@@ -62,6 +62,8 @@ mod camera_util;
 mod controllers;
 #[cfg(windows)]
 mod dinput;
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+mod evdev_ff;
 mod cli;
 mod diagnostics;
 mod duty_start;

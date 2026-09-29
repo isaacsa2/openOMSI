@@ -102,11 +102,16 @@ impl ApplicationHandler for App {
             // (the middle button - the wheel pressed - turns the view as well: OMSI's pan)
             WindowEvent::MouseInput {
                 state,
-                button: winit::event::MouseButton::Right | winit::event::MouseButton::Middle,
+                button: button @ (winit::event::MouseButton::Right | winit::event::MouseButton::Middle),
                 ..
             } => {
                 if self.navigator.as_ref().map(|n| n.map_open()).unwrap_or(false) {
                     return;
+                }
+                // a right click lets go of the mouse steering, as in OMSI (#162)
+                if button == winit::event::MouseButton::Right && state == ElementState::Pressed && self.mouse_drive && self.game_menu.is_none() {
+                    self.mouse_drive = false;
+                    self.service_msg = Some(("Mouse steering off".into(), 3.0));
                 }
                 self.mouse_look = state == ElementState::Pressed;
             }

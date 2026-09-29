@@ -651,6 +651,9 @@ pub struct Material {
     pub transmap: Option<(TextureId, bool)>,
     /// Sampled clamped (`[matl_texadress_clamp]`).
     clamp: bool,
+    /// Keep the exact material parameters so a CTC texture swap can change only the diffuse
+    /// map without losing map lighting, moisture, screen, or other renderer flags.
+    uniform: MaterialUniform,
     buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -4220,6 +4223,126 @@ impl Renderer {
         }
     }
 
+    /// Make a copy of a material with a different diffuse texture. Used by scenery CTC and
+    /// `[texchanges]` selectors: the slot's alpha, lighting, reflection, and depth settings
+    /// stay as they were, while the replacement texture may bring its own PBR maps.
+    pub fn add_material_retextured(
+        &self,
+        scene: &mut Scene,
+        base: MaterialId,
+        texture: Option<TextureId>,
+    ) -> Option<MaterialId> {
+        let (
+            alpha,
+            color,
+            unlit,
+            no_z_write,
+            no_z_check,
+            z_bias,
+            nightmap,
+            lightmap,
+            envmap,
+            env_mask,
+            bump,
+            emissive,
+            transmap,
+            clamp,
+            mut uniform,
+        ) = {
+            let src = scene.materials.get(base)?;
+            (
+                src.alpha,
+                src.color,
+                src.unlit,
+                src.no_z_write,
+                src.no_z_check,
+                src.z_bias,
+                src.nightmap,
+                src.lightmap,
+                src.envmap,
+                src.env_mask,
+                src.bump,
+                src.emissive,
+                src.transmap,
+                src.clamp,
+                src.uniform,
+            )
+        };
+        uniform.pbr = texture
+            .and_then(|id| scene.pbr_maps.get(&id))
+            .map(|maps| maps.flags)
+            .unwrap_or([0.0; 4]);
+        let slot = |t: Option<TextureId>| {
+            t.and_then(|t| scene.textures.get(t).map(|g| (t, g.gen)))
+                .unwrap_or((usize::MAX, 0))
+        };
+        let key = BindKey {
+            textures: [
+                slot(texture),
+                slot(transmap.map(|t| t.0)),
+                slot(nightmap),
+                slot(lightmap),
+                slot(envmap.map(|e| e.0)),
+                slot(env_mask),
+                slot(bump.map(|b| b.0)),
+            ],
+            clamp,
+            uniform: bytemuck::cast(uniform),
+        };
+        let (bind_group, buf) = match scene.bind_groups.get(&key) {
+            Some((bg, b)) => (bg.clone(), b.clone()),
+            None => {
+                let buf = buffer_init(
+                    &self.device,
+                    &self.queue,
+                    None,
+                    bytemuck::bytes_of(&uniform),
+                    wgpu::BufferUsages::UNIFORM,
+                );
+                let bind_group = self.material_bind_group(
+                    &scene.textures,
+                    MaterialMaps {
+                        texture,
+                        transmap,
+                        nightmap,
+                        lightmap,
+                        envmap,
+                        env_mask,
+                        bump,
+                        pbr: texture.and_then(|id| scene.pbr_maps.get(&id)).copied(),
+                    },
+                    clamp,
+                    &buf,
+                );
+                scene
+                    .bind_groups
+                    .insert(key, (bind_group.clone(), buf.clone()));
+                (bind_group, buf)
+            }
+        };
+        scene.materials.push(Material {
+            texture,
+            alpha,
+            color,
+            unlit,
+            no_z_write,
+            no_z_check,
+            z_bias,
+            nightmap,
+            lightmap,
+            envmap,
+            env_mask,
+            bump,
+            emissive,
+            transmap,
+            clamp,
+            uniform,
+            buf,
+            bind_group,
+        });
+        Some(scene.materials.len() - 1)
+    }
+
     /// Terrain material: uv is tile space, the ground texture repeats `repeats` times per
     /// tile, its detail texture `detail` times, and the optional mask (alpha 0 = cut) is
     /// sampled in tile space.
@@ -4477,6 +4600,7 @@ impl Renderer {
             emissive,
             transmap,
             clamp,
+            uniform,
             buf,
             bind_group,
         });
@@ -9318,6 +9442,7 @@ impl Renderer {
             emissive: [0.0; 3],
             transmap: None,
             clamp: false,
+            uniform: <MaterialUniform as bytemuck::Zeroable>::zeroed(),
             buf,
             bind_group,
         };

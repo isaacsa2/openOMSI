@@ -5477,6 +5477,20 @@ impl Traffic {
             (t_par - t_plan).as_secs_f64(),
             t_par.elapsed().as_secs_f64(),
         ];
+        if omsi_cfg::env::var_os("OMSI_DEBUG_TRAILERS").is_some() {
+            // coupled parts off the level of what pulls them (#140: trains' and articulated
+            // buses' rear parts under bridges)
+            for c in &self.cars {
+                let mut lead_z = c.vehicle.position.z;
+                for (k, t) in c.vehicle.trailers.iter().enumerate() {
+                    let (pitch, axle, track) = t.debug_pose();
+                    if pitch.abs() > 4.0 || (t.position.z - lead_z).abs() > 1.2 {
+                        log::info!("trailer: car {} {} part {k} at ({:.1}, {:.1}, {:.2}) lead z {:.2} pitch {pitch:.1} axle {:?} track {:?} lane {} kind {:?}", c.id, c.vehicle.ty.def.type_name, t.position.x, t.position.y, t.position.z, lead_z, axle, track.map(|p| p.z), c.state.lane, self.net.lanes[c.state.lane].kind);
+                    }
+                    lead_z = t.position.z;
+                }
+            }
+        }
         if debug {
             // a car pulled round harder than a driver would: what way was it given?
             for (c, fr) in self.cars.iter().zip(&frames) {

@@ -52,6 +52,9 @@ pub struct ObjectType {
     pub lod0_min: f32,
     /// Number of `[CTC]` paint schemes the object offers.
     pub paint_scheme_count: usize,
+    /// Runtime scenery texture groups (`[CTC]` and `[texchanges]`), each selected by its own
+    /// script variable and supplying one or more material texture replacements per choice.
+    pub dynamic_textures: Vec<DynamicTextureGroup>,
     /// `[terrainhole]` meshes of the model: where they lie the ground is taken away.
     pub holes: Vec<MeshData>,
     /// `[crossing_heightdeformation]`: the mesh a crossing presses the terrain into, so
@@ -63,6 +66,14 @@ pub struct ObjectType {
     pub camera: std::sync::OnceLock<crate::camera_arm::BlockerShape>,
     /// The collision mesh as the vehicles meet it (built on first use).
     pub collision_shape: std::sync::OnceLock<Arc<omsi_sim::collision::MeshShape>>,
+}
+
+/// One scenery texture selector and its indexed replacement sets.
+#[derive(Clone)]
+pub struct DynamicTextureGroup {
+    pub variable: String,
+    /// Each replacement is (the material's default texture key, replacement file, folder).
+    pub choices: Vec<Vec<(String, String, PathBuf)>>,
 }
 
 impl World {
@@ -685,6 +696,9 @@ struct TypeGpu {
     meshes: Vec<(MeshId, Vec<MaterialId>)>,
     /// `[matl_change]` variants: (mesh index, slot, base, item, variable).
     variants: Vec<(usize, usize, MaterialId, MaterialId, String)>,
+    /// Dynamic texture overrides, made only for combinations that placed scripts use.
+    /// Rows align with LOD 0 meshes and material slots; each entry holds (base, item).
+    dynamic_texture_variants: HashMap<Vec<usize>, Vec<Vec<Option<(MaterialId, MaterialId)>>>>,
     /// Lower LODs: (min size, max size, meshes).
     lods: Vec<(f32, f32, Vec<(MeshId, Vec<MaterialId>)>)>,
     materials: Vec<MaterialId>,
@@ -962,6 +976,109 @@ impl GpuCache {
 
     fn has_alpha(&self, path: &Path) -> bool {
         self.textures.get(path).map(|e| e.alpha).unwrap_or(false)
+    }
+
+    /// Lazily make material overrides for one placed scenery object's active `[CTC]` and
+    /// `[texchanges]` choices. The choices are cached by their complete per-group index
+    /// vector so placements sharing a type and choices also share textures and materials.
+    fn dynamic_texture_variant(
+        &mut self,
+        renderer: &Renderer,
+        scene: &mut Scene,
+        type_key: usize,
+        selection: &[usize],
+        root: &Path,
+        images: &HashMap<PathBuf, Arc<TextureData>>,
+    ) -> Option<Vec<Vec<Option<(MaterialId, MaterialId)>>>> {
+        if let Some(found) = self
+            .types
+            .get(&type_key)?
+            .dynamic_texture_variants
+            .get(selection)
+        {
+            return Some(found.clone());
+        }
+        let ot = self.types.get(&type_key)?.ot.clone();
+        let mut replacements: HashMap<String, (String, PathBuf)> = HashMap::new();
+        let mut affected_keys: HashMap<String, ()> = HashMap::new();
+        for (group, &index) in ot.dynamic_textures.iter().zip(selection) {
+            for choice in &group.choices {
+                for (default, _, _) in choice {
+                    affected_keys.insert(scenery_texture_key(default), ());
+                }
+            }
+            if let Some(choice) = group.choices.get(index) {
+                for (default, file, dir) in choice {
+                    replacements.insert(scenery_texture_key(default), (file.clone(), dir.clone()));
+                }
+            }
+        }
+
+        let (base_meshes, base_variants) = {
+            let ty = self.types.get(&type_key)?;
+            (ty.meshes.clone(), ty.variants.clone())
+        };
+        let mut rows: Vec<Vec<Option<(MaterialId, MaterialId)>>> = base_meshes
+            .iter()
+            .map(|(_, materials)| vec![None; materials.len()])
+            .collect();
+        for (mesh_index, (_, o3d_materials, _)) in ot.meshes.iter().enumerate() {
+            let Some((_, base_materials)) = base_meshes.get(mesh_index) else {
+                continue;
+            };
+            for (slot, source) in o3d_materials.iter().enumerate() {
+                let key = scenery_texture_key(&source.texture);
+                if !affected_keys.contains_key(&key) {
+                    continue;
+                }
+                let Some(&base) = base_materials.get(slot) else {
+                    continue;
+                };
+                let item = base_variants
+                    .iter()
+                    .find(|v| v.0 == mesh_index && v.1 == slot)
+                    .map(|v| v.3)
+                    .unwrap_or(base);
+                // Always retain a reset pair. An invalid index or a missing replacement
+                // texture must restore the model material after a previously valid choice.
+                rows[mesh_index][slot] = Some((base, item));
+                let Some((file, scheme_dir)) = replacements.get(&key) else {
+                    continue;
+                };
+                let mut dirs = texture_dirs(root, &ot.model_dir);
+                dirs.insert(0, scheme_dir.clone());
+                let Some((texture, path)) = self.texture(renderer, scene, file, &dirs, images)
+                else {
+                    continue;
+                };
+                let Some(base_ctc) = renderer.add_material_retextured(scene, base, Some(texture))
+                else {
+                    self.release_texture(renderer, scene, &path);
+                    continue;
+                };
+                let item_ctc = if item == base {
+                    base_ctc
+                } else if let Some(mat) =
+                    renderer.add_material_retextured(scene, item, Some(texture))
+                {
+                    mat
+                } else {
+                    base_ctc
+                };
+                let ty = self.types.get_mut(&type_key)?;
+                ty.materials.push(base_ctc);
+                if item_ctc != base_ctc {
+                    ty.materials.push(item_ctc);
+                }
+                ty.textures.push(path);
+                rows[mesh_index][slot] = Some((base_ctc, item_ctc));
+            }
+        }
+        self.types
+            .get_mut(&type_key)?
+            .dynamic_texture_variants
+            .insert(selection.to_vec(), rows.clone());
+        Some(rows)
     }
 
     /// A `[matl_bumpmap]` height map (`omsi_texture::gpu::prepare_bump`), shared like
@@ -2296,16 +2413,69 @@ impl World {
                 lower_lods.push((model.lods[l].min_size, list));
             }
             let lod0_min = model.lods.first().map(|l| l.min_size).unwrap_or(0.0);
-            // [CTC] paint schemes (.cti items): texture substitutions for the chosen scheme
-            let paint_schemes: Vec<omsi_sim::vehicle::PaintScheme> = model
+            // [CTC] paint schemes (.cti items): retain their texture keys and folders so
+            // the selected advertisements can be resolved when a placement chooses them.
+            let ctc_schemes: Vec<(String, Vec<omsi_sim::vehicle::PaintScheme>)> = model
                 .ctc
                 .iter()
-                .flat_map(|c| {
-                    omsi_sim::vehicle::load_paint_schemes(&omsi_cfg::resolve_path(
-                        &sco_dir, &c.path,
-                    ))
+                .map(|c| {
+                    (
+                        c.variable.clone(),
+                        omsi_sim::vehicle::load_paint_schemes(&omsi_cfg::resolve_path(
+                            &sco_dir, &c.path,
+                        )),
+                    )
                 })
                 .collect();
+            let paint_schemes: Vec<omsi_sim::vehicle::PaintScheme> = ctc_schemes
+                .iter()
+                .flat_map(|(_, schemes)| schemes.iter().cloned())
+                .collect();
+            let mut dynamic_textures: Vec<DynamicTextureGroup> = ctc_schemes
+                .iter()
+                .map(|(variable, schemes)| DynamicTextureGroup {
+                    variable: variable.clone(),
+                    choices: schemes
+                        .iter()
+                        .map(|scheme| {
+                            scheme
+                                .textures
+                                .iter()
+                                .filter_map(|(name, file)| {
+                                    model
+                                        .ctc_textures
+                                        .iter()
+                                        .find(|(ctc_name, _)| ctc_name.eq_ignore_ascii_case(name))
+                                        .map(|(_, default)| {
+                                            (default.clone(), file.clone(), scheme.dir.clone())
+                                        })
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                })
+                .collect();
+            // Scenery models can also use the same script-variable texture selectors as
+            // vehicles. Each [newtexchangemaster] is an independent dynamic texture group.
+            dynamic_textures.extend(
+                omsi_model::load_texchanges(&model_dir, &model.texchanges)
+                    .into_iter()
+                    .map(|master| {
+                        let omsi_model::TexChangeMaster {
+                            texture,
+                            variable,
+                            entries,
+                            dir,
+                        } = master;
+                        DynamicTextureGroup {
+                            variable,
+                            choices: entries
+                                .into_iter()
+                                .map(|file| vec![(texture.clone(), file, dir.clone())])
+                                .collect(),
+                        }
+                    }),
+            );
             if let Some(ps) = scheme.and_then(|i| paint_schemes.get(i)) {
                 let mut map: HashMap<String, String> = HashMap::new();
                 for (ctc_name, file) in &ps.textures {
@@ -2426,6 +2596,7 @@ impl World {
                 lower_lods,
                 lod0_min,
                 paint_scheme_count,
+                dynamic_textures,
                 holes,
                 deform,
                 collision,
@@ -4851,6 +5022,7 @@ impl World {
             ot: ot.clone(),
             meshes: Vec::new(),
             variants: Vec::new(),
+            dynamic_texture_variants: HashMap::new(),
             lods: Vec::new(),
             materials: Vec::new(),
             textures: Vec::new(),
@@ -5723,6 +5895,24 @@ impl World {
                         Vec::new();
                     let mut script_texts: Vec<(TextureId, omsi_sim::texttex::TextTextureState)> =
                         Vec::new();
+                    // Run {init} once for this placement: its variable values choose CTC
+                    // schemes and its strings can name [matl_freetex] pictures.
+                    let needs_own_script = lamp.is_none()
+                        || ot.meshes.iter().any(|(_, _, overrides)| {
+                            overrides.iter().any(|o| !o.item && o.freetex.is_some())
+                        });
+                    let mut object_script = if needs_own_script {
+                        ot.program.as_ref().map(|program| {
+                            omsi_sim::scenery::SceneryInstance::new(
+                                program.clone(),
+                                &ot.mesh_defs(),
+                                self.script_clock(),
+                                &strings,
+                            )
+                        })
+                    } else {
+                        None
+                    };
                     // a crossing warped onto the ground has meshes of its own
                     let own_meshes: Option<Vec<(MeshId, Vec<MaterialId>)>> = warped.as_ref().map(|ms| {
                         ms.iter()
@@ -5787,8 +5977,6 @@ impl World {
                             ground_meshes.push((level, mi, ground_id));
                         }
                     }
-                    // (the script's string variables after its {init}, for [matl_freetex])
-                    let mut freetex_vars: Option<omsi_sim::scenery::SceneryInstance> = None;
                     for (mi, (mesh_id, mats)) in mesh_list.iter().enumerate() {
                         let inst = if surface || ot.mesh_shadow.get(mi).copied().unwrap_or(false) {
                             let i = instance!(renderer.add_surface_instance(
@@ -5818,10 +6006,7 @@ impl World {
                             for override_ in overrides.iter().filter(|o| !o.item && o.freetex.is_some()) {
                                 let Some(slot) = omsi_sim::vehicle::override_slot(o3d_mats, override_) else { continue };
                                 let Some((_, var)) = &override_.freetex else { continue };
-                                let Some(program) = ot.program.as_ref() else { continue };
-                                let started = freetex_vars.get_or_insert_with(|| {
-                                    omsi_sim::scenery::SceneryInstance::new(program.clone(), &ot.mesh_defs(), self.script_clock(), &strings)
-                                });
+                                let Some(started) = object_script.as_ref() else { continue };
                                 let name = started.str_var(var).trim().to_string();
                                 if name.is_empty() {
                                     continue;
@@ -6159,18 +6344,50 @@ impl World {
                             sound,
                             sounds: Default::default(),
                         });
-                    } else if let Some(program) = &ot.program {
-                        // scripted / animated object: its own script state
-                        let inst = omsi_sim::scenery::SceneryInstance::new(
-                            program.clone(),
-                            &ot.mesh_defs(),
-                            self.script_clock(),
-                            &strings,
-                        );
+                    } else if let Some(inst) = object_script.take() {
+                        let texture_selection = scenery_texture_selection(&ot, &inst);
+                        if !ot.dynamic_textures.is_empty() {
+                            if let Some(rows) = gpu.dynamic_texture_variant(
+                                renderer,
+                                scene,
+                                tkey,
+                                &texture_selection,
+                                &self.root,
+                                images,
+                            ) {
+                                for (mi, row) in rows.iter().enumerate() {
+                                    let Some(&mesh_inst) = all_instances.get(mi) else {
+                                        continue;
+                                    };
+                                    for (slot, pair) in row.iter().enumerate() {
+                                        let Some((base, item)) = pair else { continue };
+                                        let item_on = object_variants
+                                            .iter()
+                                            .find(|v| v.0 == mesh_inst && v.1 == slot)
+                                            .map(|v| {
+                                                v.4.trim()
+                                                    .parse::<f32>()
+                                                    .ok()
+                                                    .or_else(|| inst.var(&v.4))
+                                                    .unwrap_or(1.0)
+                                                    > 0.5
+                                            })
+                                            .unwrap_or(false);
+                                        renderer.set_material(
+                                            scene,
+                                            mesh_inst,
+                                            slot,
+                                            if item_on { *item } else { *base },
+                                        );
+                                    }
+                                }
+                            }
+                        }
                         if inst.is_dynamic()
                             || !object_variants.is_empty()
                             || ot.sco.sound.is_some()
                             || !script_texts.is_empty()
+                            || !ot.dynamic_textures.is_empty()
                         {
                             let arrivals = inst.wants_arrivals();
                             // (a scripted object with [terrainmapping] slots had more instances
@@ -7603,6 +7820,12 @@ impl World {
         let mut scripted = self.scripted.lock();
         let mut boards = self.timetable_boards.lock();
         let mut wanted: Vec<i64> = Vec::new();
+        let mut texture_updates: Vec<(
+            Arc<ObjectType>,
+            Vec<usize>,
+            Vec<usize>,
+            HashMap<(usize, usize), bool>,
+        )> = Vec::new();
         // First what every object's script is given (in order: the light programs and the
         // boards are read here), then the scripts themselves, side by side on the worker
         // threads (a city's hundreds of scripted objects took a core's worth of a frame),
@@ -7743,6 +7966,26 @@ impl World {
                 };
                 renderer.set_material(scene, *inst, *slot, if x > 0.5 { *item } else { *base });
             }
+            if !o.ty.dynamic_textures.is_empty() {
+                let selection = scenery_texture_selection(&o.ty, &o.inst);
+                let switches = o
+                    .variants
+                    .iter()
+                    .map(|(inst, slot, _, _, var)| {
+                        let value = if var.trim().eq_ignore_ascii_case("NightlightA") {
+                            nightlight as i32 as f32
+                        } else {
+                            var.trim()
+                                .parse::<f32>()
+                                .ok()
+                                .or_else(|| o.inst.var(var))
+                                .unwrap_or(1.0)
+                        };
+                        ((*inst, *slot), value > 0.5)
+                    })
+                    .collect();
+                texture_updates.push((o.ty.clone(), selection, o.instances.clone(), switches));
+            }
             for ((inst, xf), &visible) in o.instances.iter().zip(&o.inst.mesh_transforms).zip(&o.inst.mesh_visible) {
                 renderer.set_transform(scene, *inst, o.pos, o.xf * *xf);
                 let p = &mut scene.instances[*inst];
@@ -7757,6 +8000,39 @@ impl World {
         boards.wanted = wanted;
         drop(scripted);
         drop(boards);
+        // Scenery placement takes the GPU-cache lock before the script list. Apply dynamic
+        // texture changes after releasing the script-list lock to keep that lock order
+        // consistent.
+        for (ty, selection, instances, switches) in texture_updates {
+            let variant = {
+                let mut gpu = self.gpu.lock();
+                gpu.dynamic_texture_variant(
+                    renderer,
+                    scene,
+                    Arc::as_ptr(&ty) as usize,
+                    &selection,
+                    &self.root,
+                    &HashMap::new(),
+                )
+            };
+            if let Some(rows) = variant {
+                for (mi, row) in rows.iter().enumerate() {
+                    let Some(&mesh_inst) = instances.get(mi) else {
+                        continue;
+                    };
+                    for (slot, pair) in row.iter().enumerate() {
+                        let Some((base, item)) = pair else { continue };
+                        let item_on = switches.get(&(mesh_inst, slot)).copied().unwrap_or(false);
+                        renderer.set_material(
+                            scene,
+                            mesh_inst,
+                            slot,
+                            if item_on { *item } else { *base },
+                        );
+                    }
+                }
+            }
+        }
         // the lamps' own sounds (a level crossing's bell): their scripts run with the light
         // programs (`Traffic::sync`), what they fired is heard here
         for lamp in self.light_objects.lock().iter() {
@@ -8284,6 +8560,33 @@ pub(crate) fn is_null_texture(name: &str) -> bool {
             .is_some_and(|s| s.eq_ignore_ascii_case("null"))
 }
 
+fn scenery_texture_key(name: &str) -> String {
+    name.trim().replace('\\', "/").to_ascii_lowercase()
+}
+
+fn scenery_texture_selection(
+    ot: &ObjectType,
+    inst: &omsi_sim::scenery::SceneryInstance,
+) -> Vec<usize> {
+    ot.dynamic_textures
+        .iter()
+        .map(|group| {
+            let Some(value) = inst.var(&group.variable) else {
+                return usize::MAX;
+            };
+            if !value.is_finite() || value < 0.0 {
+                return usize::MAX;
+            }
+            let index = value.trunc() as usize;
+            if index < group.choices.len() {
+                index
+            } else {
+                usize::MAX
+            }
+        })
+        .collect()
+}
+
 /// The Direct3D material of a slot as OMSI sets it: a `[matl_allcolor]` (diffuse rgba,
 /// ambient rgb, specular rgb, emissive rgb, power) replaces the o3d file's material. Returns (diffuse colour, emissive colour, specular colour and power).
 /// The diffuse colour modulates the texture; its alpha only counts where there is no
@@ -8343,7 +8646,12 @@ fn material_extra(
     MaterialExtra {
         env_mask,
         no_z_write: ov.iter().any(|o| o.no_z_write),
-        no_z_check: ov.iter().any(|o| o.no_z_check),
+        // `[matl_noZcheck]` leaves Omsi.exe's depth test on: its draw of the slot (0x7fd6c4)
+        // never reads the flag, which only adds a colourless stencil pass marking the panes
+        // for the raindrops (0x7c32c4 -> 0x7fc58c, ZENABLE 1, blend ZERO/ONE). Taken as "no
+        // depth test", the Sprinter's inner window glass (flagged so) was drawn over the
+        // body skin round every opening. OMSI_NOZCHECK_BIAS=1: the old reading.
+        no_z_check: ov.iter().any(|o| o.no_z_check) && omsi_cfg::env::var_os("OMSI_NOZCHECK_BIAS").is_some(),
         z_bias: ov.iter().map(|o| o.z_bias).find(|b| *b != 0).unwrap_or(0),
         specular,
         bump: bump.filter(|b| b.1.is_finite() && b.1 != 0.0),
@@ -9825,10 +10133,10 @@ impl World {
                 }
             }
         }
-        // (opt-in for now with OMSI_MODEL_ORDER=1: drawn so, the bodies of the Sprinter,
-        // the Mercus, the Urbino 15 and the Lion's City showed the saloon through half their
-        // panels)
-        if ordered && omsi_cfg::env::var_os("OMSI_MODEL_ORDER").is_some() {
+        // (the Sprinter's, the Mercus's, the Urbino 15's saloon showed through half their
+        // panels drawn so while `[matl_noZcheck]` still took their inner glass out of the
+        // depth test; OMSI_NO_MODEL_ORDER=1 draws opaque parts first again)
+        if ordered && omsi_cfg::env::var_os("OMSI_NO_MODEL_ORDER").is_none() {
             log::debug!("{}: drawn in model order (a blended slot writes depth before an opaque one)", vt.def.path.display());
             for &i in &instances {
                 if scene.instances.get(i).is_some_and(|x| !x.blob) {
@@ -10863,7 +11171,7 @@ mod material_tests {
             Some((3, 0.1)),
             [0.2, 0.2, 0.2, 10.0],
         );
-        assert!(e.no_z_write && e.no_z_check);
+        assert!(e.no_z_write && !e.no_z_check);
         assert_eq!(e.z_bias, 16);
         assert_eq!(e.env_mask, Some(7));
         assert_eq!(e.specular, [0.2, 0.2, 0.2, 10.0]);
