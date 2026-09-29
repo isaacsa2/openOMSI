@@ -1,4 +1,4 @@
-//! Updates from the project's GitHub releases (github.com/turbo-devv/openOMSI).
+//! Updates from this distribution's GitHub releases (github.com/isaacsa2/openOMSI).
 //!
 //! Every push to main publishes a release `v<MAJOR.MINOR.COMMIT>` with one archive per
 //! platform (see .github/workflows/release.yml). The launcher asks the GitHub API for the
@@ -31,9 +31,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// The project on GitHub.
-pub const REPO: &str = "turbo-devv/openOMSI";
-pub const REPO_URL: &str = "https://github.com/turbo-devv/openOMSI";
-const LATEST_API: &str = "https://api.github.com/repos/turbo-devv/openOMSI/releases/latest";
+pub const REPO: &str = "isaacsa2/openOMSI";
+pub const REPO_URL: &str = "https://github.com/isaacsa2/openOMSI";
+const LATEST_API: &str = "https://api.github.com/repos/isaacsa2/openOMSI/releases/latest";
 
 /// A release newer than this build, with the file for this platform.
 #[derive(Clone, Debug, PartialEq)]
@@ -170,9 +170,17 @@ pub fn current_version() -> &'static str {
     crate::startup::VERSION
 }
 
-/// `0.1.7` / `v0.1.7` as numbers (missing parts are 0).
+/// `0.1.7` / `v0.1.7I` as numbers (missing parts are 0).  Fork releases carry a
+/// trailing `I`, which identifies Isaac's build but is not part of version ordering.
 fn version_parts(v: &str) -> Vec<u64> {
-    v.trim().trim_start_matches(['v', 'V']).split(['.', '-', '+']).map_while(|p| p.parse::<u64>().ok()).collect()
+    v.trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['.', '-', '+'])
+        .map_while(|p| {
+            let digits: String = p.chars().take_while(|c| c.is_ascii_digit()).collect();
+            (!digits.is_empty()).then(|| digits.parse::<u64>().ok()).flatten()
+        })
+        .collect()
 }
 
 /// Whether `candidate` is a newer version than `current`.
@@ -627,25 +635,29 @@ mod tests {
         assert!(newer("v0.1.10", "0.1.9"));
         assert!(newer("0.2.0", "0.1.99"));
         assert!(newer("1.0", "0.9.9"));
+        assert!(newer("0.1.10I", "0.1.9I"));
+        assert!(newer("v0.1.10I", "0.1.9"));
         assert!(!newer("0.1.7", "0.1.7"));
+        assert!(!newer("0.1.7I", "0.1.7I"));
+        assert!(!newer("0.1.7", "0.1.7I"));
         assert!(!newer("v0.1.6", "0.1.7"));
         assert!(!newer("garbage", "0.1.7"));
     }
 
     #[test]
     fn the_platform_file_of_a_github_release() {
-        let name = asset_name("0.1.9").unwrap();
+        let name = asset_name("0.1.9I").unwrap();
         let v = serde_json::json!({
-            "tag_name": "v0.1.9", "html_url": "https://github.com/turbo-devv/openOMSI/releases/tag/v0.1.9", "body": "notes",
+            "tag_name": "v0.1.9I", "html_url": "https://github.com/isaacsa2/openOMSI/releases/tag/v0.1.9I", "body": "notes",
             "assets": [
                 {"name": "openOMSI-0.1.9-server-linux-x64.zip", "browser_download_url": "https://x/server", "size": 5},
                 {"name": name, "browser_download_url": "https://x/mine", "size": 42, "digest": "sha256:ABCDEF"}
             ]
         });
-        let r = parse_release(&v, "0.1.7").unwrap().unwrap();
-        assert_eq!((r.version.as_str(), r.asset_url.as_str(), r.size, r.sha256.as_deref()), ("0.1.9", "https://x/mine", 42, Some("abcdef")));
+        let r = parse_release(&v, "0.1.7I").unwrap().unwrap();
+        assert_eq!((r.version.as_str(), r.asset_url.as_str(), r.size, r.sha256.as_deref()), ("0.1.9I", "https://x/mine", 42, Some("abcdef")));
         // not newer, a draft, or without this platform's file: nothing to offer
-        assert!(parse_release(&v, "0.1.9").unwrap().is_none());
+        assert!(parse_release(&v, "0.1.9I").unwrap().is_none());
         let mut d = v.clone();
         d["draft"] = serde_json::json!(true);
         assert!(parse_release(&d, "0.1.7").unwrap().is_none());

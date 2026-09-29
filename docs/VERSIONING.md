@@ -11,6 +11,10 @@
 `COMMIT` restarts from `0` whenever `VERSION` changes: after `1.1.23`, a commit that sets
 `VERSION` to `1.2` is released as `1.2.0`, and the next one as `1.2.1`.
 
+Releases built by the `isaacsa2/openOMSI` fork append `I` to that numeric version (for
+example `0.1.146I`). The suffix identifies the distribution; update ordering still uses
+the three numeric parts.
+
 To start a new version, edit one line and push:
 
 ```sh
