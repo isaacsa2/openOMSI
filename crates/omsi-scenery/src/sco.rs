@@ -207,7 +207,11 @@ impl SceneryObject {
                 "collision_mesh" => o.collision_mesh = Some(r.str().to_string()),
                 "crossing_heightdeformation" => o.crossing_height_deformation = Some(r.str().to_string()),
                 "nocollision" => o.no_collision = true,
-                "surface" => o.surface = true,
+                // (and `[fixed]` with it, as Omsi.exe sets both at 0x7b6823)
+                "surface" => {
+                    o.surface = true;
+                    o.fixed = true;
+                }
                 "switch" => o.switch = Some(r.i32()),
                 "switchdir" => {
                     let d = r.i32();

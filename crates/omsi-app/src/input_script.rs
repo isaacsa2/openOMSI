@@ -2084,7 +2084,7 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
         let dir = base.join(dir);
         let _ = std::fs::create_dir_all(&dir);
         let out = dir.join("laststn.osn");
-        let sit = build_situation(&self.args, w, &self.clock, self.args.weather.as_deref(), self.player.as_ref(), cam, self.duty.as_ref(), "Last situation");
+        let sit = build_situation(&self.args, w, &self.clock, self.args.weather.as_deref(), self.player.as_ref(), &self.placed, cam, self.duty.as_ref(), "Last situation");
         match sit.save(&out) {
             Ok(()) => log::info!("saved the last situation {}", out.display()),
             Err(e) => log::warn!("saving {}: {e}", out.display()),
@@ -2099,7 +2099,7 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
         let dir = crate::startup::content_dir().unwrap_or_else(|| self.args.root.clone()).join("Situations");
         let _ = std::fs::create_dir_all(&dir);
         let out = dir.join("quicksave.osn");
-        let sit = build_situation(&self.args, w, &self.clock, self.args.weather.as_deref(), self.player.as_ref(), cam, self.duty.as_ref(), "Quicksave");
+        let sit = build_situation(&self.args, w, &self.clock, self.args.weather.as_deref(), self.player.as_ref(), &self.placed, cam, self.duty.as_ref(), "Quicksave");
         match sit.save(&out) {
             Ok(()) => {
                 log::info!("saved situation {} ({} vehicles)", out.display(), sit.vehicles.len());

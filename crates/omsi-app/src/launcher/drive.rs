@@ -273,7 +273,7 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
             // (a long line name, as Ahlheim's "Eichenhoehe TA11 Mo-Do Schule", is cut)
             let count = format!("{tours}");
             let cw = ui.width(&count, 11.5, Weight::Bold) + 8.0;
-            let bw = (ui.width(name, 13.0, Weight::Black) + 14.0).clamp(34.0, rr.w - cw - 24.0);
+            let bw = (ui.width(name, 13.0, Weight::Black) + 14.0).clamp(34.0, (rr.w - cw - 24.0).max(34.0));
             let badge = Rect::new(rr.x + 8.0, rr.y + 8.0, bw, 22.0);
             ui.p().rounded(badge, 4.0, Color::rgba(52, 52, 52, 1.0));
             ui.text_in(name, badge.pad(6.0, 0.0), 12.5, Weight::Bold, TEXT, Align::Center);

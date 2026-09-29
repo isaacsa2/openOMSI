@@ -740,6 +740,16 @@ fn motion_kind(kind: LaneKind) -> MotionKind {
     }
 }
 
+/// How far ahead of the player's bus centre a car looks for it (m): the bus's half length,
+/// and where it will be in `horizon` seconds for a car whose way crosses the bus's. Not
+/// for one going the same way (`way_dir` within 60 degrees of the bus's heading): with the
+/// bus behind it, that stretch ahead of the bus reached over the car itself and it braked
+/// for a bus that was only following it (#139).
+fn player_reach_ahead(half_len: f32, speed: f32, horizon: f32, fwd: DVec2, way_dir: DVec2) -> f64 {
+    let same_way = way_dir.length() > 0.5 && way_dir.normalize().dot(fwd) > 0.5;
+    half_len as f64 + if same_way { 0.0 } else { (speed.max(0.0) * horizon) as f64 }
+}
+
 /// How much track an AI rail vehicle keeps behind it (m): a long train's length.
 const RAIL_TRAIL: f64 = 400.0;
 
@@ -4306,7 +4316,8 @@ impl Traffic {
         let fwd = DVec2::new(h.sin(), h.cos());
         let right = DVec2::new(h.cos(), -h.sin());
         let horizon = if self.player_priority { 5.0 } else { 1.5 };
-        let ahead = half_len as f64 + (speed.max(0.0) * horizon) as f64;
+        let way_dir = (st.way_point(&self.net, 3.0) - st.way_point(&self.net, 0.0)).truncate();
+        let ahead = player_reach_ahead(half_len, speed, horizon, fwd, way_dir);
         let behind = half_len as f64 + ((-speed).max(0.0) * horizon) as f64;
         let wide = (half_w + half_width + 0.35) as f64;
         let margin = PLAYER_BOX_MARGIN as f64;
@@ -6636,11 +6647,22 @@ impl Traffic {
 
 #[cfg(test)]
 mod group_density_tests {
-    use super::uvg_density;
+    use super::{player_reach_ahead, uvg_density};
+    use glam::DVec2;
 
     /// Berlin-Spandau's `unsched_vehgroups.txt`: NormalCars 1, Trucks 0, Commercials 1,
     /// Ambulance 1, GDRCars 0.
     const SPANDAU: [i32; 5] = [1, 0, 1, 1, 0];
+
+    #[test]
+    fn a_following_bus_is_no_bus_in_the_way() {
+        let north = DVec2::new(0.0, 1.0);
+        // a car ahead going the same way: only the bus itself counts
+        assert_eq!(player_reach_ahead(6.0, 14.0, 1.5, north, DVec2::new(0.1, 3.0)), 6.0);
+        // a car crossing its way (or coming towards it): where the bus will be counts too
+        assert_eq!(player_reach_ahead(6.0, 14.0, 1.5, north, DVec2::new(3.0, 0.0)), 27.0);
+        assert_eq!(player_reach_ahead(6.0, 14.0, 1.5, north, DVec2::new(0.0, -3.0)), 27.0);
+    }
 
     #[test]
     fn a_group_off_by_default_drives_where_a_path_asks_for_it() {

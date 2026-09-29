@@ -240,7 +240,9 @@ impl Rig {
             ax = ring.iter().map(|p| p.x).sum::<f32>() / n;
             ay = ring.iter().map(|p| p.y).sum::<f32>() / n;
         }
-        let ay = ay.clamp(heel_y + 0.03, toe_y - 0.1);
+        // (a foot shorter than 13 cm - a child, a small model - has the ankle as far back as
+        // it goes: the bounds crossed and the game stopped on the clamp, #138)
+        let ay = ay.clamp(heel_y + 0.03, (toe_y - 0.1).max(heel_y + 0.03));
         let ax = if (ax - knee.x).abs() < 0.1 {
             ax
         } else {

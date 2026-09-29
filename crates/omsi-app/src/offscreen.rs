@@ -261,11 +261,13 @@ pub(crate) fn run_offscreen(
         t.populate(&world, &renderer, &mut scene, center);
     }
     // OMSI_GROUND_SAMPLE=<csv>: what the wheels stand on every metre along the street lanes
-    // within 400 m of the start (lane, s, x, y, lane z, ground z) - two builds compared on
+    // within 400 m of the start (lane, s, x, y, lane z, ground z, the id of an object whose
+    // collision mesh stands in the way there) - two builds compared on
     // the same map show where a change of the ground rules adds or removes a bump
     if let (Ok(path), Some(t)) = (omsi_cfg::env::var("OMSI_GROUND_SAMPLE"), traffic.as_ref()) {
         use std::io::Write;
         let Ok(mut f) = std::fs::File::create(&path) else { return Err(anyhow::anyhow!("OMSI_GROUND_SAMPLE: cannot write {path}")) };
+        let collision = world.collision.lock().clone();
         for (li, l) in t.net.lanes.iter().enumerate() {
             if l.kind != omsi_sim::traffic::LaneKind::Street { continue; }
             let len = l.length();
@@ -274,7 +276,14 @@ pub(crate) fn run_offscreen(
                 let (p, _) = l.at(s);
                 if (p.truncate() - center.truncate()).length() < 400.0 {
                     let g = crate::scene::drive_probe(&world.terrains, &world.surfaces, p.x, p.y, p.z + 0.5);
-                    let _ = writeln!(f, "{li},{s:.1},{:.2},{:.2},{:.3},{}", p.x, p.y, p.z, g.below.map(|z| format!("{z:.4}")).unwrap_or_default());
+                    // and a wall there: a 2 m box from 0.3 m to 3 m over the ground, against
+                    // the objects' collision meshes (the id of the first one it touches)
+                    let base = g.below.unwrap_or(p.z);
+                    let mut probe = omsi_sim::collision::Obb::from_box([2.0, 2.0, 2.7, 0.0, 0.0, 0.0], DVec3::new(p.x, p.y, base), 0.0);
+                    probe.z0 = base + 0.3;
+                    probe.z1 = base + 3.0;
+                    let wall = collision.meshes.iter().find(|m| m.parts_near(&probe, None).next().is_some()).map(|m| m.id);
+                    let _ = writeln!(f, "{li},{s:.1},{:.2},{:.2},{:.3},{},{}", p.x, p.y, p.z, g.below.map(|z| format!("{z:.4}")).unwrap_or_default(), wall.map(|w| w.to_string()).unwrap_or_default());
                 }
                 s += 1.0;
             }
@@ -566,6 +575,17 @@ pub(crate) fn run_offscreen(
                     }
                 }
                 player.vehicle.update(dt);
+                // OMSI_JOINT_ANGLE=degrees: the rear section held at that angle to the front
+                // one (the joint and its bellows seen bent, without driving a curve)
+                if let Some(a) = omsi_cfg::env::var("OMSI_JOINT_ANGLE").ok().and_then(|v| v.trim().parse::<f64>().ok()) {
+                    let v = &mut player.vehicle;
+                    let (pos, rot, heading) = (v.position, v.body_rotation(), v.heading);
+                    if let Some(t) = v.trailers.first_mut() {
+                        let c = t.coupling_point(pos, rot);
+                        let h = (heading + a).to_radians();
+                        t.place_pivot(c - DVec3::new(h.sin(), h.cos(), 0.0) * t.pivot_length() as f64);
+                    }
+                }
                 crate::rail_drive::frame(player, traffic.as_ref().map(|t| &t.net), &world, dt);
                 // the driver's hands follow the wheel frame by frame (as in the window), so
                 // that the snapshots show them where the hand-over-hand has got to
@@ -2075,6 +2095,7 @@ pub(crate) fn run_offscreen(
             &clock,
             args.weather.as_deref(),
             player_ref.as_ref(),
+            &[],
             &camera,
             duty.as_ref(),
             "openOMSI save",

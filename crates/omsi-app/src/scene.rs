@@ -3943,6 +3943,12 @@ impl World {
             // gantry of a mod map not marked `[fixed]` - an invisible wall under it.
             // (a parked car is a vehicle: it is hit as the traffic is)
             let solid = ot.sco.fixed || ot.sco.crash_mode_pole.is_some() || o.parked;
+            // (Not a `[surface]` object, although Omsi.exe makes it `[fixed]` and puts its
+            // collision mesh into the tile's static ODE space like any other (0x7af0a4, the
+            // vehicle collides with that space in 0x6ff5b8): the Spandau depot's
+            // `Betr_S_Bauten` has fence rails 1.9 m up across its yard's drive paths, which
+            // the original's buses pass through - something drops those contacts that is not
+            // found yet, and made solid here they walled in the whole yard.)
             let mesh_shape = ot
                 .collision
                 .as_ref()

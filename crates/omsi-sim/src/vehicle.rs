@@ -3162,6 +3162,13 @@ impl TrailerPart {
         };
         // the height of the part's origin over its axle (where the ground has none: level
         // with the coupling, as before)
+        // A height far from where the coupling holds the part is another level's: the AI's
+        // ground lookup knows only x and y and gives the highest road there, which under a
+        // bridge is the deck (or, on the deck, a road that runs on beneath it) - the trailer
+        // of a lorry and the rear of an articulated bus stood up on the bridge or down under
+        // it (#140). Level with the coupling instead.
+        let level = c.z - self.coupling_front.z as f64;
+        let ground_z = ground_z.filter(|z| main.contact.is_some() || (z + lift - level).abs() < 1.5);
         let axle_z = match on_track.or(ground_z.map(|z| z + lift)) {
             Some(z) if on_track.is_some() => z,
             Some(z) => {
@@ -3177,7 +3184,7 @@ impl TrailerPart {
                     from + dz * (dt as f64 * 6.0).min(1.0)
                 }
             }
-            None => c.z - self.coupling_front.z as f64,
+            None => level,
         };
         self.axle_z = Some(axle_z);
         // The part hangs at the coupling in front and stands on its axle behind: its pitch is

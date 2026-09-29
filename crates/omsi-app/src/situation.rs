@@ -176,6 +176,7 @@ pub(crate) fn build_situation(
     clock: &omsi_sim::SimClock,
     weather: Option<&str>,
     player: Option<&Player>,
+    placed: &[Player],
     camera: &Camera,
     duty: Option<&crate::schedule::PlayerDuty>,
     name: &str,
@@ -254,6 +255,11 @@ pub(crate) fn build_situation(
             ];
         }
         vehicles.push(rec);
+    }
+    // and the vehicles placed besides it, standing where they are (only the driven one was
+    // written: a session continued with the last one alone, #139)
+    for (k, q) in placed.iter().enumerate() {
+        vehicles.push(vehicle_record(&q.vehicle, 2.0 + k as f64, false));
     }
     let (cam_tile, cam_local) = omsi_map::world_to_tile_local(camera.position.x, camera.position.y);
     Situation {
