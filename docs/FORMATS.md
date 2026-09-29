@@ -415,14 +415,24 @@ WH UK AI cars put their shadow there.
 its *alpha* is the slot's alpha, and a picture without an alpha channel is opaque as Direct3D
 samples it (the WH UK AI cars' paint layer uses a black 24-bit `transmap_null.tga`).
 
-`[texchanges] <file>` names a `chtex_*.cfg` **relative to the vehicle's own folder**
-(`texture\chtex_SD.cfg`, `..\Anzeigen\Rollband_SD79\chtex_rollband.cfg`), not to the
-model.cfg's. It holds `[newtexchangemaster]` blocks of two lines - the texture name as it
+`[texchanges] <file>` names a `chtex_*.cfg`, relative to the vehicle's root folder for
+vehicles and to the model-config folder for scenery. The examples are
+`texture\chtex_SD.cfg` and `..\Anzeigen\Rollband_SD79\chtex_rollband.cfg`. It holds
+`[newtexchangemaster]` blocks of two lines - the texture name as it
 appears in the o3d, and a script variable - each followed by `[entries] n` and n texture
 files that live next to that cfg. The variable's integer value picks the entry, 0 first
 (`rollband.osc` clamps `rlbnd_lnN` to 0…15 for sixteen entries and stores `trunc()+0.001`).
 The named texture usually does not exist on disk at all: the mesh carries it only as a key.
 The masters are model-wide even though `[texchanges]` is written inside a mesh block.
+
+Scenery `[CTC] <variable> <folder> <value>` groups read the folder's `.cti` items. Their
+`[CTCTexture] <name> <default-file>` entries link each item to a material texture. The
+script's integer variable selects an item by zero-based index; each `[CTC]` group has its own
+variable and can select independently. Scenery `[texchanges]` masters use the same indexed
+script-variable selection, with each entry replacing the master texture key. Both mechanisms
+are applied to scenery material slots at runtime, so they can drive adverts on shelter panels,
+building signs, and other props. An out-of-range or negative value leaves the model's own
+texture active.
 
 `[matl_freetex] <texture> <string variable>` is the same idea with a file name the script
 builds at run time: the SD200's destination roller sets `Rollband_Tex_V` from the map's
