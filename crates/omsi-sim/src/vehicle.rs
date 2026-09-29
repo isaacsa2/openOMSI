@@ -930,6 +930,10 @@ impl VehicleInstance {
                 state.vars[*i as usize] = 1.0;
             }
         }
+        // A model.cfg can choose a vehicle variant with `[setvar]` (dashboard, doors,
+        // destination display, and so on). OMSI makes these values visible to `{init}`;
+        // merely parsing them left converted vehicles on the script's zero defaults.
+        apply_model_set_vars(&mut state, &var_index, &ty.model.set_vars);
         // `$.yard` is the depot the bus runs from, the [name] of its .hof, known before
         // {init}: the matrix displays build their line list and palette paths from it
         // (`Linienlisten\<yard>_ANX.jpg`, `palettes\<yard>.bmp`), the roller blind its
@@ -2436,6 +2440,14 @@ impl VehicleInstance {
     }
 }
 
+fn apply_model_set_vars(state: &mut State, var_index: &HashMap<String, omsi_script::VarId>, set_vars: &[(String, f32)]) {
+    for (name, value) in set_vars {
+        if let Some(i) = var_index.get(&name.to_ascii_lowercase()) {
+            state.vars[*i as usize] = *value;
+        }
+    }
+}
+
 /// Per-mesh `[visible]`, `[matl_alphascale]` and texture offsets from variables. The
 /// vehicles use the same rules through `PropsPlan`, resolved once; this is the plain
 /// statement of them (and what the plan is tested against).
@@ -3419,6 +3431,19 @@ pub fn skin_vertices(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_setvars_are_applied_case_insensitively_before_init() {
+        let mut state = State { vars: vec![0.0, 0.0], str_vars: Vec::new() };
+        let mut vars = HashMap::new();
+        vars.insert("dashboard_variant".into(), 0);
+        vars.insert("door_type".into(), 1);
+        let set_vars = [("Dashboard_Variant".into(), 2.0), ("door_TYPE".into(), 1.5), ("not_in_varlist".into(), 9.0)];
+
+        apply_model_set_vars(&mut state, &vars, &set_vars);
+
+        assert_eq!(state.vars, [2.0, 1.5]);
+    }
 
     /// A shadow blob at the model's z = 0 is laid onto the plane through the wheels: 15 cm
     /// up with the body sagging, and following a pitch; one axle gives a level plane.
