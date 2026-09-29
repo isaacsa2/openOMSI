@@ -24,12 +24,15 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy)]
 pub struct IndexedSpline {
     pub length: f64,
+    /// The chain distance stored in the last `[spline]` field (tile version 11+).
+    /// `None` for older tiles, where that field is not present.
+    pub map_chain_offset: Option<f64>,
     pub prev: i64,
     pub next: i64,
 }
 
-/// What the map holds outside the loaded tiles: its splines (lengths and links), the spline
-/// every `[splineAttachement]` row starts on, and where every object stands.
+/// What the map holds outside the loaded tiles: its splines (lengths, chain offsets and links),
+/// the spline every `[splineAttachement]` row starts on, and where every object stands.
 #[derive(Default)]
 pub struct MapIndex {
     pub splines: HashMap<i64, IndexedSpline>,
@@ -70,7 +73,22 @@ impl MapIndex {
                 let mut part = MapIndex::default();
                 let mut rows: RowParts = Default::default();
                 for s in tile.splines.iter().filter(|s| !s.deleted) {
-                    part.splines.insert(s.id, IndexedSpline { length: s.length, prev: s.prev_id, next: s.next_id });
+                    let map_chain_offset = if tile.version >= 11 || tile.version == 0 {
+                        let offset = if s.tex_offset.is_finite() && s.tex_offset > 0.0 {
+                            s.tex_offset
+                        } else {
+                            0.0
+                        };
+                        Some(offset)
+                    } else {
+                        None
+                    };
+                    part.splines.insert(s.id, IndexedSpline {
+                        length: s.length,
+                        map_chain_offset,
+                        prev: s.prev_id,
+                        next: s.next_id,
+                    });
                 }
                 for a in &tile.spline_attachments {
                     let Some(s) = tile.splines.get(a.spline_index.max(0) as usize) else { continue };
@@ -321,14 +339,14 @@ pub fn chain_distance(index: &MapIndex, from: i64, to: i64, limit: f64) -> Optio
     }
 }
 
-/// How far the start of spline `id` lies from the start of its chain: the length of the
-/// splines before it, following the `prev` links back (and the direction flips where two
-/// splines meet end to end) until the chain begins or comes round to a spline already
-/// passed. A row's start distance counts from there: with it, 176 of the 180 repeaters of
-/// Berlin-Spandau that can be checked start at the object the map names (165 counting from
-/// the master's own spline), and the buffer stops stand a few metres before their track
-/// ends instead of in the middle of the rails.
+/// How far the start of spline `id` lies from the start of its chain. OMSI stores this in the
+/// last `[spline]` field in tile version 11 and newer; that value is authoritative because
+/// `prev`/`next` links can be stale. Older tiles do not store it, so reconstruct it by walking
+/// the links (flipping direction where two splines meet end to end).
 pub fn chain_offset(index: &MapIndex, id: i64) -> f64 {
+    if let Some(offset) = index.splines.get(&id).and_then(|s| s.map_chain_offset) {
+        return offset;
+    }
     let mut cur = id;
     let mut forward = true;
     let mut acc = 0.0;
@@ -442,7 +460,7 @@ fn place_on(att: &SplineAttachment, spline: &MapSpline, origin: DVec2, index: Op
             let (u, side, turn) = if backwards { (len - along, -x, 180.0) } else { (along, x, 0.0) };
             let pos = curve.offset_point(u, side, h);
             let heading = curve.heading_at(u) + turn + att.rot[0];
-            let (mut pitch, mut bank) = (att.rot[1], att.rot[2]);
+            let [_, mut pitch, mut bank] = omsi_geometry::map_rotation(att.rot);
             if att.tilt {
                 let sign = if backwards { -1.0 } else { 1.0 };
                 pitch += sign * curve.slope_at(u).atan().to_degrees();
@@ -931,16 +949,19 @@ mod tests {
     /// of predecessors, one of them joined end to end.
     fn buffer_stop_chain() -> MapIndex {
         let mut ix = MapIndex::default();
-        ix.splines.insert(10, IndexedSpline { length: 400.0, prev: 0, next: 11 });
+        ix.splines.insert(10, IndexedSpline { length: 400.0, map_chain_offset: Some(0.0), prev: 0, next: 11 });
         // spline 11 runs against the chain: its end meets 10, its start meets 12
-        ix.splines.insert(11, IndexedSpline { length: 200.0, prev: 12, next: 10 });
-        ix.splines.insert(12, IndexedSpline { length: 250.0, prev: 11, next: 0 });
+        ix.splines.insert(11, IndexedSpline { length: 200.0, map_chain_offset: Some(250.0), prev: 12, next: 10 });
+        ix.splines.insert(12, IndexedSpline { length: 250.0, map_chain_offset: Some(600.0), prev: 11, next: 0 });
         ix
     }
 
     #[test]
     fn row_start_counts_from_the_chain_start() {
-        let ix = buffer_stop_chain();
+        let mut ix = buffer_stop_chain();
+        // Berlin's map links can be stale: keep the authored chain distance even when the
+        // segment no longer points back to the spline that the distance includes.
+        ix.splines.get_mut(&12).unwrap().prev = 0;
         assert_eq!(chain_offset(&ix, 10), 0.0);
         assert_eq!(chain_offset(&ix, 12), 600.0);
         // a row on spline 11 runs its way, from the joint with 12: the chain before it is 12
@@ -952,9 +973,9 @@ mod tests {
         assert!((objs[0].pose.pos.y - 245.3).abs() < 1e-6, "{:?}", objs[0].pose.pos);
         // a loop has no start: the walk stops where it comes round
         let mut ring = MapIndex::default();
-        ring.splines.insert(1, IndexedSpline { length: 10.0, prev: 3, next: 2 });
-        ring.splines.insert(2, IndexedSpline { length: 20.0, prev: 1, next: 3 });
-        ring.splines.insert(3, IndexedSpline { length: 30.0, prev: 2, next: 1 });
+        ring.splines.insert(1, IndexedSpline { length: 10.0, map_chain_offset: None, prev: 3, next: 2 });
+        ring.splines.insert(2, IndexedSpline { length: 20.0, map_chain_offset: None, prev: 1, next: 3 });
+        ring.splines.insert(3, IndexedSpline { length: 30.0, map_chain_offset: None, prev: 2, next: 1 });
         assert_eq!(chain_offset(&ring, 1), 50.0);
     }
 
@@ -995,10 +1016,10 @@ mod tests {
     #[test]
     fn repeater_continues_the_row() {
         let mut ix = MapIndex::default();
-        ix.splines.insert(1, IndexedSpline { length: 100.0, prev: 0, next: 2 });
-        ix.splines.insert(2, IndexedSpline { length: 50.0, prev: 1, next: 3 });
+        ix.splines.insert(1, IndexedSpline { length: 100.0, map_chain_offset: None, prev: 0, next: 2 });
+        ix.splines.insert(2, IndexedSpline { length: 50.0, map_chain_offset: None, prev: 1, next: 3 });
         // spline 3 is joined end to end: it runs against the chain
-        ix.splines.insert(3, IndexedSpline { length: 80.0, prev: 0, next: 2 });
+        ix.splines.insert(3, IndexedSpline { length: 80.0, map_chain_offset: None, prev: 0, next: 2 });
         assert_eq!(chain_distance(&ix, 1, 3, 1e9), Some((150.0, true)));
         ix.masters.insert((0, 5), (1, 20.0));
         // the master row: 20, 50, 80 m on spline 1

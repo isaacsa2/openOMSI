@@ -693,18 +693,11 @@ impl App {
                 self.vehicle_action(action, true);
                 self.vehicle_action(action, false);
             }
-            Btn::BlinkLeft => {
-                self.tap_key(event_loop, KeyCode::KeyZ, false, true);
-                self.tap_key(event_loop, KeyCode::KeyZ, false, false);
-            }
-            Btn::BlinkRight => {
-                self.tap_key(event_loop, KeyCode::KeyC, false, true);
-                self.tap_key(event_loop, KeyCode::KeyC, false, false);
-            }
-            Btn::Hazard => {
-                self.tap_key(event_loop, KeyCode::KeyX, false, true);
-                self.tap_key(event_loop, KeyCode::KeyX, false, false);
-            }
+            // (the lever itself, not the Z / C / X keys: those are the simple layouts' only,
+            // and with OMSI's keys chosen the phone's indicator buttons did nothing)
+            Btn::BlinkLeft => self.blinker(1),
+            Btn::BlinkRight => self.blinker(2),
+            Btn::Hazard => self.blinker(3),
             Btn::Horn => self.vehicle_action("horn", down),
             Btn::Engine => self.vehicle_action("kw_m_enginestart", down),
             Btn::Battery => {

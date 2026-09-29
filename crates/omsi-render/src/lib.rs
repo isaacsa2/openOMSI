@@ -1053,6 +1053,9 @@ pub struct Renderer {
     )>,
     /// The pre-exposure (natural log) as it follows the sky's.
     exposure: Option<f32>,
+    /// The projection's width over height while a picture is drawn into a texture (see
+    /// `render_to_texture`), whatever the texture's own shape.
+    texture_aspect: Option<f32>,
     last_frame: Option<std::time::Instant>,
     /// The next frame stands alone (an offscreen picture): the exposure is there at once.
     pub instant_exposure: bool,
@@ -1273,7 +1276,41 @@ impl Renderer {
             .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, compatible_surface: surface, force_fallback_adapter: false, ..Default::default() })
             .await
             .map_err(|e| anyhow!("no graphics adapter that can draw the game was found (Metal, Vulkan, DirectX 12 or OpenGL 3.3 or later); updating the graphics driver often helps: {e}"))?;
+        Self::new_on(adapter, surface, format, options).await
+    }
+
+    /// The adapters of `instance` that can show `surface`, the ones worth trying first first:
+    /// a graphics card of its own, then the processor's graphics, then anything else (a
+    /// software renderer last).
+    pub fn adapters_for(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>) -> Vec<wgpu::Adapter> {
+        let mut v: Vec<wgpu::Adapter> = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
+            .into_iter()
+            .filter(|a| a.is_surface_supported(surface))
+            .collect();
+        let rank = |a: &wgpu::Adapter| match a.get_info().device_type {
+            wgpu::DeviceType::DiscreteGpu => 0,
+            wgpu::DeviceType::IntegratedGpu => 1,
+            wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => 2,
+            wgpu::DeviceType::Cpu => 3,
+        };
+        v.sort_by_key(rank);
+        v
+    }
+
+    /// Create a renderer on this adapter.
+    pub async fn new_on(
+        adapter: wgpu::Adapter,
+        surface: Option<&wgpu::Surface<'_>>,
+        format: Option<wgpu::TextureFormat>,
+        options: RenderOptions,
+    ) -> Result<Renderer> {
         let info = adapter.get_info();
+        // test hooks for an adapter that cannot be opened: an error, or wgpu going down
+        match omsi_cfg::env::var("OMSI_FAKE_GPU_ERROR").as_deref() {
+            Ok("open") => return Err(anyhow!("test: {} refused (OMSI_FAKE_GPU_ERROR=open)", info.name)),
+            Ok("open-panic") => panic!("test: {} went down while being opened (OMSI_FAKE_GPU_ERROR=open-panic)", info.name),
+            _ => {}
+        }
         // What the textures may take on this adapter (wgpu does not tell a card's memory):
         // a discrete card is taken for one of 2-4 GB, whose rest the pictures (the render
         // targets, the shadow maps) and the driver need; an integrated one shares the
@@ -1281,8 +1318,10 @@ impl Renderer {
         let vram = dedicated_vram_mb(&info);
         let guess_mb: u64 = match info.device_type {
             // (a card of 2 or 3 GB, where Windows says: half of it - 1600 MB of a GTX 1050's
-            // 2 GB left too little for the rest, and its Vulkan device was lost at the start)
-            wgpu::DeviceType::DiscreteGpu => vram.filter(|v| *v >= 512).map_or(1600, |v| (v / 2).min(1600)),
+            // 2 GB left too little for the rest, and its Vulkan device was lost at the start;
+            // a card of 2 GB a third of it - with half, 4x MSAA, SSAO and the shadows its
+            // DirectX 12 device still ran out of memory on Grundorf within seconds, #114)
+            wgpu::DeviceType::DiscreteGpu => vram.filter(|v| *v >= 512).map_or(1600, |v| if v <= 2560 { v * 35 / 100 } else { (v / 2).min(1600) }),
             wgpu::DeviceType::IntegratedGpu if info.backend == wgpu::Backend::Metal => 3000,
             wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu => 1000,
             _ => 800,
@@ -3430,6 +3469,7 @@ impl Renderer {
             sky_state: None,
             sky_job: None,
             exposure: None,
+            texture_aspect: None,
             last_frame: None,
             instant_exposure: false,
             overlay_pipeline_1x,
@@ -3965,19 +4005,24 @@ impl Renderer {
     }
 
     /// Render the scene from `camera` into a texture made by `add_render_texture`.
+    /// `aspect`: the projection's width over height (OMSI draws its mirrors 1.6 wide into
+    /// square textures, and their meshes show the middle of that).
     pub fn render_to_texture(
         &mut self,
         scene: &mut Scene,
         id: TextureId,
         camera: &Camera,
         lighting: &Lighting,
+        aspect: f32,
     ) {
         let Some(t) = scene.textures.get(id) else {
             return;
         };
         let view = t.view.clone();
         let (w, h) = t.size;
+        self.texture_aspect = Some(aspect);
         self.render_inner(scene, &view, w, h, camera, lighting, false, Some(id));
+        self.texture_aspect = None;
     }
 
     /// Replace the pixels of a texture (same size as when created, no mipmaps regenerated).
@@ -6400,7 +6445,7 @@ impl Renderer {
             None
         };
         let scene_view: &wgpu::TextureView = scene_target.as_ref().map(|t| &t.0).unwrap_or(target);
-        let aspect = width as f32 / height.max(1) as f32;
+        let aspect = self.texture_aspect.unwrap_or(width as f32 / height.max(1) as f32);
         let cam_rel = (camera.position - ro).as_vec3();
         // The mirrors are drawn with the plain shading even in Enhanced: without the depth
         // prepass (sized for the window) every layer of a mirror's picture ran the enhanced
@@ -7125,8 +7170,8 @@ impl Renderer {
                         has_blend = true;
                         continue;
                     }
-                    // a render target cannot be sampled while being drawn into (mirror glass)
-                    if exclude_texture.is_some() && mat.texture == exclude_texture {
+                    // a render target cannot be sampled while being drawn into (mirror glass, or a reflection map of it)
+                    if exclude_texture.is_some_and(|t| mat.uses_texture(t)) {
                         continue;
                     }
                     items.push(DrawItem {
@@ -7252,7 +7297,7 @@ impl Renderer {
                     let mat_id = inst.materials.get(*slot as usize).copied().unwrap_or(0);
                     let mat = &scene.materials[mat_id];
                     if (mat.alpha != AlphaMode::Blend && !mat.no_z_check)
-                        || (exclude_texture.is_some() && mat.texture == exclude_texture)
+                        || exclude_texture.is_some_and(|t| mat.uses_texture(t))
                     {
                         continue;
                     }
@@ -9735,4 +9780,13 @@ thread_local! {
 /// does not report it as the end of the game).
 pub fn catching() -> bool {
     CATCHING.with(|c| c.get())
+}
+
+/// Run `f`; a panic in it (a driver wgpu cannot use, taking it down in a way it does not
+/// turn into an error) is caught and gives None, and is not reported as the end of the game.
+pub fn catch<R>(f: impl FnOnce() -> R) -> Option<R> {
+    let was = CATCHING.with(|c| c.replace(true));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    CATCHING.with(|c| c.set(was));
+    r.ok()
 }

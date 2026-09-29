@@ -282,30 +282,32 @@ impl App {
             Some(w) => w,
             None => Arc::new(event_loop.create_window(attrs).expect("window")),
         };
-        let surface = self
-            .instance
-            .create_surface(window.clone())
-            .expect("surface");
-        let mut renderer = pollster::block_on(Renderer::new_with(
-            &self.instance,
-            Some(&surface),
-            None,
-            self.settings.render_options(),
-        ))
-        .expect("renderer");
+        let mut renderer = match window_renderer(&mut self.instance, &window, self.settings.render_options()) {
+            Ok(r) => r,
+            Err(e) => {
+                fatal_message(&format!("The game cannot draw on this computer: {e:#}"));
+                crate::platform::exit(event_loop);
+                return;
+            }
+        };
         crate::lights::load_smoke_texture(&mut renderer, &self.args.root);
         crate::lights::set_corona_root(&self.args.root);
-        drop(surface);
         let size = window.inner_size();
-        let surface = SurfaceState::new_with(
+        let surface = match SurfaceState::new_with(
             &self.instance,
             window.clone(),
             &renderer,
             size.width,
             size.height,
             self.settings.vsync,
-        )
-        .expect("surface");
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                fatal_message(&format!("The game's window cannot be drawn into: {e:#}"));
+                crate::platform::exit(event_loop);
+                return;
+            }
+        };
         let (sw, sh) = renderer.scene_size(size.width, size.height);
         log::info!(
             "window: {}x{} pixels (scale factor {:.2}), 3D picture {sw}x{sh}, present mode {:?}",

@@ -39,7 +39,7 @@ pub(crate) struct Args {
     /// Entry point index (from global.cfg) where the vehicle is placed.
     #[arg(long, default_value_t = 0)]
     pub(crate) entry: usize,
-    /// View: driver, pax, outside, or free.
+    /// View: driver, pax, outside, or free; mirror<n> shows what mirror n's camera sees (a check).
     #[arg(long, default_value = "driver")]
     pub(crate) view: String,
     /// Put the bus into service at the start of the run (the Shift+U auto-start).

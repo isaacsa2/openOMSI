@@ -279,19 +279,26 @@ fn mirror_in_view(eye: DVec3, radius: f32, view: &(Camera, f32)) -> bool {
     d.dot(r).abs() <= z.max(0.0) * tan_x + slack_x && d.dot(u).abs() <= z.max(0.0) * tan_y + slack_y
 }
 
-/// Draw the views of the vehicle's `[add_camera_reflexion]` cameras into its mirror textures.
-/// `only`: render just one mirror, the `i % n`-th of those `view` sees (round robin, as
-/// OMSI takes its turns among the mirrors in the picture; with no view, of all of them).
+/// A mirror's picture is drawn this wide over its height (Omsi.exe sub_6f6468 gives the
+/// reflection cameras' projection 1.6 on their square textures), and the mirror meshes show
+/// its middle: drawn square, a mirror showed a slice two thirds as wide as OMSI's - the
+/// strip of the bus at its edge and hardly any of the lane beside it.
+const MIRROR_ASPECT: f32 = 1.6;
+
 /// A mirror's camera as OMSI turns it: the yaw of an `[add_camera_reflexion]` goes the other
 /// way round from a driver camera's - the picture is what the mirror reflects. Read like a
 /// driver camera, every stock mirror looked in at the bus's own side (the SD200's left mirror
-/// at 169 degrees, its right one at 201) and showed little else; OMSI's own pictures of them
-/// (the SD202's `reflexion0.bmp` placeholder) look back and a little outwards, the bus a narrow
-/// strip at the edge.
+/// at 169 degrees, its right one at 201) and showed little else; the placeholders OMSI's
+/// mirrors ship with (`reflexion<n>.bmp` of the SD200/SD202, the NL/NG, the Golf, add-ons'
+/// alike) look back and a little outwards, the bus a narrow strip at the near edge - drawn
+/// 1.6 wide (`MIRROR_ASPECT`) and turned this way, the pictures match them.
 pub(crate) fn reflexion_camera(c: &omsi_vehicle::Camera) -> omsi_vehicle::Camera {
     omsi_vehicle::Camera { yaw: -c.yaw, ..c.clone() }
 }
 
+/// Draw the views of the vehicle's `[add_camera_reflexion]` cameras into its mirror textures.
+/// `only`: render just one mirror, the `i % n`-th of those `view` sees (round robin, as
+/// OMSI takes its turns among the mirrors in the picture; with no view, of all of them).
 pub(crate) fn render_mirrors(
     renderer: &mut Renderer,
     scene: &mut Scene,
@@ -362,6 +369,6 @@ pub(crate) fn render_mirrors(
             near: 0.3,
             far: 450.0,
         };
-        renderer.render_to_texture(scene, *tex, &cam, &lighting);
+        renderer.render_to_texture(scene, *tex, &cam, &lighting, MIRROR_ASPECT);
     }
 }

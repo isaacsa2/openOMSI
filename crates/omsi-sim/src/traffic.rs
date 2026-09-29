@@ -68,8 +68,14 @@ pub struct Lane {
     pub offset: f32,
     /// Spline/object file the lane came from (debugging).
     pub name: String,
-    /// `[rule] trafficdensity`: how much of the road traffic uses this lane (0 = none).
+    /// `[rule] trafficdensity`: how much of the road traffic uses this lane (0 = none), of
+    /// any random traffic group.
     pub density: f32,
+    /// `[rule] trafficdensity <value> <group>` of the path, the last per group: the group
+    /// is the random traffic group's place in the map's `unsched_vehgroups.txt`. A group
+    /// without one takes its default there (Berlin-Spandau's GDR cars only drive where
+    /// the Falkensee paths ask for them).
+    pub group_density: Vec<(u16, f32)>,
     /// `[rule] no_cars` / `bus`: cars keep off this lane; only the timetable's buses use it.
     pub no_cars: bool,
     /// `[rule] trucks 0`: no lorries here.
@@ -229,7 +235,7 @@ impl LaneBuilder {
     pub fn curve(points: Vec<DVec3>, headings: Vec<f32>, curvature: Vec<f32>, kind: LaneKind, width: f32) -> Lane {
         let dist = cumulative(&points);
         let speed_limit_kmh = if kind == LaneKind::Air { AIR_NO_LIMIT_KMH } else { 50.0 };
-        Lane { key: None, reversed: false, kind, width, points, headings, curvature, dist, speed_limit_kmh, next: Vec::new(), traffic_light: None, turn: 0, source: 0, offset: 0.0, name: String::new(), invisible: false, density: 1.0, no_cars: false, no_trucks: false, left: None, right: None, priority: DEFAULT_PRIORITY, blocks: Vec::new() }
+        Lane { key: None, reversed: false, kind, width, points, headings, curvature, dist, speed_limit_kmh, next: Vec::new(), traffic_light: None, turn: 0, source: 0, offset: 0.0, name: String::new(), invisible: false, density: 1.0, group_density: Vec::new(), no_cars: false, no_trucks: false, left: None, right: None, priority: DEFAULT_PRIORITY, blocks: Vec::new() }
     }
 
     /// Lane from bare points: headings from the neighbouring points on both sides (the

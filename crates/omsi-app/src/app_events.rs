@@ -688,7 +688,12 @@ impl ApplicationHandler for App {
                             if let Some(t) = tracked {
                                 p.seat += glam::Vec3::new(t.pos[0], -t.pos[2], t.pos[1]).clamp(glam::Vec3::splat(-60.0), glam::Vec3::splat(60.0)) / 100.0;
                             }
-                            let mut cam = p.camera_look(&self.view, cam, self.look, self.orbit);
+                            // (the outside view's field of view starts from the plain 60
+                            // degrees every frame: taken from the last frame's camera, the
+                            // zoom was applied on top of itself and ran off to its narrowest
+                            // or widest at once)
+                            let base = omsi_render::Camera { fov_deg: 60.0, ..*cam };
+                            let mut cam = p.camera_look(&self.view, &base, self.look, self.orbit);
                             if let Some(mut t) = tracked {
                                 for (k, axis) in ["yaw", "pitch", "roll"].iter().enumerate() {
                                     if self.settings.head_tracking_invert.contains(axis) {
@@ -726,7 +731,9 @@ impl ApplicationHandler for App {
                     // turned, else every few frames for switches that moved under it - a ray
                     // through every cockpit mesh every frame was a tenth of the frame)
                     let key = self.camera.as_ref().map(|c| (self.cursor.0.round() as i32, self.cursor.1.round() as i32, (c.yaw * 4.0).round() as i32, (c.pitch * 4.0).round() as i32));
-                    if key != self.hover_key || self.total_frames % 6 == 0 {
+                    // (the cab sways with the suspension: a view that only turned waits a few frames)
+                    let cursor_moved = key.map(|k| (k.0, k.1)) != self.hover_key.map(|k| (k.0, k.1));
+                    if cursor_moved || (key != self.hover_key && self.total_frames % 3 == 0) || self.total_frames % 6 == 0 {
                         self.hover_key = key;
                         self.update_hover();
                     }
@@ -1776,7 +1783,10 @@ impl ApplicationHandler for App {
                         let __t = Instant::now();
                         match frame {
                             Some(frame) => {
-                                win.pre_present_notify();
+                                // (without V-sync max_fps paces the frames: waiting for the compositor's frame callback cost a missed refresh each slow frame)
+                                if self.settings.vsync {
+                                    win.pre_present_notify();
+                                }
                                 frame.present();
                             }
                             None => {

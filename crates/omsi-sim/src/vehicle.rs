@@ -1090,16 +1090,9 @@ impl VehicleInstance {
     /// Re-render changed text textures; returns the indices with a pending image.
     pub fn update_text_textures(&mut self) -> Vec<usize> {
         let mut changed = Vec::new();
-        // `Refresh_Strings`: a one-shot request to draw every text texture again (OMSI
-        // the original → the original, then the variable back to 0); changed strings are drawn
-        // anyway
+        // `Refresh_Strings` is reset; an unchanged string would draw the same picture again
         if let Some(id) = self.ty.program.var("Refresh_Strings") {
-            if self.state.vars[id as usize] != 0.0 {
-                self.state.vars[id as usize] = 0.0;
-                for t in self.text_textures.iter_mut() {
-                    t.last_text = None;
-                }
-            }
+            self.state.vars[id as usize] = 0.0;
         }
         for i in 0..self.text_textures.len() {
             let var = self.text_textures[i].def.variable.clone();
@@ -2148,7 +2141,7 @@ impl VehicleInstance {
             let c = t.coupling_point(lp, lr);
             let b_c = b_prev + (c - prev_c).truncate().length();
             if let Some(p) = at_behind(b_c + t.pivot_length() as f64) {
-                t.place_pivot(p);
+                t.place_on_track(p);
             }
             t.update(self, dt, lead);
             lead = Some((t.position, t.body_rotation(), t.heading));
@@ -2801,6 +2794,9 @@ pub struct TrailerPart {
     pitch: f32,
     bank: f32,
     axle_z: Option<f64>,
+    /// The track under its turning axle, when it runs on rails (`VehicleInstance::retrail`):
+    /// it stands at the track's height, not on whatever the ground probe finds there.
+    track: Option<DVec3>,
     /// Mesh property sources, resolved against the leading vehicle's variables.
     props_plan: PropsPlan,
     /// The meshes' transforms in the modelled pose, for `[smoothskin]` (made when needed).
@@ -2920,6 +2916,7 @@ impl TrailerPart {
             pitch: 0.0,
             bank: 0.0,
             axle_z: None,
+            track: None,
             v_alpha: program.var(&format!("articulation_{joint}_alpha")),
             v_beta: program.var(&format!("articulation_{joint}_beta")),
             animators,
@@ -3044,6 +3041,7 @@ impl TrailerPart {
     pub fn realign(&mut self) {
         self.pivot = None;
         self.axle_z = None;
+        self.track = None;
     }
 
     /// Where this part couples to the part in front of it, in the world, with the leading
@@ -3063,6 +3061,13 @@ impl TrailerPart {
     /// straight behind it.
     pub fn place_pivot(&mut self, pivot: DVec3) {
         self.pivot = Some(pivot);
+    }
+
+    /// Put the part's turning axle on a track at `p` (a rail vehicle's coupled car or
+    /// section): it also takes the track's height there.
+    pub fn place_on_track(&mut self, p: DVec3) {
+        self.pivot = Some(p);
+        self.track = Some(p);
     }
 
     fn update(&mut self, main: &mut VehicleInstance, dt: f32, lead: Option<(DVec3, Mat4, f64)>) {
@@ -3126,19 +3131,27 @@ impl TrailerPart {
         }
         let lift = sag.iter().sum::<f32>() as f64 / sag.len().max(1) as f64;
         self.ground_lift = lift as f32;
+        // On rails: the track's height where it was put on it (the ground probe found the
+        // platform edge or the embankment beside a bend, and the car jumped up and down).
+        let on_track = self
+            .track
+            .filter(|t| (t.truncate() - new_pivot.truncate()).length() < 1.0)
+            .map(|t| t.z);
         // the ground under its axle: what the wheels stand on where the world says, else the
         // plain height sampler
-        let ground_z = match (&main.contact, &main.ground) {
-            (Some(c), _) => {
+        let ground_z = match (on_track, &main.contact, &main.ground) {
+            (Some(_), _, _) => None,
+            (None, Some(c), _) => {
                 c.probe(new_pivot.x, new_pivot.y, self.position.z + 1.5)
                     .below
             }
-            (None, Some(g)) => g(new_pivot.x, new_pivot.y),
+            (None, None, Some(g)) => g(new_pivot.x, new_pivot.y),
             _ => None,
         };
         // the height of the part's origin over its axle (where the ground has none: level
         // with the coupling, as before)
-        let axle_z = match ground_z.map(|z| z + lift) {
+        let axle_z = match on_track.or(ground_z.map(|z| z + lift)) {
+            Some(z) if on_track.is_some() => z,
             Some(z) => {
                 // The sampled surface is not perfectly smooth (a centimetre of wobble along
                 // the railway ballast every metre or two), and a car that follows every

@@ -1646,6 +1646,9 @@ pub fn setup(l: &mut Launcher, area: Rect) {
         l.state.config.game = game.trim().to_string();
         match core::save_config(&l.state.config) {
             Ok(()) => {
+                // (what was read of the folders before is forgotten: a folder copied or
+                // changed while the launcher ran is read as it is now)
+                omsi_cfg::content_changed();
                 l.state.config = core::load_config();
                 l.pages.setup_root = None;
                 l.pages.setup_game = None;

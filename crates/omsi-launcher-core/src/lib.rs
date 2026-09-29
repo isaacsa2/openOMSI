@@ -90,6 +90,9 @@ fn find_game(configured: &str) -> Option<PathBuf> {
     cands.into_iter().find(|p| p.is_file())
 }
 
+/// The last search for the OMSI folder: (the places given first, what was found).
+static FOUND: std::sync::Mutex<Option<(Vec<PathBuf>, Option<PathBuf>)>> = std::sync::Mutex::new(None);
+
 /// The OMSI folder: configured, remembered by the game, or found in any usual place
 /// (beside the program, Steam libraries, Wine bottles, the user's folders).
 fn find_root(configured: &str) -> Option<PathBuf> {
@@ -103,8 +106,8 @@ fn find_root(configured: &str) -> Option<PathBuf> {
     if let Ok(t) = std::fs::read_to_string(home().join(".openomsi-root")) {
         first.push(PathBuf::from(t.trim()));
     }
-    // searching the disk costs a moment: once per process is enough
-    static FOUND: std::sync::Mutex<Option<(Vec<PathBuf>, Option<PathBuf>)>> = std::sync::Mutex::new(None);
+    // searching the disk costs a moment: once per process is enough (until the settings
+    // are saved again, see `save_config`)
     let mut g = FOUND.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((k, v)) = g.as_ref() {
         if *k == first && v.as_ref().map(|p| is_omsi_root(p)).unwrap_or(true) {
@@ -216,6 +219,10 @@ pub fn omsi_options(root: &Path) -> Option<OmsiOptions> {
 
 pub fn save_config(c: &Config) -> Result<()> {
     std::fs::write(config_path(), serde_json::to_vec_pretty(c)?)?;
+    // the folder is looked for again: a folder that was not a complete OMSI 2 when it was
+    // first chosen (still being copied, a part missing) and is now stayed "not found" until
+    // the launcher was restarted, however often it was chosen and saved again
+    *FOUND.lock().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(())
 }
 
@@ -265,11 +272,13 @@ fn register_roots(content: &Path) {
     let content = content.to_path_buf();
     DONE.call_once(|| {
         omsi_cfg::add_content_root(content.clone());
-        if let Some(r) = find_root(&load_config_raw().root) {
-            omsi_cfg::add_content_root(r);
-        }
         mount_archives(&content);
     });
+    // the OMSI folder - also one chosen under Setup while the launcher runs (it was only
+    // looked for once, at the start, and a folder set later was never a root)
+    if let Some(r) = find_root(&load_config_raw().root) {
+        omsi_cfg::add_content_root(r);
+    }
 }
 
 /// Mount the archives in `<content>/Archives` that are not mounted yet (an install may
@@ -632,11 +641,36 @@ pub fn list_maps() -> Result<Vec<MapInfo>> {
         out.extend(info);
     }
     index::save("map|", Some(&keys));
+    if out.is_empty() {
+        log_empty("maps", "global.cfg");
+    }
     Ok(out)
 }
 
+/// Say in launcher.log where a list that came out empty was looked for: each folder of
+/// `rel` and how many entries it has (a player whose lists stay empty sends the log).
+fn log_empty(rel: &str, what: &str) {
+    let places: Vec<String> = bases()
+        .iter()
+        .map(|b| {
+            let d = b.join(rel);
+            match omsi_cfg::vfs::list_dir(&d) {
+                Some(l) => format!("{} ({} entries)", d.display(), l.len()),
+                None => format!("{} (cannot be read: {})", d.display(), std::fs::read_dir(&d).err().map(|e| e.to_string()).unwrap_or_else(|| "not a folder".into())),
+            }
+        })
+        .collect();
+    log_line(&format!("{rel}: nothing with a {what} found in {}", if places.is_empty() { "no folder (no OMSI 2 folder and no content folder)".to_string() } else { places.join(", ") }));
+}
+
 fn read_map(d: &Path, folder: &str, lang: &str) -> Option<MapInfo> {
-    let g = omsi_map::GlobalCfg::load(&d.join("global.cfg")).ok()?;
+    let g = match omsi_map::GlobalCfg::load(&d.join("global.cfg")) {
+        Ok(g) => g,
+        Err(e) => {
+            log_line(&format!("maps: {} cannot be read ({e:#}) - not listed", d.join("global.cfg").display()));
+            return None;
+        }
+    };
     // `global_ENG.dsc` (the language of the settings) names and describes the map
     let dsc = find_dsc(&d.join("global.cfg"), lang);
     let friendly = dsc.as_ref().and_then(|x| x.name.first().cloned()).unwrap_or_else(|| g.friendly_name.trim().to_string());
@@ -783,6 +817,9 @@ pub fn list_vehicles() -> Result<Vec<VehicleInfo>> {
         out.extend(list);
     }
     index::save("bus2|", Some(&keys));
+    if out.is_empty() {
+        log_empty("Vehicles", ".bus file");
+    }
     Ok(out)
 }
 
@@ -1374,7 +1411,7 @@ fn keyboard_cfg_write_path() -> Result<PathBuf> {
 
 fn keyboard_cfg_read_path() -> Result<PathBuf> {
     let own = keyboard_cfg_write_path()?;
-    Ok(if own.exists() { own } else { root()?.join("Inputs").join("keyboard.cfg") })
+    Ok(if own.exists() { own } else { omsi_cfg::original_keyboard_cfg(&root()?) })
 }
 
 fn binding_to_json(b: &omsi_content::input::KeyBinding) -> Value {

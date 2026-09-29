@@ -3120,14 +3120,14 @@ impl World {
             let place = if absolute {
                 Placement::Pose(Pose {
                     pos: DVec3::new(x, y, o.pos[2]),
-                    rot: object_rotation(o.rot),
+                    rot: object_rotation(omsi_geometry::map_rotation(o.rot)),
                 })
             } else {
                 Placement::Ground {
                     x,
                     y,
                     z: o.pos[2],
-                    rot: o.rot,
+                    rot: omsi_geometry::map_rotation(o.rot),
                 }
             };
             out.objects.push(StagedObject {
@@ -3159,7 +3159,7 @@ impl World {
                     parent,
                     index: o.attach_index,
                     instance: o.instance,
-                    rot: o.rot,
+                    rot: omsi_geometry::map_rotation(o.rot),
                 },
                 rules: o.rules.clone(),
                 extra: o.extra.clone(),
@@ -10203,6 +10203,28 @@ impl World {
     }
 }
 
+/// A path's `[rule] trafficdensity`s: how much random traffic of any group it carries,
+/// and the last value per group (the rule's fourth line: the group's place in the map's
+/// `unsched_vehgroups.txt`). Without a rule for the first group the path has its medium
+/// density (1); the lane carries traffic as long as any group drives on it - on
+/// Berlin-Spandau 462 Falkensee paths set only the GDR cars' density.
+fn path_densities(rules: &[omsi_map::MapRule], path: usize) -> (f32, Vec<(u16, f32)>) {
+    let mut per: Vec<(u16, f32)> = Vec::new();
+    for r in rules.iter().filter(|r| {
+        r.path_index == path as i32 && r.kind.eq_ignore_ascii_case("trafficdensity") && !r.kill
+    }) {
+        let g = r.extra.max(0.0) as u16;
+        let v = (r.value as f32).max(0.0);
+        match per.iter_mut().find(|(k, _)| *k == g) {
+            Some(e) => e.1 = v,
+            None => per.push((g, v)),
+        }
+    }
+    let first = per.iter().find(|(g, _)| *g == 0).map(|e| e.1).unwrap_or(1.0);
+    let density = per.iter().map(|e| e.1).fold(first, f32::max);
+    (density, per)
+}
+
 /// Lanes of one map spline: every `[path]` of the spline type runs along the curve at its
 /// lateral offset; `direction` 1 runs backwards, 2 both ways (two lanes).
 ///
@@ -10256,7 +10278,7 @@ fn spline_lanes(
                 .map(|r| r.value as f32)
                 .last()
         };
-        let density = rule_of("trafficdensity").unwrap_or(1.0);
+        let (density, group_density) = path_densities(&s.rules, pi);
         let no_cars = s.rules.iter().any(|r| {
             r.path_index == pi as i32 && r.kind.eq_ignore_ascii_case("no_cars") && !r.kill
         });
@@ -10274,7 +10296,8 @@ fn spline_lanes(
             if let Some(v) = limit {
                 l.speed_limit_kmh = v;
             }
-            l.density = density.max(0.0);
+            l.density = density;
+            l.group_density = group_density.clone();
             l.no_cars = no_cars || bus_only;
             l.no_trucks = no_trucks;
             l.source = 1;
@@ -10367,7 +10390,7 @@ fn object_lanes(
             })
             .map(|r| r.value as f32)
             .last();
-        let density = rule_of("trafficdensity").unwrap_or(1.0);
+        let (density, group_density) = path_densities(rules, pi);
         let no_cars = rules.iter().any(|r| {
             r.path_index == pi as i32
                 && (r.kind.eq_ignore_ascii_case("no_cars") || r.kind.eq_ignore_ascii_case("bus"))
@@ -10385,7 +10408,8 @@ fn object_lanes(
             if let Some(v) = limit {
                 l.speed_limit_kmh = v;
             }
-            l.density = density.max(0.0);
+            l.density = density;
+            l.group_density = group_density.clone();
             l.no_cars = no_cars;
             l.no_trucks = no_trucks;
             l.turn = turn;
@@ -10424,6 +10448,25 @@ fn object_lanes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A path's trafficdensity rules per group: the last of each, and traffic on the lane
+    /// while any group drives there (a path without a rule for the first group has its
+    /// medium density).
+    #[test]
+    fn path_densities_per_group() {
+        let rule = |path: i32, value: f64, extra: f64| omsi_map::MapRule {
+            path_index: path,
+            kind: "trafficdensity".into(),
+            value,
+            extra,
+            ..Default::default()
+        };
+        let rules = [rule(0, 0.0, 0.0), rule(0, 1.0, 4.0), rule(0, 0.5, 4.0), rule(1, 2.0, 0.0)];
+        assert_eq!(path_densities(&rules, 0), (0.5, vec![(0, 0.0), (4, 0.5)]));
+        assert_eq!(path_densities(&rules, 1), (2.0, vec![(0, 2.0)]));
+        assert_eq!(path_densities(&[rule(2, 0.3, 4.0)], 2), (1.0, vec![(4, 0.3)]));
+        assert_eq!(path_densities(&[], 0), (1.0, vec![]));
+    }
 
     /// A wire strung 5.5 m over its spline is no ground; a wall standing on it, or a
     /// catenary spline that has a track bed at the bottom, is.
