@@ -27,7 +27,9 @@ jobs:
         with:
           fetch-depth: 0
       - id: v
-        run: echo "version=$(sh scripts/version.sh)" >> "$GITHUB_OUTPUT"
+        # Fork releases end in I, so the launcher and download names cannot be confused
+        # with an upstream build carrying the same numeric version.
+        run: echo "version=$(sh scripts/version.sh)I" >> "$GITHUB_OUTPUT"
       - run: echo "### openOMSI ${{ steps.v.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
 
   windows:
