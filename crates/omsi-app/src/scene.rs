@@ -8479,6 +8479,27 @@ fn material_has_vehicle_volume(mesh: &MeshData, slot: usize) -> bool {
         && sides[0] / sides[2] > 0.02
 }
 
+/// Whether the triangles of material `slot` lie on the faces of another slot of the same
+/// mesh: a layer modelled as a copy of the surface under it with a material of its own (a
+/// baked ambient-occlusion or shading film over the floor, `[matl_alpha] 2`), which OMSI
+/// blends over the surface as declared.
+fn slot_overlays_another(mesh: &MeshData, slot: usize) -> bool {
+    let key = |p: &glam::Vec3| ((p.x * 1000.0).round() as i32, (p.y * 1000.0).round() as i32, (p.z * 1000.0).round() as i32);
+    let mut own = std::collections::HashSet::new();
+    let mut others = std::collections::HashSet::new();
+    for &(first, count, material) in &mesh.ranges {
+        let start = first as usize;
+        let end = start.saturating_add(count as usize).min(mesh.indices.len());
+        let set = if material as usize == slot { &mut own } else { &mut others };
+        for &index in mesh.indices.get(start..end).unwrap_or_default() {
+            if let Some(p) = mesh.positions.get(index as usize) {
+                set.insert(key(p));
+            }
+        }
+    }
+    own.len() >= 3 && own.iter().filter(|k| others.contains(*k)).count() * 10 >= own.len() * 9
+}
+
 /// GPU-side representation of a vehicle instance: one render instance per mesh.
 pub struct VehicleRender {
     pub instances: Vec<usize>,
@@ -9950,9 +9971,10 @@ impl World {
                         .any(|part| material_name.contains(part));
                     let named_body = ["body", "wagenkasten", "karos", "chassis", "kuzov"].iter().any(|part| mesh_name.contains(part));
                     let mesh_has_overlay = def.materials.iter().any(|o| o.no_z_write);
-                    let body_hint = named_body
-                        || ov.iter().any(|o| o.bumpmap.is_some())
-                        || (!mesh_has_overlay && material_has_vehicle_volume(&vm.data, slot));
+                    // (a body-sized part in any case: a name or a bump map alone also took a
+                    // dashboard's display or a sticker on a mesh called "body" for bodywork)
+                    let body_hint = (named_body || ov.iter().any(|o| o.bumpmap.is_some()) || !mesh_has_overlay)
+                        && material_has_vehicle_volume(&vm.data, slot);
                     // a layer over another mesh of the same shape drawn before it (the WH UK
                     // AI cars' baked shading over their paint, `[matl_alpha] 2`): blended as
                     // the model says - made opaque, the dark bake covered the paint and the
@@ -9962,7 +9984,12 @@ impl World {
                             && vt.mesh_boxes[..mesh_index].iter().any(|&(l2, h2)| (l2 - lo).abs().max_element() < 0.03 && (h2 - hi).abs().max_element() < 0.03)
                     });
                     let repair_body_depth = !layer && is_vehicle_body_material(&def.file, &m.texture, tex.is_some(), transmap.is_some(), ov.iter().any(|o| o.no_z_write), body_hint);
-                    if repair_body_depth && !dirt_overlay && !transparent_layer_hint {
+                    // (only a blended slot: an alpha-tested one - `[matl_alpha] 1`, the EN92's
+                    // pictograms, a Sprinter's seat covers - is cut out as the model says, and
+                    // made opaque its cut-out parts were grey boxes; and not a layer made of
+                    // the same faces as another slot of its mesh, an ambient-occlusion or
+                    // shading film over the floor, which drawn opaque was black)
+                    if repair_body_depth && alpha == AlphaMode::Blend && !dirt_overlay && !transparent_layer_hint && !slot_overlays_another(&vm.data, slot) {
                         alpha = AlphaMode::Opaque;
                     }
                     // Body-volume heuristics must never turn a named pane back into an
@@ -10448,6 +10475,23 @@ fn object_lanes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A film modelled as a copy of the floor's faces with a slot of its own is an overlay;
+    /// a panel beside the floor, sharing one edge with it, is not.
+    #[test]
+    fn a_copy_of_another_slots_faces_is_an_overlay() {
+        let v = glam::Vec3::new;
+        let mesh = MeshData {
+            positions: vec![v(0.0, 0.0, 0.0), v(4.0, 0.0, 0.0), v(4.0, 2.0, 0.0), v(0.0, 2.0, 0.0), v(4.0, 0.0, 1.0), v(0.0, 0.0, 1.0)],
+            // slot 0 the floor, slot 1 the film over it (the same corners), slot 2 a wall
+            // standing on the floor's front edge
+            indices: vec![0, 1, 2, 0, 2, 3, 0, 1, 2, 0, 2, 3, 0, 1, 4, 0, 4, 5],
+            ranges: vec![(0, 6, 0), (6, 6, 1), (12, 6, 2)],
+            ..Default::default()
+        };
+        assert!(slot_overlays_another(&mesh, 1));
+        assert!(!slot_overlays_another(&mesh, 2));
+    }
 
     /// A path's trafficdensity rules per group: the last of each, and traffic on the lane
     /// while any group drives there (a path without a rule for the first group has its
