@@ -1001,6 +1001,13 @@ mod tests {
         assert_eq!(m.lod_meshes(1)[0].file, "low.o3d");
     }
 
+    #[test]
+    fn model_setvars_are_kept_for_vehicle_initialisation() {
+        let text = "[setvar]\nDashboard_variant\n2\n\n[setvar]\ndoor_type\n1.5\n";
+        let m = Model::parse(&CfgFile::from_str("model.cfg", text));
+        assert_eq!(m.set_vars, [("Dashboard_variant".into(), 2.0), ("door_type".into(), 1.5)]);
+    }
+
     use super::*;
 
     /// A tab-indented block (the stock F90 lorry's second rear axle, whose mesh does not

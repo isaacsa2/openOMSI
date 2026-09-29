@@ -2,6 +2,33 @@
 
 use super::*;
 
+/// Actions from OMSI's `[game]` key list which openOMSI handles outside a vehicle script.
+/// Controller buttons use the same action names as `keyboard.cfg`, so they must take this
+/// path too instead of being mistaken for bus triggers.
+pub(crate) fn is_game_action(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "sim_pause"
+            | "screenshot"
+            | "quicksave"
+            | "view_set_ego"
+            | "view_set_driver"
+            | "view_set_passenger"
+            | "view_set_outside"
+            | "view_set_map"
+            | "view_set_schedule"
+            | "view_set_ticketselling"
+            | "view_toggle_informationdisplay"
+            | "view_reset_direction"
+            | "view_reset_all_directions"
+            | "view_toggle_viewpoint"
+            | "view_interiorcam_plus"
+            | "view_interiorcam_minus"
+            | "toggel_mouse_ctrl"
+            | "toggel_ctrler"
+    )
+}
+
 impl App {
     /// Save the personnel file and the session summary (once: every caller ends the game,
     /// and the frames the loop still runs before it stops count no more time).
@@ -1816,7 +1843,8 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
 
     /// One of OMSI's global key actions; false when it is not one this game does.
     pub(crate) fn game_action(&mut self, name: &str) -> bool {
-        match name {
+        let name = name.to_ascii_lowercase();
+        match name.as_str() {
             "sim_pause" => self.toggle_pause(),
             "screenshot" => self.take_screenshot(),
             "quicksave" => self.quick_save(),
@@ -2281,6 +2309,20 @@ impl crate::App {
             v.insert(at, ("more", "More..."));
         }
         v
+    }
+}
+
+#[cfg(test)]
+mod action_tests {
+    use super::is_game_action;
+
+    #[test]
+    fn controller_recognises_standard_omsi_game_actions() {
+        for action in ["sim_pause", "quicksave", "view_set_driver", "toggel_ctrler"] {
+            assert!(is_game_action(action), "{action}");
+        }
+        assert!(is_game_action("SCREENSHOT"), "action names are case-insensitive");
+        assert!(!is_game_action("bus_doorfront0"), "vehicle triggers stay with the bus");
     }
 }
 
