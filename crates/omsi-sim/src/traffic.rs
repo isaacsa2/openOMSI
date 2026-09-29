@@ -120,6 +120,11 @@ impl Lane {
         *self.dist.last().unwrap_or(&0.0)
     }
 
+    /// Measure the lane again after its points were moved (an object's tilt).
+    pub fn refresh(&mut self) {
+        self.dist = cumulative(&self.points);
+    }
+
     /// Segment and fraction along it at distance `s` (clamped to the lane).
     fn locate(&self, s: f32) -> (usize, f32) {
         // (a position gone NaN takes the lane's start rather than stopping the game)

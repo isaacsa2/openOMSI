@@ -431,7 +431,7 @@ fn shade_enhanced(in: VsOut) -> vec4<f32> {
         // no mask, which OMSI takes as "reflect the sphere map fully" and not as chrome:
         // read as metalness it made a Golf's bonnet a mirror, in which the envmap photo's
         // trees stood as contour lines across the paint at close range.
-        let masked = material.params2.w > 0.5;
+        let masked = (u32(material.params2.w + 0.5) & 1u) != 0u;
         metal = select(0.0, smoothstep(0.3, 0.85, refl), masked);
         f0 = mix(vec3<f32>(clamp(refl, 0.02, 0.08)), mix(albedo, vec3<f32>(1.0), 0.4) * refl, metal);
         rough = mix(max(0.3 - 0.12 * smoothstep(0.0, 0.25, refl), select(0.22, 0.0, masked)), 0.14, metal);

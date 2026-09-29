@@ -970,7 +970,8 @@ fn two_bone(root: Vec3, l1: f32, l2: f32, target: Vec3, pole: Vec3) -> (Vec3, Ve
     let len = d.length();
     let dir = if len > 1e-5 { d / len } else { -Vec3::Z };
     let reach = (l1 + l2) * 0.9995;
-    let dist = len.clamp((l1 - l2).abs() + 1e-3, reach);
+    // (a bone next to nothing puts the floor over the reach: clamp would panic)
+    let dist = len.clamp(((l1 - l2).abs() + 1e-3).min(reach), reach);
     let mut n = dir.cross(pole);
     if n.length_squared() < 1e-8 {
         n = dir.cross(Vec3::Y);

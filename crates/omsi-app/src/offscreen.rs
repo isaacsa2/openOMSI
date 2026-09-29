@@ -283,7 +283,18 @@ pub(crate) fn run_offscreen(
                     probe.z0 = base + 0.3;
                     probe.z1 = base + 3.0;
                     let wall = collision.meshes.iter().find(|m| m.parts_near(&probe, None).next().is_some()).map(|m| m.id);
-                    let _ = writeln!(f, "{li},{s:.1},{:.2},{:.2},{:.3},{},{}", p.x, p.y, p.z, g.below.map(|z| format!("{z:.4}")).unwrap_or_default(), wall.map(|w| w.to_string()).unwrap_or_default());
+                    // and beside the lane, where a bus's wheels run (1.1 m) and a lane over
+                    // (2.5 m): a ground wider than the road shows there
+                    let (q, _) = l.at((s + 0.5).min(len));
+                    let dir = (q - p).truncate().normalize_or_zero();
+                    let side: Vec<String> = [-2.5, -1.1, 1.1, 2.5]
+                        .iter()
+                        .map(|&d| {
+                            let w = p.truncate() + glam::DVec2::new(dir.y, -dir.x) * d;
+                            crate::scene::drive_probe(&world.terrains, &world.surfaces, w.x, w.y, p.z + 0.5).below.map(|z| format!("{z:.4}")).unwrap_or_default()
+                        })
+                        .collect();
+                    let _ = writeln!(f, "{li},{s:.1},{:.2},{:.2},{:.3},{},{},{}", p.x, p.y, p.z, g.below.map(|z| format!("{z:.4}")).unwrap_or_default(), wall.map(|w| w.to_string()).unwrap_or_default(), side.join(","));
                 }
                 s += 1.0;
             }

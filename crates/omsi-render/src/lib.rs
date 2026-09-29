@@ -709,6 +709,10 @@ pub struct MaterialExtra {
     /// 1 when the texture's `.cfg` sidecar carries `[moisture]`/`[puddles]`: the road of a
     /// junction or crossing object gets wet and collects puddles like a spline's.
     pub moisture: f32,
+    /// `[matl_transmap]` was given, whether or not its file is there: Omsi.exe raises the
+    /// material's transmap flag before it reads the name (0x7fbbf4), and with it the
+    /// `[matl_envmap]` reflection goes by the texture's alpha instead of the factor.
+    pub transmap_declared: bool,
 }
 
 /// The textures a material's bind group samples.
@@ -793,6 +797,13 @@ pub struct Instance {
     /// it. (Only the vehicle the camera is in was spared, by its box; every other bus showed
     /// its saloon under snow through the windows.)
     pub roof: Option<f32>,
+    /// Drawn with every slot in model order among the blended draws, as Omsi.exe draws a
+    /// model: mesh after mesh, each material subset with its own states and depth write
+    /// (0x7c32c4 -> 0x7fd6c4, DrawSubset), not its opaque parts first. Set on the models
+    /// where it matters: a blended slot that writes depth before an opaque one (a body with
+    /// `[matl_alpha] 2` listed before its interior hides the interior as in the original,
+    /// instead of showing it through the paint's alpha).
+    pub ordered: bool,
 }
 
 pub struct Scene {
@@ -4393,7 +4404,9 @@ impl Renderer {
                 if lightmap.is_some() { 1.0 } else { 0.0 },
                 envmap.map(|e| e.1).unwrap_or(0.0),
                 moisture,
-                if env_mask.is_some() { 1.0 } else { 0.0 },
+                // bit 1: a [matl_envmap_mask]; bit 2: a [matl_transmap] (see the shaders)
+                (if env_mask.is_some() { 1.0 } else { 0.0 })
+                    + if extra.transmap_declared || transmap.is_some() { 2.0 } else { 0.0 },
             ],
             emissive: [emissive[0], emissive[1], emissive[2], if extra.rain_film { 2.0 } else if extra.glass { 1.0 } else if extra.display { -1.0 } else { 0.0 }],
             specular: extra.specular,
@@ -4790,6 +4803,7 @@ impl Renderer {
             any_distance: false,
             mirror_only: false,
             omsi_caster: false,
+            ordered: false,
             casts_shadow: true,
             roof: None,
         });
@@ -4834,6 +4848,7 @@ impl Renderer {
             any_distance: false,
             mirror_only: false,
             omsi_caster: false,
+            ordered: false,
             casts_shadow: false,
             roof: None,
         });
@@ -4921,6 +4936,13 @@ impl Renderer {
     pub fn set_omsi_caster(&self, scene: &mut Scene, instance: usize, on: bool) {
         if let Some(i) = scene.instances.get_mut(instance) {
             i.omsi_caster = on;
+        }
+    }
+
+    /// Draw an instance with all its slots in model order (see [`Instance::ordered`]).
+    pub fn set_ordered(&self, scene: &mut Scene, instance: usize, on: bool) {
+        if let Some(i) = scene.instances.get_mut(instance) {
+            i.ordered = on;
         }
     }
 
@@ -7160,6 +7182,10 @@ impl Renderer {
             let mut blended: Vec<usize> = Vec::new();
             for &(i, _, _) in &visible {
                 let inst = &scene.instances[i];
+                if inst.ordered {
+                    blended.push(i);
+                    continue;
+                }
                 let mut has_blend = false;
                 let cull = culls_back_faces(scene, inst);
                 for (ri, (_, _, slot)) in scene.meshes[inst.mesh].ranges.iter().enumerate() {
@@ -7296,7 +7322,7 @@ impl Renderer {
                 for (ri, (_, _, slot)) in scene.meshes[inst.mesh].ranges.iter().enumerate() {
                     let mat_id = inst.materials.get(*slot as usize).copied().unwrap_or(0);
                     let mat = &scene.materials[mat_id];
-                    if (mat.alpha != AlphaMode::Blend && !mat.no_z_check)
+                    if (mat.alpha != AlphaMode::Blend && !mat.no_z_check && !inst.ordered)
                         || exclude_texture.is_some_and(|t| mat.uses_texture(t))
                     {
                         continue;
@@ -7319,7 +7345,10 @@ impl Renderer {
                     // the whole bus (the steering wheel in front of the counter, the body over
                     // the shadow), so it is drawn with the surfaces' depth bias instead: on
                     // top of its base, behind whatever really stands in front of it.
-                    let kind = if mat.no_z_write || mat.no_z_check {
+                    let kind = if mat.alpha != AlphaMode::Blend && !mat.no_z_check {
+                        // (a model drawn in order: its opaque and cut-out slots too)
+                        kind_of(mat.alpha)
+                    } else if mat.no_z_write || mat.no_z_check {
                         PIPE_BLEND_NO_WRITE
                     } else {
                         PIPE_BLEND

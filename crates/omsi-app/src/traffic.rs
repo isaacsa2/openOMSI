@@ -796,11 +796,13 @@ fn place_body(
 ) -> AiBody {
     let mut body = AiBody::new(&vehicle.ty.def, kind);
     let ground = vehicle.ground.clone();
+    let contact = vehicle.contact.clone();
     body.place(
         &|d| state.way_point(net, d),
         ground
             .as_ref()
             .map(|g| g.as_ref() as &dyn Fn(f64, f64) -> Option<f64>),
+        contact.as_deref(),
         state.speed,
     );
     body.apply(vehicle);
@@ -2278,6 +2280,16 @@ impl Traffic {
         } else {
             Some(ai_ground(world))
         };
+        // and what its wheels stand on, asked as the player's are (see `AiBody::settle`); a
+        // coupled part (an articulated bus's rear, a lorry's trailer) asks it too, with the
+        // height it is at - the plain sampler gave it the deck of a bridge over its road
+        // (`OMSI_AI_WAY_ONLY=1`: on the way and the plain sampler, as before - A/B runs)
+        vehicle.contact = (kind == LaneKind::Street && omsi_cfg::env::var_os("OMSI_AI_WAY_ONLY").is_none()).then(|| {
+            std::sync::Arc::new(crate::scene::DriveGround {
+                terrains: world.terrains.clone(),
+                surfaces: world.surfaces.clone(),
+            }) as std::sync::Arc<dyn omsi_sim::rigid::Ground>
+        });
         // random paint scheme / advert
         let scheme = match scheme {
             Some(s) => s,
@@ -4885,7 +4897,9 @@ impl Traffic {
                     let stop_gap = if real - want >= comfortable {
                         want
                     } else {
-                        (real - comfortable).clamp(real.min(0.5), want)
+                        // (a gap wanted under half a metre is the floor itself: clamp
+                        // panicked with its bounds the wrong way round, #138)
+                        (real - comfortable).clamp(real.min(0.5).min(want), want)
                     };
                     keep_back = Some(st.front + (real - stop_gap).max(0.0) + 0.6);
                 }
@@ -5406,6 +5420,7 @@ impl Traffic {
                 .for_each(|(state, body, vehicle, frame, trail)| {
                     let t0 = std::time::Instant::now();
                     let ground = vehicle.ground.clone();
+                    let contact = vehicle.contact.clone();
                     let rail = body.kind == MotionKind::Rail;
                     if rail {
                         record_rail_trail(trail, state.odometer as f64, state.way_point(net, 0.0));
@@ -5419,6 +5434,7 @@ impl Traffic {
                         ground
                             .as_ref()
                             .map(|g| g.as_ref() as &dyn Fn(f64, f64) -> Option<f64>),
+                        contact.as_deref(),
                     );
                     body.apply(vehicle);
                     if rail && !vehicle.trailers.is_empty() {
