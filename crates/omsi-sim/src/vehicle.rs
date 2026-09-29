@@ -2820,6 +2820,12 @@ pub struct TrailerPart {
 }
 
 impl TrailerPart {
+    /// Pitch (degrees, nose up), eased axle height and the track point it stands on (for
+    /// the `OMSI_DEBUG_TRAILERS` trace).
+    pub fn debug_pose(&self) -> (f32, Option<f64>, Option<DVec3>) {
+        (self.pitch, self.axle_z, self.track)
+    }
+
     pub fn new(
         ty: Arc<VehicleType>,
         main: &VehicleType,

@@ -8343,7 +8343,12 @@ fn material_extra(
     MaterialExtra {
         env_mask,
         no_z_write: ov.iter().any(|o| o.no_z_write),
-        no_z_check: ov.iter().any(|o| o.no_z_check),
+        // `[matl_noZcheck]` leaves Omsi.exe's depth test on: its draw of the slot (0x7fd6c4)
+        // never reads the flag, which only adds a colourless stencil pass marking the panes
+        // for the raindrops (0x7c32c4 -> 0x7fc58c, ZENABLE 1, blend ZERO/ONE). Taken as "no
+        // depth test", the Sprinter's inner window glass (flagged so) was drawn over the
+        // body skin round every opening. OMSI_NOZCHECK_BIAS=1: the old reading.
+        no_z_check: ov.iter().any(|o| o.no_z_check) && omsi_cfg::env::var_os("OMSI_NOZCHECK_BIAS").is_some(),
         z_bias: ov.iter().map(|o| o.z_bias).find(|b| *b != 0).unwrap_or(0),
         specular,
         bump: bump.filter(|b| b.1.is_finite() && b.1 != 0.0),
@@ -10863,7 +10868,7 @@ mod material_tests {
             Some((3, 0.1)),
             [0.2, 0.2, 0.2, 10.0],
         );
-        assert!(e.no_z_write && e.no_z_check);
+        assert!(e.no_z_write && !e.no_z_check);
         assert_eq!(e.z_bias, 16);
         assert_eq!(e.env_mask, Some(7));
         assert_eq!(e.specular, [0.2, 0.2, 0.2, 10.0]);
