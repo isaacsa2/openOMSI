@@ -627,8 +627,8 @@ onlytypes end types_prefered number_tour.
 * `wearlifespan` is a plain vehicle variable the engine sets, and it must be 1: at 0 every
   random part lifetime the stock scripts draw is 0, which makes the SD200's rear door
   reopen by itself for ever.
-* Input: keyboard.cfg `[game]/[vehicles]` + `[entry] name scancode modifier` (the modifier
-  is a mask: 1 shift, 2 ctrl, 4 alt - OMSI's own driving keys are Shift + numpad);
+* Input: keyboard.cfg `[game]/[vehicles]` + `[entry] name scancode flags` (the flags are
+  a mask: 1 duration/held, 2 Shift, 4 Ctrl, 8 Alt - OMSI's own driving keys use the numpad);
   gamectrler.cfg ctrl axis buttons FFScale.
 * Startup order (logfile.txt) documents the manager creation sequence, mirrored in `omsi-sim`.
 

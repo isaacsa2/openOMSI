@@ -17,7 +17,8 @@ pub(crate) struct Player {
     /// The interior cameras chosen (OMSI's `view_toggle_viewpoint`,
     /// `view_interiorcam_minus`/`_plus`): the driver's and the passengers' camera numbers.
     pub(crate) cam_choice: (usize, usize),
-    /// (scan code, modifier bits) → action name, from `Inputs/keyboard.cfg` `[vehicles]`.
+    /// (scan code, OMSI duration/modifier flags) → action name, from
+    /// `Inputs/keyboard.cfg` `[vehicles]`.
     pub(crate) bindings: Vec<omsi_content::KeyBinding>,
     pub(crate) sounds: Option<omsi_audio::SoundSet>,
     /// Mesh index currently pressed with the mouse (its `[mouseevent]` gets `_off` on release).
@@ -84,7 +85,7 @@ pub(crate) struct Player {
     /// The outside camera's arm (how far out it is swung right now).
     pub(crate) arm: camera_arm::SpringArm,
     /// What `Z`/`X`/`C` last turned on, so a repeat press of the same key turns it back off
-    /// (real OMSI's Z/X/C and Shift+numpad 4/6/5 are toggles, not one-shot "set" buttons):
+    /// (the convenience Z/X/C and OMSI's numpad 4/6/5 are toggles, not one-shot "set" buttons):
     /// 0 = nothing, 1 = left, 2 = right, 3 = hazard.
     pub(crate) blinker_key_state: u8,
 }
@@ -98,8 +99,8 @@ pub(crate) struct Player {
 // is selected at the end: the bus spawns in N anyway, and a D pressed while the auto-start
 // was still running was thrown back to N by it.
 
-/// OMSI's own layout drives the bus with Shift and the numpad (throttle Shift+Num 8, brake
-/// Shift+Num 2, steering Shift+Num 4/6). A laptop or a Mac keyboard has no numpad at all, so
+/// OMSI's own layout drives the bus with the numpad (throttle Num 8, brake Num 2, steering
+/// Num 4/6). A laptop or a Mac keyboard has no numpad at all, so
 /// the arrow keys drive as well; all they do in OMSI is step through the interior cameras.
 ///
 /// W, A, S and D drive as well, because that is what everybody reaches for - but
@@ -107,7 +108,7 @@ pub(crate) struct Player {
 /// gearbox**, so those three are reached by holding shift (Shift+D selects D), and the bus
 /// can still be put into gear. `--drive-keys arrows` leaves W/A/S/D to OMSI entirely.
 /// The driving keys of a control preset (`drive_keys` in the settings):
-/// `omsi` - only the original layout of Inputs/keyboard.cfg (Shift + numpad), nothing extra;
+/// `omsi` - only the original layout of Inputs/keyboard.cfg (numpad), nothing extra;
 /// `simple` - W/S/A/D and the arrow keys both drive; `wasd` - W/S/A/D only;
 /// `arrows` - the arrow keys only (W/S/D keep their OMSI meaning: wipers, viewpoint, gear).
 pub(crate) fn fallback_action(code: KeyCode, preset: &str) -> Option<omsi_sim::EngineAction> {
@@ -679,7 +680,7 @@ impl Player {
             let n: Vec<String> = self
                 .bindings
                 .iter()
-                .filter(|b| b.scan_code == scan && b.modifier == modifiers)
+                .filter(|b| b.matches(scan, modifiers))
                 .map(|b| b.action.clone())
                 .collect();
             self.held_keys.insert(scan, n.clone());
@@ -690,7 +691,7 @@ impl Player {
                 None => self
                     .bindings
                     .iter()
-                    .filter(|b| b.scan_code == scan && b.modifier == modifiers)
+                    .filter(|b| b.matches(scan, modifiers))
                     .map(|b| b.action.clone())
                     .collect(),
             }

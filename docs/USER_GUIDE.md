@@ -53,7 +53,7 @@ Everything can also be given on the command line, which then skips both:
 
 Keys in the window: **W** throttle, **S** brake, **A**/**D** steering - the arrow keys do the
 same - and every vehicle key of `Inputs/keyboard.cfg` works as it does in OMSI: throttle
-Shift+Num 8, brake Shift+Num 2, steering Shift+Num 4/6, **E** battery and ignition, **M**
+Num 8, brake Num 2, steering Num 4/6, **E** battery and ignition, **M**
 starter, **N**/**R** the automatic, **.** the parking brake. W, S and D are OMSI's wiper,
 viewpoint and **D of the automatic gearbox**, so hold shift for those: **Shift+D** selects D.
 `--drive-keys arrows` leaves W/A/S/D to OMSI entirely.
@@ -102,7 +102,7 @@ ahead again in every view (OMSI's `view_reset_all_directions`), Home recentres t
 The mouse wheel (and **=** / **-**, a pinch on a phone) zooms: outside the camera comes closer,
 inside the bus the view narrows, as in OMSI; **Ctrl**+wheel outside narrows the view instead
 (a telephoto, the camera stays where it is). F1-F4 driver / passenger / outside / map (free) camera, F5-F8 the destination
-sign and roller blind keys as in OMSI, Alt+S quick save, F9 write the run into the personnel
+sign and roller blind keys as in OMSI, Ctrl+S quick save, F9 write the run into the personnel
 file, WASD+QE in the free camera, left click on cockpit elements, **V** the chat line in a
 LAN session. Esc opens the game menu: drive the next placed vehicle, place any vehicle of
 the installation in front of the camera (or beside the bus), couple what stands close behind
@@ -202,7 +202,7 @@ in). The file also carries a `version`; older files that say
 
 `drive_keys` is a control preset: `simple` (W/S/A/D and the arrow keys drive; the default),
 `wasd`, `arrows`, or `omsi` ("Custom controls") - only the layout of `Inputs/keyboard.cfg`
-(OMSI's Shift + numpad, or what the Controls page made of it), nothing added. **T** sells the ticket a passenger asks for on a bus without a
+(OMSI's numpad, or what the Controls page made of it), nothing added. **T** sells the ticket a passenger asks for on a bus without a
 ticket printer (the original's `ticket_give` key).
 
 `boarding` is how passengers board: `auto` (default) - they walk to the standing place the

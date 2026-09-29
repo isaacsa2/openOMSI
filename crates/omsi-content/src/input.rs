@@ -3,13 +3,40 @@
 use omsi_cfg::CfgFile;
 use std::path::Path;
 
+/// The low bit in a `keyboard.cfg` entry is OMSI's "duration" flag: the action
+/// remains active for as long as the key is held.  It is not a keyboard modifier.
+pub const KEY_FLAG_DURATION: i32 = 1;
+pub const KEY_MOD_SHIFT: i32 = 2;
+pub const KEY_MOD_CTRL: i32 = 4;
+pub const KEY_MOD_ALT: i32 = 8;
+
+/// The actual modifier-key part of the flags stored in `keyboard.cfg`.
+pub fn key_modifiers(flags: i32) -> i32 {
+    flags & !KEY_FLAG_DURATION
+}
+
+/// Encode the modifier keys in the representation used by `keyboard.cfg`.
+pub fn key_modifier_flags(shift: bool, ctrl: bool, alt: bool) -> i32 {
+    (shift as i32) * KEY_MOD_SHIFT
+        | (ctrl as i32) * KEY_MOD_CTRL
+        | (alt as i32) * KEY_MOD_ALT
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct KeyBinding {
     pub action: String,
     /// DirectInput scan code
     pub scan_code: i32,
-    /// modifier bits (1 = shift, 2 = ctrl, 4 = alt … as used by the original)
+    /// OMSI key flags: 1 = duration, 2 = Shift, 4 = Ctrl, 8 = Alt.
     pub modifier: i32,
+}
+
+impl KeyBinding {
+    /// Whether this binding is the given physical key chord.  Duration is an action
+    /// property and therefore deliberately does not participate in chord matching.
+    pub fn matches(&self, scan_code: i32, modifiers: i32) -> bool {
+        self.scan_code == scan_code && key_modifiers(self.modifier) == modifiers
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -49,9 +76,14 @@ impl KeyboardCfg {
     /// The keys the game adds to the file's (not written back by `save`).
     pub fn with_game_defaults(mut self) -> Self {
         // The IBIS's next stop with its announcement (`IBIS_vor`) has no key in OMSI's own
-        // file: only the mouse on the IBIS reached it. Q (scan code 16, no modifier: Ctrl+Q
-        // ends the game, Shift+Q is the microphone) gives it one where Q is still free.
-        let q_taken = self.game.iter().chain(self.vehicles.iter()).any(|b| b.scan_code == 16 && b.modifier == 0);
+        // file: only the mouse on the IBIS reached it. Give it Q (scan code 16) only where
+        // that physical chord is free. A duration binding (the stock microphone/announcement
+        // action, for example) is still physically unmodified and therefore occupies Q.
+        let q_taken = self
+            .game
+            .iter()
+            .chain(self.vehicles.iter())
+            .any(|b| b.scan_code == 16 && key_modifiers(b.modifier) == 0);
         if !q_taken && !self.vehicles.iter().any(|b| b.action.eq_ignore_ascii_case("IBIS_vor")) {
             self.vehicles.push(KeyBinding { action: "IBIS_vor".into(), scan_code: 16, modifier: 0 });
         }
@@ -177,5 +209,28 @@ mod tests {
         let back = KeyboardCfg::load(&path).unwrap();
         let _ = std::fs::remove_file(&path);
         assert_eq!(back, k);
+    }
+
+    #[test]
+    fn duration_is_not_a_keyboard_modifier() {
+        assert_eq!(key_modifiers(KEY_FLAG_DURATION), 0);
+        assert_eq!(key_modifiers(KEY_FLAG_DURATION | KEY_MOD_SHIFT), KEY_MOD_SHIFT);
+        assert_eq!(key_modifier_flags(true, true, false), KEY_MOD_SHIFT | KEY_MOD_CTRL);
+
+        let throttle = KeyBinding {
+            action: "throttle".into(),
+            scan_code: 17,
+            modifier: KEY_FLAG_DURATION,
+        };
+        assert!(throttle.matches(17, 0));
+        assert!(!throttle.matches(17, KEY_MOD_SHIFT));
+
+        let shifted = KeyBinding {
+            action: "wiper_interval".into(),
+            scan_code: 17,
+            modifier: KEY_FLAG_DURATION | KEY_MOD_SHIFT,
+        };
+        assert!(shifted.matches(17, KEY_MOD_SHIFT));
+        assert!(!shifted.matches(17, 0));
     }
 }

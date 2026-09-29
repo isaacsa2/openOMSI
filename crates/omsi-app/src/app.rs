@@ -170,14 +170,14 @@ pub(crate) struct App {
     pub(crate) own_shift: std::collections::HashSet<i32>,
     /// Whether the game stood paused before the menu opened (closing it goes back to that).
     pub(crate) menu_prev_pause: bool,
-    /// OMSI's information bar (`view_toggle_informationdisplay`, Ctrl+Y): time, speed, the
+    /// OMSI's information bar (`view_toggle_informationdisplay`, Shift+Y): time, speed, the
     /// trip and its next stop along the top of the picture.
     pub(crate) info_bar: bool,
     /// A time of day the bus's script wrote (`(S.S.Time)`), for the clock at the next frame.
     pub(crate) pending_time: Option<f64>,
     /// The play time (`clock.run_time`) the last situation was saved at.
     pub(crate) autosave_t: f64,
-    /// OMSI's timetable window (`view_set_schedule`, Shift+Insert).
+    /// OMSI's timetable window (`view_set_schedule`, Insert).
     pub(crate) timetable: bool,
     /// The left button is held on a switch: mouse movement turns it.
     pub(crate) dragging: bool,

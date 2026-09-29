@@ -319,7 +319,11 @@ pub(crate) fn ticket_key_name(root: &Path, bindings: &[omsi_content::KeyBinding]
         .map(|(_, n)| n.clone())
         .unwrap_or_else(|| format!("key {}", b.scan_code));
     let mut out = String::new();
-    for (bit, name) in [(1, "Shift+"), (2, "Ctrl+"), (4, "Alt+")] {
+    for (bit, name) in [
+        (omsi_content::input::KEY_MOD_SHIFT, "Shift+"),
+        (omsi_content::input::KEY_MOD_CTRL, "Ctrl+"),
+        (omsi_content::input::KEY_MOD_ALT, "Alt+"),
+    ] {
         if b.modifier & bit != 0 {
             out.push_str(name);
         }

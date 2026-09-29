@@ -4,7 +4,7 @@
 //! it alone - also when the player edited the installation's own file, where there was no
 //! untouched copy to tell the changes by.
 
-/// (action, DirectInput scan code, modifier bits: 1 Shift, 2 Ctrl, 4 Alt)
+/// (action, DirectInput scan code, OMSI flags: 1 duration, 2 Shift, 4 Ctrl, 8 Alt)
 pub(crate) const STOCK_KEYS: &[(&str, i32, i32)] = &[
     ("debug_start_bench2", 48, 6),
     ("sim_pause", 25, 0),
@@ -135,3 +135,27 @@ pub(crate) const STOCK_KEYS: &[(&str, i32, i32)] = &[
     ("kw_s_minus", 53, 0),
     ("change_take", 20, 2),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::STOCK_KEYS;
+    use omsi_content::input::{KEY_FLAG_DURATION, KEY_MOD_CTRL, KEY_MOD_SHIFT};
+
+    fn flags(action: &str) -> i32 {
+        STOCK_KEYS
+            .iter()
+            .find(|(name, _, _)| *name == action)
+            .map(|(_, _, flags)| *flags)
+            .unwrap()
+    }
+
+    #[test]
+    fn stock_flags_match_omsi_duration_shift_and_ctrl() {
+        assert_eq!(flags("throttle"), KEY_FLAG_DURATION);
+        assert_eq!(flags("kw_wipermode_up"), 0);
+        assert_eq!(flags("cp_wischer_intervall_toggle"), KEY_MOD_SHIFT);
+        assert_eq!(flags("cp_wischer_wascher_button"), KEY_MOD_CTRL);
+        assert_eq!(flags("quicksave"), KEY_MOD_CTRL);
+        assert_eq!(flags("screenshot"), KEY_MOD_SHIFT | KEY_MOD_CTRL);
+    }
+}

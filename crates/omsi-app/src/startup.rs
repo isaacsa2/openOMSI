@@ -84,7 +84,8 @@ pub(crate) fn own_keys(root: &Path) -> std::collections::HashSet<i32> {
     own_bindings(root, 0)
 }
 
-/// The keys held with `modifier` (1: Shift) that the file in use binds otherwise than OMSI 2's
+/// The keys held with the physical `modifier` flags (2: Shift, 4: Ctrl, 8: Alt) that the
+/// file in use binds otherwise than OMSI 2's
 /// own assignment ([`crate::stock_keys::STOCK_KEYS`]): the player's own. Told apart from the
 /// built-in list, not from the installation's file - a player who edited that file had
 /// every change overridden by the game's conveniences (Z / X / C, Shift+number).
@@ -94,7 +95,7 @@ pub(crate) fn own_bindings(root: &Path, modifier: i32) -> std::collections::Hash
     m.vehicles
         .iter()
         .chain(m.game.iter())
-        .filter(|b| b.modifier == modifier && b.scan_code != 0 && !stock.contains(&(b.action.to_ascii_lowercase(), b.scan_code, b.modifier)))
+        .filter(|b| omsi_content::input::key_modifiers(b.modifier) == modifier && b.scan_code != 0 && !stock.contains(&(b.action.to_ascii_lowercase(), b.scan_code, b.modifier)))
         .map(|b| b.scan_code)
         .collect()
 }
