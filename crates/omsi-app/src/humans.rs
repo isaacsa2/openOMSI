@@ -5470,11 +5470,14 @@ impl Humans {
                     let lat = side.length();
                     let to_bus = bn.pos.truncate() - pos2;
                     let face = to_bus.x.atan2(to_bus.y).to_degrees();
-                    // a metre clear of its side, and never more than 4 m from the waiting place
+                    // a metre clear of its side, and a step or two from the waiting place at
+                    // most: OMSI's people keep to the walkways of the stop (its path links),
+                    // and allowed 4 m they stood out on the road before the bus had stopped
+                    // (a bus pulling in along the far lane, #123)
                     let clear = bn.half.x + 1.0;
                     if lat > clear + 0.3 {
                         let home = sp.floor().truncate();
-                        let target = home + (pos2 - side / lat * (lat - clear) - home).clamp_length_max(4.0);
+                        let target = home + (pos2 - side / lat * (lat - clear) - home).clamp_length_max(1.2);
                         let d = (target - pos2).length();
                         self.people[i].why = "steps forward to meet the bus";
                         return Want {

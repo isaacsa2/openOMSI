@@ -4240,7 +4240,7 @@ impl World {
         let debug = omsi_cfg::env::var_os("OMSI_DEBUG_SPLINES").is_some();
         type Check = (usize, usize, Vec<(f64, f64, f32)>);
         let debug_physics = omsi_cfg::env::var_os("OMSI_DEBUG_PHYSICS").is_some();
-        let results: Vec<(Arc<TileSurface>, Option<Image>, Check, (usize, usize))> = prepared
+        let results: Vec<(Arc<TileSurface>, Option<Image>, Check, usize)> = prepared
             .par_iter_mut()
             .map(|p| {
                 let key = (p.tx, p.ty);
@@ -4253,7 +4253,7 @@ impl World {
                 order.sort_by_key(|q| (q.tx, q.ty));
                 let mut ts = TileSurface::new(SURFACE_RASTER);
                 // meshes the wheels stand on, and of them low objects they climb
-                let (mut wheel_meshes, mut steps) = (0usize, 0usize);
+                let mut wheel_meshes = 0usize;
                 let report = |mesh: &MeshData,
                               xf: &Mat4,
                               o: DVec3,
@@ -4337,38 +4337,11 @@ impl World {
                                 ts.rasterize_hole(h, &pose.rot, pose.pos, tx, ty);
                             }
                         }
+                        // Laid on the ground (the terrain is cut under it): a `[surface]` object
+                        // and one drawn as a ground layer (`[rendertype]`).
                         let surface =
                             !matches!(ot.sco.render_type, omsi_scenery::sco::RenderType::Normal)
                                 || ot.sco.surface;
-                        let warped_here = res.warped.contains_key(&oi);
-                        // what the wheels stand on besides the roads: a surface object's
-                        // collision mesh (unless the object was bent onto the ground, then its
-                        // bent meshes are), and a low object's collision mesh (a traffic
-                        // island: a step, not a surface)
-                        // (a step only of an object that is solid at all - `[fixed]`, not
-                        // `[nocollision]`: the helper and sensor objects of mod maps carry low
-                        // collision meshes too, and the bus hopped over things nobody sees)
-                        let solid_step = (ot.sco.fixed || o.parked) && !ot.sco.no_collision;
-                        match (surface, ot.collision.as_ref()) {
-                            (false, Some(c)) if solid_step => {
-                                let top = c.positions.iter().map(|p| p.z).fold(f32::MIN, f32::max);
-                                if top <= LOW_OBJECT
-                                    && top > 0.02
-                                    && !outside(&mesh_bounds(c, &pose.rot, pose.pos))
-                                {
-                                    ts.add_drive_mesh(c, &pose.rot, pose.pos, tx, ty);
-                                    wheel_meshes += 1;
-                                    steps += 1;
-                                }
-                            }
-                            (true, Some(c)) if !warped_here => {
-                                if !outside(&mesh_bounds(c, &pose.rot, pose.pos)) {
-                                    ts.add_drive_mesh(c, &pose.rot, pose.pos, tx, ty);
-                                    wheel_meshes += 1;
-                                }
-                            }
-                            _ => {}
-                        }
                         if !surface {
                             continue;
                         }
@@ -4376,16 +4349,19 @@ impl World {
                             Some(w) => w.iter().collect(),
                             None => ot.meshes.iter().map(|(m, _, _)| m).collect(),
                         };
-                        // The wheels stand on a `[surface]` object's drawn faces: OMSI's
-                        // ground probe casts into the object's model
-                        // mesh, whatever its `[collision_mesh]` or `[nocollision]` say (those
-                        // only shape the crash body, TPhysObjInstance). Its collision mesh
-                        // counts as well (added above) - the Spandau depot (Omnibushof_S_1)
-                        // has one for its buildings only, and with the drawn faces left out
-                        // the buses sank 10 cm into its yard onto the terrain under it and
-                        // hopped wherever a building's footprint began
-                        let collision_used = false;
-                        for mesh in meshes {
+                        // What the wheels stand on is Omsi.exe's ground query (0x7a0814): the
+                        // terrain, the splines, and of the objects only the `[surface]` ones
+                        // (the tile's list of them, 0x79eb63) - and of those only the first
+                        // `[mesh]` of the model, a ray cast down into it (0x5f9218 with only
+                        // mesh 0). A collision mesh is never ground (it only shapes the crash
+                        // body), nor is an object drawn as a ground layer without `[surface]`
+                        // (the road markings), nor are the other meshes of a surface object
+                        // (the Spandau depot's buildings stand on its yard, `Betr_S_Boden`,
+                        // its first mesh). Every one of those lifted the wheels here: the bus
+                        // hopped over markings, low collision meshes and whatever a surface
+                        // object carried - bumps nobody could see.
+                        let ground_mesh = ot.sco.surface.then(|| ot.mesh_def_index.iter().position(|&d| d == 0)).flatten();
+                        for (k, mesh) in meshes.into_iter().enumerate() {
                             let b = mesh_bounds(mesh, &pose.rot, pose.pos);
                             if outside(&b) {
                                 continue;
@@ -4399,7 +4375,7 @@ impl World {
                                 )
                             });
                             ts.rasterize_kind(mesh, &pose.rot, pose.pos, tx, ty, true);
-                            if !collision_used {
+                            if Some(k) == ground_mesh {
                                 ts.add_drive_mesh(mesh, &pose.rot, pose.pos, tx, ty);
                                 wheel_meshes += 1;
                             }
@@ -4510,17 +4486,16 @@ impl World {
                         })
                     })
                     .collect();
-                (Arc::new(ts), cut, check, (wheel_meshes, steps))
+                (Arc::new(ts), cut, check, wheel_meshes)
             })
             .collect();
         let (mut holes, mut cells) = (0usize, 0usize);
         let mut where_: Vec<(f64, f64, f32)> = Vec::new();
-        let (mut tris, mut wheel_meshes, mut steps) = (0usize, 0usize, 0usize);
+        let (mut tris, mut wheel_meshes) = (0usize, 0usize);
         for (p, (ts, cut, check, wheels)) in prepared.iter_mut().zip(results) {
             p.cut = cut.map(|c| tile_texture(c, true));
             tris += ts.drive.tris.len();
-            wheel_meshes += wheels.0;
-            steps += wheels.1;
+            wheel_meshes += wheels;
             // the wheel surfaces come and go with the tile (World::unload_tile)
             self.surfaces.write().insert((p.tx, p.ty), ts);
             holes += check.0;
@@ -4528,7 +4503,7 @@ impl World {
             where_.extend(check.2);
         }
         if debug_physics {
-            log::info!("wheel surfaces: {tris} faces on {} tiles from {wheel_meshes} meshes ({steps} low objects the wheels climb)", prepared.len());
+            log::info!("wheel surfaces: {tris} faces on {} tiles from {wheel_meshes} meshes", prepared.len());
         }
         if check_roads {
             where_.sort_by(|a, b| b.2.total_cmp(&a.2));

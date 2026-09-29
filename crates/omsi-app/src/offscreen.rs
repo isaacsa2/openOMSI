@@ -260,6 +260,26 @@ pub(crate) fn run_offscreen(
         .lamps_on;
         t.populate(&world, &renderer, &mut scene, center);
     }
+    // OMSI_GROUND_SAMPLE=<csv>: what the wheels stand on every metre along the street lanes
+    // within 400 m of the start (lane, s, x, y, lane z, ground z) - two builds compared on
+    // the same map show where a change of the ground rules adds or removes a bump
+    if let (Ok(path), Some(t)) = (omsi_cfg::env::var("OMSI_GROUND_SAMPLE"), traffic.as_ref()) {
+        use std::io::Write;
+        let Ok(mut f) = std::fs::File::create(&path) else { return Err(anyhow::anyhow!("OMSI_GROUND_SAMPLE: cannot write {path}")) };
+        for (li, l) in t.net.lanes.iter().enumerate() {
+            if l.kind != omsi_sim::traffic::LaneKind::Street { continue; }
+            let len = l.length();
+            let mut s = 0.0f32;
+            while s < len {
+                let (p, _) = l.at(s);
+                if (p.truncate() - center.truncate()).length() < 400.0 {
+                    let g = crate::scene::drive_probe(&world.terrains, &world.surfaces, p.x, p.y, p.z + 0.5);
+                    let _ = writeln!(f, "{li},{s:.1},{:.2},{:.2},{:.3},{}", p.x, p.y, p.z, g.below.map(|z| format!("{z:.4}")).unwrap_or_default());
+                }
+                s += 1.0;
+            }
+        }
+    }
     // LAN in an offscreen run too, so that one game's view of another can be rendered
     // (`OMSI_LAN_AUDIO=1`: with the other buses' sounds, heard at the camera - for the logs)
     let lan_audio = (lan_off.is_some() && omsi_cfg::env::var_os("OMSI_LAN_AUDIO").is_some())
