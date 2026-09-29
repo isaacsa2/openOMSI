@@ -872,9 +872,10 @@ impl ApplicationHandler for App {
                         }
                         if std::mem::take(&mut h.stop_request) {
                             p.vehicle.trigger("door_haltewunsch");
-                            // (a press is let go again: the script keeps its button pressed
-                            // until `_off`, and the stop request never ended - the automatic
-                            // rear door opened again whenever it was shut)
+                        }
+                        if std::mem::take(&mut h.stop_request_release) {
+                            // A real, short button press: scripts get at least one update
+                            // with the button down before the release trigger arrives.
                             p.vehicle.trigger("door_haltewunsch_off");
                         }
                         if std::mem::take(&mut h.door_request) {
