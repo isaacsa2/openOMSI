@@ -208,7 +208,7 @@ impl App {
             // driving layout uses keeps that meaning (with the OMSI layout, every binding
             // counts)
             if pressed && !repeat {
-                let m = shift_now as i32 | (ctrl as i32) * 2 | (alt as i32) * 4;
+                let m = omsi_content::input::key_modifier_flags(shift_now, ctrl, alt);
                 let own = keys::dik_code(code).is_some_and(|s| self.own_keys.contains(&s));
                 let ours = self.args.drive_keys != "omsi"
                     && m == 0
@@ -216,7 +216,11 @@ impl App {
                     && (fallback_action(code, &self.args.drive_keys).is_some()
                         || matches!(code, KeyCode::KeyZ | KeyCode::KeyX | KeyCode::KeyC | KeyCode::KeyI | KeyCode::KeyL));
                 if let Some(scan) = keys::dik_code(code).filter(|_| !ours) {
-                    let action = self.game_keys.iter().find(|b| b.scan_code == scan && b.modifier == m).map(|b| b.action.clone());
+                    let action = self
+                        .game_keys
+                        .iter()
+                        .find(|b| b.matches(scan, m))
+                        .map(|b| b.action.clone());
                     if let Some(a) = action {
                         if self.game_action(&a) {
                             return;
@@ -249,14 +253,14 @@ impl App {
                         self.game_action("view_interiorcam_plus");
                         return;
                     }
-                    // OMSI's `screenshot` (Ctrl+Alt+P), and F12 as most games have it
-                    KeyCode::KeyP if ctrl && alt => {
+                    // OMSI's `screenshot` (Ctrl+Shift+P), and F12 as most games have it
+                    KeyCode::KeyP if ctrl && shift_now && !alt => {
                         self.take_screenshot();
                         return;
                     }
                     // (F12 alone only where the bus has no key of its own on it: in OMSI's
                     // keyboard.cfg it is the pram/wheelchair button, which it took away)
-                    KeyCode::F12 if !self.player.as_ref().is_some_and(|p| p.bindings.iter().any(|b| b.scan_code == 88 && b.modifier == 0 && p.vehicle.ty.program.trigger(&b.action).is_some())) => {
+                    KeyCode::F12 if !self.player.as_ref().is_some_and(|p| p.bindings.iter().any(|b| b.matches(88, 0) && p.vehicle.ty.program.trigger(&b.action).is_some())) => {
                         self.take_screenshot();
                         return;
                     }
@@ -279,18 +283,18 @@ impl App {
                         self.toggle_pause();
                         return;
                     }
-                    // OMSI's `quicksave` (Alt+S)
-                    KeyCode::KeyS if alt && !ctrl => {
+                    // OMSI's `quicksave` (Ctrl+S)
+                    KeyCode::KeyS if ctrl && !alt && !shift_now => {
                         self.quick_save();
                         return;
                     }
-                    // OMSI's `view_toggle_informationdisplay` (Ctrl+Y)
-                    KeyCode::KeyY if ctrl => {
+                    // OMSI's `view_toggle_informationdisplay` (Shift+Y on a QWERTY layout)
+                    KeyCode::KeyY if shift_now && !ctrl && !alt => {
                         self.info_bar = !self.info_bar;
                         return;
                     }
-                    // OMSI's `view_set_schedule` (Shift+Insert)
-                    KeyCode::Insert if shift_now => {
+                    // OMSI's `view_set_schedule` (Insert; its duration flag is not Shift)
+                    KeyCode::Insert if !shift_now && !ctrl && !alt => {
                         self.timetable = !self.timetable;
                         return;
                     }
@@ -304,7 +308,7 @@ impl App {
                 && !self.keys.iter().any(|k| matches!(k, KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::AltLeft | KeyCode::AltRight | KeyCode::ShiftLeft | KeyCode::ShiftRight));
             if pressed && !repeat {
                 // Z / X / C: indicator left / hazard / right, where the hand rests
-                // (OMSI's own layout wants Shift and the numpad for them). Each is a
+                // (OMSI's own layout uses the numpad for them). Each is a
                 // toggle: pressing the same key again turns it back off, tracked in
                 // `blinker_key_state` since the scripts expose separate "set"/"off"
                 // triggers for left/right rather than a toggle (hazard already has a
@@ -510,15 +514,13 @@ impl App {
                     let m = if covers_vehicle_key {
                         0
                     } else {
-                        shift as i32 * 1
-                            | (self.keys.contains(&KeyCode::ControlLeft)
-                                || self.keys.contains(&KeyCode::ControlRight))
-                                as i32
-                                * 2
-                            | (self.keys.contains(&KeyCode::AltLeft)
-                                || self.keys.contains(&KeyCode::AltRight))
-                                as i32
-                                * 4
+                        omsi_content::input::key_modifier_flags(
+                            shift,
+                            self.keys.contains(&KeyCode::ControlLeft)
+                                || self.keys.contains(&KeyCode::ControlRight),
+                            self.keys.contains(&KeyCode::AltLeft)
+                                || self.keys.contains(&KeyCode::AltRight),
+                        )
                     };
                     p.key(scan, m, pressed);
                 }
@@ -1796,7 +1798,7 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
         let dir = crate::startup::content_dir().unwrap_or_else(|| self.args.root.clone()).join("Situations");
         let file = dir.join("quicksave.osn");
         if !file.exists() {
-            self.service_msg = Some(("No quicksave yet (Alt+S saves one)".into(), 4.0));
+            self.service_msg = Some(("No quicksave yet (Ctrl+S saves one)".into(), 4.0));
             return false;
         }
         let Ok(exe) = std::env::current_exe() else { return false };

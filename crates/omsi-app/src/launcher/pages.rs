@@ -692,19 +692,19 @@ fn action_label(a: &str) -> String {
     known.iter().find(|k| k.0 == a).map(|k| k.1.to_string()).unwrap_or_else(|| a.trim_start_matches("kw_").trim_start_matches("cp_").trim_start_matches("bus_").replace('_', " "))
 }
 
-fn key_name(scan: i64, modifier: i64) -> String {
+fn key_name(scan: i64, flags: i64) -> String {
     if scan == 0 {
         return "(unbound)".into();
     }
     let k = crate::keys::scan_name(scan as i32).unwrap_or_else(|| format!("scan {scan}"));
     let mut mods = Vec::new();
-    if modifier & 1 != 0 {
+    if flags & omsi_content::input::KEY_MOD_SHIFT as i64 != 0 {
         mods.push("Shift");
     }
-    if modifier & 2 != 0 {
+    if flags & omsi_content::input::KEY_MOD_CTRL as i64 != 0 {
         mods.push("Ctrl");
     }
-    if modifier & 4 != 0 {
+    if flags & omsi_content::input::KEY_MOD_ALT as i64 != 0 {
         mods.push("Alt");
     }
     if mods.is_empty() {
@@ -712,6 +712,11 @@ fn key_name(scan: i64, modifier: i64) -> String {
     } else {
         format!("{}+{k}", mods.join("+"))
     }
+}
+
+fn rebound_key_flags(previous: i64, shift: bool, ctrl: bool, alt: bool) -> i64 {
+    let duration = previous & omsi_content::input::KEY_FLAG_DURATION as i64;
+    duration | omsi_content::input::key_modifier_flags(shift, ctrl, alt) as i64
 }
 
 pub fn controls(l: &mut Launcher, area: Rect) {
@@ -732,11 +737,16 @@ pub fn controls(l: &mut Launcher, area: Rect) {
         } else if !matches!(code, K::ShiftLeft | K::ShiftRight | K::ControlLeft | K::ControlRight | K::AltLeft | K::AltRight | K::SuperLeft | K::SuperRight) {
             match crate::keys::dik_code(code) {
                 Some(scan) => {
-                    let m = (l.ui.input.shift as i64) | ((l.ui.input.ctrl as i64) << 1) | ((l.ui.input.alt as i64) << 2);
                     let section = ["vehicles", "game"][sec];
                     if let Some(b) = l.state.keybindings.get_mut(section).and_then(|a| a.as_array_mut()).and_then(|a| a.get_mut(idx)) {
+                        let old = b.get("modifier").and_then(|x| x.as_i64()).unwrap_or(0);
                         b["scan_code"] = json!(scan);
-                        b["modifier"] = json!(m);
+                        b["modifier"] = json!(rebound_key_flags(
+                            old,
+                            l.ui.input.shift,
+                            l.ui.input.ctrl,
+                            l.ui.input.alt,
+                        ));
                     }
                     save_keys(l);
                 }
@@ -827,8 +837,12 @@ pub fn controls(l: &mut Launcher, area: Rect) {
         match clicked {
             Some((i, true)) => {
                 if let Some(b) = l.state.keybindings.get_mut(*key).and_then(|a| a.as_array_mut()).and_then(|a| a.get_mut(i)) {
+                    // Keep OMSI's duration property while the key is unbound, so assigning
+                    // it again does not turn a held action (throttle, horn, clutch) into a
+                    // one-shot action.
+                    let flags = b.get("modifier").and_then(|x| x.as_i64()).unwrap_or(0);
                     b["scan_code"] = json!(0);
-                    b["modifier"] = json!(0);
+                    b["modifier"] = json!(flags & omsi_content::input::KEY_FLAG_DURATION as i64);
                 }
                 save_keys(l);
             }
@@ -1695,6 +1709,37 @@ pub fn tutorials(l: &mut Launcher, area: Rect) {
 #[cfg(test)]
 mod wizard_tests {
     use crate::controllers::Func;
+
+    #[test]
+    fn keyboard_names_separate_duration_from_modifiers() {
+        use omsi_content::input::{KEY_FLAG_DURATION, KEY_MOD_CTRL, KEY_MOD_SHIFT};
+
+        assert_eq!(super::key_name(17, KEY_FLAG_DURATION as i64), "W");
+        assert_eq!(super::key_name(17, KEY_MOD_SHIFT as i64), "Shift+W");
+        assert_eq!(super::key_name(17, KEY_MOD_CTRL as i64), "Ctrl+W");
+        assert_eq!(
+            super::key_name(17, (KEY_MOD_SHIFT | KEY_MOD_CTRL) as i64),
+            "Shift+Ctrl+W"
+        );
+    }
+
+    #[test]
+    fn rebinding_preserves_duration_and_encodes_real_omsi_modifiers() {
+        use omsi_content::input::{KEY_FLAG_DURATION, KEY_MOD_CTRL, KEY_MOD_SHIFT};
+
+        assert_eq!(
+            super::rebound_key_flags(KEY_FLAG_DURATION as i64, false, false, false),
+            KEY_FLAG_DURATION as i64
+        );
+        assert_eq!(
+            super::rebound_key_flags(KEY_FLAG_DURATION as i64, true, true, false),
+            (KEY_FLAG_DURATION | KEY_MOD_SHIFT | KEY_MOD_CTRL) as i64
+        );
+        assert_eq!(
+            super::rebound_key_flags(KEY_MOD_SHIFT as i64, false, false, false),
+            0
+        );
+    }
 
     #[test]
     fn a_wheel_with_three_pedals() {
