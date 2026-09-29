@@ -248,12 +248,11 @@ pub(crate) fn spawn_player(
                 if let Some(i) = vt.program.str_var("number") {
                     vehicle.state.str_vars[i as usize] = n.clone();
                 }
-                let reg = match &vt.def.registration_automatic {
-                    Some((pre, post)) => format!("{pre}{n}{post}"),
-                    None => format!("B-V {n}"),
-                };
-                if let Some(i) = vt.program.str_var("ident") {
-                    vehicle.state.str_vars[i as usize] = reg;
+                // (a free plate is the player's to choose: from registrations.txt below)
+                if vt.def.registration_mode != 1 {
+                    if let Some(i) = vt.program.str_var("ident") {
+                        vehicle.state.str_vars[i as usize] = vt.def.plate_of_number(n);
+                    }
                 }
             }
         }

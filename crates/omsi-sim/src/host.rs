@@ -321,8 +321,8 @@ impl Host for VehicleHost {
             "textlength" => {
                 let font = stacks.pop() as i32;
                 let text = stacks.pop_str();
-                // advance per glyph as drawn: glyph width plus the font's gap
-                let w = self.font_atlas(font).map(|a| text.chars().map(|c| a.font.glyph(c).map(|g| g.x1 - g.x0).unwrap_or(0) + a.font.gap).sum::<i32>() as f32).unwrap_or(0.0);
+                // as Omsi.exe measures it (0x5d6c00): the glyphs and the gaps between them
+                let w = self.font_atlas(font).map(|a| a.font.text_width(&text) as f32).unwrap_or(0.0);
                 if omsi_cfg::env::var_os("OMSI_DEBUG_TEXT").is_some() {
                     log::info!("TextLength(font {font} = {:?}, {text:?}) = {w}", self.font_atlas(font).map(|a| a.font.name.clone()));
                 }

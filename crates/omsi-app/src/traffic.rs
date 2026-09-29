@@ -2267,10 +2267,27 @@ impl Traffic {
             if let Some(i) = ty.program.str_var("ident") {
                 vehicle.state.str_vars[i as usize] = reg;
             }
-        } else if ty.def.registration_free {
-            // a plate of the map's registrations.txt
-            if let (Some(i), Some(reg)) = (ty.program.str_var("ident"), world.free_registration(seed.rotate_left(17))) {
-                vehicle.state.str_vars[i as usize] = reg;
+        } else {
+            // A vehicle of the random traffic with a `[number]` list takes a number of it at
+            // random and the plate beside it, else the plate its mode makes of the number
+            // (TRoadVehicleInst.virtual_11 at 0x7e7b51); a free plate is one of the map's
+            // registrations.txt.
+            let numbers = ty.def.numbers_with_plates();
+            if !numbers.is_empty() {
+                let (n, plate) = &numbers[(seed.rotate_left(29) % numbers.len() as u64) as usize];
+                if let Some(i) = ty.program.str_var("number") {
+                    vehicle.state.str_vars[i as usize] = n.clone();
+                }
+                if ty.def.registration_mode != 1 {
+                    if let Some(i) = ty.program.str_var("ident") {
+                        vehicle.state.str_vars[i as usize] = if plate.is_empty() { ty.def.plate_of_number(n) } else { plate.clone() };
+                    }
+                }
+            }
+            if ty.def.registration_mode == 1 {
+                if let (Some(i), Some(reg)) = (ty.program.str_var("ident"), world.free_registration(seed.rotate_left(17))) {
+                    vehicle.state.str_vars[i as usize] = reg;
+                }
             }
         }
         // aircraft keep the height of their flight path: a ground sampler would pull

@@ -149,6 +149,7 @@ pub(crate) fn run_offscreen(
             .global
             .passenger_density((parse_time(&args.time) / 3600.0) as f32);
         h.time_of_day = parse_time(&args.time);
+        h.stop_targets = schedule.as_ref().map(|s| s.stop_targets());
         h.populate(&world, &renderer, &mut scene, center);
         if let Some(p) = player.as_ref() {
             if args.riders > 0 {

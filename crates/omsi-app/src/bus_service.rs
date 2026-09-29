@@ -65,6 +65,9 @@ pub struct BusService {
     /// The timetable still carries the route on as tiles bring their lanes: at the end of
     /// what it has, it waits for more.
     pub route_open: bool,
+    /// The terminus of its trip, the name the waiting people read off it (Omsi.exe's bus
+    /// +0x7bc) to see whether it goes their way.
+    pub terminus: String,
     /// People aboard when it was put on the road (seated by the passengers' side when the
     /// bus first comes near).
     pub riders: u8,
@@ -132,6 +135,7 @@ impl BusService {
             delay: 0.0,
             layover: false,
             route_open: false,
+            terminus: String::new(),
             riders,
             near_d: f32::INFINITY,
         }

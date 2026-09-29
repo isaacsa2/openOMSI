@@ -231,41 +231,6 @@ struct Choice {
     train: Option<Vec<(Arc<VehicleType>, bool)>>,
 }
 
-/// The paint scheme fleet number `number` wears, from the bus's `[number]` lists: a `.org`
-/// file, or a folder of them, each naming a repaint on its first line (as the `[CTC]`
-/// names it) and the numbers painted so below; a list without a repaint's name is the main
-/// list, for every other number. The AI buses of a depot were painted at random, so a
-/// number the depot list gives one repaint came out in another.
-pub(crate) fn scheme_of_number(ty: &VehicleType, number: &str) -> Option<usize> {
-    let rel = ty.def.number_file.as_ref()?;
-    let number = number.trim();
-    if number.is_empty() || ty.paint_schemes.is_empty() {
-        return None;
-    }
-    let path = omsi_cfg::resolve_path(ty.def.dir(), rel);
-    let files: Vec<std::path::PathBuf> = if omsi_cfg::vfs::is_file(&path) {
-        vec![path]
-    } else {
-        omsi_cfg::vfs::list_dir(&path)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(n, d)| !d && n.to_string_lossy().to_ascii_lowercase().ends_with(".org"))
-            .map(|(n, _)| path.join(n))
-            .collect()
-    };
-    for f in files {
-        let Ok(list) = omsi_vehicle::vehicle::NumberList::load(&f) else { continue };
-        let name = list.paint_scheme.trim();
-        if name.is_empty() || !list.numbers.iter().any(|n| n.trim() == number) {
-            continue;
-        }
-        if let Some(i) = ty.paint_schemes.iter().position(|s| s.name.trim().eq_ignore_ascii_case(name)) {
-            return Some(i);
-        }
-    }
-    None
-}
-
 /// The bus stands next to the kerb: the pole's offset less half a bus width and a gap; only
 /// where the pole is clearly off the lane (a bay).
 ///
@@ -302,12 +267,12 @@ fn project_stop(
 pub struct Schedule {
     pub data: TimetableData,
     departures: Vec<Departure>,
-    /// Depot vehicles per AI group: (type, list of (number, registration), depot file).
+    /// Depot vehicles per AI group: (type, its fleet from the ailists, depot file).
     depots: HashMap<
         String,
         Vec<(
             Arc<VehicleType>,
-            Vec<(String, String)>,
+            Vec<omsi_map::DepotEntry>,
             Option<Arc<omsi_vehicle::Hof>>,
         )>,
     >,
@@ -708,7 +673,7 @@ impl Schedule {
                     continue;
                 }
                 let found = self.depots.get(&group).and_then(|v| {
-                    v.iter().enumerate().find_map(|(k, (_, nums, _))| nums.iter().position(|(n, _)| n.trim() == number.trim()).map(|j| (k, j)))
+                    v.iter().enumerate().find_map(|(k, (_, nums, _))| nums.iter().position(|e| e.number.trim() == number.trim()).map(|j| (k, j)))
                 });
                 if let Some(kj) = found {
                     self.tour_vehicle.insert(key, kj);
@@ -738,16 +703,16 @@ impl Schedule {
                         types.iter().any(|w| p.ends_with(w.as_str()))
                     })
                     .flat_map(|(k, (_, nums, _))| (0..nums.len()).map(move |j| (k, j)))
-                    .filter(|(k, j)| !self.used_numbers.contains(&(group.clone(), vehicles[*k].1[*j].0.trim().to_string())))
+                    .filter(|(k, j)| !self.used_numbers.contains(&(group.clone(), vehicles[*k].1[*j].number.trim().to_string())))
                     .collect();
                 if candidates.is_empty() {
                     continue;
                 }
                 let (k, j) = candidates[(mix(h) % candidates.len() as u64) as usize];
                 if omsi_cfg::env::var_os("OMSI_DEBUG_TRAFFIC").is_some() {
-                    log::info!("car_use: line {} tour {} -> {} #{}", line.name, t.number, vehicles[k].0.def.path.display(), vehicles[k].1[j].0);
+                    log::info!("car_use: line {} tour {} -> {} #{}", line.name, t.number, vehicles[k].0.def.path.display(), vehicles[k].1[j].number);
                 }
-                self.used_numbers.insert((group.clone(), vehicles[k].1[j].0.trim().to_string()));
+                self.used_numbers.insert((group.clone(), vehicles[k].1[j].number.trim().to_string()));
                 self.tour_vehicle.insert(key, (k, j));
                 n_typed += 1;
             }
@@ -1197,7 +1162,7 @@ impl Schedule {
             .and_then(|t| t.get((h % t.len().max(1) as u64) as usize).cloned());
         let (ty, numbers, hof): (
             Arc<VehicleType>,
-            Vec<(String, String)>,
+            Vec<omsi_map::DepotEntry>,
             Option<Arc<omsi_vehicle::Hof>>,
         ) = match (&train, self.depots.get(&group).filter(|v| !v.is_empty())) {
             (Some(cars), _) => (cars[0].0.clone(), Vec::new(), None),
@@ -1226,10 +1191,10 @@ impl Schedule {
                         let start = ((h >> 21) % nums.len().max(1) as u64) as usize;
                         let free = (0..nums.len())
                             .map(|o| (start + o) % nums.len())
-                            .find(|&j| !self.used_numbers.contains(&(group.clone(), nums[j].0.trim().to_string())));
+                            .find(|&j| !self.used_numbers.contains(&(group.clone(), nums[j].number.trim().to_string())));
                         let j = free.unwrap_or(start);
                         if let Some(n) = nums.get(j) {
-                            self.used_numbers.insert((group.clone(), n.0.trim().to_string()));
+                            self.used_numbers.insert((group.clone(), n.number.trim().to_string()));
                         }
                         self.tour_vehicle.insert(h, (k, j));
                         (k, j)
@@ -1250,14 +1215,30 @@ impl Schedule {
                 )
             }
         };
-        let number = numbers.first().cloned();
-        // the repaint of that fleet number, as the bus's `[number]` lists give it; any
-        // other number a repaint drawn for the tour
-        let own = number.as_ref().and_then(|n| scheme_of_number(&ty, &n.0));
+        // A depot bus as Omsi.exe makes it (0x70a174): the fleet number of its ailists line;
+        // the plate of that line, else - unless the bus's plates are free - the plate the bus
+        // gives the number ([registration_list] / [registration_automatic]); and the repaint
+        // that line names, else the model's own paint (the first repaint when the default
+        // paint is "<nouse>"). Another tour's bus draws a repaint at random, as random
+        // traffic does.
+        let entry = numbers.first().cloned();
+        let number = entry.as_ref().map(|e| {
+            let plate = if !e.registration.trim().is_empty() {
+                e.registration.clone()
+            } else if ty.def.registration_mode != 1 {
+                ty.def.plate_of_number(&e.number)
+            } else {
+                String::new()
+            };
+            (e.number.clone(), plate)
+        });
         let scheme = if ty.paint_schemes.is_empty() {
             None
-        } else if own.is_some() {
-            own
+        } else if let Some(e) = &entry {
+            ty.paint_schemes
+                .iter()
+                .position(|s| s.name.trim_end() == e.paint.trim_end())
+                .or_else(|| (ty.def.default_paint.trim() == "<nouse>").then_some(0))
         } else {
             Some(
                 ((h >> 42) % ty.paint_schemes.len().min(crate::traffic::AI_SCHEMES) as u64)
@@ -1605,6 +1586,42 @@ impl Schedule {
     }
 
     /// How many due departures are still waiting to be put on the road.
+    /// Omsi.exe's station targets (0x61cb18): per bus stop, the stops the timetable's trips
+    /// go on to from there, each with the termini of the trips that do. A passenger waiting
+    /// at the stop wants one of these targets and boards a bus whose terminus is among its
+    /// termini (0x61c33c); the names compare exactly.
+    pub fn stop_targets(&self) -> HashMap<i64, Vec<HashSet<String>>> {
+        let name_of = |id: i64| {
+            self.data
+                .bus_stops
+                .iter()
+                .find(|b| b.object_id == id)
+                .map(|b| b.name.trim().to_string())
+                .unwrap_or_else(|| id.to_string())
+        };
+        let mut named: HashMap<i64, Vec<(String, HashSet<String>)>> = HashMap::new();
+        for trip in &self.data.trips {
+            let stations = trip_stations(trip);
+            let terminus = trip.terminus.trim().to_string();
+            for (k, from) in stations.iter().enumerate() {
+                let targets = named.entry(*from).or_default();
+                for to in &stations[k + 1..] {
+                    let to = name_of(*to);
+                    match targets.iter_mut().find(|t| t.0 == to) {
+                        Some(t) => {
+                            t.1.insert(terminus.clone());
+                        }
+                        None => targets.push((to, HashSet::from_iter([terminus.clone()]))),
+                    }
+                }
+            }
+        }
+        named
+            .into_iter()
+            .map(|(id, t)| (id, t.into_iter().map(|t| t.1).collect()))
+            .collect()
+    }
+
     pub fn pending(&self) -> usize {
         self.pending.len()
     }
@@ -2114,6 +2131,7 @@ impl Schedule {
             set_ai_destination(&mut car.vehicle, hof.as_deref(), &line, &terminus);
             if let Some(b) = car.bus.as_mut() {
                 b.route_open = end < slots.len();
+                b.terminus = terminus.clone();
             }
             let id = car.id;
             self.car_departure.insert(id, i);
@@ -2267,13 +2285,14 @@ impl Schedule {
             b.layover = departure > day_time
                 && b.stops.front().map(|st| st.ri == 0 && (st.s - s).abs() < 2.0).unwrap_or(false);
             b.route_open = end < slots.len();
+            b.terminus = terminus.clone();
         }
         // the bus scripts read the line/terminus for their displays
         if let Some(i) = ty.program.str_var("Linie") {
             car.vehicle.state.str_vars[i as usize] = line.clone();
         }
         set_ai_destination(&mut car.vehicle, hof.as_deref(), &line, &terminus);
-        log::info!("scheduled bus: line {line} tour {tour} trip {trip_name} {} #{:?} at {:.1} min, {} stops, at ({:.1}, {:.1}) heading {:.0}{}", ty.def.type_name, number.as_ref().map(|n| n.0.as_str()), day_time / 60.0, car.bus.as_ref().map(|b| b.stops.len()).unwrap_or(0), car.vehicle.position.x, car.vehicle.position.y, car.vehicle.heading, if end < slots.len() { format!(", route {} of {} steps so far", end - start, steps.len()) } else { String::new() });
+        log::info!("scheduled bus: line {line} tour {tour} trip {trip_name} {} #{:?} at {:.1} min, {} stops, at ({:.1}, {:.1}) heading {:.0}{}", ty.def.type_name, number.as_ref().map(|n| format!("{} plate {:?} paint {:?}", n.0, n.1, scheme.and_then(|i| ty.paint_schemes.get(i)).map(|p| p.name.as_str()))), day_time / 60.0, car.bus.as_ref().map(|b| b.stops.len()).unwrap_or(0), car.vehicle.position.x, car.vehicle.position.y, car.vehicle.heading, if end < slots.len() { format!(", route {} of {} steps so far", end - start, steps.len()) } else { String::new() });
         if end < slots.len() {
             self.running.push(RunningTrip {
                 car: car.id,

@@ -522,16 +522,12 @@ fn switch_driver(app: &mut App, name: &str) {
 
 /// The fleet numbers of the bus's `[number]` list with their registrations.
 fn fleet_numbers(v: &omsi_sim::VehicleInstance) -> Vec<(String, String)> {
-    let Some(list) = v.ty.def.number_file.as_ref() else { return Vec::new() };
-    let Ok(nl) = omsi_vehicle::vehicle::NumberList::load(&omsi_cfg::resolve_path(v.ty.def.dir(), list)) else { return Vec::new() };
-    nl.numbers
-        .iter()
-        .map(|n| {
-            let reg = match &v.ty.def.registration_automatic {
-                Some((pre, post)) => format!("{pre}{n}{post}"),
-                None => String::new(),
-            };
-            (n.clone(), reg)
+    let def = &v.ty.def;
+    def.numbers_with_plates()
+        .into_iter()
+        .map(|(n, _)| {
+            let reg = if def.registration_mode == 1 { String::new() } else { def.plate_of_number(&n) };
+            (n, reg)
         })
         .collect()
 }
