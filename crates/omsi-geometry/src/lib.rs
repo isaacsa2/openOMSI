@@ -592,13 +592,27 @@ pub fn terrain_height(t: &Terrain, x: f32, y: f32) -> f32 {
 }
 
 /// Rotation of a map object: heading (Z), pitch (X), bank (Y). The position is kept apart
-/// as the instance origin (f64).
+/// as the instance origin (f64). Pitched first, then banked, then turned, as Omsi.exe puts
+/// an object down (sub_79cb18: RotationX(pitch) · RotationZ(bank) · RotationY(heading)) - a
+/// rock both pitched and banked a good deal leant otherwise with the bank taken first.
 pub fn object_rotation(rot_deg: [f64; 3]) -> Mat4 {
     let heading = (-rot_deg[0]).to_radians() as f32; // clockwise heading → counter-clockwise rotation about +z
     let pitch = rot_deg[1].to_radians() as f32;
     let bank = rot_deg[2].to_radians() as f32;
-    let q = Quat::from_rotation_z(heading) * Quat::from_rotation_x(pitch) * Quat::from_rotation_y(bank);
+    let q = Quat::from_rotation_z(heading) * Quat::from_rotation_y(bank) * Quat::from_rotation_x(pitch);
     Mat4::from_quat(q)
+}
+
+/// A map file's heading, pitch and bank (`[object]`, `[attachObj]`, `[splineAttachement]`)
+/// in the terms [`object_rotation`] takes. The file keeps the angles of Direct3D's
+/// left-handed frame, where a positive pitch lowers the nose and a positive bank raises the
+/// right side; going over to the right-handed world turns every sense of rotation round.
+/// `object_rotation` already turns the heading, and pitch and bank have to turn as well: taken
+/// as they stand, TH_Wald's rocks tipped the other way and stood as boxes with a grass lid
+/// beside the road instead of a rock face. (Pitch and bank that openOMSI works out itself -
+/// a parked car on a slope, an object tilted with its spline - are world angles already.)
+pub fn map_rotation(rot_deg: [f64; 3]) -> [f64; 3] {
+    [rot_deg[0], -rot_deg[1], -rot_deg[2]]
 }
 
 /// Convert an `.o3d`/`.x` mesh to [`MeshData`] (one range per material).
@@ -674,6 +688,43 @@ pub fn mesh_from_o3d(m: &omsi_o3d::Mesh) -> MeshData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A map object turned, pitched and banked a good deal at once stands as Omsi.exe puts
+    /// it: `v · RotationX(pitch) · RotationZ(bank) · RotationY(heading)` in Direct3D's
+    /// left-handed frame (x right, y up, z forward), read in the world's (x, z, y).
+    #[test]
+    fn map_angles_compose_as_omsi_does() {
+        let d3d = |v: [f32; 3], h: f32, p: f32, b: f32| -> Vec3 {
+            let (h, p, b) = (h.to_radians(), p.to_radians(), b.to_radians());
+            let rx = |v: [f32; 3]| [v[0], v[1] * p.cos() - v[2] * p.sin(), v[1] * p.sin() + v[2] * p.cos()];
+            let rz = |v: [f32; 3]| [v[0] * b.cos() - v[1] * b.sin(), v[0] * b.sin() + v[1] * b.cos(), v[2]];
+            let ry = |v: [f32; 3]| [v[0] * h.cos() + v[2] * h.sin(), v[1], -v[0] * h.sin() + v[2] * h.cos()];
+            let w = ry(rz(rx(v)));
+            Vec3::new(w[0], w[2], w[1])
+        };
+        let (h, p, b) = (40.0, 35.0, -50.0);
+        let r = object_rotation(map_rotation([h as f64, p as f64, b as f64]));
+        for (lh, rh) in [([0.0, 0.0, 1.0], Vec3::Y), ([1.0, 0.0, 0.0], Vec3::X), ([0.0, 1.0, 0.0], Vec3::Z)] {
+            let want = d3d(lh, h, p, b);
+            let got = r.transform_vector3(rh);
+            assert!((want - got).length() < 1e-4, "{lh:?}: {got:?} != {want:?}");
+        }
+    }
+
+    /// A map object pitched and banked by the file's positive angles: the nose goes down
+    /// and the right side up, as in Direct3D's frame the file keeps them in.
+    #[test]
+    fn map_pitch_lowers_the_nose_and_bank_raises_the_right() {
+        let r = object_rotation(map_rotation([0.0, 30.0, 0.0]));
+        let forward = r.transform_vector3(Vec3::Y);
+        assert!(forward.z < -0.4, "{forward:?}");
+        let r = object_rotation(map_rotation([0.0, 0.0, 30.0]));
+        let up = r.transform_vector3(Vec3::Z);
+        assert!(up.x < -0.4, "{up:?}");
+        // the heading stays as the file has it (clockwise from north)
+        let r = object_rotation(map_rotation([90.0, 0.0, 0.0]));
+        assert!(r.transform_vector3(Vec3::Y).x > 0.99);
+    }
 
     /// A kerb: road at 0, pavement at 0.15 from x = 10 on, a bridge deck at 6 m over it all.
     #[test]

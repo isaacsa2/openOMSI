@@ -1358,6 +1358,12 @@ impl Player {
     /// the outside camera sits from the vehicle.
     pub(crate) fn camera_look(&self, view: &str, fallback: &Camera, look: (f32, f32), dist: f32) -> Camera {
         let def = &self.vehicle.ty.def;
+        // `mirror<n>`: what the n-th mirror's camera sees, as it is drawn into the mirror's
+        // picture (a check of the mirrors against OMSI's own `reflexion<n>.bmp`)
+        if let Some(c) = view.strip_prefix("mirror").and_then(|n| n.parse::<usize>().ok()).and_then(|n| def.cameras_reflexion.get(n)) {
+            let (eye, yaw, pitch, roll) = self.vehicle.camera_world_full(&crate::camera_util::reflexion_camera(c));
+            return Camera { position: eye, yaw, pitch, roll, fov_deg: if c.fov > 1.0 { c.fov } else { 50.0 }, near: 0.3, far: 450.0 };
+        }
         let cam = match view {
             "driver" => {
                 let n = def.cameras_driver.len().max(1);

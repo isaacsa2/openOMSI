@@ -257,10 +257,14 @@ impl Launcher {
     fn make_surface(&mut self) {
         let Some(window) = self.window.clone() else { return };
         if self.renderer.is_none() {
-            let surface = self.instance.create_surface(window.clone()).expect("surface");
             let settings = crate::settings::Settings::load();
-            let renderer = pollster::block_on(Renderer::new_with(&self.instance, Some(&surface), None, showroom_options(&settings))).expect("renderer");
-            drop(surface);
+            let renderer = match crate::startup::window_renderer(&mut self.instance, &window, showroom_options(&settings)) {
+                Ok(r) => r,
+                Err(e) => {
+                    crate::startup::fatal_message(&format!("openOMSI cannot draw on this computer: {e:#}"));
+                    std::process::exit(1);
+                }
+            };
             self.gpu = Some(omsi_ui::Gpu::new(&renderer.device, renderer.format(), 4, self.ui.atlas.size));
             self.ui.atlas = omsi_ui::Atlas::new(self.ui.atlas.size);
             self.renderer = Some(renderer);
@@ -302,13 +306,32 @@ impl ApplicationHandler for Launcher {
         if omsi_cfg::env::var_os("OMSI_BACKGROUND").is_some() {
             attrs = attrs.with_active(false);
         }
-        let window = Arc::new(event_loop.create_window(attrs).expect("window"));
-        let surface = self.instance.create_surface(window.clone()).expect("surface");
+        let window = match event_loop.create_window(attrs) {
+            Ok(w) => Arc::new(w),
+            Err(e) => {
+                crate::startup::fatal_message(&format!("openOMSI cannot open its window: {e}"));
+                event_loop.exit();
+                return;
+            }
+        };
         let settings = crate::settings::Settings::load();
-        let renderer = pollster::block_on(Renderer::new_with(&self.instance, Some(&surface), None, showroom_options(&settings))).expect("renderer");
-        drop(surface);
+        let renderer = match crate::startup::window_renderer(&mut self.instance, &window, showroom_options(&settings)) {
+            Ok(r) => r,
+            Err(e) => {
+                crate::startup::fatal_message(&format!("openOMSI cannot draw on this computer: {e:#}"));
+                event_loop.exit();
+                return;
+            }
+        };
         let size = window.inner_size();
-        let surface = SurfaceState::new_with(&self.instance, window.clone(), &renderer, size.width, size.height, true).expect("surface");
+        let surface = match SurfaceState::new_with(&self.instance, window.clone(), &renderer, size.width, size.height, true) {
+            Ok(s) => s,
+            Err(e) => {
+                crate::startup::fatal_message(&format!("openOMSI cannot draw into its window: {e:#}"));
+                event_loop.exit();
+                return;
+            }
+        };
         log::info!("launcher window {}x{} (scale {:.2}), adapter {}", size.width, size.height, window.scale_factor(), renderer.adapter_name);
         self.gpu = Some(omsi_ui::Gpu::new(&renderer.device, renderer.format(), 4, self.ui.atlas.size));
         self.window = Some(window);
