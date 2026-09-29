@@ -253,6 +253,7 @@ fn find_texture_uncached(name: &str, dirs: &[&Path]) -> Option<PathBuf> {
     }
     let stem_path = Path::new(&name);
     let stem = stem_path.with_extension("");
+    let texture_dirs = dirs.to_vec();
     let season = season_folder();
     // A seasonal texture lives in a subfolder of the folder the texture itself is in:
     // `Texture\WinterSnow\gras.bmp` for `Texture\gras.bmp`. The name often carries that
@@ -288,6 +289,30 @@ fn find_texture_uncached(name: &str, dirs: &[&Path]) -> Option<PathBuf> {
             }
         }
     }
+    // D3DX/OMSI ultimately looks vehicle and object textures up by file name.  A fair
+    // number of add-ons accidentally save an author-machine or model-relative subfolder
+    // in the mesh (for example `model\texture\body.tga`) although `body.tga` is beside
+    // the other vehicle textures.  The exact relative path above still wins; only after it
+    // misses do we retry the bare name in the actual texture directories.  Do not include
+    // the content root added for cross-add-on paths here, or an unrelated global file with
+    // the same name could paint a bus.
+    if name.contains('/') {
+        if let Some(file) = stem_path.file_name().and_then(|f| f.to_str()) {
+            for dir in &texture_dirs {
+                let p = omsi_cfg::resolve_path(dir, file);
+                if omsi_cfg::vfs::is_file(&p) {
+                    return Some(p);
+                }
+                let file_stem = Path::new(file).with_extension("");
+                for ext in EXTENSIONS {
+                    let p = omsi_cfg::resolve_path(dir, &format!("{}.{}", file_stem.display(), ext));
+                    if omsi_cfg::vfs::is_file(&p) {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+    }
     let _ = stem;
     // A path of the author's machine (`D:\OMSI 2\Vehicles\Sprinter_work\Texture\extras.jpg`
     // in the Sprinter 412D): the same file under the installation's content folders, else
@@ -305,7 +330,7 @@ fn find_texture_uncached(name: &str, dirs: &[&Path]) -> Option<PathBuf> {
             }
         }
         if let Some(file) = parts.last() {
-            if let Some(p) = find_texture_uncached(file, &dirs) {
+            if let Some(p) = find_texture_uncached(file, &texture_dirs) {
                 return Some(p);
             }
         }
@@ -517,6 +542,9 @@ mod tests {
         let upper = find_texture("ANZ-OBEN.JPG .", &[tex.as_path()]).map(|p| p.to_string_lossy().to_lowercase());
         assert_eq!(upper, Some(tex.join("anz-oben.jpg").to_string_lossy().to_lowercase()));
         assert_eq!(find_texture("texture.\\anz-oben.bmp", &[dir.as_path()]), Some(tex.join("anz-oben.jpg")));
+        // Add-on meshes commonly retain a stale relative folder.  OMSI falls back to the
+        // file name in the model's texture directory, including extension substitution.
+        assert_eq!(find_texture("model\\old_texture\\anz-oben.tga", &[tex.as_path()]), Some(tex.join("anz-oben.jpg")));
         std::fs::remove_dir_all(&dir).ok();
     }
 

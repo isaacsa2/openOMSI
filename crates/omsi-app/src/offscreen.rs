@@ -788,6 +788,10 @@ pub(crate) fn run_offscreen(
             if std::mem::take(&mut h.stop_request) {
                 if let Some(p) = player.as_mut() {
                     p.vehicle.trigger("door_haltewunsch");
+                }
+            }
+            if std::mem::take(&mut h.stop_request_release) {
+                if let Some(p) = player.as_mut() {
                     p.vehicle.trigger("door_haltewunsch_off");
                 }
             }
