@@ -562,7 +562,7 @@ impl ApplicationHandler for App {
                             }
                             return false;
                         }
-                        if n.starts_with("view_") {
+                        if crate::input_script::is_game_action(&n) {
                             if *down {
                                 game.push(n);
                             }
