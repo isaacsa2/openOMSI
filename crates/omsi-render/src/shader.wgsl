@@ -307,9 +307,31 @@ struct MaterialParams {
 // The reflection mask of a [matl_envmap] material: the alpha of its [matl_envmap_mask]
 // texture when it has one, else the diffuse texture's alpha - which reads 1 for a texture
 // without an alpha channel (a 24-bit bitmap, DXT1, a JPEG), so its factor alone decides.
+fn has_env_mask() -> bool {
+    return (u32(material.params2.w + 0.5) & 1u) != 0u;
+}
+
+// [matl_transmap] was given (its file there or not: see MaterialExtra::transmap_declared)
+fn has_transmap_declared() -> bool {
+    return (u32(material.params2.w + 0.5) & 2u) != 0u;
+}
+
 fn reflection_mask(uv: vec2<f32>, diffuse_a: f32) -> f32 {
     let mask = textureSample(t_envmask, s_diffuse, uv).a;
-    return select(diffuse_a, mask, material.params2.w > 0.5);
+    return select(diffuse_a, mask, has_env_mask());
+}
+
+// The D3DCOLOR Omsi.exe packs for its environment stage (0x7ff8ed): each channel the
+// [matl_envmap] factor x 255 x its light (at most 1), truncated, and OR-ed together shifted
+// into place without saturation - a factor over 1 spills into the neighbouring channel
+// exactly as there (a factor of 10 at full light reads almost white).
+fn omsi_texture_factor(factor: f32, light: vec3<f32>) -> vec3<f32> {
+    let m = min(max(light, vec3<f32>(0.0)), vec3<f32>(1.0)) * max(factor, 0.0) * 255.0;
+    let r = u32(m.r);
+    let g = u32(m.g);
+    let b = u32(m.b);
+    let packed = (0xffu << 24u) | (r << 16u) | (g << 8u) | b;
+    return vec3<f32>(f32((packed >> 16u) & 0xffu), f32((packed >> 8u) & 0xffu), f32(packed & 0xffu)) / 255.0;
 }
 
 // [matl_bumpmap]: Direct3D's bump-mapped environment stage moves the sphere-map lookup by
@@ -1032,7 +1054,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // it, the vanilla picture lights it from the tile light map alone)
     let lm_only = light_map_mapped(material.params) && camera.sky_color.w > 0.5;
     let map_lamps = select(1.0, 0.0, (material.params.y > 0.2 && material.params.y < 0.3) || lm_only);
-    var lit = albedo * material.color.rgb * (diffuse + point_lights(in.world, n, map_lamps));
+    let lamp_light = point_lights(in.world, n, map_lamps);
+    var lit = albedo * material.color.rgb * (diffuse + lamp_light);
     if (material.specular.w > 0.0 && material.params.y < 0.5) {
         // the D3D material's own highlight (specular colour and power of the o3d file or a
         // [matl_allcolor]) from the sun, added after the texture as D3D's specular is;
@@ -1141,7 +1164,30 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             // enhanced.wgsl): the doors seen from the driver's seat were a grey veil
             pane_k = k * (1.0 - 0.85 * near_player_vehicle(in.world) * inside_vehicle(camera.cam_pos.xyz));
         } else {
-            lit = mix(lit, env.rgb * env_light, k);
+            // Omsi.exe's environment stage (0x7fd6c4 at 0x7ff626, fixed function): the sphere
+            // map's colour as it is, over what the stages before made of the lit texture -
+            // D3DTOP_LERP by the texture factor when the material has neither a
+            // [matl_transmap] nor a [matl_envmap_mask], D3DTOP_BLENDCURRENTALPHA when it
+            // has one. The factor is [matl_envmap]'s times the ambient light plus `g` (the
+            // light the vehicle stands in: the lamps of the tile's light map and the sky),
+            // each at most 1, packed into a D3DCOLOR without saturation (0x7ff8ed: a
+            // factor over 1 spills its bits into the next channel, as there). The alpha
+            // it blends by is the mask's, or the diffuse texture's times `g`
+            // (0x7feacc, 0x7ff092) - never the diffuse alpha of a material without one of
+            // them: taken as a reflection mask, a body whose texture carries an alpha
+            // channel for other purposes was mirrored (dark) where that alpha was high.
+            // `g` (0x861ca0, set per vehicle at 0x7d8735): the mean of the light the tile's
+            // light map throws on it plus the day's light A (weather +0xac = the mean of
+            // lightcolor A, 0x75333f - by it the stars fade), at most 1
+            let g = clamp(dot(lamp_light, vec3<f32>(1.0 / 3.0)) + dot(camera.sun_color.rgb, vec3<f32>(1.0 / 3.0)), 0.0, 1.0);
+            var kk = vec3<f32>(0.0);
+            if (has_transmap_declared() || has_env_mask()) {
+                let a = select(diffuse_a, textureSample(t_envmask, s_diffuse, duv).a, has_env_mask());
+                kk = vec3<f32>(a * g);
+            } else {
+                kk = omsi_texture_factor(material.params2.y, camera.ambient.rgb + vec3<f32>(g));
+            }
+            lit = mix(lit, env.rgb, kk);
         }
     }
     // wet road: a surface whose texture carries [moisture] darkens under rain and starts

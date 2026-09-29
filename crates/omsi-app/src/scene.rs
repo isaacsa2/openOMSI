@@ -1308,6 +1308,13 @@ fn tree_quad_mesh() -> MeshData {
 /// Where textures are looked up for a given content directory.
 /// How far a road surface may ride above the ground and still have the ground cut away
 /// under it. Anything higher is a bridge or an embankment, where cutting would open a hole.
+/// `OMSI_HEIGHTPROFILE_GROUND=1`: the wheels stand on the splines' `[heightprofile]`s as
+/// they did before, instead of on the drawn splines as Omsi.exe stands them (A/B runs).
+fn heightprofile_ground() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| omsi_cfg::env::var_os("OMSI_HEIGHTPROFILE_GROUND").is_some())
+}
+
 fn surface_flush() -> f32 {
     omsi_cfg::env::var("OMSI_SURFACE_FLUSH")
         .ok()
@@ -3013,10 +3020,22 @@ impl World {
                 }
                 continue;
             }
-            let hp = omsi_geometry::build_height_profile_mesh(&st.def, &curve, s.mirror, origin);
-            if !hp.is_empty() {
-                let b = mesh_bounds(&hp, &Mat4::IDENTITY, origin);
-                out.drive.push((hp, b));
+            // What the wheels stand on is the spline's drawn mesh, not its `[heightprofile]`:
+            // Omsi.exe's ground query (0x7a0814) casts a ray from 3 m over the point down
+            // into each spline segment of the tile (0x5b2d94 -> 0x7c40c8, D3DXIntersect on
+            // the segment's mesh +0xa0), and that mesh is the one TSplineSegment.Generate
+            // (0x5b1e14) builds from the `[profile]`/`[profilepnt]` lists (+0xc) for drawing.
+            // The height profile (+0x20) is read by the editor's "is the point on this
+            // spline" test alone (0x5b2b1c). Taken as the ground, a height profile wider than
+            // the drawn road reached under the bus from the road beside it, one lower than
+            // the asphalt sank the wheels into it, and a road without one had no ground at
+            // all. `OMSI_HEIGHTPROFILE_GROUND=1` goes back to the height profiles (A/B).
+            if heightprofile_ground() {
+                let hp = omsi_geometry::build_height_profile_mesh(&st.def, &curve, s.mirror, origin);
+                if !hp.is_empty() {
+                    let b = mesh_bounds(&hp, &Mat4::IDENTITY, origin);
+                    out.drive.push((hp, b));
+                }
             }
             let mesh = build_spline_mesh(&st.def, &curve, s.mirror, origin);
             if debug_splines {
@@ -3055,6 +3074,10 @@ impl World {
                     indices: mesh.indices.clone(),
                     ..Default::default()
                 };
+                // (every spline the game draws: Omsi.exe asks them all, roads or not)
+                if !heightprofile_ground() {
+                    out.drive.push((shape.clone(), bounds));
+                }
                 let drivable = st.def.paths.iter().any(|pd| pd.kind == 0 || pd.kind == 1);
                 let overlay = !st.def.profiles.is_empty()
                     && st.def.profiles.iter().all(|p| st.def.textures.get(p.texture).is_some_and(|t| t.alpha == 2));
@@ -3916,6 +3939,20 @@ impl World {
                     o.id,
                     &o.rules,
                 );
+                // An object tilted on a slope (the map's pitch and bank) tilts its paths with
+                // it, as the whole object matrix places them in Omsi.exe: laid out by the
+                // heading alone, a junction on a hill had flat lanes through a sloping plate
+                // and its traffic drove into the road on one side and over it on the other.
+                let yaw = omsi_geometry::object_rotation([heading, 0.0, 0.0]);
+                let tilt = xf * yaw.inverse();
+                if !tilt.abs_diff_eq(Mat4::IDENTITY, 1e-5) {
+                    for l in own.iter_mut() {
+                        for q in l.points.iter_mut() {
+                            *q = pos + tilt.transform_point3((*q - pos).as_vec3()).as_dvec3();
+                        }
+                        l.refresh();
+                    }
+                }
                 // a junction plate raised by its height field carries its paths with it
                 if let (Some(field), true) = (ot.deform.as_ref(), res.warped.contains_key(&oi)) {
                     let inv = xf.inverse();
@@ -4864,7 +4901,7 @@ impl World {
                     None if !is_null_texture(&m.texture) => {
                         let rel = night_texture_name(&m.texture);
                         let dirs_ref: Vec<&Path> = dirs.iter().map(|p| p.as_path()).collect();
-                        if omsi_texture::find_texture(&rel, &dirs_ref).is_some() {
+                        if night_texture_exists(&rel, &dirs_ref) {
                             t.auto_night = true;
                             tex_of(gpu, scene, &rel, &mut t)
                         } else {
@@ -4952,6 +4989,12 @@ impl World {
                     .any(|o| !matches!(o.tex_address, omsi_model::TexAddress::Wrap));
                 renderer.clamp_next.set(clamp);
                 renderer.light_map_next.set(ot.sco.light_map_mapping);
+                // OMSI_DEBUG_OBJMAT=<part of the object's file name>: how its slots are made
+                if let Ok(f) = omsi_cfg::env::var("OMSI_DEBUG_OBJMAT") {
+                    if ot.sco.path.to_string_lossy().to_ascii_lowercase().contains(&f.to_ascii_lowercase()) {
+                        log::info!("{} slot {slot} '{}': tex {} alpha {:?} color {:?} emissive {:?} night {} transmap {:?} envmap {:?} auto_night {}", ot.sco.path.display(), m.texture, tex.is_some(), alpha, color, emissive, night.is_some(), transmap.map(|t| t.1), envmap.map(|e| e.1), t.auto_night);
+                    }
+                }
                 let base = renderer.add_material_extra(
                     scene, tex, alpha, color, false, transmap, night, None, envmap, emissive, extra,
                 );
@@ -8306,6 +8349,7 @@ fn material_extra(
         screen: false,
         no_map_lights: false,
         moisture: 0.0,
+        transmap_declared: ov.iter().any(|o| o.transmap.is_some()),
     }
 }
 
@@ -9745,6 +9789,45 @@ impl World {
                 inst
             });
         }
+        // Omsi.exe draws a model mesh after mesh and each material subset in its turn, with
+        // the subset's own blend and depth-write states (0x7c32c4 -> 0x7fd6c4), so a slot
+        // blended by `[matl_alpha] 2` that writes depth hides what the model lists after it.
+        // Where that happens - a blended slot writing depth before an opaque or cut-out one -
+        // the whole vehicle is drawn in that order (see `Instance::ordered`); drawn with its
+        // opaque parts first, a body blended by its alpha showed the interior through it.
+        let slots_in_order = |i: usize| -> Vec<(omsi_render::AlphaMode, bool)> {
+            let Some(inst) = scene.instances.get(i) else { return Vec::new() };
+            let Some(mesh) = scene.meshes.get(inst.mesh) else { return Vec::new() };
+            mesh.ranges
+                .iter()
+                .filter_map(|(_, _, slot)| inst.materials.get(*slot as usize))
+                .filter_map(|&m| scene.materials.get(m))
+                .map(|m| (m.alpha, !m.no_z_write && !m.no_z_check))
+                .collect()
+        };
+        let mut blended_first = false;
+        let mut ordered = false;
+        for &i in &instances {
+            if scene.instances.get(i).is_none_or(|x| x.blob) {
+                continue;
+            }
+            for (alpha, writes) in slots_in_order(i) {
+                match alpha {
+                    omsi_render::AlphaMode::Blend if writes => blended_first = true,
+                    omsi_render::AlphaMode::Blend => {}
+                    _ if blended_first => ordered = true,
+                    _ => {}
+                }
+            }
+        }
+        if ordered && omsi_cfg::env::var_os("OMSI_NO_MODEL_ORDER").is_none() {
+            log::debug!("{}: drawn in model order (a blended slot writes depth before an opaque one)", vt.def.path.display());
+            for &i in &instances {
+                if scene.instances.get(i).is_some_and(|x| !x.blob) {
+                    renderer.set_ordered(scene, i, true);
+                }
+            }
+        }
         // the vehicle is drawn or left out as one object (see `set_object_culling`): its
         // sphere about the vehicle's origin, which every mesh instance shares
         let radius = set
@@ -9964,7 +10047,11 @@ impl World {
                         (hi - lo).max_element() > 0.5
                             && vt.mesh_boxes[..mesh_index].iter().any(|&(l2, h2)| (l2 - lo).abs().max_element() < 0.03 && (h2 - hi).abs().max_element() < 0.03)
                     });
-                    let repair_body_depth = !layer && is_vehicle_body_material(&def.file, &m.texture, tex.is_some(), transmap.is_some(), ov.iter().any(|o| o.no_z_write), body_hint);
+                    // (Retired: a body blended by `[matl_alpha] 2` is drawn as Omsi.exe draws
+                    // it, in model order with its depth written - see `Instance::ordered` -
+                    // instead of being guessed opaque, which drew overlay layers black, #127.
+                    // `OMSI_REPAIR_BODY_DEPTH=1` brings the old guess back for comparison.)
+                    let repair_body_depth = omsi_cfg::env::var_os("OMSI_REPAIR_BODY_DEPTH").is_some() && !layer && is_vehicle_body_material(&def.file, &m.texture, tex.is_some(), transmap.is_some(), ov.iter().any(|o| o.no_z_write), body_hint);
                     // (only a blended slot: an alpha-tested one - `[matl_alpha] 1`, the EN92's
                     // pictograms, a Sprinter's seat covers - is cut out as the model says, and
                     // made opaque its cut-out parts were grey boxes; and not a layer made of
@@ -10856,6 +10943,21 @@ fn field_height(m: &MeshData, x: f32, y: f32) -> Option<f32> {
 
 
 /// The name of a texture's night copy: the same file in a `night` folder beside it.
+/// Whether an object's texture has its night copy (see [`night_texture_name`]). A texture
+/// named by its full path - a parked car's paint, resolved in its scheme's folder - has it
+/// there or not at all: the texture lookup takes such a path for one of its author's
+/// machine and falls back to the bare file name, which found the day picture itself, and
+/// every parked car of a paint scheme was lit by its own paint at night, glowing in the
+/// dark street.
+fn night_texture_exists(rel: &str, dirs: &[&Path]) -> bool {
+    // (`night_texture_name` writes backslashes: "\\Users\\...", "C:\\...")
+    let norm = rel.trim().replace('\\', "/");
+    if norm.starts_with('/') || norm.as_bytes().get(1) == Some(&b':') {
+        return omsi_cfg::vfs::is_file(Path::new(&norm));
+    }
+    omsi_texture::find_texture(rel, dirs).is_some()
+}
+
 fn night_texture_name(texture: &str) -> String {
     let name = texture.trim().replace('/', "\\");
     match name.rsplit_once('\\') {
