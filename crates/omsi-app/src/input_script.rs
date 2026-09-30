@@ -2060,6 +2060,8 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
             "view_reset_all_directions" => {
                 self.look = (0.0, 0.0);
                 self.view_looks.clear();
+                self.view_zoom.clear();
+                self.orbit = ORBIT_DEFAULT;
             }
             "view_toggle_viewpoint" | "view_interiorcam_plus" | "view_interiorcam_minus" => {
                 let Some(p) = self.player.as_mut() else { return true };
