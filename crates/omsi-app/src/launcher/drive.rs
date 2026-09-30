@@ -23,6 +23,13 @@ pub struct DriveView {
     bus_items: std::sync::Arc<Vec<BusItem>>,
     bus_items_key: (String, usize, usize, usize),
     pub line_filter: String,
+    /// Lines without `[userallowed]` are hidden by default, like OMSI's timetable dialog,
+    /// but can still be inspected when a map author needs to test an AI duty.
+    pub show_ai_lines: bool,
+    /// What the line list was last brought into view for. Map/date/filter are part of the
+    /// key because a remembered line can otherwise be left several screens out of sight
+    /// after the timetable is reloaded.
+    line_scroll_key: Option<(String, String, String, String, bool)>,
     /// The list was scrolled to the chosen bus (once, when the lists came).
     pub scrolled_to_bus: bool,
 }
@@ -248,35 +255,88 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
         l.ui.paragraph("Free driving: the bus starts where you chose, with the traffic and the timetable's buses around it, but no line of your own.", Vec2::new(r.x, y), r.w, 13.0, Weight::Regular, TEXT_DIM);
         return;
     }
-    // lines and tours side by side
-    let half = (r.w - 12.0) * 0.5;
-    let left = Rect::new(r.x, y, half, r.bottom() - y);
-    let right = Rect::new(r.x + half + 12.0, y, half, r.bottom() - y);
+    // A narrow launcher used to squeeze both lists into columns barely 190 px wide. Stack
+    // them when there is enough height: line names, termini and tour times stay readable on
+    // small windows, while a desktop still gets the quicker side-by-side view.
+    let remaining = (r.bottom() - y).max(0.0);
+    let stacked = r.w < 500.0 && remaining >= 380.0;
+    let (left, right) = if stacked {
+        let line_h = (remaining * 0.48).clamp(180.0, remaining - 190.0);
+        (Rect::new(r.x, y, r.w, line_h), Rect::new(r.x, y + line_h + 12.0, r.w, remaining - line_h - 12.0))
+    } else {
+        let half = (r.w - 12.0) * 0.5;
+        (Rect::new(r.x, y, half, remaining), Rect::new(r.x + half + 12.0, y, half, remaining))
+    };
     l.ui.heading(Rect::new(left.x, left.y, left.w, 28.0), "Line", None);
     l.ui.text_input("line-filter", Rect::new(left.x, left.y + 30.0, left.w, 34.0), &mut l.drive.line_filter, "Filter…", Some("search"));
-    let q = l.drive.line_filter.to_lowercase();
-    let lines: Vec<(String, String, usize)> = l.state.lines.iter().filter(|x| q.is_empty() || x.name.to_lowercase().contains(&q)).map(|x| (x.name.clone(), x.termini.join(" · "), x.tours.len())).collect();
     let chosen = l.state.choice.line.clone();
+    let mut show_ai = l.drive.show_ai_lines;
+    if l.ui.toggle("show-ai-lines", Rect::new(left.x, left.y + 66.0, left.w, 28.0), &mut show_ai, "Include AI-only lines") {
+        l.drive.show_ai_lines = show_ai;
+        l.drive.line_scroll_key = None;
+    }
+    let q = l.drive.line_filter.trim().to_lowercase();
+    let has_player_lines = l.state.lines.iter().any(|x| x.user_allowed);
+    let mut lines: Vec<(String, String, usize, usize, bool)> = l
+        .state
+        .lines
+        .iter()
+        // Keep an already selected AI line visible even after the toggle is turned off: a
+        // saved duty must not appear to vanish while it is still the active choice.
+        .filter(|x| x.user_allowed || show_ai || chosen.as_deref() == Some(x.name.as_str()))
+        .filter(|x| line_matches(x, &q))
+        .map(|x| {
+            let today = x.tours.iter().filter(|t| t.runs).count();
+            (x.name.clone(), x.termini.join(" · "), x.tours.len(), today, x.user_allowed)
+        })
+        .collect();
+    // Player-selectable lines are what most people came for; AI-only lines stay available
+    // below them when requested without disturbing the timetable's natural-number order.
+    lines.sort_by_key(|x| !x.4);
     let mut pick_line = None;
     let loading = l.state.loading_lines;
-    l.ui.scroll_area("line-list", Rect::new(left.x - 4.0, left.y + 72.0, left.w + 8.0, left.h - 72.0), &mut |ui, v| {
+    let line_area = Rect::new(left.x - 4.0, left.y + 98.0, left.w + 8.0, (left.h - 98.0).max(40.0));
+    let scroll_key = (l.state.lines_for.0.clone(), l.state.lines_for.1.clone(), chosen.clone().unwrap_or_default(), q.clone(), show_ai);
+    if l.drive.line_scroll_key.as_ref() != Some(&scroll_key) {
+        if let Some(k) = chosen.as_ref().and_then(|n| lines.iter().position(|x| &x.0 == n)) {
+            l.ui.scroll_to("line-list", k as f32 * 48.0, 48.0 * 2.0, line_area.h);
+        }
+        l.drive.line_scroll_key = Some(scroll_key);
+    }
+    l.ui.scroll_area("line-list", line_area, &mut |ui, v| {
         let rh = 48.0;
         if lines.is_empty() {
-            ui.text_in(if loading { "Reading the timetable…" } else { "No lines on this date." }, Rect::new(v.x + 10.0, v.y, v.w, 36.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
+            let empty = if loading {
+                "Reading the timetable…"
+            } else if !q.is_empty() {
+                "No lines match the filter."
+            } else if !show_ai && !has_player_lines && !l.state.lines.is_empty() {
+                "No player lines on this date. Enable AI-only lines to see the rest."
+            } else {
+                "No lines on this date."
+            };
+            ui.text_in(empty, Rect::new(v.x + 10.0, v.y, v.w - 20.0, 52.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
         }
-        for (k, (name, termini, tours)) in lines.iter().enumerate() {
+        for (k, (name, termini, tours, today, user_allowed)) in lines.iter().enumerate() {
             let rr = Rect::new(v.x + 4.0, v.y + k as f32 * rh, v.w - 12.0, rh - 4.0);
+            if rr.bottom() < line_area.y - rh || rr.y > line_area.bottom() + rh {
+                continue;
+            }
             let on = chosen.as_deref() == Some(name.as_str());
             if ui.row(&format!("line-{name}"), rr, on) {
                 pick_line = Some(name.clone());
             }
             // (a long line name, as Ahlheim's "Eichenhoehe TA11 Mo-Do Schule", is cut)
-            let count = format!("{tours}");
+            let count = if today == tours { format!("{tours}") } else { format!("{today}/{tours}") };
             let cw = ui.width(&count, 11.5, Weight::Bold) + 8.0;
-            let bw = (ui.width(name, 13.0, Weight::Black) + 14.0).clamp(34.0, (rr.w - cw - 24.0).max(34.0));
+            let ai_w = if *user_allowed { 0.0 } else { 42.0 };
+            let bw = (ui.width(name, 13.0, Weight::Black) + 14.0).clamp(34.0, (rr.w - cw - ai_w - 24.0).max(34.0));
             let badge = Rect::new(rr.x + 8.0, rr.y + 8.0, bw, 22.0);
             ui.p().rounded(badge, 4.0, Color::rgba(52, 52, 52, 1.0));
             ui.text_in(name, badge.pad(6.0, 0.0), 12.5, Weight::Bold, TEXT, Align::Center);
+            if !*user_allowed {
+                ui.badge(Vec2::new(badge.right() + 4.0, rr.y + 10.0), "AI", WARN);
+            }
             ui.icon("event", Vec2::new(rr.right() - cw - 8.0, rr.y + 19.0), 13.0, TEXT_FAINT);
             ui.text_in(&count, Rect::new(rr.right() - cw, rr.y + 8.0, cw - 4.0, 22.0), 11.5, Weight::Bold, TEXT_DIM, Align::Right);
             ui.text_in(termini, Rect::new(rr.x + 8.0, rr.y + 28.0, rr.w - 16.0, 16.0), 11.0, Weight::Regular, TEXT_FAINT, Align::Left);
@@ -342,6 +402,51 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
 fn natural(s: &str) -> (u64, String) {
     let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
     (digits.parse().unwrap_or(u64::MAX), s.to_string())
+}
+
+/// The launcher used to search only the line's `.ttl` name. A destination or a tour number
+/// is often what a driver actually remembers, especially on maps whose file names are not
+/// their public line numbers.
+fn line_matches(line: &omsi_launcher_lib::LineInfo, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || line.name.to_lowercase().contains(&query)
+        || line.termini.iter().any(|x| x.to_lowercase().contains(&query))
+        || line.tours.iter().any(|x| x.number.to_lowercase().contains(&query))
+}
+
+#[cfg(test)]
+mod line_selector_tests {
+    use super::line_matches;
+    use omsi_launcher_lib::{LineInfo, TourInfo};
+
+    fn line() -> LineInfo {
+        LineInfo {
+            name: "42E".into(),
+            user_allowed: true,
+            termini: vec!["Central Station".into(), "Airport".into()],
+            tours: vec![TourInfo {
+                number: "School 7".into(),
+                ai_group: String::new(),
+                first: 0.0,
+                last: 0.0,
+                days: "Mon-Fri".into(),
+                runs: true,
+                next_run: None,
+                trips: Vec::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn line_filter_finds_name_destination_and_tour() {
+        let line = line();
+        assert!(line_matches(&line, "42e"));
+        assert!(line_matches(&line, " CENTRAL "));
+        assert!(line_matches(&line, "airport"));
+        assert!(line_matches(&line, "school 7"));
+        assert!(!line_matches(&line, "harbour"));
+    }
 }
 
 /// The name of the server the Drive page is joined to (see the Multiplayer page).
