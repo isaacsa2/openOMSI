@@ -518,6 +518,7 @@ impl Player {
     /// (#226). Scripts that read `AutoClutch` (the Sprinters' G32) work it themselves.
     pub(crate) fn clutch_for_gate(&mut self, name: &str) {
         let Some(gate) = name.get(..5).filter(|p| p.eq_ignore_ascii_case("kw_s_")).map(|_| &name[5..]) else { return };
+        let gate = gate.strip_suffix("_fest").unwrap_or(gate);
         let is_gate = gate.eq_ignore_ascii_case("r") || gate.eq_ignore_ascii_case("n") || gate.parse::<u32>().is_ok();
         let program = &self.vehicle.ty.program;
         if !is_gate || self.vehicle.host.auto_clutch < 0.5 || program.trigger(name).is_none() || program.reads_sys(omsi_script::SysVar::AutoClutch) {
@@ -978,7 +979,8 @@ impl Player {
     /// from a stop stalled the engine unless a clutch pedal was worked.
     pub(crate) fn auto_clutch_bite(&mut self, throttle: f32) {
         let program = &self.vehicle.ty.program;
-        if self.vehicle.host.auto_clutch < 0.5 || program.trigger("kw_s_1").is_none() || program.reads_sys(omsi_script::SysVar::AutoClutch) {
+        let has_manual_gate = program.trigger("kw_s_1").is_some() || program.trigger("kw_s_1_fest").is_some();
+        if self.vehicle.host.auto_clutch < 0.5 || !has_manual_gate || program.reads_sys(omsi_script::SysVar::AutoClutch) {
             return;
         }
         let gear = self.vehicle.var("antrieb_getr_aktugang").or_else(|| self.vehicle.var("antrieb_getr_gang")).unwrap_or(0.0);
