@@ -195,7 +195,7 @@ pub fn run() -> Result<()> {
 /// The showroom is drawn the way the game will be.
 pub(crate) fn launcher_statics() {
     let s = settings::Settings::load();
-    ENHANCED.store(s.enhanced || omsi_cfg::env::var_os("OMSI_ENHANCED").is_some(), std::sync::atomic::Ordering::Relaxed);
+    ENHANCED.store(!cfg!(target_os = "android") && (s.enhanced || omsi_cfg::env::var_os("OMSI_ENHANCED").is_some()), std::sync::atomic::Ordering::Relaxed);
     CLASSIC.store(s.classic(), std::sync::atomic::Ordering::Relaxed);
     CLOUDS.store(s.clouds && omsi_cfg::env::var_os("OMSI_NO_CLOUDS").is_none(), std::sync::atomic::Ordering::Relaxed);
 }
