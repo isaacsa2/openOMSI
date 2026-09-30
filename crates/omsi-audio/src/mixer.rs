@@ -40,6 +40,9 @@ pub struct VoiceParams {
     /// bodywork from the cabin loses its edge, not just some volume (a straight gain cut
     /// still reads as "the same sound, turned down" rather than "coming from outside").
     pub lowpass_hz: f32,
+    /// OMSI's `[important]`: keep this sound ahead of ordinary voices when the
+    /// `[sound_maxcount]`-style mixer limit is reached.
+    pub important: bool,
 }
 
 impl Default for VoiceParams {
@@ -52,6 +55,7 @@ impl Default for VoiceParams {
             doppler: true,
             range: 5.0,
             lowpass_hz: 0.0,
+            important: false,
         }
     }
 }
@@ -142,21 +146,26 @@ impl Shared {
         let frames = out.len() / ch;
         let rate = self.sample_rate.load(Ordering::Relaxed).max(1);
         let dev_rate = rate as f64;
-        // More voices than OMSI's `[sound_maxcount]` (200 by default): the quietest are not
-        // mixed this block but keep their place in time (a crowd of AI engines and scenery
-        // loops used to be mixed in full however many there were).
-        let quiet_below = if voices.len() > MAX_VOICES {
-            let mut loud: Vec<f32> = voices.iter().map(|v| heard_gain(v, &listener)).collect();
-            loud.sort_by(|a, b| b.total_cmp(a));
-            loud[MAX_VOICES - 1]
+        // More voices than OMSI's `[sound_maxcount]` (200 by default): keep
+        // `[important]` sounds first, then the ordinary voices that reach the listener
+        // loudest. Voices left out still advance in time, so an engine loop comes back at
+        // the right phase when it becomes audible again.
+        let mixed: Option<std::collections::HashSet<VoiceId>> = if voices.iter().filter(|v| !v.finished && v.stream.is_none()).count() > MAX_VOICES {
+            let mut ranked: Vec<(bool, f32, VoiceId)> = voices
+                .iter()
+                .filter(|v| !v.finished && v.stream.is_none())
+                .map(|v| (v.params.important, heard_gain(v, &listener), v.id))
+                .collect();
+            ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.total_cmp(&a.1)));
+            Some(ranked.into_iter().take(MAX_VOICES).map(|(_, _, id)| id).collect())
         } else {
-            f32::NEG_INFINITY
+            None
         };
         for v in voices.iter_mut() {
             if v.finished {
                 continue;
             }
-            if v.stream.is_none() && heard_gain(v, &listener) < quiet_below {
+            if v.stream.is_none() && mixed.as_ref().is_some_and(|keep| !keep.contains(&v.id)) {
                 skip_clip(v, frames, dev_rate);
                 continue;
             }
@@ -724,7 +733,7 @@ mod tests {
             id: 1,
             clip,
             stream: None,
-            params: VoiceParams { gain, pitch: 1.0, looping: true, position: None, doppler: true, range: 10.0, lowpass_hz: 0.0 },
+            params: VoiceParams { gain, pitch: 1.0, looping: true, position: None, doppler: true, range: 10.0, lowpass_hz: 0.0, important: false },
             pos: 0.0,
             finished: false,
             cur_gain: gain,
@@ -787,6 +796,28 @@ mod tests {
         assert!(e.stream.borrow().is_some());
         assert_eq!(*e.device.borrow(), before);
         assert!(!e.reopen.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn important_voices_win_the_mixer_limit() {
+        let clip = Arc::new(Clip { sample_rate: 48_000, channels: 1, samples: vec![64; 100] });
+        let s = shared();
+        for k in 0..MAX_VOICES {
+            s.voices.lock().push(voice(clip.clone(), 1.0));
+        }
+        let mut quiet_important = voice(clip, 0.001);
+        quiet_important.id = 9_999;
+        quiet_important.params.important = true;
+        s.voices.lock().push(quiet_important);
+        let mut out = vec![0.0f32; 16];
+        s.render(&mut out);
+        let voices = s.voices.lock();
+        let kept_ordinary = voices
+            .iter()
+            .filter(|v| v.id != 9_999 && v.pos > 0.0)
+            .count();
+        assert_eq!(kept_ordinary, MAX_VOICES - 1);
+        assert!(voices.iter().find(|v| v.id == 9_999).is_some_and(|v| v.pos > 0.0));
     }
 
     #[test]
