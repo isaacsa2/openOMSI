@@ -513,7 +513,7 @@ fn settings_columns(ui: &mut Ui, s: &mut Value, dirty: &mut f32, body: Rect, upd
     sel_setting(ui, s, dirty, "s-fps", row(&mut y), "Frame limit", "max_fps", &[("0", "Screen refresh rate"), ("30", "30 fps"), ("45", "45 fps"), ("60", "60 fps"), ("120", "120 fps"), ("144", "144 fps"), ("1000", "Unlimited")]);
     sel_setting(ui, s, dirty, "s-minobj", row(&mut y), "Small objects", "min_obj_size", &[("0.005", "All"), ("0.013", "Normal"), ("0.02", "Fewer (faster)"), ("0.03", "Few (fastest)")]);
     sel_setting(ui, s, dirty, "s-maxobj", row(&mut y), "Object distance", "max_obj_dist", &[("auto", "Automatic"), ("500", "500 m"), ("750", "750 m"), ("900", "900 m"), ("1500", "1500 m"), ("3000", "3000 m")]);
-    sel_setting(ui, s, dirty, "s-mirror", row(&mut y), "Mirrors", "mirror_size", &[("128", "Low (128)"), ("256", "Normal (256)"), ("512", "High (512)"), ("1024", "Very high (1024)")]);
+    sel_setting(ui, s, dirty, "s-mirror", row(&mut y), "Mirrors", "mirror_size", &[("0", "Off"), ("128", "Low (128)"), ("256", "Normal (256)"), ("512", "High (512)"), ("1024", "Very high (1024)")]);
     if cfg!(windows) {
         y += 6.0;
         ui.heading(Rect::new(inner.x, y, inner.w, 28.0), "Virtual reality", Some("view_in_ar"));
