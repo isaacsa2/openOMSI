@@ -1976,7 +1976,486 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if !mirrored {
+                        if cfg!(target_os = "android") {
+                            // Motorola GPU stage diagnostic. The previous tests proved that
+                            // clear + present and a minimal WGSL triangle work. Exercise the
+                            // next renderer building blocks independently in one frame:
+                            // blue=vertex buffer, yellow=uniform bind group,
+                            // cyan=sampled texture, bottom square green=depth test works
+                            // (red means the farther draw incorrectly overwrote the nearer one).
+                            let shader = r.device.create_shader_module(
+                                wgpu::ShaderModuleDescriptor {
+                                    label: Some("android gpu stages"),
+                                    source: wgpu::ShaderSource::Wgsl(
+                                        r#"
+struct VOut {
+    @builtin(position) pos: vec4<f32>,
+};
+
+@vertex
+fn vs_buf(@location(0) p: vec2<f32>) -> VOut {
+    var o: VOut;
+    o.pos = vec4<f32>(p, 0.0, 1.0);
+    return o;
+}
+
+@fragment
+fn fs_blue() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.05, 0.25, 1.0, 1.0);
+}
+
+struct UColor {
+    value: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> ucolor: UColor;
+
+@fragment
+fn fs_uniform() -> @location(0) vec4<f32> {
+    return ucolor.value;
+}
+
+struct TOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_tex(@builtin(vertex_index) i: u32) -> TOut {
+    var p = array<vec2<f32>, 6>(
+        vec2<f32>(0.28, 0.65), vec2<f32>(0.88, 0.65), vec2<f32>(0.28, 0.10),
+        vec2<f32>(0.28, 0.10), vec2<f32>(0.88, 0.65), vec2<f32>(0.88, 0.10)
+    );
+    var uv = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
+        vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
+    );
+    var o: TOut;
+    o.pos = vec4<f32>(p[i], 0.0, 1.0);
+    o.uv = uv[i];
+    return o;
+}
+
+@group(0) @binding(0) var smoke_tex: texture_2d<f32>;
+@group(0) @binding(1) var smoke_sampler: sampler;
+
+@fragment
+fn fs_tex(i: TOut) -> @location(0) vec4<f32> {
+    return textureSample(smoke_tex, smoke_sampler, i.uv);
+}
+
+struct DOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) col: vec4<f32>,
+};
+
+@vertex
+fn vs_depth(
+    @builtin(vertex_index) i: u32,
+    @builtin(instance_index) inst: u32
+) -> DOut {
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-0.30, -0.18),
+        vec2<f32>( 0.30, -0.18),
+        vec2<f32>( 0.00, -0.82)
+    );
+    var o: DOut;
+    // Instance 0 is near and green; instance 1 is far and red.
+    // Near is drawn first. With a functioning LessEqual depth buffer,
+    // the later far/red triangle must be rejected.
+    let near_draw = inst == 0u;
+    let z = select(0.80, 0.20, near_draw);
+    o.pos = vec4<f32>(p[i], z, 1.0);
+    o.col = select(
+        vec4<f32>(1.0, 0.05, 0.05, 1.0),
+        vec4<f32>(0.05, 1.0, 0.18, 1.0),
+        near_draw
+    );
+    return o;
+}
+
+@fragment
+fn fs_depth(i: DOut) -> @location(0) vec4<f32> {
+    return i.col;
+}
+"#.into(),
+                                    ),
+                                },
+                            );
+
+                            let target = Some(wgpu::ColorTargetState {
+                                format: s.config.format,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            });
+
+                            let attrs = [wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 0,
+                                shader_location: 0,
+                            }];
+                            let vertex_layout = wgpu::VertexBufferLayout {
+                                array_stride: 8,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: &attrs,
+                            };
+
+                            let plain_layout = r.device.create_pipeline_layout(
+                                &wgpu::PipelineLayoutDescriptor {
+                                    label: Some("android buffer smoke"),
+                                    bind_group_layouts: &[],
+                                    immediate_size: 0,
+                                },
+                            );
+                            let blue_pipeline = r.device.create_render_pipeline(
+                                &wgpu::RenderPipelineDescriptor {
+                                    label: Some("android vertex buffer smoke"),
+                                    layout: Some(&plain_layout),
+                                    vertex: wgpu::VertexState {
+                                        module: &shader,
+                                        entry_point: Some("vs_buf"),
+                                        buffers: &[vertex_layout.clone()],
+                                        compilation_options: Default::default(),
+                                    },
+                                    primitive: Default::default(),
+                                    depth_stencil: None,
+                                    multisample: Default::default(),
+                                    fragment: Some(wgpu::FragmentState {
+                                        module: &shader,
+                                        entry_point: Some("fs_blue"),
+                                        targets: &[target.clone()],
+                                        compilation_options: Default::default(),
+                                    }),
+                                    multiview_mask: None,
+                                    cache: None,
+                                },
+                            );
+
+                            let uniform_layout = r.device.create_bind_group_layout(
+                                &wgpu::BindGroupLayoutDescriptor {
+                                    label: Some("android uniform smoke"),
+                                    entries: &[wgpu::BindGroupLayoutEntry {
+                                        binding: 0,
+                                        visibility: wgpu::ShaderStages::FRAGMENT,
+                                        ty: wgpu::BindingType::Buffer {
+                                            ty: wgpu::BufferBindingType::Uniform,
+                                            has_dynamic_offset: false,
+                                            min_binding_size: None,
+                                        },
+                                        count: None,
+                                    }],
+                                },
+                            );
+                            let uniform_pipeline_layout = r.device.create_pipeline_layout(
+                                &wgpu::PipelineLayoutDescriptor {
+                                    label: Some("android uniform smoke"),
+                                    bind_group_layouts: &[Some(&uniform_layout)],
+                                    immediate_size: 0,
+                                },
+                            );
+                            let uniform_pipeline = r.device.create_render_pipeline(
+                                &wgpu::RenderPipelineDescriptor {
+                                    label: Some("android uniform smoke"),
+                                    layout: Some(&uniform_pipeline_layout),
+                                    vertex: wgpu::VertexState {
+                                        module: &shader,
+                                        entry_point: Some("vs_buf"),
+                                        buffers: &[vertex_layout.clone()],
+                                        compilation_options: Default::default(),
+                                    },
+                                    primitive: Default::default(),
+                                    depth_stencil: None,
+                                    multisample: Default::default(),
+                                    fragment: Some(wgpu::FragmentState {
+                                        module: &shader,
+                                        entry_point: Some("fs_uniform"),
+                                        targets: &[target.clone()],
+                                        compilation_options: Default::default(),
+                                    }),
+                                    multiview_mask: None,
+                                    cache: None,
+                                },
+                            );
+
+                            let tex_layout = r.device.create_bind_group_layout(
+                                &wgpu::BindGroupLayoutDescriptor {
+                                    label: Some("android texture smoke"),
+                                    entries: &[
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 0,
+                                            visibility: wgpu::ShaderStages::FRAGMENT,
+                                            ty: wgpu::BindingType::Texture {
+                                                sample_type: wgpu::TextureSampleType::Float {
+                                                    filterable: true,
+                                                },
+                                                view_dimension: wgpu::TextureViewDimension::D2,
+                                                multisampled: false,
+                                            },
+                                            count: None,
+                                        },
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 1,
+                                            visibility: wgpu::ShaderStages::FRAGMENT,
+                                            ty: wgpu::BindingType::Sampler(
+                                                wgpu::SamplerBindingType::Filtering,
+                                            ),
+                                            count: None,
+                                        },
+                                    ],
+                                },
+                            );
+                            let tex_pipeline_layout = r.device.create_pipeline_layout(
+                                &wgpu::PipelineLayoutDescriptor {
+                                    label: Some("android texture smoke"),
+                                    bind_group_layouts: &[Some(&tex_layout)],
+                                    immediate_size: 0,
+                                },
+                            );
+                            let tex_pipeline = r.device.create_render_pipeline(
+                                &wgpu::RenderPipelineDescriptor {
+                                    label: Some("android texture smoke"),
+                                    layout: Some(&tex_pipeline_layout),
+                                    vertex: wgpu::VertexState {
+                                        module: &shader,
+                                        entry_point: Some("vs_tex"),
+                                        buffers: &[],
+                                        compilation_options: Default::default(),
+                                    },
+                                    primitive: Default::default(),
+                                    depth_stencil: None,
+                                    multisample: Default::default(),
+                                    fragment: Some(wgpu::FragmentState {
+                                        module: &shader,
+                                        entry_point: Some("fs_tex"),
+                                        targets: &[target.clone()],
+                                        compilation_options: Default::default(),
+                                    }),
+                                    multiview_mask: None,
+                                    cache: None,
+                                },
+                            );
+
+                            let depth_pipeline = r.device.create_render_pipeline(
+                                &wgpu::RenderPipelineDescriptor {
+                                    label: Some("android depth smoke"),
+                                    layout: Some(&plain_layout),
+                                    vertex: wgpu::VertexState {
+                                        module: &shader,
+                                        entry_point: Some("vs_depth"),
+                                        buffers: &[],
+                                        compilation_options: Default::default(),
+                                    },
+                                    primitive: Default::default(),
+                                    depth_stencil: Some(wgpu::DepthStencilState {
+                                        format: wgpu::TextureFormat::Depth24Plus,
+                                        depth_write_enabled: Some(true),
+                                        depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                                        stencil: Default::default(),
+                                        bias: Default::default(),
+                                    }),
+                                    multisample: Default::default(),
+                                    fragment: Some(wgpu::FragmentState {
+                                        module: &shader,
+                                        entry_point: Some("fs_depth"),
+                                        targets: &[target],
+                                        compilation_options: Default::default(),
+                                    }),
+                                    multiview_mask: None,
+                                    cache: None,
+                                },
+                            );
+
+                            let to_bytes = |v: &[f32]| {
+                                let mut out = Vec::with_capacity(v.len() * 4);
+                                for x in v {
+                                    out.extend_from_slice(&x.to_ne_bytes());
+                                }
+                                out
+                            };
+                            let left = to_bytes(&[
+                                -0.90, 0.65, -0.35, 0.65, -0.625, 0.10,
+                            ]);
+                            let center = to_bytes(&[
+                                -0.25, 0.65, 0.25, 0.65, 0.00, 0.10,
+                            ]);
+                            let left_buf = r.device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("android vertex buffer smoke"),
+                                size: left.len() as u64,
+                                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                                mapped_at_creation: false,
+                            });
+                            r.queue.write_buffer(&left_buf, 0, &left);
+                            let center_buf = r.device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("android uniform vertices"),
+                                size: center.len() as u64,
+                                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                                mapped_at_creation: false,
+                            });
+                            r.queue.write_buffer(&center_buf, 0, &center);
+
+                            let yellow = to_bytes(&[1.0, 0.90, 0.05, 1.0]);
+                            let uniform_buf = r.device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("android uniform smoke"),
+                                size: 16,
+                                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                                mapped_at_creation: false,
+                            });
+                            r.queue.write_buffer(&uniform_buf, 0, &yellow);
+                            let uniform_bg = r.device.create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some("android uniform smoke"),
+                                    layout: &uniform_layout,
+                                    entries: &[wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: uniform_buf.as_entire_binding(),
+                                    }],
+                                },
+                            );
+
+                            let tex = r.device.create_texture(&wgpu::TextureDescriptor {
+                                label: Some("android texture smoke"),
+                                size: wgpu::Extent3d {
+                                    width: 1,
+                                    height: 1,
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                    | wgpu::TextureUsages::COPY_DST,
+                                view_formats: &[],
+                            });
+                            r.queue.write_texture(
+                                tex.as_image_copy(),
+                                &[0, 255, 255, 255],
+                                wgpu::TexelCopyBufferLayout {
+                                    offset: 0,
+                                    bytes_per_row: Some(4),
+                                    rows_per_image: Some(1),
+                                },
+                                wgpu::Extent3d {
+                                    width: 1,
+                                    height: 1,
+                                    depth_or_array_layers: 1,
+                                },
+                            );
+                            let tex_view = tex.create_view(&Default::default());
+                            let sampler = r.device.create_sampler(&wgpu::SamplerDescriptor {
+                                mag_filter: wgpu::FilterMode::Linear,
+                                min_filter: wgpu::FilterMode::Linear,
+                                ..Default::default()
+                            });
+                            let tex_bg = r.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("android texture smoke"),
+                                layout: &tex_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(&tex_view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Sampler(&sampler),
+                                    },
+                                ],
+                            });
+
+                            let depth = r.device.create_texture(&wgpu::TextureDescriptor {
+                                label: Some("android depth smoke"),
+                                size: wgpu::Extent3d {
+                                    width: s.config.width.max(1),
+                                    height: s.config.height.max(1),
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Depth24Plus,
+                                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                                view_formats: &[],
+                            });
+                            let depth_view = depth.create_view(&Default::default());
+
+                            let mut encoder = r.device.create_command_encoder(
+                                &wgpu::CommandEncoderDescriptor {
+                                    label: Some("android gpu stages"),
+                                },
+                            );
+                            {
+                                let mut pass = encoder.begin_render_pass(
+                                    &wgpu::RenderPassDescriptor {
+                                        label: Some("android gpu stages color"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &view,
+                                                depth_slice: None,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                                        r: 1.0,
+                                                        g: 0.0,
+                                                        b: 1.0,
+                                                        a: 1.0,
+                                                    }),
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: None,
+                                        timestamp_writes: None,
+                                        occlusion_query_set: None,
+                                        multiview_mask: None,
+                                    },
+                                );
+                                pass.set_pipeline(&blue_pipeline);
+                                pass.set_vertex_buffer(0, left_buf.slice(..));
+                                pass.draw(0..3, 0..1);
+
+                                pass.set_pipeline(&uniform_pipeline);
+                                pass.set_bind_group(0, &uniform_bg, &[]);
+                                pass.set_vertex_buffer(0, center_buf.slice(..));
+                                pass.draw(0..3, 0..1);
+
+                                pass.set_pipeline(&tex_pipeline);
+                                pass.set_bind_group(0, &tex_bg, &[]);
+                                pass.draw(0..6, 0..1);
+                            }
+                            {
+                                let mut pass = encoder.begin_render_pass(
+                                    &wgpu::RenderPassDescriptor {
+                                        label: Some("android gpu stages depth"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &view,
+                                                depth_slice: None,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Load,
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: Some(
+                                            wgpu::RenderPassDepthStencilAttachment {
+                                                view: &depth_view,
+                                                depth_ops: Some(wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(1.0),
+                                                    store: wgpu::StoreOp::Store,
+                                                }),
+                                                stencil_ops: None,
+                                            },
+                                        ),
+                                        timestamp_writes: None,
+                                        occlusion_query_set: None,
+                                        multiview_mask: None,
+                                    },
+                                );
+                                pass.set_pipeline(&depth_pipeline);
+                                pass.draw(0..3, 0..2);
+                            }
+                            r.queue.submit([encoder.finish()]);
+                        } else if !mirrored {
                             r.render(
                                 scene,
                                 &view,
@@ -1986,8 +2465,10 @@ impl ApplicationHandler for App {
                                 &lighting,
                             );
                         }
-                        // the on-screen controls over the picture (a phone)
-                        self.touch.render(r, &view, s.config.width, s.config.height);
+                        if !cfg!(target_os = "android") {
+                            // the on-screen controls over the picture (a phone)
+                            self.touch.render(r, &view, s.config.width, s.config.height);
+                        }
                         *self.profile.entry("render").or_default() += __t.elapsed().as_secs_f64();
                         if omsi_cfg::env::var_os("OMSI_PROFILE_GPU").is_some() {
                             // wait for the GPU here, so that its time shows as a stage of its own
