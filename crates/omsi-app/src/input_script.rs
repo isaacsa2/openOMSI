@@ -2,6 +2,34 @@
 
 use super::*;
 
+/// Actions from OMSI's `[game]` key list which openOMSI handles outside a vehicle script.
+/// Controller buttons use the same action names as `keyboard.cfg`, so they must take this
+/// path too instead of being mistaken for bus triggers.
+pub(crate) fn is_game_action(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "sim_pause"
+            | "screenshot"
+            | "quicksave"
+            | "view_set_ego"
+            | "view_set_driver"
+            | "view_set_passenger"
+            | "view_set_outside"
+            | "view_set_map"
+            | "view_set_schedule"
+            | "view_set_ticketselling"
+            | "view_toggle_informationdisplay"
+            | "view_reset_direction"
+            | "view_reset_all_directions"
+            | "view_toggle_viewpoint"
+            | "view_interiorcam_plus"
+            | "view_interiorcam_minus"
+            | "toggel_mouse_ctrl"
+            | "toggel_ctrler"
+    )
+}
+
+
 /// How far (m) a click reaches a page (`[htmltexture]`) on a scenery object.
 const HTML_OBJECT_REACH: f32 = 4.0;
 
