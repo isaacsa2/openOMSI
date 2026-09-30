@@ -85,6 +85,7 @@ mod startup;
 mod traffic_link;
 mod tutorial;
 mod weather_setup;
+mod weather_cycle;
 mod world_load;
 
 // the interface's translations (locales/app.yml; the English text is the key)
@@ -305,6 +306,16 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         args.situation = Some(tutorial::SITUATIONS[n - 1].to_string());
     }
     apply_situation(&mut args)?;
+    // `openomsi`: the official server, wherever its tunnel is today (see omsi_net::official)
+    if let Some(t) = args.lan_join.clone().filter(|t| omsi_net::official::is_alias(t)) {
+        match omsi_net::official::resolve_target(&t) {
+            Ok(url) => {
+                log::info!("LAN: the official server is at {url}");
+                args.lan_join = Some(url);
+            }
+            Err(e) => log::error!("LAN: {e}"),
+        }
+    }
     // a duty starts at its trip, as in OMSI (not at the map's entry point); a joining
     // player's once the host's world is known (below): it was never placed at all, and
     // "Automatic" put it at the map's first entry point, the depot
@@ -506,6 +517,8 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         plugins: None,
         career: Default::default(),
         wetness: 0.0,
+        weather_blend: None,
+        weather_cycle: None,
         cursor_kind: 0,
         settings,
         lan: None,

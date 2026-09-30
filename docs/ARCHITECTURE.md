@@ -221,7 +221,8 @@ budget.
    everything blended behind it), glass reflections weighted by the viewing angle, WASD
    driving with shift for the three vehicle keys it covers, and a build stamp in the log and
    the HUD. **(done)**
-   Also: `[spline_terrain_align]` and `[terrainhole]` applied, and the ground only cut
+   Also: `[spline_terrain_align]` (the spline's hole outline, as Omsi.exe cuts it) and
+   `[terrainhole]` applied, and the ground only cut
    where a surface really crosses it; `OMSI_ROAD_PHOTO` photographs the carriageway network
    from above and reports where the picture shows ground instead of road (0 of ~400 points
    on both stock maps). **(done)**

@@ -3192,6 +3192,7 @@ dependencies = [
  "flate2",
  "libc",
  "log",
+ "ring",
  "sha2",
  "tungstenite",
  "ureq",

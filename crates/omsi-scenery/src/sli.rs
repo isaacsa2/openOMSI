@@ -89,7 +89,11 @@ pub struct Spline {
     pub third_rail: Vec<ThirdRail>,
     pub half_cant_width: Option<f32>,
     pub only_editor: bool,
-    pub terrain_hole_profile: Vec<[f32; 3]>,
+    /// `[terrainholeprofile]`s with their `[terrainholeprofilepnt]`s (x across, height, and
+    /// how far an end of the hole stands off the spline's end): the outline a spline laid
+    /// with `[spline_terrain_align]` cuts out of the ground. None given, Omsi.exe makes them
+    /// from the drawn profiles (see `omsi_geometry::terrain_hole_profiles`).
+    pub terrain_hole_profiles: Vec<Vec<[f32; 3]>>,
     pub unknown_keywords: Vec<(String, usize)>,
 }
 
@@ -102,7 +106,6 @@ impl Spline {
     pub fn parse(file: &CfgFile) -> Spline {
         let mut s = Spline { path: file.path.clone(), ..Default::default() };
         let mut r = file.reader();
-        let mut in_hole = false;
         while let Some(k) = r.next_keyword() {
             match k.as_str() {
                 "length" => s.length = r.f32(),
@@ -133,7 +136,6 @@ impl Spline {
                     s.height_profiles.push(HeightProfile { x0: v[0], x1: v[1], z0: v[2], z1: v[3] });
                 }
                 "profile" => {
-                    in_hole = false;
                     s.profiles.push(SplineProfile { texture: r.usize(), points: Vec::new() });
                 }
                 "profilepnt" => {
@@ -163,11 +165,13 @@ impl Spline {
                 "third_rail" => s.third_rail.push(ThirdRail { values: r.f32s::<6>() }),
                 "halfcantwidth" => s.half_cant_width = Some(r.f32()),
                 "onlyeditor" => s.only_editor = true,
-                "terrainholeprofile" => in_hole = true,
+                // (a point goes to the last profile begun, Omsi.exe 0x5ad923: none begun, it
+                // is dropped)
+                "terrainholeprofile" => s.terrain_hole_profiles.push(Vec::new()),
                 "terrainholeprofilepnt" => {
                     let v = r.f32s::<3>();
-                    if in_hole || true {
-                        s.terrain_hole_profile.push(v);
+                    if let Some(p) = s.terrain_hole_profiles.last_mut() {
+                        p.push(v);
                     }
                 }
                 _ => s.unknown_keywords.push((k, r.block_line())),

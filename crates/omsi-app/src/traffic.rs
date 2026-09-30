@@ -5391,6 +5391,14 @@ impl Traffic {
                 // waiting at a stop: dark until it is about to pull away
                 car.state.blinker = 0;
             }
+            if omsi_cfg::env::var_os("OMSI_DEBUG_DOORS").is_some() && car.is_bus() && (self.time * 2.0).floor() != ((self.time - dt) * 2.0).floor() {
+                let v = &car.vehicle;
+                let g = |n: &str| v.var(n).map(|x| format!("{x:.2}")).unwrap_or("-".into());
+                let st = g("AI_Scheduled_AtStation");
+                if st != "0.00" || car.bus.as_ref().is_some_and(|b| b.at_stop()) {
+                    log::info!("doors t={:.1} car {} {} phase {:?} speed {:.1}: AtStation {st} door {} {} {} {} target {} {} {} halte {} timer {}", self.time, car.id, v.ty.def.type_name, car.bus.as_ref().map(|b| b.phase), car.state.speed, g("door_0"), g("door_1"), g("door_2"), g("door_3"), g("doorTarget_0"), g("doorTarget_1"), g("doorTarget_2"), g("bremse_halte_sw"), g("door_AI_timer"));
+                }
+            }
             frames[i] = Some(AiFrame {
                 speed: car.state.speed,
                 odometer: car.state.odometer,

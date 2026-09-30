@@ -10,6 +10,7 @@
 
 mod drive;
 pub mod mobile;
+pub mod phone;
 mod multiplayer;
 mod pages;
 mod showroom;
@@ -98,6 +99,8 @@ pub struct Launcher {
     page: Page,
     page_anim: f32,
     pub drive: drive::DriveView,
+    /// The launcher made for a phone (see `phone`).
+    pub phone: phone::PhoneView,
     pub pages: pages::PagesView,
     pub mp: multiplayer::MultiplayerView,
     /// Server icons in the interface pipeline (by server address), and those decoded but
@@ -163,6 +166,7 @@ impl Launcher {
         page: Page::Drive,
         page_anim: 1.0,
         drive: drive::DriveView::default(),
+        phone: phone::PhoneView::default(),
         pages: pages::PagesView::default(),
         mp: multiplayer::MultiplayerView::default(),
         icons: Default::default(),
@@ -218,6 +222,26 @@ impl Launcher {
     if let Ok(p) = omsi_cfg::env::var("OMSI_LAUNCHER_PAGE") {
         if let Some((pg, _, _)) = PAGES.iter().find(|(_, n, _)| n.eq_ignore_ascii_case(p.split(':').next().unwrap_or(""))) {
             app.page = *pg;
+            // (the phone's tab for it)
+            app.phone.tab = match pg {
+                Page::Drive => phone::Tab::Play,
+                Page::Multiplayer => phone::Tab::Online,
+                Page::Mods => phone::Tab::Mods,
+                other => {
+                    app.phone.page = Some(*other);
+                    phone::Tab::More
+                }
+            };
+        }
+        // (`OMSI_LAUNCHER_PAGE=more`, `=sheet-bus` …: the phone's More, or one of its sheets)
+        match p.as_str() {
+            "more" => app.phone.tab = phone::Tab::More,
+            "sheet-map" => app.phone.sheet = Some(phone::Sheet::Map),
+            "sheet-bus" => app.phone.sheet = Some(phone::Sheet::Bus),
+            "sheet-duty" => app.phone.sheet = Some(phone::Sheet::Duty),
+            "sheet-time" => app.phone.sheet = Some(phone::Sheet::Time),
+            "sheet-livery" => app.phone.sheet = Some(phone::Sheet::Livery),
+            _ => {}
         }
         if let Some(step) = p.split(':').nth(1).and_then(|s| s.parse().ok()) {
             app.drive.step = step;
@@ -736,7 +760,15 @@ impl Launcher {
             self.ui.input.text.clear();
             i
         });
-        let rail_w = if mobile { mobile::RAIL_W_MOBILE } else { RAIL_W };
+        // a phone: the launcher made for it, not the desktop's pages
+        if mobile {
+            if self.page == Page::Setup && !omsi_cfg::missing_original_essentials(std::path::Path::new(&self.state.config.root)).is_empty() && self.phone.page.is_none() {
+                self.phone.tab = phone::Tab::More;
+                self.phone.page = Some(Page::Setup);
+            }
+            phone::draw(self);
+        } else {
+        let rail_w = RAIL_W;
         self.page_anim = (self.page_anim + self.ui.dt / 0.15).min(1.0);
         // (no wider than a page reads well: on a wide screen the rest is margin, the page
         // in the middle - the panels stretched across 2000 px with their text at one end)
@@ -764,12 +796,9 @@ impl Launcher {
             Page::Setup => pages::setup(self, content),
         }
         // the rail over the page (a scrolled page passes under it)
-        if mobile {
-            self.rail_mobile();
-        } else {
-            self.rail();
-        }
+        self.rail();
         self.status_bar();
+        }
         self.draw_updated_notice();
         if let Some(i) = saved {
             self.ui.input = i;

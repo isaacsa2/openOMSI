@@ -62,15 +62,19 @@ pub struct SplineCurve {
     pub half_cant_width: f64,
 }
 
-/// The half cant width OMSI uses for a spline type: the .sli's
-/// `[halfcantwidth]`, else as far as its profile reaches either side.
+/// The half cant width OMSI uses for a spline type: the .sli's `[halfcantwidth]`, else as
+/// far as its `[heightprofile]`s reach either side (Omsi.exe 0x5adb3c: the width starts at
+/// -1 and becomes the larger of -min(0, x0) and max(0, x1) over the height profiles, 0x5ac727
+/// / 0x5ac78d) - not the drawn profile. A type without height profiles (the grass and
+/// pavement pieces of a crossing kit) has none at all, and a cant the map gives it does
+/// nothing: taken over the drawn width, Westcountry's crossings' `-70` tipped their pieces
+/// metres into the ground and the sky, pointed spikes at every corner.
 pub fn half_cant_width(def: &Spline) -> f64 {
     if let Some(w) = def.half_cant_width.filter(|w| w.is_finite() && *w >= 0.0) {
         return w as f64;
     }
-    let xs = def.profiles.iter().flat_map(|p| p.points.iter().map(|q| q.x as f64));
-    let (lo, hi) = xs.fold((0.0f64, 0.0f64), |(lo, hi), x| (lo.min(x), hi.max(x)));
-    (-lo).max(hi)
+    let (lo, hi) = def.height_profiles.iter().fold((0.0f64, 0.0f64), |(lo, hi), h| (lo.min(h.x0 as f64), hi.max(h.x1 as f64)));
+    (-lo).max(hi).max(-1.0)
 }
 
 /// The half cant width of a spline without a .sli object (OMSI: 10 m).
@@ -445,6 +449,146 @@ pub fn build_spline_mesh(def: &Spline, curve: &SplineCurve, mirror: bool, origin
     mesh
 }
 
+/// The profiles of the hole a spline laid with `[spline_terrain_align]` cuts into the ground,
+/// as points (x across, height, how far that end of the hole stands off the spline's end):
+/// the `.sli`'s own `[terrainholeprofile]`s, or else those Omsi.exe makes from the drawn
+/// profiles when it loads the spline (0x5ab908, from 0x5adc52): the profiles are strung
+/// together where one begins within a centimetre of where the last ended, and each string
+/// gives a trough from its left end to its right end, 3 cm in from both and 3 mm below them,
+/// whose bottom lies 10 cm under the lowest point of the string and reaches half a metre
+/// past both ends of the spline. (The bottom's corners are where the lines from the edges
+/// through the points below them come down to that depth; with nothing below an edge, a
+/// quarter of the way across. The left edge is always the first profile's first point:
+/// Omsi.exe compares every other profile's start with it but then takes the first one's
+/// again.)
+pub fn terrain_hole_profiles(def: &Spline) -> Vec<Vec<[f32; 3]>> {
+    if !def.terrain_hole_profiles.is_empty() {
+        return def.terrain_hole_profiles.clone();
+    }
+    const JOIN: f32 = 0.01;
+    let profiles: Vec<Vec<(f32, f32)>> = def.profiles.iter().map(|p| p.points.iter().map(|q| (q.x, q.z)).collect()).collect();
+    let mut used = vec![false; profiles.len()];
+    let mut out = Vec::new();
+    while used.iter().any(|u| !u) {
+        let mut chain: Vec<usize> = Vec::new();
+        loop {
+            let next = (0..profiles.len()).find(|&j| {
+                !used[j]
+                    && match chain.last() {
+                        None => true,
+                        Some(&l) => match (profiles[l].last(), profiles[j].first()) {
+                            (Some(a), Some(b)) => (a.0 - b.0).abs() < JOIN && (a.1 - b.1).abs() < JOIN,
+                            _ => false,
+                        },
+                    }
+            });
+            match next {
+                Some(j) => {
+                    used[j] = true;
+                    chain.push(j);
+                }
+                None => break,
+            }
+        }
+        let Some((&(xl, zl), _)) = profiles[chain[0]].first().zip(profiles[chain[0]].last()) else {
+            continue;
+        };
+        let (mut xr, mut zr) = *profiles[chain[0]].last().unwrap();
+        for &j in &chain[1..] {
+            if let Some(&(x, z)) = profiles[j].last() {
+                if x > xr {
+                    (xr, zr) = (x, z);
+                }
+            }
+        }
+        let points = || chain.iter().flat_map(|&j| profiles[j].iter().copied());
+        let low = points().fold(zl.min(zr), |m, (_, z)| m.min(z));
+        let bottom_left = if low < zl {
+            points().filter(|p| zl > p.1).fold(xr, |m, (x, z)| m.min((x - xl) / (zl - z) * (zl - low) + xl))
+        } else {
+            (xr - xl) / 4.0 + xl
+        };
+        let bottom_right = if low < zr {
+            points().filter(|p| zr > p.1).fold(xl, |m, (x, z)| m.max(xr - (xr - x) / (zr - z) * (zr - low)))
+        } else {
+            (xr - xl) * 3.0 / 4.0 + xl
+        };
+        let low = low - 0.1;
+        out.push(vec![[xl + 0.03, zl - 0.003, 0.0], [bottom_left, low, -0.5], [bottom_right, low, -0.5], [xr - 0.03, zr - 0.003, 0.0]]);
+    }
+    out
+}
+
+/// The outlines (world x, y) a spline laid with `[spline_terrain_align]` cuts out of the
+/// ground, one per [`terrain_hole_profiles`] profile, as Omsi.exe's TSplineSegment.Generate
+/// makes them (0x5b1178, from 0x5b13b1): along the right edge (the profile's last point)
+/// at the inner cross-sections, across the far end (the profile backwards), back along the
+/// left edge (its first point) and across the near end. An end lies where each point's
+/// third value puts it (the hole reaching past the spline's end) unless the map's
+/// `[spline_terrain_align_2]` says otherwise: `mode` 2 and 4 keep the far end at the end,
+/// 3 and 4 the near end at the start. A mirrored spline takes the profile backwards and
+/// turned across.
+pub fn spline_hole_outlines(def: &Spline, curve: &SplineCurve, mirror: bool, mode: u8) -> Vec<Vec<DVec2>> {
+    if mode == 0 || curve.length <= 0.0 {
+        return Vec::new();
+    }
+    let mut n = spline_station_count(def, curve);
+    let _ = patchwork(def, curve, &mut n);
+    let n = n.max(1);
+    let l = curve.length;
+    let curve = &curve.with_sli(def);
+    let at = |x: f32, s: f64| skewed_point(curve, s, x as f64, 0.0).0.truncate();
+    terrain_hole_profiles(def)
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let p: Vec<[f32; 3]> = if mirror { p.iter().rev().map(|q| [-q[0], q[1], q[2]]).collect() } else { p };
+            let k = p.len();
+            let mut ring = Vec::with_capacity(2 * (k + n - 1));
+            for i in 1..n {
+                ring.push(at(p[k - 1][0], i as f64 * l / n as f64));
+            }
+            for q in p.iter().rev() {
+                ring.push(at(q[0], if mode & 1 == 0 { l } else { l - q[2] as f64 }));
+            }
+            for i in (1..n).rev() {
+                ring.push(at(p[0][0], i as f64 * l / n as f64));
+            }
+            for q in &p {
+                ring.push(at(q[0], if mode > 2 { 0.0 } else { q[2] as f64 }));
+            }
+            ring
+        })
+        .collect()
+}
+
+/// Does a closed outline cross itself? Omsi.exe cuts no hole along one that does (0x5748bc
+/// and the terrain's "Terrain hole cutting" error): a tight curve folds the inner edge over.
+pub fn outline_crosses_itself(ring: &[DVec2]) -> bool {
+    let n = ring.len();
+    if n < 4 {
+        return n < 3;
+    }
+    let cross = |a: DVec2, b: DVec2, c: DVec2| (b - a).perp_dot(c - a);
+    let hits = |p1: DVec2, p2: DVec2, q1: DVec2, q2: DVec2| {
+        let (d1, d2) = (cross(q1, q2, p1), cross(q1, q2, p2));
+        let (d3, d4) = (cross(p1, p2, q1), cross(p1, p2, q2));
+        ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
+    };
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        for j in i + 2..n {
+            if (j + 1) % n == i {
+                continue;
+            }
+            if hits(a, b, ring[j], ring[(j + 1) % n]) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// The surface a spline's `[heightprofile]` segments describe, extruded along the curve like
 /// the drawn profile (the same cross-sections, the same skew): what vehicles and wheels stand
 /// on. OMSI keeps it apart from the graphics - a railway's third rail or a tunnel's walls are
@@ -783,11 +927,18 @@ mod tests {
         assert_eq!(ts.hole_height(k(12.0, 20.0)), None);
         assert!(ts.cut_at(115.0, 115.0, 0.0, 0.12));
         assert!(!ts.cut_at(200.0, 200.0, 0.0, 0.12));
-        // the ground at 1.95 m is cut under the plate (flush), at 0.2 m under the road (a
-        // sunken road still shows)
-        assert!(ts.cut_at(12.0, 20.0, 1.95, 0.12));
+        // a surface alone takes no ground away (only the map's holes do, as in Omsi.exe)
+        // unless OMSI_ROAD_CUT asks for it
+        assert_eq!(ts.cut_at(12.0, 20.0, 1.95, 0.12), road_cut());
         assert!(!ts.cut_at(12.0, 20.0, 1.5, 0.12));
-        assert!(ts.cut_at(25.0, 20.0, 1.5, 0.12));
+        // an aligned spline's outline cuts exactly along it, whatever the heights
+        ts.add_outline(&[DVec2::new(50.0, 50.0), DVec2::new(60.0, 50.0), DVec2::new(60.0, 51.0), DVec2::new(50.0, 51.0)], 0, 0);
+        assert!(ts.cut_at(55.0, 50.5, 40.0, 0.12));
+        assert!(!ts.cut_at(55.0, 51.3, 0.0, 0.12));
+        let mask = ts.mask_image(&|_, _| 0.0, 0.12);
+        let n = ts.size;
+        let a = |x: f32, y: f32| mask[((y / tile_size() as f32 * n as f32) as usize * n + (x / tile_size() as f32 * n as f32) as usize) * 4 + 3];
+        assert!(a(55.0, 50.5) < 128 && a(55.0, 53.0) == 255);
         // only the touched blocks hold memory: a few kilobytes, not the 5 MB of a dense raster
         assert!(ts.heap_bytes().0 < 200_000, "{}", ts.heap_bytes().0);
         let _ = cell;
@@ -1246,8 +1397,26 @@ impl DriveGrid {
 /// covered the terrain is not drawn (the original cuts the terrain polygons instead) and the
 /// surface height is used for ground queries.
 /// How far below the ground a surface may lie and still take the ground away: enough for a
+/// Take the ground away under every road surface lying about its height (`OMSI_ROAD_CUT=1`).
+/// Omsi.exe does not: the ground goes only where the map says (`[terrainhole]` meshes, the
+/// splines' `[terrainholeprofile]`, a tile's `.hole` file), and a road lying on it wins by
+/// its depth bias. Cut by a raster of 1.5-3 m texels, the ground went a metre or two past
+/// the road's edge too, and the sky showed through along kerbs and car parks.
+pub fn road_cut() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("OMSI_ROAD_CUT").is_some())
+}
+
+/// How far below the ground a surface may lie and still take the ground away: enough for a
 /// sunken road or an underpass, not enough for a junction plate left at height zero.
-pub const DEEP_CUT: f32 = 4.0;
+const DEEP_CUT: f32 = 4.0;
+
+/// How far around an aligned spline's outline the mask is looked at texel by texel (m).
+const OUTLINE_EDGE: f32 = 1.2;
+/// How far inside an outline the ground is still kept (m): the filtered mask puts a slanting
+/// edge up to ~7 cm off, and past the outline (3 cm inside the road's edge) the ground gone
+/// shows the sky under a kerb's top - pale slivers every two metres along the kerbs.
+const OUTLINE_KEEP: f32 = 0.08;
 
 pub struct TileSurface {
     pub size: usize,
@@ -1269,6 +1438,10 @@ pub struct TileSurface {
     /// it reaches up to it, so a junction a mapper left thirty metres down does not open a
     /// window into the sky. In blocks like the surfaces; most tiles have none.
     holes: Vec<Option<Box<[f32; BLOCK * BLOCK]>>>,
+    /// The outlines the splines laid with `[spline_terrain_align]` cut out of the ground
+    /// ([`spline_hole_outlines`]), in tile metres, with their bounds (x0, y0, x1, y1): cut
+    /// exactly along them, as Omsi.exe cuts the terrain's triangles, not by texel.
+    outlines: Vec<(Vec<Vec2>, [f32; 4])>,
     /// The faces the wheels stand on over this tile (spline height profiles, surface objects):
     /// a texel of the raster is most of a metre wide and holds one height, which put a wheel
     /// next to a kerb on top of the pavement or into the road's camber.
@@ -1308,7 +1481,7 @@ impl TileSurface {
 
     pub fn new(size: usize) -> TileSurface {
         let blocks = size.div_ceil(BLOCK);
-        TileSurface { size, blocks: (0..blocks * blocks).map(|_| None).collect(), holes: (0..blocks * blocks).map(|_| None).collect(), drive: DriveGrid::default() }
+        TileSurface { size, blocks: (0..blocks * blocks).map(|_| None).collect(), holes: (0..blocks * blocks).map(|_| None).collect(), outlines: Vec::new(), drive: DriveGrid::default() }
     }
 
     /// Block and index within it of texel `k`.
@@ -1447,6 +1620,63 @@ impl TileSurface {
     /// `origin` (after `transform`).
     pub fn rasterize(&mut self, mesh: &MeshData, transform: &Mat4, origin: DVec3, tx: i32, ty: i32) {
         self.rasterize_kind(mesh, transform, origin, tx, ty, true)
+    }
+
+    /// Cut the ground inside an aligned spline's outline (world x, y) on tile (tx, ty).
+    pub fn add_outline(&mut self, ring: &[DVec2], tx: i32, ty: i32) {
+        let o = DVec2::new(tx as f64 * tile_size(), ty as f64 * tile_size());
+        let pts: Vec<Vec2> = ring.iter().map(|p| (*p - o).as_vec2()).collect();
+        let b = pts.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)]);
+        let t = tile_size() as f32;
+        if pts.len() < 3 || b[2] < -OUTLINE_EDGE || b[3] < -OUTLINE_EDGE || b[0] > t + OUTLINE_EDGE || b[1] > t + OUTLINE_EDGE {
+            return;
+        }
+        self.outlines.push((pts, b));
+    }
+
+    /// Signed distance (m) from tile point (x, y) to the aligned splines' cut, negative
+    /// inside it, as far as `OUTLINE_EDGE` (farther: None).
+    fn outline_distance(&self, x: f32, y: f32) -> Option<f32> {
+        let p = Vec2::new(x, y);
+        let mut best: Option<f32> = None;
+        for (ring, b) in &self.outlines {
+            if x < b[0] - OUTLINE_EDGE || y < b[1] - OUTLINE_EDGE || x > b[2] + OUTLINE_EDGE || y > b[3] + OUTLINE_EDGE {
+                continue;
+            }
+            let mut d2 = f32::MAX;
+            let mut inside = false;
+            let n = ring.len();
+            for i in 0..n {
+                let (a, c) = (ring[i], ring[(i + 1) % n]);
+                let e = c - a;
+                let t = ((p - a).dot(e) / e.length_squared().max(1e-12)).clamp(0.0, 1.0);
+                d2 = d2.min((a + e * t - p).length_squared());
+                if (a.y > y) != (c.y > y) && x < a.x + (y - a.y) / (c.y - a.y) * (c.x - a.x) {
+                    inside = !inside;
+                }
+            }
+            let d = if inside { -d2.sqrt() } else { d2.sqrt() };
+            best = Some(best.map_or(d, |b: f32| b.min(d)));
+        }
+        best.filter(|d| *d < OUTLINE_EDGE)
+    }
+
+    /// Is tile point (x, y) inside an aligned spline's outline?
+    fn in_outlines(&self, x: f32, y: f32) -> bool {
+        self.outlines.iter().any(|(ring, b)| {
+            if x < b[0] || y < b[1] || x > b[2] || y > b[3] {
+                return false;
+            }
+            let mut inside = false;
+            let n = ring.len();
+            for i in 0..n {
+                let (a, c) = (ring[i], ring[(i + 1) % n]);
+                if (a.y > y) != (c.y > y) && x < a.x + (y - a.y) / (c.y - a.y) * (c.x - a.x) {
+                    inside = !inside;
+                }
+            }
+            inside
+        })
     }
 
     /// Mark the texels a `[terrainhole]` mesh covers: there the ground goes away entirely.
@@ -1627,6 +1857,40 @@ impl TileSurface {
             }
         }
         let mut out = vec![255u8; n * n * 4];
+        // the aligned splines' outlines: how much of each texel keeps its ground (4×4
+        // samples where an edge passes through it). Filtered, the half-way value lies on the
+        // outline; and a strip of ground between two holes narrower than two texels (a
+        // median, 0.96 m on the Falkenseer Chaussee) keeps its full value, where a distance
+        // field's ridge sank to the cut-off and let the sky through in lens-shaped patches.
+        if !self.outlines.is_empty() {
+            let (mut lo, mut hi) = ([usize::MAX; 2], [0usize; 2]);
+            for (_, b) in &self.outlines {
+                lo[0] = lo[0].min(((b[0] - OUTLINE_EDGE) / cell).floor().max(0.0) as usize);
+                lo[1] = lo[1].min(((b[1] - OUTLINE_EDGE) / cell).floor().max(0.0) as usize);
+                hi[0] = hi[0].max((((b[2] + OUTLINE_EDGE) / cell).ceil().max(0.0) as usize).min(n));
+                hi[1] = hi[1].max((((b[3] + OUTLINE_EDGE) / cell).ceil().max(0.0) as usize).min(n));
+            }
+            for j in lo[1]..hi[1] {
+                for i in lo[0]..hi[0] {
+                    let (cx, cy) = ((i as f32 + 0.5) * cell, (j as f32 + 0.5) * cell);
+                    let Some(d) = self.outline_distance(cx, cy) else { continue };
+                    let a = if d < -cell * 0.75 {
+                        0
+                    } else if d > cell * 0.75 {
+                        255
+                    } else {
+                        let kept = (0..16)
+                            .filter(|q| {
+                                let (x, y) = (cx + ((q % 4) as f32 - 1.5) * cell / 4.0, cy + ((q / 4) as f32 - 1.5) * cell / 4.0);
+                                !self.in_outlines(x, y) || self.outline_distance(x, y).is_some_and(|d| d > -OUTLINE_KEEP)
+                            })
+                            .count();
+                        (kept * 255 / 16) as u8
+                    };
+                    out[(j * n + i) * 4 + 3] = a;
+                }
+            }
+        }
         for j in 0..n {
             for i in 0..n {
                 // erode: cut only where the whole 3×3 neighbourhood is cut
@@ -1647,6 +1911,9 @@ impl TileSurface {
     /// Would the ground be taken away at this point? (the per-texel decision `mask_image`
     /// makes, for checks that need to know whether a road is visible)
     pub fn cut_at(&self, x: f32, y: f32, terrain_h: f32, flush: f32) -> bool {
+        if self.in_outlines(x, y) {
+            return true;
+        }
         let i = self.texel(x, y);
         if self.hole_height(i).map(|top| terrain_h <= top + DEEP_CUT).unwrap_or(false) {
             return true;
@@ -1662,7 +1929,7 @@ impl TileSurface {
     /// it), and cutting the ground over it opened a band you could see the sky through.
     /// A plate a mapper left thirty metres down takes nothing either.
     pub fn cuts(&self, k: usize, t: f32, flush: f32) -> bool {
-        if !self.covered(k) || self.low_height(k) - flush > t {
+        if !road_cut() || !self.covered(k) || self.low_height(k) - flush > t {
             return false;
         }
         if self.road_covered(k) && t <= self.road_height(k) + DEEP_CUT {
@@ -1685,7 +1952,12 @@ impl TileSurface {
     }
 
     /// Is any texel actually cut? (`mask_image` with the same arguments would do something.)
+    /// (Only the map's own holes - `[terrainhole]` meshes, the splines' `[terrainholeprofile]`
+    /// - unless `road_cut`.)
     pub fn cuts_anything(&self, terrain_at: &dyn Fn(f32, f32) -> f32, flush: f32) -> bool {
+        if !self.outlines.is_empty() {
+            return true;
+        }
         let n = self.size;
         let cell = tile_size() as f32 / n as f32;
         self.touched().any(|k| {
