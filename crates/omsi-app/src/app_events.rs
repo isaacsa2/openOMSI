@@ -1976,7 +1976,295 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if !mirrored {
+                        if cfg!(target_os = "android") {
+                            // Motorola storage-buffer smoke test. This mirrors the binding
+                            // pattern used by the real scene shader: uniform at 0 and
+                            // read-only storage buffers at 1/2/3/4/10, including matrices
+                            // stored as columns of vec4 and draw_list indexed by instance.
+                            let shader = r.device.create_shader_module(
+                                wgpu::ShaderModuleDescriptor {
+                                    label: Some("android storage smoke"),
+                                    source: wgpu::ShaderSource::Wgsl(
+                                        r#"
+struct Camera {
+    offset: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<storage, read> models: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read> inst_params: array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read> colors: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read> grid: array<u32>;
+@group(0) @binding(10) var<storage, read> draw_list: array<u32>;
+
+fn model_matrix(e: u32) -> mat4x4<f32> {
+    let k = e * 4u;
+    return mat4x4<f32>(
+        models[k],
+        models[k + 1u],
+        models[k + 2u],
+        models[k + 3u]
+    );
+}
+
+struct Out {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) @interpolate(flat) entry: u32,
+};
+
+@vertex
+fn vs_main(
+    @builtin(vertex_index) i: u32,
+    @builtin(instance_index) inst: u32
+) -> Out {
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-0.28, -0.34),
+        vec2<f32>( 0.28, -0.34),
+        vec2<f32>( 0.00,  0.34)
+    );
+    let e = draw_list[inst];
+    let scale = inst_params[e].x;
+    var o: Out;
+    o.pos = model_matrix(e) * vec4<f32>(p[i] * scale, 0.0, 1.0) + camera.offset;
+    o.entry = e;
+    return o;
+}
+
+@fragment
+fn fs_main(i: Out) -> @location(0) vec4<f32> {
+    if (grid[0] != 0x12345678u) {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    }
+    return colors[i.entry];
+}
+"#.into(),
+                                    ),
+                                },
+                            );
+
+                            let layout = r.device.create_bind_group_layout(
+                                &wgpu::BindGroupLayoutDescriptor {
+                                    label: Some("android storage smoke"),
+                                    entries: &[
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 0,
+                                            visibility: wgpu::ShaderStages::VERTEX,
+                                            ty: wgpu::BindingType::Buffer {
+                                                ty: wgpu::BufferBindingType::Uniform,
+                                                has_dynamic_offset: false,
+                                                min_binding_size: None,
+                                            },
+                                            count: None,
+                                        },
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 1,
+                                            visibility: wgpu::ShaderStages::VERTEX,
+                                            ty: wgpu::BindingType::Buffer {
+                                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                                has_dynamic_offset: false,
+                                                min_binding_size: None,
+                                            },
+                                            count: None,
+                                        },
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 2,
+                                            visibility: wgpu::ShaderStages::VERTEX,
+                                            ty: wgpu::BindingType::Buffer {
+                                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                                has_dynamic_offset: false,
+                                                min_binding_size: None,
+                                            },
+                                            count: None,
+                                        },
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 3,
+                                            visibility: wgpu::ShaderStages::FRAGMENT,
+                                            ty: wgpu::BindingType::Buffer {
+                                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                                has_dynamic_offset: false,
+                                                min_binding_size: None,
+                                            },
+                                            count: None,
+                                        },
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 4,
+                                            visibility: wgpu::ShaderStages::FRAGMENT,
+                                            ty: wgpu::BindingType::Buffer {
+                                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                                has_dynamic_offset: false,
+                                                min_binding_size: None,
+                                            },
+                                            count: None,
+                                        },
+                                        wgpu::BindGroupLayoutEntry {
+                                            binding: 10,
+                                            visibility: wgpu::ShaderStages::VERTEX,
+                                            ty: wgpu::BindingType::Buffer {
+                                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                                has_dynamic_offset: false,
+                                                min_binding_size: None,
+                                            },
+                                            count: None,
+                                        },
+                                    ],
+                                },
+                            );
+                            let pipeline_layout = r.device.create_pipeline_layout(
+                                &wgpu::PipelineLayoutDescriptor {
+                                    label: Some("android storage smoke"),
+                                    bind_group_layouts: &[Some(&layout)],
+                                    immediate_size: 0,
+                                },
+                            );
+                            let pipeline = r.device.create_render_pipeline(
+                                &wgpu::RenderPipelineDescriptor {
+                                    label: Some("android storage smoke"),
+                                    layout: Some(&pipeline_layout),
+                                    vertex: wgpu::VertexState {
+                                        module: &shader,
+                                        entry_point: Some("vs_main"),
+                                        buffers: &[],
+                                        compilation_options: Default::default(),
+                                    },
+                                    primitive: Default::default(),
+                                    depth_stencil: None,
+                                    multisample: Default::default(),
+                                    fragment: Some(wgpu::FragmentState {
+                                        module: &shader,
+                                        entry_point: Some("fs_main"),
+                                        targets: &[Some(wgpu::ColorTargetState {
+                                            format: s.config.format,
+                                            blend: None,
+                                            write_mask: wgpu::ColorWrites::ALL,
+                                        })],
+                                        compilation_options: Default::default(),
+                                    }),
+                                    multiview_mask: None,
+                                    cache: None,
+                                },
+                            );
+
+                            let f32_bytes = |v: &[f32]| {
+                                let mut out = Vec::with_capacity(v.len() * 4);
+                                for x in v {
+                                    out.extend_from_slice(&x.to_ne_bytes());
+                                }
+                                out
+                            };
+                            let u32_bytes = |v: &[u32]| {
+                                let mut out = Vec::with_capacity(v.len() * 4);
+                                for x in v {
+                                    out.extend_from_slice(&x.to_ne_bytes());
+                                }
+                                out
+                            };
+                            let make_buffer = |label: &'static str,
+                                               bytes: &[u8],
+                                               usage: wgpu::BufferUsages| {
+                                let b = r.device.create_buffer(&wgpu::BufferDescriptor {
+                                    label: Some(label),
+                                    size: bytes.len().max(4) as u64,
+                                    usage: usage | wgpu::BufferUsages::COPY_DST,
+                                    mapped_at_creation: false,
+                                });
+                                if !bytes.is_empty() {
+                                    r.queue.write_buffer(&b, 0, bytes);
+                                }
+                                b
+                            };
+
+                            let camera = make_buffer(
+                                "storage smoke camera",
+                                &f32_bytes(&[0.0, 0.0, 0.0, 0.0]),
+                                wgpu::BufferUsages::UNIFORM,
+                            );
+                            // Two column-major affine matrices: one shifts left, one right.
+                            let models = make_buffer(
+                                "storage smoke models",
+                                &f32_bytes(&[
+                                    1.0,0.0,0.0,0.0, 0.0,1.0,0.0,0.0,
+                                    0.0,0.0,1.0,0.0, -0.48,0.0,0.0,1.0,
+                                    1.0,0.0,0.0,0.0, 0.0,1.0,0.0,0.0,
+                                    0.0,0.0,1.0,0.0,  0.48,0.0,0.0,1.0,
+                                ]),
+                                wgpu::BufferUsages::STORAGE,
+                            );
+                            let params = make_buffer(
+                                "storage smoke params",
+                                &f32_bytes(&[
+                                    1.0,1.0,0.0,0.0,
+                                    1.0,1.0,0.0,0.0,
+                                ]),
+                                wgpu::BufferUsages::STORAGE,
+                            );
+                            let colors = make_buffer(
+                                "storage smoke colors",
+                                &f32_bytes(&[
+                                    0.05,1.0,0.18,1.0,
+                                    0.05,0.85,1.0,1.0,
+                                ]),
+                                wgpu::BufferUsages::STORAGE,
+                            );
+                            let grid = make_buffer(
+                                "storage smoke grid",
+                                &u32_bytes(&[0x12345678]),
+                                wgpu::BufferUsages::STORAGE,
+                            );
+                            let draw_list = make_buffer(
+                                "storage smoke draw list",
+                                &u32_bytes(&[0,1]),
+                                wgpu::BufferUsages::STORAGE,
+                            );
+
+                            let group = r.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("android storage smoke"),
+                                layout: &layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry { binding: 0, resource: camera.as_entire_binding() },
+                                    wgpu::BindGroupEntry { binding: 1, resource: models.as_entire_binding() },
+                                    wgpu::BindGroupEntry { binding: 2, resource: params.as_entire_binding() },
+                                    wgpu::BindGroupEntry { binding: 3, resource: colors.as_entire_binding() },
+                                    wgpu::BindGroupEntry { binding: 4, resource: grid.as_entire_binding() },
+                                    wgpu::BindGroupEntry { binding: 10, resource: draw_list.as_entire_binding() },
+                                ],
+                            });
+
+                            let mut encoder = r.device.create_command_encoder(
+                                &wgpu::CommandEncoderDescriptor {
+                                    label: Some("android storage smoke"),
+                                },
+                            );
+                            {
+                                let mut pass = encoder.begin_render_pass(
+                                    &wgpu::RenderPassDescriptor {
+                                        label: Some("android storage smoke"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &view,
+                                                depth_slice: None,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                                        r: 1.0,
+                                                        g: 0.0,
+                                                        b: 1.0,
+                                                        a: 1.0,
+                                                    }),
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: None,
+                                        timestamp_writes: None,
+                                        occlusion_query_set: None,
+                                        multiview_mask: None,
+                                    },
+                                );
+                                pass.set_pipeline(&pipeline);
+                                pass.set_bind_group(0, &group, &[]);
+                                pass.draw(0..3, 0..2);
+                            }
+                            r.queue.submit([encoder.finish()]);
+                        } else if !mirrored {
                             r.render(
                                 scene,
                                 &view,
@@ -1986,8 +2274,10 @@ impl ApplicationHandler for App {
                                 &lighting,
                             );
                         }
-                        // the on-screen controls over the picture (a phone)
-                        self.touch.render(r, &view, s.config.width, s.config.height);
+                        if !cfg!(target_os = "android") {
+                            // the on-screen controls over the picture (a phone)
+                            self.touch.render(r, &view, s.config.width, s.config.height);
+                        }
                         *self.profile.entry("render").or_default() += __t.elapsed().as_secs_f64();
                         if omsi_cfg::env::var_os("OMSI_PROFILE_GPU").is_some() {
                             // wait for the GPU here, so that its time shows as a stage of its own
