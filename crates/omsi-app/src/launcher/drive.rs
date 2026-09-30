@@ -54,6 +54,30 @@ impl LineItem {
     }
 }
 
+struct TourItem {
+    number: String,
+    trips: usize,
+    days: String,
+    runs: bool,
+    next_run: Option<String>,
+    first: f64,
+    last: f64,
+}
+
+impl TourItem {
+    fn new(tour: &omsi_launcher_lib::TourInfo) -> Self {
+        Self {
+            number: tour.number.clone(),
+            trips: tour.trips.len(),
+            days: tour.days.clone(),
+            runs: tour.runs,
+            next_run: tour.next_run.clone(),
+            first: tour.first,
+            last: tour.last,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct DriveView {
     pub step: usize,
@@ -73,6 +97,10 @@ pub struct DriveView {
     /// Indices into `line_items` for the current query and AI-lines switch.
     visible_lines: std::sync::Arc<Vec<usize>>,
     visible_lines_key: (u64, String, bool, String),
+    /// Sorted display rows for the chosen line, rebuilt only when it or the timetable changes.
+    tour_items: std::sync::Arc<Vec<TourItem>>,
+    tour_items_key: (u64, String),
+    tour_scroll_key: Option<(u64, String, String)>,
     /// What the line list was last brought into view for. Map/date/filter are part of the
     /// key because a remembered line can otherwise be left several screens out of sight
     /// after the timetable is reloaded.
@@ -414,34 +442,50 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
         }
     }
     l.ui.heading(Rect::new(right.x, right.y, right.w, 28.0), "Tour", None);
-    let Some(line) = l.state.line().cloned() else {
+    let Some(line) = l.state.line() else {
         l.ui.paragraph("Pick a line first. As in OMSI, the start time and date then say where in the tour the bus is: the trip under way, or the next to leave.", Vec2::new(right.x, right.y + 34.0), right.w, 12.5, Weight::Regular, TEXT_DIM);
         return;
     };
-    let mut tours: Vec<&omsi_launcher_lib::TourInfo> = line.tours.iter().collect();
-    tours.sort_by(|a, b| b.runs.cmp(&a.runs).then_with(|| natural(&a.number).cmp(&natural(&b.number))));
-    let tours: Vec<(String, usize, String, bool, Option<String>, f64, f64)> = tours.iter().map(|t| (t.number.clone(), t.trips.len(), t.days.clone(), t.runs, t.next_run.clone(), t.first, t.last)).collect();
+    let tour_key = (l.state.lines_revision, line.name.clone());
+    if l.drive.tour_items_key != tour_key {
+        let mut tours: Vec<TourItem> = line.tours.iter().map(TourItem::new).collect();
+        tours.sort_by(|a, b| b.runs.cmp(&a.runs).then_with(|| natural(&a.number).cmp(&natural(&b.number))));
+        l.drive.tour_items = std::sync::Arc::new(tours);
+        l.drive.tour_items_key = tour_key;
+        l.drive.tour_scroll_key = None;
+    }
+    let tours = l.drive.tour_items.clone();
     let chosen_t = l.state.choice.tour.clone();
     let mut pick = None;
-    l.ui.scroll_area("tour-list", Rect::new(right.x - 4.0, right.y + 30.0, right.w + 8.0, right.h - 30.0), &mut |ui, v| {
+    let tour_area = Rect::new(right.x - 4.0, right.y + 30.0, right.w + 8.0, (right.h - 30.0).max(40.0));
+    let tour_scroll_key = (l.state.lines_revision, line.name.clone(), chosen_t.clone().unwrap_or_default());
+    if l.drive.tour_scroll_key.as_ref() != Some(&tour_scroll_key) {
+        if let Some(k) = chosen_t.as_ref().and_then(|number| tours.iter().position(|tour| &tour.number == number)) {
+            l.ui.scroll_to("tour-list", k as f32 * 52.0, 52.0 * 2.0, tour_area.h);
+        }
+        l.drive.tour_scroll_key = Some(tour_scroll_key);
+    }
+    l.ui.scroll_area("tour-list", tour_area, &mut |ui, v| {
         let rh = 52.0;
-        for (k, (num, trips, days, runs, next, first, last)) in tours.iter().enumerate() {
+        for (k, tour) in tours.iter().enumerate() {
             let rr = Rect::new(v.x + 4.0, v.y + k as f32 * rh, v.w - 12.0, rh - 4.0);
-            let on = chosen_t.as_deref() == Some(num.as_str());
-            if ui.row(&format!("tour-{num}"), rr, on) {
-                pick = Some((num.clone(), *runs, next.clone()));
+            if rr.bottom() < tour_area.y - rh || rr.y > tour_area.bottom() + rh {
+                continue;
             }
-            let c = if *runs { TEXT } else { TEXT_FAINT };
+            let on = chosen_t.as_deref() == Some(tour.number.as_str());
+            if ui.row(&format!("tour-{}", tour.number), rr, on) {
+                pick = Some((tour.number.clone(), tour.runs, tour.next_run.clone()));
+            }
+            let c = if tour.runs { TEXT } else { TEXT_FAINT };
             // (the tour's name as the map writes it and OMSI lists it: "1", "Mo-Fr 1")
-            let name = num.clone();
-            ui.text_in(&name, Rect::new(rr.x + 10.0, rr.y + 6.0, rr.w - 110.0, 18.0), 13.5, Weight::Bold, c, Align::Left);
-            ui.text_in(&format!("{} - {}", hhmm(*first), hhmm(*last)), Rect::new(rr.right() - 110.0, rr.y + 6.0, 100.0, 18.0), 12.0, Weight::Medium, if *runs { ACCENT } else { TEXT_FAINT }, Align::Right);
-            let sub = if *runs {
-                format!("{trips} trips · {days}")
+            ui.text_in(&tour.number, Rect::new(rr.x + 10.0, rr.y + 6.0, rr.w - 110.0, 18.0), 13.5, Weight::Bold, c, Align::Left);
+            ui.text_in(&format!("{} - {}", hhmm(tour.first), hhmm(tour.last)), Rect::new(rr.right() - 110.0, rr.y + 6.0, 100.0, 18.0), 12.0, Weight::Medium, if tour.runs { ACCENT } else { TEXT_FAINT }, Align::Right);
+            let sub = if tour.runs {
+                format!("{} trips · {}", tour.trips, tour.days)
             } else {
-                match next {
-                    Some(n) => format!("{trips} trips · {days} · runs {n}"),
-                    None => format!("{trips} trips · never within a year"),
+                match &tour.next_run {
+                    Some(next) => format!("{} trips · {} · runs {next}", tour.trips, tour.days),
+                    None => format!("{} trips · never within a year", tour.trips),
                 }
             };
             ui.text_in(&sub, Rect::new(rr.x + 10.0, rr.y + 27.0, rr.w - 20.0, 16.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
@@ -462,9 +506,9 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
     }
 }
 
-fn natural(s: &str) -> (u64, String) {
-    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-    (digits.parse().unwrap_or(u64::MAX), s.to_string())
+fn natural(s: &str) -> (u64, &str) {
+    let digits = s.bytes().take_while(u8::is_ascii_digit).count();
+    (s[..digits].parse().unwrap_or(u64::MAX), s)
 }
 
 #[cfg(test)]
@@ -677,7 +721,7 @@ fn step_time(l: &mut Launcher, r: Rect) {
 }
 
 fn step_roadbook(l: &mut Launcher, r: Rect) {
-    let (Some(line), Some(tour), false) = (l.state.line().cloned(), l.state.tour().cloned(), l.state.choice.free) else {
+    let (Some(line), Some(tour), false) = (l.state.line(), l.state.tour(), l.state.choice.free) else {
         let map = l.state.map().map(|m| if m.friendly.is_empty() { m.name.clone() } else { m.friendly.clone() }).unwrap_or_default();
         l.ui.paragraph(&format!("No duty chosen: free driving on {map}. Pick a line and a tour under Route to see the roadbook here."), Vec2::new(r.x, r.y), r.w, 13.0, Weight::Regular, TEXT_DIM);
         ibis_box(l, Rect::new(r.x, r.y + 60.0, r.w, 160.0));
@@ -685,20 +729,31 @@ fn step_roadbook(l: &mut Launcher, r: Rect) {
     };
     let from = l.state.first_trip().unwrap_or(0);
     l.ui.text_in(&format!("Line {} · tour {} · from {}", line.name, tour.number, hhmm(l.state.choice.time as f64 * 60.0)), Rect::new(r.x, r.y, r.w, 22.0), 14.0, Weight::Bold, TEXT, Align::Left);
-    let trips: Vec<omsi_launcher_lib::TripInfo> = tour.trips.iter().skip(from).cloned().collect();
+    let trips = &tour.trips[from.min(tour.trips.len())..];
     let ibis_h = 150.0;
     let list = Rect::new(r.x - 4.0, r.y + 30.0, r.w + 8.0, r.h - 30.0 - ibis_h - 10.0);
     l.ui.scroll_area("roadbook", list, &mut |ui, v| {
         let mut y = v.y;
         for (k, t) in trips.iter().enumerate() {
-            let head = Rect::new(v.x + 4.0, y, v.w - 12.0, 46.0);
-            ui.p().rounded(head, 6.0, if k == 0 { SELECTED } else { FIELD });
-            ui.text_in(&format!("{} · {} → {}", if k == 0 { "Your first trip" } else { "Then" }, if t.from.is_empty() { "?" } else { &t.from }, t.terminus), Rect::new(head.x + 10.0, head.y + 4.0, head.w - 20.0, 20.0), 13.0, Weight::Bold, TEXT, Align::Left);
-            ui.text_in(&format!("{} - {} · {:.1} km · {}{}", hhmm(t.departure), hhmm(t.arrival), t.km, if t.line.is_empty() { "depot run".to_string() } else { format!("line {}", t.line) }, format!(" · {}", t.name)), Rect::new(head.x + 10.0, head.y + 24.0, head.w - 20.0, 18.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
-            y += 52.0;
             let n = t.stops.len();
+            let trip_h = 64.0 + n as f32 * 24.0;
+            if y + trip_h < list.y - 64.0 || y > list.bottom() + 64.0 {
+                y += trip_h;
+                continue;
+            }
+            let head = Rect::new(v.x + 4.0, y, v.w - 12.0, 46.0);
+            if head.bottom() >= list.y - 46.0 && head.y <= list.bottom() + 46.0 {
+                ui.p().rounded(head, 6.0, if k == 0 { SELECTED } else { FIELD });
+                ui.text_in(&format!("{} · {} → {}", if k == 0 { "Your first trip" } else { "Then" }, if t.from.is_empty() { "?" } else { &t.from }, t.terminus), Rect::new(head.x + 10.0, head.y + 4.0, head.w - 20.0, 20.0), 13.0, Weight::Bold, TEXT, Align::Left);
+                ui.text_in(&format!("{} - {} · {:.1} km · {} · {}", hhmm(t.departure), hhmm(t.arrival), t.km, if t.line.is_empty() { "depot run".to_string() } else { format!("line {}", t.line) }, t.name), Rect::new(head.x + 10.0, head.y + 24.0, head.w - 20.0, 18.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
+            }
+            y += 52.0;
             for (s, st) in t.stops.iter().enumerate() {
                 let rr = Rect::new(v.x + 4.0, y, v.w - 12.0, 24.0);
+                if rr.bottom() < list.y - 24.0 || rr.y > list.bottom() + 24.0 {
+                    y += 24.0;
+                    continue;
+                }
                 // the timeline: a line with a dot per stop
                 let cx = rr.x + 60.0;
                 if s + 1 < n {
