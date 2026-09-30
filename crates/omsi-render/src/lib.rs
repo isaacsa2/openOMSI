@@ -1359,6 +1359,12 @@ impl Renderer {
             && info.backend == wgpu::Backend::Vulkan
             && info.vendor == 0x8086
             && omsi_cfg::env::var_os("OMSI_INTEL_FULL_GPU").is_none();
+        // Diagnostic Android/GLES profile. Keep the renderer itself unchanged and only
+        // remove the optional/high-cost settings that are most likely to expose driver
+        // problems. This is intentionally much less invasive than a separate OpenGL
+        // renderer.
+        let android_gles_safe = cfg!(target_os = "android")
+            && info.backend == wgpu::Backend::Gl;
         let options = if intel_vulkan_safe {
             log::warn!(
                 "Intel Vulkan adapter detected ({}): using the stable driver profile (1x MSAA, 1x anisotropy, SSAO and runtime texture compression off); set OMSI_INTEL_FULL_GPU=1 after updating the Intel driver to retry the requested settings",
@@ -1371,14 +1377,30 @@ impl Renderer {
                 compress_textures: false,
                 ..options
             }
+        } else if android_gles_safe {
+            log::warn!(
+                "Android OpenGL ES compatibility profile active on {}: 1x MSAA, 1x anisotropy, 512 shadows, SSAO/FXAA/reflections/runtime texture compression off",
+                info.name
+            );
+            RenderOptions {
+                msaa: 1,
+                anisotropy: 1,
+                shadow_size: 512,
+                ssao: false,
+                render_scale: 1.0,
+                compress_textures: false,
+                fxaa: false,
+                reflections: false,
+                ..options
+            }
         } else {
             options
         };
         let shadow_size = options
             .shadow_size
-            .clamp(512, if intel_vulkan_safe { 2048 } else { 8192 });
+            .clamp(512, if intel_vulkan_safe || android_gles_safe { 2048 } else { 8192 });
         let mut limits = wgpu::Limits::default().using_resolution(adapter.limits());
-        if intel_vulkan_safe {
+        if intel_vulkan_safe || android_gles_safe {
             // Do not request every large limit the Intel driver advertises. In particular,
             // asking for its maximum storage-buffer and buffer sizes makes 31.0.101.2141
             // crash in vkCreateDevice instead of returning a VkResult. The WebGPU defaults
@@ -1458,8 +1480,8 @@ impl Renderer {
         if omsi_cfg::env::var_os("OMSI_NO_BC").is_none() {
             required_features |= adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC;
         }
-        if intel_vulkan_safe {
-            // Keep vkCreateDevice entirely free of optional extensions. Compressed source
+        if intel_vulkan_safe || android_gles_safe {
+            // Keep the compatibility device free of optional extensions. Compressed source
             // textures are decoded to RGBA by upload_texture on this device.
             required_features = wgpu::Features::empty();
         }
