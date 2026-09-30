@@ -165,6 +165,22 @@ pub(crate) fn graphics_instance() -> wgpu::Instance {
     last.unwrap_or_else(|| wgpu::Instance::new(descriptor))
 }
 
+/// The Android launcher uses GLES only for its bootstrap. Motorola devices in the field
+/// have been observed to terminate while the normal Vulkan-first launcher is being opened,
+/// while the same build reaches the launcher reliably through GLES. The game itself still
+/// gets a fresh normal instance and may therefore use Vulkan.
+pub(crate) fn graphics_instance_for_launcher() -> wgpu::Instance {
+    #[cfg(target_os = "android")]
+    {
+        log::info!("graphics: Android launcher bootstrap uses OpenGL ES");
+        return backend_instance(wgpu::Backends::GL);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        graphics_instance()
+    }
+}
+
 /// The graphics interfaces in the order they are tried: Metal on a Mac; elsewhere Vulkan
 /// first, and where the graphics chip or its driver has none (an older card - a GeForce GT
 /// 530 -, an old phone) DirectX 12 on Windows and then OpenGL. Settings → Graphics API
