@@ -402,20 +402,21 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     let view = args.view.clone();
     let args_root_for_keys = args.root.clone();
     let clock_note = args.clock_moved.clone();
+    let game_instance = if cfg!(target_os = "android") {
+        #[cfg(target_os = "android")]
+        {
+            crate::startup::android_game_graphics_instance(&args.root)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            unreachable!()
+        }
+    } else {
+        graphics_instance()
+    };
     let mut app = App {
         args,
-        instance: if cfg!(target_os = "android") {
-            #[cfg(target_os = "android")]
-            {
-                crate::startup::android_game_graphics_instance(&args.root)
-            }
-            #[cfg(not(target_os = "android"))]
-            {
-                unreachable!()
-            }
-        } else {
-            graphics_instance()
-        },
+        instance: game_instance,
         window: None,
         surface: None,
         renderer: None,
