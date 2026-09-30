@@ -29,7 +29,9 @@ impl Launcher {
         self.update.poll();
         match self.update.status() {
             // "install updates without asking"
-            Status::Available(r) if self.setting("update_auto", false) && !self.update.dismissed && !self.update.auto_started => {
+            // Diagnostic Android builds must not replace themselves with an upstream
+            // release before the compatibility test is finished.
+            Status::Available(r) if !cfg!(target_os = "android") && self.setting("update_auto", false) && !self.update.dismissed && !self.update.auto_started => {
                 self.update.auto_started = true;
                 log::info!("update: installing {} by itself (update_auto)", r.version);
                 self.update.install(r);
