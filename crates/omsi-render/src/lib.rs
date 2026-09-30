@@ -1986,7 +1986,15 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            // The NOOP adapter used by dedicated servers is deliberately downlevel and
+            // does not permit COPY_DST on the sRGB variant. A server never samples this
+            // atlas, so use the guaranteed plain RGBA8 format there; real renderers keep
+            // sRGB exactly as before.
+            format: if info.backend == wgpu::Backend::Noop {
+                wgpu::TextureFormat::Rgba8Unorm
+            } else {
+                wgpu::TextureFormat::Rgba8UnormSrgb
+            },
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
