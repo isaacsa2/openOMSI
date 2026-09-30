@@ -127,7 +127,8 @@ shadows exactly as in the game, under the light of the chosen time and weather -
 again only when something changes; drag on it to turn the bus, scroll to zoom. Its pages:
 
 * **Drive** - four steps: the bus (search, liveries, depot file, number plate), the route (map, start
-  point, line and tour - the lines that run on the chosen date), time and weather (time,
+  point, line and tour - the lines that run on the chosen date; filter by line, terminus or
+  tour, with AI-only lines available separately), time and weather (time,
   date, season, traffic, passengers, timetable buses, autostart, *LAN play: host / join*,
   the weather presets that suit the season), and the roadbook with the IBIS codes; the
   summary and **Start the duty** bottom right.
