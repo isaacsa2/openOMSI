@@ -117,7 +117,7 @@ impl Shell {
             }
             launcher_statics();
             self.instance = Some(());
-            self.launcher = Some(Box::new(launcher::Launcher::new(graphics_instance())));
+            self.launcher = Some(Box::new(launcher::Launcher::new(graphics_instance_for_launcher())));
         }
         self.launcher.as_mut().unwrap()
     }
