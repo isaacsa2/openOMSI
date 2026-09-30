@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/turbo-devv/openOMSI/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/turbo-devv/openOMSI?label=version&color=f47f30&style=for-the-badge"></a>
-  <a href="https://github.com/turbo-devv/openOMSI/actions/workflows/release.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/turbo-devv/openOMSI/release.yml?branch=main&style=for-the-badge&label=build"></a>
+  <a href="https://github.com/isaacsa2/openOMSI/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/isaacsa2/openOMSI?label=version&color=f47f30&style=for-the-badge"></a>
+  <a href="https://github.com/isaacsa2/openOMSI/actions/workflows/release.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/isaacsa2/openOMSI/release.yml?branch=main&style=for-the-badge&label=build"></a>
   <a href="https://turbo-devv.github.io/openOMSI/"><img alt="Docs" src="https://img.shields.io/badge/docs-website-2d3138?style=for-the-badge"></a>
   <a href="https://discord.gg/VG2EKVafYG"><img alt="Discord" src="https://img.shields.io/badge/discord-join%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
   <a href="https://buymeacoffee.com/usonskyyy"><img alt="Buy me a coffee" src="https://img.shields.io/badge/buy%20me%20a%20coffee-support-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black"></a>
@@ -33,7 +33,7 @@ and fully compatible with the existing maps, buses, scenery and mods.
 ## Download
 
 Every commit to `main` is built by GitHub Actions and published on the
-[**Releases**](https://github.com/turbo-devv/openOMSI/releases) page:
+[**Releases**](https://github.com/isaacsa2/openOMSI/releases) page:
 
 | Platform | File |
 | --- | --- |
@@ -59,7 +59,7 @@ the maps Grundorf and Berlin-Spandau and the stock buses (MAN SD200/SD202, NL). 
 brings no game content of its own; it plays the original's maps, buses and mods.
 
 1. **Download** the file for your system from
-   [Releases](https://github.com/turbo-devv/openOMSI/releases) (table above) and unpack it
+   [Releases](https://github.com/isaacsa2/openOMSI/releases) (table above) and unpack it
    into a folder of its own that you can write to - your Documents, a games folder, or the
    OMSI 2 folder itself. Not `Program Files`: the launcher could not update itself there.
 2. **Start it.**
