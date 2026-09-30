@@ -313,6 +313,13 @@ pub(crate) fn run(app: &mut App, kind: &ListKind, action: &str) -> Option<ListKi
                 }
                 "mouse" => {
                     app.mouse_drive = !app.mouse_drive;
+                    if !app.mouse_drive {
+                        crate::player::keep_wheel(app.player.as_mut());
+                    }
+                    #[cfg(windows)]
+                    if !app.mouse_drive {
+                        app.reset_vr_pointer();
+                    }
                     app.mouse_steer = (app.player.as_ref().map(|p| p.vehicle.physics.controls.steering).unwrap_or(0.0), 1.0);
                     app.mouse_pedals = app.player.as_ref().map(|p| (p.vehicle.physics.controls.throttle, p.vehicle.physics.controls.brake)).unwrap_or((0.0, 0.0));
                     None

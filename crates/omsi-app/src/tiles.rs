@@ -53,6 +53,22 @@ pub struct MapIndex {
     pub covers: HashMap<(i32, i32), [f64; 4]>,
     pub tiles_read: usize,
     pub tiles_failed: usize,
+    /// Object id → how many passengers get off at it, as Omsi.exe weighs a `[busstop]`'s
+    /// strings (see [`stop_exit_weight`]); only objects that carry strings.
+    pub stop_weights: HashMap<i64, f32>,
+}
+
+/// How many passengers get off at a bus stop, as Omsi.exe reads the stop object's strings
+/// when it sets the station up (0x620058): `pass_enter_max` (string 1, else 1) and
+/// `pass_enter_min` (string 2, else 0) rounded, and `pass_exit` (string 3) rounded - or,
+/// without it, the mean of the two - never below 0. A boarding passenger draws where to get
+/// off among the stops ahead by these numbers (0x61baa8), so a stop with twice the number
+/// takes twice the riders; the stock maps put 10 on every stop.
+pub fn stop_exit_weight(strings: &[String]) -> f32 {
+    let num = |i: usize| strings.get(i).map(|s| s.trim()).filter(|s| !s.is_empty()).and_then(|s| s.replace(',', ".").parse::<f64>().ok()).filter(|v| v.is_finite()).map(|v| v.round() as f32);
+    let max = num(1).unwrap_or(1.0);
+    let min = num(2).unwrap_or(0.0);
+    num(3).unwrap_or((min + max) / 2.0).max(0.0)
 }
 
 impl MapIndex {
@@ -113,6 +129,12 @@ impl MapIndex {
                 for o in &tile.objects {
                     let ground = terrain.as_ref().map(|t| t.sample(o.pos[0].clamp(0.0, tile_size()) as f32, o.pos[1].clamp(0.0, tile_size()) as f32) as f64).unwrap_or(0.0);
                     part.objects.insert(o.id, ((*tx, *ty), DVec3::new(origin.x + o.pos[0], origin.y + o.pos[1], o.pos[2] + ground), o.rot));
+                    if o.extra.len() >= 2 {
+                        part.stop_weights.insert(o.id, stop_exit_weight(&o.extra));
+                    }
+                }
+                for a in tile.spline_attachments.iter().filter(|a| a.repeater.is_none() && a.strings.len() >= 2) {
+                    part.stop_weights.insert(a.id, stop_exit_weight(&a.strings));
                 }
                 // an object put on a spline (`[splineAttachement]`: an entry point or a stop
                 // on the road): where the row's first object stands on its own spline - enough
@@ -141,6 +163,7 @@ impl MapIndex {
                         index.objects.insert(id, v);
                     }
                     index.covers.extend(p.covers);
+                    index.stop_weights.extend(p.stop_weights);
                     for (f, (n, t)) in p.files {
                         index.files.entry(f).or_insert((0, t)).0 += n;
                     }
@@ -286,12 +309,18 @@ pub struct Pose {
 
 impl Pose {
     /// The pose of an object hanging on attachment point `attach` of this pose, turned by
-    /// its own heading/pitch/bank `own`.
+    /// its own heading/pitch/bank `own`, as Omsi.exe puts it there (0x79d4c4..0x79d689): the
+    /// point's place turned with the parent, and for the turn the D3DX quaternion product
+    /// point x own x parent - the point's rotation, then the object's own (bank, pitch,
+    /// heading), then the parent's, all taken as rotations of the world axes. For the
+    /// usual turns about the vertical this is the plain hierarchy; with a tilt in more than
+    /// one of them it is what the original shows.
     pub fn attached(&self, attach: &Mat4, own: [f64; 3]) -> Pose {
         let local = attach.transform_point3(Vec3::ZERO);
         let pos = self.pos + self.rot.transform_vector3(local).as_dvec3();
         let (_, r, _) = attach.to_scale_rotation_translation();
-        let rot = self.rot * Mat4::from_quat(r) * omsi_geometry::object_rotation(own);
+        let (_, parent, _) = self.rot.to_scale_rotation_translation();
+        let rot = Mat4::from_quat((omsi_geometry::object_rotation_ypr(own).to_scale_rotation_translation().1 * r * parent).normalize());
         Pose { pos, rot }
     }
 
@@ -1037,6 +1066,20 @@ mod tests {
         assert!((objs[0].pose.pos.y - 170.0).abs() < 1e-6, "{:?}", objs[0].pose.pos);
         // the row's right is the spline's left there: still east of the chain
         assert!(objs[0].pose.pos.x > 2.9, "{:?}", objs[0].pose.pos);
+    }
+
+    #[test]
+    fn stop_exit_weights_as_omsi_reads_them() {
+        let v = |a: &[&str]| stop_exit_weight(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        // the stock stops: name, enter max, enter min, exit
+        assert_eq!(v(&["Krankenhaus", "0", "0", "10", "", "", ""]), 10.0);
+        // no exit number: the mean of the two entering numbers
+        assert_eq!(v(&["A", "6", "2"]), 4.0);
+        assert_eq!(v(&["A", "", ""]), 0.5);
+        // rounded, never below 0, rubbish ignored
+        assert_eq!(v(&["A", "1", "0", "2.6"]), 3.0);
+        assert_eq!(v(&["A", "1", "0", "-4"]), 0.0);
+        assert_eq!(v(&["A", "1", "0", "x"]), 0.5);
     }
 
     #[test]

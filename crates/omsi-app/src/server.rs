@@ -153,6 +153,7 @@ pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
     let cfg = ServerCfg::load(path)?;
     SERVER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = SERVER_ADMIN.set((cfg.admin_password.clone(), cfg.time_speed));
+    let _ = SERVER_VEHICLES.set(cfg.vehicles.clone());
     args.map = cfg.map.clone();
     args.time = cfg.time.clone();
     if let Some(d) = &cfg.date {
@@ -174,6 +175,9 @@ pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
     log::info!("server '{}': map {}, {} at {}, traffic {}, timetable {}, passengers {}, UDP {} / web {}, at most {} players", cfg.name, cfg.map, cfg.date.as_deref().unwrap_or("today"), cfg.time, cfg.traffic, cfg.timetable, cfg.passengers, cfg.port, cfg.web_port, cfg.max_players);
     Ok(cfg)
 }
+
+/// The buses a dedicated server allows (`vehicles`; empty: every bus it has).
+pub(crate) static SERVER_VEHICLES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
 
 /// A dedicated server's admin password and clock speed (for the host loop).
 pub(crate) static SERVER_ADMIN: std::sync::OnceLock<(String, f64)> = std::sync::OnceLock::new();

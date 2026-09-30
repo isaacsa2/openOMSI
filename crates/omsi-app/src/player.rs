@@ -17,8 +17,7 @@ pub(crate) struct Player {
     /// The interior cameras chosen (OMSI's `view_toggle_viewpoint`,
     /// `view_interiorcam_minus`/`_plus`): the driver's and the passengers' camera numbers.
     pub(crate) cam_choice: (usize, usize),
-    /// (scan code, OMSI duration/modifier flags) → action name, from
-    /// `Inputs/keyboard.cfg` `[vehicles]`.
+    /// (scan code, modifier bits) → action name, from `Inputs/keyboard.cfg` `[vehicles]`.
     pub(crate) bindings: Vec<omsi_content::KeyBinding>,
     pub(crate) sounds: Option<omsi_audio::SoundSet>,
     /// Mesh index currently pressed with the mouse (its `[mouseevent]` gets `_off` on release).
@@ -57,6 +56,9 @@ pub(crate) struct Player {
     /// Where the driver's head is thrown by the bus's accelerations (vehicle frame, m):
     /// OMSI's `[driverview_moving]`.
     pub(crate) head: Vec3,
+    /// Its speed (m/s) and the body's turning rates of the frame before (see `move_head`).
+    pub(crate) head_vel: Vec3,
+    pub(crate) head_omega: Vec3,
     /// The driver's seat moved (Settings → seat position; bus frame, m).
     pub(crate) seat: Vec3,
     /// The player's turn of each mirror (yaw, pitch degrees; Ctrl+Alt+arrows in the cab).
@@ -85,7 +87,7 @@ pub(crate) struct Player {
     /// The outside camera's arm (how far out it is swung right now).
     pub(crate) arm: camera_arm::SpringArm,
     /// What `Z`/`X`/`C` last turned on, so a repeat press of the same key turns it back off
-    /// (the convenience Z/X/C and OMSI's numpad 4/6/5 are toggles, not one-shot "set" buttons):
+    /// (real OMSI's Z/X/C and Shift+numpad 4/6/5 are toggles, not one-shot "set" buttons):
     /// 0 = nothing, 1 = left, 2 = right, 3 = hazard.
     pub(crate) blinker_key_state: u8,
 }
@@ -99,8 +101,8 @@ pub(crate) struct Player {
 // is selected at the end: the bus spawns in N anyway, and a D pressed while the auto-start
 // was still running was thrown back to N by it.
 
-/// OMSI's own layout drives the bus with the numpad (throttle Num 8, brake Num 2, steering
-/// Num 4/6). A laptop or a Mac keyboard has no numpad at all, so
+/// OMSI's own layout drives the bus with Shift and the numpad (throttle Shift+Num 8, brake
+/// Shift+Num 2, steering Shift+Num 4/6). A laptop or a Mac keyboard has no numpad at all, so
 /// the arrow keys drive as well; all they do in OMSI is step through the interior cameras.
 ///
 /// W, A, S and D drive as well, because that is what everybody reaches for - but
@@ -108,7 +110,7 @@ pub(crate) struct Player {
 /// gearbox**, so those three are reached by holding shift (Shift+D selects D), and the bus
 /// can still be put into gear. `--drive-keys arrows` leaves W/A/S/D to OMSI entirely.
 /// The driving keys of a control preset (`drive_keys` in the settings):
-/// `omsi` - only the original layout of Inputs/keyboard.cfg (numpad), nothing extra;
+/// `omsi` - only the original layout of Inputs/keyboard.cfg (Shift + numpad), nothing extra;
 /// `simple` - W/S/A/D and the arrow keys both drive; `wasd` - W/S/A/D only;
 /// `arrows` - the arrow keys only (W/S/D keep their OMSI meaning: wipers, viewpoint, gear).
 pub(crate) fn fallback_action(code: KeyCode, preset: &str) -> Option<omsi_sim::EngineAction> {
@@ -680,7 +682,7 @@ impl Player {
             let n: Vec<String> = self
                 .bindings
                 .iter()
-                .filter(|b| b.matches(scan, modifiers))
+                .filter(|b| b.scan_code == scan && b.matches(modifiers))
                 .map(|b| b.action.clone())
                 .collect();
             self.held_keys.insert(scan, n.clone());
@@ -691,7 +693,7 @@ impl Player {
                 None => self
                     .bindings
                     .iter()
-                    .filter(|b| b.matches(scan, modifiers))
+                    .filter(|b| b.scan_code == scan && b.matches(modifiers))
                     .map(|b| b.action.clone())
                     .collect(),
             }
@@ -896,18 +898,60 @@ impl Player {
 
     /// The driver's head follows the bus's accelerations a little late, as a body does:
     /// forward when braking, out of a bend, down over a bump (OMSI's head movement).
+    /// The driver's head on its neck, as Omsi.exe moves the driver's view (0x7e2110): a mass
+    /// on a spring, thrown by what the body does where the eye is - up and down always
+    /// (spring 3000/150, damper 2000/150 per second, a kick of the heave's acceleration and
+    /// of the pitch and roll rates' change times the eye's lever), sideways and fore and aft
+    /// with `[driverview_moving]` (3000/100 and 2000/100, and only once the bus is moving),
+    /// never further than 10 cm up or down (0x7e2256). (A lag of our own towards a point a
+    /// hundredth of the acceleration off - a third of what the original throws the head -
+    /// stood in for it.)
     pub(crate) fn move_head(&mut self, dt: f32, enabled: bool) {
+        let dt = dt.clamp(0.0, 0.1);
         let a = self.vehicle.physics.accel;
-        let target = if enabled {
-            Vec3::new(-a.x * 0.010, -a.y * 0.012, -(a.z - 9.81) * 0.006).clamp(Vec3::splat(-0.07), Vec3::splat(0.07))
-        } else {
-            Vec3::ZERO
+        let omega = self.vehicle.rigid.as_ref().map(|rb| rb.omega).unwrap_or(Vec3::ZERO);
+        let dw = omega - self.head_omega;
+        self.head_omega = omega;
+        if dt <= 0.0 {
+            return;
+        }
+        let def = &self.vehicle.ty.def;
+        let n = def.cameras_driver.len().max(1);
+        let eye = def.cameras_driver.get((def.camera_std + self.cam_choice.0) % n).map(|c| Vec3::new(c.pos[0], c.pos[1], c.pos[2])).unwrap_or(Vec3::ZERO);
+        // (1 unless a frame is longer than 1/15 s)
+        let stab = (1.0 / (15.0 * dt)).min(1.0);
+        let spring = |p: f32, v: f32, kick: f32, k: f32, c: f32| -> (f32, f32) {
+            let v = v + kick + (-k * p - c * v) * stab * dt;
+            (p + v * dt, v)
         };
-        let k = 1.0 - (-dt.max(0.0) * 7.0).exp();
-        self.head += (target - self.head) * k;
+        // up and down: the heave's acceleration, and the roll and pitch rates' change at the eye
+        let kick = -(a.z - 9.81) * dt + dw.y * eye.x + dw.x * eye.y;
+        let (mut p, mut v) = spring(self.head.z, self.head_vel.z, kick, 3000.0 / 150.0, 2000.0 / 150.0);
+        if p.abs() > 0.1 {
+            p = p.clamp(-0.1, 0.1);
+            v = 0.0;
+        }
+        self.head.z = p;
+        self.head_vel.z = v;
+        if enabled {
+            let moving = self.vehicle.physics.speed.abs().min(1.0);
+            let kx = (-a.x * dt + dw.y * eye.z - dw.z * eye.y) * moving;
+            let ky = (-a.y * dt - dw.x * eye.z + dw.z * eye.x) * moving;
+            let (px, vx) = spring(self.head.x, self.head_vel.x, kx, 3000.0 / 100.0, 2000.0 / 100.0);
+            let (py, vy) = spring(self.head.y, self.head_vel.y, ky, 3000.0 / 100.0, 2000.0 / 100.0);
+            self.head.x = px;
+            self.head_vel.x = vx;
+            self.head.y = py;
+            self.head_vel.y = vy;
+        } else {
+            self.head.x = 0.0;
+            self.head.y = 0.0;
+            self.head_vel.x = 0.0;
+            self.head_vel.y = 0.0;
+        }
     }
 
-    pub(crate) fn tick(&mut self, dt: f32, audio: Option<&omsi_audio::AudioEngine>, inside: bool) {
+    pub(crate) fn tick(&mut self, dt: f32, audio: Option<&omsi_audio::AudioEngine>, inside: bool, listener_follows_bus: bool) {
         self.tick_startup(dt);
         self.tick_auto_drag(dt);
         self.axes.speed_kmh = self.vehicle.physics.velocity_kmh();
@@ -975,6 +1019,7 @@ impl Player {
             // samples outside, the rain on the roof in the cab)
             ss.set_inside(inside);
             ss.set_muffled(inside);
+            ss.set_listener_vehicle(listener_follows_bus);
             // how open the bus is to the outside (doors, driver's window) for every outside
             // sound heard in it - this bus's own and the traffic's
             omsi_audio::soundset::set_outside_open(if inside { v.var("Snd_OutsideVol") } else { None });
@@ -1073,6 +1118,46 @@ impl Player {
     /// The same forgiving pick as `pick`, for the coupled sections of an articulated bus.
     pub(crate) fn pick_trailer(&self, origin: DVec3, dir: Vec3, spread: f32) -> Option<(usize, usize)> {
         pick_trailer_in(&self.vehicle, origin, dir, spread)
+    }
+
+    /// Exact surface under a VR pointer, including meshes without a mouse event.
+    /// This runs when the mouse moves, not for every headset frame.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn surface_hit(&self, origin: DVec3, dir: Vec3) -> Option<DVec3> {
+        let mut nearest = f32::INFINITY;
+        let mut nearest_control = f32::INFINITY;
+        let vehicle = &self.vehicle;
+        let o = (origin - vehicle.position).as_vec3();
+        for (i, mesh) in vehicle.ty.meshes.iter().enumerate() {
+            if !vehicle.mesh_props[i].visible { continue; }
+            let transform = vehicle.mesh_local_transform(i);
+            if !ray_may_hit(&vehicle.ty, i, &transform, o, dir, 0.0) { continue; }
+            if let Some(t) = omsi_geometry::ray_mesh(o, dir, &mesh.data, &transform) {
+                if t > 0.02 {
+                    if t < nearest { nearest = t; }
+                    if vehicle.ty.model.meshes[mesh.def_index].mouse_event.is_some()
+                        && t < nearest_control { nearest_control = t; }
+                }
+            }
+        }
+        for trailer in &vehicle.trailers {
+            let o = (origin - trailer.position).as_vec3();
+            for (i, mesh) in trailer.ty.meshes.iter().enumerate() {
+                if !trailer.mesh_props[i].visible { continue; }
+                let transform = trailer.mesh_local_transform(i);
+                if !ray_may_hit(&trailer.ty, i, &transform, o, dir, 0.0) { continue; }
+                if let Some(t) = omsi_geometry::ray_mesh(o, dir, &mesh.data, &transform) {
+                    if t > 0.02 {
+                        if t < nearest { nearest = t; }
+                        if trailer.ty.model.meshes[mesh.def_index].mouse_event.is_some()
+                            && t < nearest_control { nearest_control = t; }
+                    }
+                }
+            }
+        }
+        if nearest_control.is_finite() { nearest = nearest_control; }
+        (nearest.is_finite() && nearest < 8.0)
+            .then(|| origin + (dir * nearest).as_dvec3())
     }
 
     /// The part of the bus under a ray, switch or not: `(name, operable)`. Without this the
@@ -1355,6 +1440,11 @@ impl Player {
         cam
     }
 
+    /// How many passenger cameras the bus has, its coupled parts' included.
+    pub(crate) fn pax_camera_count(&self) -> usize {
+        self.vehicle.ty.def.cameras_pax.len() + self.vehicle.trailers.iter().map(|t| t.ty.def.cameras_pax.len()).sum::<usize>()
+    }
+
     /// `look`: yaw/pitch the player has turned the head (or the orbit) by; `dist`: how far
     /// the outside camera sits from the vehicle.
     pub(crate) fn camera_look(&self, view: &str, fallback: &Camera, look: (f32, f32), dist: f32) -> Camera {
@@ -1362,7 +1452,9 @@ impl Player {
         // `mirror<n>`: what the n-th mirror's camera sees, as it is drawn into the mirror's
         // picture (a check of the mirrors against OMSI's own `reflexion<n>.bmp`)
         if let Some(c) = view.strip_prefix("mirror").and_then(|n| n.parse::<usize>().ok()).and_then(|n| def.cameras_reflexion.get(n)) {
-            let (eye, yaw, pitch, roll) = self.vehicle.camera_world_full(&crate::camera_util::reflexion_camera(c));
+            let k = def.cameras_reflexion.iter().position(|x| std::ptr::eq(x, c)).unwrap_or(0);
+            let aimed = crate::camera_util::mirror_view(&self.vehicle, c, crate::camera_util::driver_eye(self), self.mirror_offsets.get(k).copied().unwrap_or([0.0; 2]));
+            let (eye, yaw, pitch, roll) = self.vehicle.camera_world_full(&aimed);
             return Camera { position: eye, yaw, pitch, roll, fov_deg: if c.fov > 1.0 { c.fov } else { 50.0 }, near: 0.3, far: 450.0 };
         }
         let cam = match view {
@@ -1372,7 +1464,31 @@ impl Player {
                     .get((def.camera_std + self.cam_choice.0) % n)
                     .or(def.cameras_driver.first())
             }
-            "pax" => def.cameras_pax.get(self.cam_choice.1 % def.cameras_pax.len().max(1)),
+            "pax" => {
+                // the passenger cameras of every part of the bus, the front's first: an
+                // articulated bus's rear section brings its own in its `.bus`
+                let n = self.pax_camera_count().max(1);
+                let k = self.cam_choice.1 % n;
+                match def.cameras_pax.get(k) {
+                    Some(c) => Some(c),
+                    None => {
+                        let mut k = k - def.cameras_pax.len();
+                        let mut found = None;
+                        for t in &self.vehicle.trailers {
+                            if let Some(c) = t.ty.def.cameras_pax.get(k) {
+                                let (eye, yaw, pitch) = t.camera_world(c);
+                                found = Some((eye, yaw, pitch, c.fov));
+                                break;
+                            }
+                            k -= t.ty.def.cameras_pax.len();
+                        }
+                        if let Some((eye, yaw, pitch, fov)) = found {
+                            return Camera { position: eye, yaw: yaw + look.0, pitch: (pitch + look.1).clamp(-89.0, 89.0), roll: 0.0, fov_deg: fov, near: 0.25, far: 6000.0 };
+                        }
+                        def.cameras_pax.first()
+                    }
+                }
+            }
             _ => None,
         };
         match cam {
@@ -1603,6 +1719,17 @@ pub(crate) fn pick_trailer_in(vehicle: &omsi_sim::VehicleInstance, origin: DVec3
         }
     }
     None
+}
+
+/// Mouse steering switched off: the wheel stays where the mouse left it and the keys go on
+/// from there, as in OMSI, where the mouse and the keys turn the one wheel (#184). The
+/// keys' own position was held at the middle while the mouse steered, and the wheel sprang
+/// back to it.
+pub(crate) fn keep_wheel(p: Option<&mut Player>) {
+    if let Some(p) = p {
+        p.axes.steering = p.vehicle.physics.controls.steering;
+        p.axes.centering = false;
+    }
 }
 
 /// OMSI's mouse steering (Omsi.exe 0x6f4284..0x6f447b): the cursor's place across the whole

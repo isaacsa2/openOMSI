@@ -331,7 +331,9 @@ fn session_codes() {
         session: 0x49A5_0EA5_8A1F,
     };
     let text = multi.encode();
-    assert_eq!(text.replace('-', "").len(), 4 + 37, "{text}");
+    // (37 characters, the last group filled up to four: 40)
+    assert_eq!(text.replace('-', "").len(), 4 + 40, "{text}");
+    assert!(text.split('-').all(|g| g.len() == 4), "{text}");
     assert!(!text[5..].contains(['0', '1', 'O', 'I']), "{text}");
     assert_eq!(SessionCode::decode(&text).unwrap(), multi);
     assert_eq!(
@@ -342,7 +344,11 @@ fn session_codes() {
         ips: multi.ips[..2].to_vec(),
         ..multi.clone()
     };
-    assert_eq!(two.encode().replace('-', "").len(), 4 + 31);
+    assert_eq!(two.encode().replace('-', "").len(), 4 + 32);
+    // the code without the filling (as an older game wrote it) is read the same
+    let short: String = two.encode().replace('-', "")[4..35].to_string();
+    assert_eq!(SessionCode::decode(&short).unwrap(), two);
+    assert!(looks_like_code(&two.encode()) && looks_like_code(&short));
     assert_eq!(SessionCode::decode(&two.encode()).unwrap(), two);
     // every character matters in the long codes too
     let chars: Vec<char> = text.chars().collect();

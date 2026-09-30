@@ -322,8 +322,31 @@ impl SessionCode {
             }
             chars.push(ALPHABET[v] as char);
         }
+        // (the last group filled up to four with the zero character: a code of two
+        // addresses ended in a group of three, and players took it for cut short, #152)
+        while chars.len() % 4 != 0 {
+            chars.push(ALPHABET[0] as char);
+        }
         let groups: Vec<String> = chars.chunks(4).map(|c| c.iter().collect()).collect();
         format!("OMSI-{}", groups.join("-"))
+    }
+
+    /// A code's characters (after `OMSI-`) without the filling of its last group, or None
+    /// when it has no length a code has.
+    fn unpadded(s: &str) -> Option<&str> {
+        let lengths = Self::valid_lengths();
+        if lengths.contains(&s.len()) {
+            return Some(s);
+        }
+        lengths
+            .into_iter()
+            .find(|&l| l < s.len() && l.div_ceil(4) * 4 == s.len() && s.as_bytes()[l..].iter().all(|c| *c == ALPHABET[0]))
+            .map(|l| &s[..l])
+    }
+
+    /// The lengths a code is written with (its last group filled to four).
+    fn written_lengths() -> Vec<usize> {
+        Self::valid_lengths().into_iter().map(|l| l.div_ceil(4) * 4).collect()
     }
 
     /// The code lengths (characters after `OMSI-`) that exist: one address, or two to
@@ -342,12 +365,14 @@ impl SessionCode {
             .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
             .collect::<String>()
             .to_ascii_uppercase();
-        let lengths = Self::valid_lengths();
+        let lengths = Self::written_lengths();
         // (O and I are not in the alphabet: a code itself never starts with OMSI)
         if s.starts_with("OMSI") {
             s = s[4..].to_string();
         }
-        if !lengths.contains(&s.len()) {
+        if let Some(u) = Self::unpadded(&s) {
+            s = u.to_string();
+        } else {
             let n = s.len();
             return Err(format!(
                 "a session code has {} characters after OMSI- (this one has {n}) - copy the whole code",
@@ -453,10 +478,8 @@ pub fn looks_like_code(text: &str) -> bool {
     }
     // the full code, the code without its prefix, or something that was meant to be one
     // (the prefix and a few groups: a code cut short while copying)
-    let lengths = SessionCode::valid_lengths();
-    lengths.contains(&s.len())
-        || (s.starts_with("OMSI")
-            && (lengths.contains(&(s.len() - 4)) || (t.starts_with("OMSI-") && s.len() >= 8)))
+    let ok = |s: &str| SessionCode::unpadded(s).is_some();
+    ok(&s) || (s.starts_with("OMSI") && (ok(&s[4..]) || (t.starts_with("OMSI-") && s.len() >= 8)))
 }
 
 /// A session id as it is written in messages (12 hex digits).
@@ -1358,6 +1381,12 @@ pub struct LanSession {
     descs_up: Vec<(u32, world::Desc)>,
     /// When the session began (the host's world clock counts from it).
     started: Instant,
+    /// The clock the states and world frames are stamped with (ms since `started`): on
+    /// by each frame's time step and kept near the clock on the wall. Stamped as they left,
+    /// a state carried the moment of sending, some milliseconds after the moment of the
+    /// frame it shows, more or less as the frame took long or not - the others drew the
+    /// bus between states a little too far apart or too close, on and on: the jitter.
+    frame_ms: Option<f64>,
     /// Bytes of world datagrams and descriptions sent / received so far.
     world_sent: Cell<u64>,
     pub world_received: u64,
@@ -1449,6 +1478,7 @@ impl LanSession {
             world_up: Vec::new(),
             descs_up: Vec::new(),
             started: now,
+            frame_ms: None,
             world_sent: Cell::new(0),
             world_received: 0,
             bridge: None,
@@ -1872,6 +1902,11 @@ impl LanSession {
         self.started.elapsed().as_millis() as u32
     }
 
+    /// The moment of this frame on our clock (ms), for stamping what is sent of it.
+    pub fn stamp_ms(&self) -> u32 {
+        self.frame_ms.map(|m| m.max(0.0) as u32).unwrap_or_else(|| self.world_ms())
+    }
+
     /// The address of player `id` (host).
     fn peer_addr(&self, id: u32) -> Option<SocketAddr> {
         self.peers.get(&id).and_then(|p| p.addr)
@@ -1885,7 +1920,7 @@ impl LanSession {
         self.world_seq = self.world_seq.wrapping_add(1);
         let mut f = frame.clone();
         f.seq = self.world_seq;
-        f.host_ms = self.world_ms();
+        f.host_ms = self.stamp_ms();
         let mut n = 0;
         for d in world::encode(&f, PROTOCOL as u8) {
             self.send(&d, to);
@@ -1913,7 +1948,7 @@ impl LanSession {
         self.world_seq = self.world_seq.wrapping_add(1);
         let f = world::WorldFrame {
             seq: self.world_seq,
-            host_ms: self.world_ms(),
+            host_ms: self.stamp_ms(),
             cars: Vec::new(),
             lights: Vec::new(),
             ..frame.clone()
@@ -2108,6 +2143,22 @@ impl LanSession {
     /// Returns the ids of players that left this frame.
     pub fn tick(&mut self, dt: f32, mine: &Pose) -> Vec<u32> {
         let mut gone = Vec::new();
+        let wall = self.started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_ms = Some(match self.frame_ms {
+            Some(prev) => {
+                let c = prev + dt as f64 * 1000.0;
+                // (a frame longer than the step the game takes, or a pause: the wall again;
+                // ahead of it, it waits - it never goes back)
+                if wall - c > 250.0 {
+                    wall
+                } else if c - wall > 250.0 {
+                    prev
+                } else {
+                    (c + (wall - c) * 0.05).max(prev)
+                }
+            }
+            None => wall,
+        });
         if let Some(b) = self.bridge.as_mut() {
             b.tick(dt, &self.socket);
             // the host's addresses the rendezvous told (a client still trying)
@@ -2261,8 +2312,8 @@ impl LanSession {
             self.send_acc = (self.send_acc - interval).clamp(0.0, interval);
             self.last_state = body.to_vec();
             self.seq = self.seq.wrapping_add(1);
-            // stamped with our clock as it leaves (see `Pose::sent_ms`)
-            p.sent_ms = (self.started.elapsed().as_millis() as u32).max(1);
+            // stamped with the moment of the frame it shows (see `Pose::sent_ms`)
+            p.sent_ms = self.stamp_ms().max(1);
             let data = wire::encode_state(&p, PROTOCOL as u8, self.seq);
             match self.role {
                 Role::Host => self.broadcast(&data, None),

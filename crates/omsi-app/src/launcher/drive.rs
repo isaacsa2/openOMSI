@@ -2,7 +2,7 @@
 //! tour), the time and weather, the roadbook - in a panel on the left, the bus itself in
 //! the showroom on the right, and the button that starts the game.
 
-use super::state::{fmt_bytes, hhmm};
+use super::state::{fmt_bytes, hhmm, trip_index_at};
 use super::theme::*;
 use super::ui::{id_of, ButtonKind};
 use super::Launcher;
@@ -461,12 +461,13 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
     let tour_scroll_key = (l.state.lines_revision, line.name.clone(), chosen_t.clone().unwrap_or_default());
     if l.drive.tour_scroll_key.as_ref() != Some(&tour_scroll_key) {
         if let Some(k) = chosen_t.as_ref().and_then(|number| tours.iter().position(|tour| &tour.number == number)) {
-            l.ui.scroll_to("tour-list", k as f32 * 52.0, 52.0 * 2.0, tour_area.h);
+            l.ui.scroll_to("tour-list", k as f32 * 66.0, 66.0 * 2.0, tour_area.h);
         }
         l.drive.tour_scroll_key = Some(tour_scroll_key);
     }
+    let now = l.state.choice.time as f64 * 60.0;
     l.ui.scroll_area("tour-list", tour_area, &mut |ui, v| {
-        let rh = 52.0;
+        let rh = 66.0;
         for (k, tour) in tours.iter().enumerate() {
             let rr = Rect::new(v.x + 4.0, v.y + k as f32 * rh, v.w - 12.0, rh - 4.0);
             if rr.bottom() < tour_area.y - rh || rr.y > tour_area.bottom() + rh {
@@ -478,8 +479,15 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
             }
             let c = if tour.runs { TEXT } else { TEXT_FAINT };
             // (the tour's name as the map writes it and OMSI lists it: "1", "Mo-Fr 1")
-            ui.text_in(&tour.number, Rect::new(rr.x + 10.0, rr.y + 6.0, rr.w - 110.0, 18.0), 13.5, Weight::Bold, c, Align::Left);
-            ui.text_in(&format!("{} - {}", hhmm(tour.first), hhmm(tour.last)), Rect::new(rr.right() - 110.0, rr.y + 6.0, 100.0, 18.0), 12.0, Weight::Medium, if tour.runs { ACCENT } else { TEXT_FAINT }, Align::Right);
+            ui.text_in(&tour.number, Rect::new(rr.x + 10.0, rr.y + 5.0, rr.w - 110.0, 18.0), 13.5, Weight::Bold, c, Align::Left);
+            let trip_time = line.tours.iter()
+                .find(|t| t.number == tour.number)
+                .and_then(|t| trip_index_at(t, now).and_then(|i| t.trips.get(i)))
+                .map(|x| (x.departure, x.arrival));
+            if let Some((departure, arrival)) = trip_time {
+                ui.text_in(&format!("{} - {}", hhmm(departure), hhmm(arrival)), Rect::new(rr.right() - 110.0, rr.y + 6.0, 100.0, 18.0), 12.0, Weight::Medium, if tour.runs { ACCENT } else { TEXT_FAINT }, Align::Right);
+                ui.text_in(&format!("{}: {}", omsi_ui::tr("Trip duration"), trip_duration(departure, arrival)), Rect::new(rr.x + 10.0, rr.y + 25.0, rr.w - 20.0, 16.0), 12.0, Weight::Medium, c, Align::Left);
+            }
             let sub = if tour.runs {
                 format!("{} trips · {}", tour.trips, tour.days)
             } else {
@@ -488,7 +496,7 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
                     None => format!("{} trips · never within a year", tour.trips),
                 }
             };
-            ui.text_in(&sub, Rect::new(rr.x + 10.0, rr.y + 27.0, rr.w - 20.0, 16.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
+            ui.text_in(&sub, Rect::new(rr.x + 10.0, rr.y + 43.0, rr.w - 20.0, 16.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
         }
         tours.len() as f32 * rh + 4.0
     });
@@ -509,6 +517,19 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
 pub(super) fn natural(s: &str) -> (u64, &str) {
     let digits = s.bytes().take_while(u8::is_ascii_digit).count();
     (s[..digits].parse().unwrap_or(u64::MAX), s)
+}
+
+/// Time from the departure to the arrival of one trip.
+fn trip_duration(first: f64, last: f64) -> String {
+    let minutes = ((last - first).max(0.0) / 60.0).round() as i64;
+    let hours = minutes / 60;
+    let remaining = minutes % 60;
+    let count = |n: i64, one: &str, many: &str| format!("{n} {}", omsi_ui::tr(if n == 1 { one } else { many }));
+    match (hours, remaining) {
+        (0, m) => count(m, "minute", "minutes"),
+        (h, 0) => count(h, "hour", "hours"),
+        (h, m) => format!("{} {}", count(h, "hour", "hours"), count(m, "minute", "minutes")),
+    }
 }
 
 #[cfg(test)]

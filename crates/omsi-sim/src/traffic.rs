@@ -99,7 +99,33 @@ pub struct Lane {
 /// Priority of a path without a `[rule] priority`.
 pub const DEFAULT_PRIORITY: f32 = 128.0;
 
+/// How much of `unsched_vehgroups.txt` group `pool`'s traffic a path carries: its `[rule]
+/// trafficdensity` for the group (`rules`, see `Lane::group_density`: the last rule of a
+/// group counts), else the group's default there (`defaults`): 0 none, for the first group 1
+/// its medium density, for any other k that of the k-th group on the same path.
+pub fn pool_density(rules: &[(u16, f32)], defaults: &[i32], pool: usize) -> f32 {
+    let mut u = pool;
+    // (a default naming another group that names this one again would go round for ever)
+    for _ in 0..=defaults.len() {
+        if let Some(&(_, v)) = rules.iter().rev().find(|(k, _)| *k as usize == u) {
+            return v;
+        }
+        match defaults.get(u).copied().unwrap_or(0) {
+            d if d <= 0 => return 0.0,
+            _ if u == 0 => return 1.0,
+            d => u = d as usize - 1,
+        }
+    }
+    0.0
+}
+
 impl Lane {
+    /// How much of `unsched_vehgroups.txt` group `pool`'s traffic the lane carries (see
+    /// [`pool_density`]).
+    pub fn pool_density(&self, defaults: &[i32], pool: usize) -> f32 {
+        pool_density(&self.group_density, defaults, pool)
+    }
+
     /// Closest point of the lane's polyline to `p`: (distance along the lane, distance to it).
     pub fn nearest_point(&self, p: DVec3) -> Option<(f32, f64)> {
         let mut best: Option<(f32, f64)> = None;
@@ -1654,6 +1680,7 @@ const SIGNAL_BEFORE_CHANGE: f32 = 1.2;
 /// going. The body that follows this way is `ai_motion::AiBody`.
 #[derive(Debug, Clone)]
 pub struct AiState {
+    pub traffic_pool: Option<(usize, std::sync::Arc<Vec<i32>>)>,
     pub lane: usize,
     pub s: f32,
     pub speed: f32,
@@ -1881,7 +1908,7 @@ impl LaneSeq {
 
 impl AiState {
     pub fn new(lane: usize, s: f32, seed: u64) -> AiState {
-        AiState { lane, s, speed: 0.0, max_speed_kmh: 50.0, accel: 1.2, decel: 3.0, length: 5.0, rng: seed | 1, blinker: 0, braking: false, odometer: 0.0, planned_next: None, ahead: Vec::new(), change_plan: Vec::new(), prev_lane: None, yield_time: 0.0, route: Vec::new(), route_index: 0, change: None, change_cooldown: 5.0, lateral: 0.0, lateral_target: 0.0, lateral_ramp: (0.0, 0.0, 0.0, 1.0), turn_wish: 0, signal: 0, signal_time: 0.0, lat_accel: 2.8, desire: 1.0, headway: 1.4, min_gap: 2.0, accept_gap: 4.0, reaction: 0.7, front: 2.5, rear: 2.5, held: false, start_timer: 0.0, acc: 0.0, accel_cap: None }
+        AiState { traffic_pool: None, lane, s, speed: 0.0, max_speed_kmh: 50.0, accel: 1.2, decel: 3.0, length: 5.0, rng: seed | 1, blinker: 0, braking: false, odometer: 0.0, planned_next: None, ahead: Vec::new(), change_plan: Vec::new(), prev_lane: None, yield_time: 0.0, route: Vec::new(), route_index: 0, change: None, change_cooldown: 5.0, lateral: 0.0, lateral_target: 0.0, lateral_ramp: (0.0, 0.0, 0.0, 1.0), turn_wish: 0, signal: 0, signal_time: 0.0, lat_accel: 2.8, desire: 1.0, headway: 1.4, min_gap: 2.0, accept_gap: 4.0, reaction: 0.7, front: 2.5, rear: 2.5, held: false, start_timer: 0.0, acc: 0.0, accel_cap: None }
     }
 
     fn rand(&mut self) -> u64 {
@@ -1904,7 +1931,26 @@ impl AiState {
     /// depot yard from next door. A car that has taken a turn lane takes the turn.
     fn choose_after(&mut self, net: &Network, lane: usize) -> Option<usize> {
         let l = &net.lanes[lane];
-        let open: Vec<usize> = l.next.iter().copied().filter(|&n| !net.lanes[n].no_cars && net.lanes[n].density > 0.001).collect();
+        // (a car of a traffic pool - the trucks of a map that keeps them to its port roads -
+        // takes the ways its pool may go, as it was put on one; where none of them does, the
+        // ways open to cars, then any: it does not stand at the junction for ever)
+        let open_to = |pooled: bool| -> Vec<usize> {
+            l.next
+                .iter()
+                .copied()
+                .filter(|&n| {
+                    let nl = &net.lanes[n];
+                    let d = match self.traffic_pool.as_ref().filter(|_| pooled) {
+                        Some((p, defaults)) => nl.pool_density(defaults, *p),
+                        None => nl.density,
+                    };
+                    !nl.no_cars && d > 0.0
+                })
+                .collect()
+        };
+        let pooled = self.traffic_pool.is_some().then(|| open_to(true)).filter(|o| !o.is_empty());
+        let weighted = pooled.is_some();
+        let open = pooled.unwrap_or_else(|| open_to(false));
         let mut choices = if open.is_empty() { l.next.clone() } else { open };
         // and a way that goes on rather than into the end of the network, where there is
         // the choice (the map's edge is where OMSI takes its cars away; a village like
@@ -1925,7 +1971,16 @@ impl AiState {
         if choices.is_empty() {
             None
         } else {
-            Some(choices[(self.rand() % choices.len() as u64) as usize])
+            if let Some((pool, defaults)) = self.traffic_pool.clone().filter(|_| weighted) {
+                let total: f32 = choices.iter().map(|&n| net.lanes[n].pool_density(&defaults, pool)).sum();
+                let mut pick = (self.rand() >> 32) as f32 / (u32::MAX as f32 + 1.0) * total;
+                for &n in &choices {
+                    let weight = net.lanes[n].pool_density(&defaults, pool);
+                    if pick < weight { return Some(n); }
+                    pick -= weight;
+                }
+                choices.last().copied()
+            } else { Some(choices[(self.rand() % choices.len() as u64) as usize]) }
         }
     }
 
@@ -2326,8 +2381,12 @@ impl AiState {
         // clears (the wave that runs down a queue at a green light)
         if self.speed < 0.05 {
             if acc <= 0.05 {
+                // (a hold of a frame or two - a junction that is free and not free by turns
+                // as the cars on the ring come and go - winds the reaction back only a
+                // little: set back whole every frame, it never ran out, and the car stood at
+                // an empty roundabout for minutes, "about to go")
+                self.start_timer = if self.held { (self.start_timer + 3.0 * dt).min(self.reaction) } else { self.reaction };
                 self.held = true;
-                self.start_timer = self.reaction;
                 acc = acc.min(0.0);
             } else if self.held {
                 self.start_timer -= dt;
@@ -2827,5 +2886,23 @@ mod light_tests {
         let d = at(TrafficLightController::new(vec![vec![(0, 19.0), (3, 2.0), (6, 11.0), (9, 3.0), (0, 0.0)]], 38.0), 36.0);
         assert!((d.remaining(0) - 21.0).abs() < 1e-4, "{}", d.remaining(0));
         assert!(at(TrafficLightController::new(vec![vec![(6, 5.0)]], 0.0), 1.0).remaining(0).is_infinite());
+    }
+}
+
+#[cfg(test)]
+mod aurora_pool_tests {
+    use super::*;
+    #[test]
+    fn independent_rules_and_default_references() {
+        let mut lane = LaneBuilder::arc(DVec3::ZERO, 0.0, 100.0, 0.0, 0.0, LaneKind::Street, 3.0);
+        lane.group_density = vec![(0, 1.0), (1, 0.1), (3, 0.001), (5, 0.0)];
+        let defaults = [1, 0, 1, 0, 0, 0];
+        assert_eq!(lane.pool_density(&defaults, 1), 0.1);
+        assert_eq!(lane.pool_density(&defaults, 2), 1.0);
+        assert_eq!(lane.pool_density(&defaults, 3), 0.001);
+        assert_eq!(lane.pool_density(&defaults, 4), 0.0);
+        assert_eq!(lane.pool_density(&defaults, 5), 0.0);
+        lane.group_density.push((1, 0.5));
+        assert_eq!(lane.pool_density(&defaults, 1), 0.5);
     }
 }

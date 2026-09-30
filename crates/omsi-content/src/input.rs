@@ -3,40 +3,45 @@
 use omsi_cfg::CfgFile;
 use std::path::Path;
 
-/// The low bit in a `keyboard.cfg` entry is OMSI's "duration" flag: the action
-/// remains active for as long as the key is held.  It is not a keyboard modifier.
-pub const KEY_FLAG_DURATION: i32 = 1;
-pub const KEY_MOD_SHIFT: i32 = 2;
-pub const KEY_MOD_CTRL: i32 = 4;
-pub const KEY_MOD_ALT: i32 = 8;
-
-/// The actual modifier-key part of the flags stored in `keyboard.cfg`.
-pub fn key_modifiers(flags: i32) -> i32 {
-    flags & !KEY_FLAG_DURATION
-}
-
-/// Encode the modifier keys in the representation used by `keyboard.cfg`.
-pub fn key_modifier_flags(shift: bool, ctrl: bool, alt: bool) -> i32 {
-    (shift as i32) * KEY_MOD_SHIFT
-        | (ctrl as i32) * KEY_MOD_CTRL
-        | (alt as i32) * KEY_MOD_ALT
-}
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct KeyBinding {
     pub action: String,
     /// DirectInput scan code
     pub scan_code: i32,
-    /// OMSI key flags: 1 = duration, 2 = Shift, 4 = Ctrl, 8 = Alt.
+    /// The entry's third value, as Omsi.exe reads it (0x6478d0): [`KEY_HOLD`], [`KEY_SHIFT`],
+    /// [`KEY_CTRL`] (and our [`KEY_ALT`]). Kept whole, so that it is written back as read.
     pub modifier: i32,
 }
 
+/// The action is told the key's state every frame, not only when it changes (the key list
+/// marks it with " *"): the throttle, the brake, the steering. No part of the key chord.
+pub const KEY_HOLD: i32 = 1;
+/// Held with Shift (OMSI shows "Shift + "; its Standlicht is Shift+L, bit 2).
+pub const KEY_SHIFT: i32 = 2;
+/// Held with Ctrl (Ctrl+Q ends the game: `exit` 16 / 4).
+pub const KEY_CTRL: i32 = 4;
+/// Held with Alt: Omsi.exe has no Alt (it reads the three bits above only); ours, which it
+/// leaves alone.
+pub const KEY_ALT: i32 = 8;
+
 impl KeyBinding {
-    /// Whether this binding is the given physical key chord.  Duration is an action
-    /// property and therefore deliberately does not participate in chord matching.
-    pub fn matches(&self, scan_code: i32, modifiers: i32) -> bool {
-        self.scan_code == scan_code && key_modifiers(self.modifier) == modifiers
+    /// The keys held with it (Shift, Ctrl, Alt bits), without [`KEY_HOLD`].
+    pub fn chord(&self) -> i32 {
+        self.modifier & (KEY_SHIFT | KEY_CTRL | KEY_ALT)
     }
+
+    /// Whether the modifier keys held (`held`, [`chord`] bits) make its chord: Shift and
+    /// Ctrl as they are, as Omsi.exe compares them (0x6466b8); Alt only when it asks for
+    /// Alt (Omsi.exe has none, and fires its keys whether Alt is held or not).
+    pub fn matches(&self, held: i32) -> bool {
+        let sc = KEY_SHIFT | KEY_CTRL;
+        self.chord() & sc == held & sc && (self.chord() & KEY_ALT == 0 || held & KEY_ALT != 0)
+    }
+}
+
+/// The chord bits of the modifier keys held.
+pub fn chord(shift: bool, ctrl: bool, alt: bool) -> i32 {
+    (shift as i32) * KEY_SHIFT | (ctrl as i32) * KEY_CTRL | (alt as i32) * KEY_ALT
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -76,16 +81,26 @@ impl KeyboardCfg {
     /// The keys the game adds to the file's (not written back by `save`).
     pub fn with_game_defaults(mut self) -> Self {
         // The IBIS's next stop with its announcement (`IBIS_vor`) has no key in OMSI's own
-        // file: only the mouse on the IBIS reached it. Give it Q (scan code 16) only where
-        // that physical chord is free. A duration binding (the stock microphone/announcement
-        // action, for example) is still physically unmodified and therefore occupies Q.
-        let q_taken = self
-            .game
-            .iter()
-            .chain(self.vehicles.iter())
-            .any(|b| b.scan_code == 16 && key_modifiers(b.modifier) == 0);
+        // file: only the mouse on the IBIS reached it. Q (scan code 16, no modifier: Ctrl+Q
+        // ends the game, Shift+Q is the microphone) gives it one where Q is still free.
+        let q_taken = self.game.iter().chain(self.vehicles.iter()).any(|b| b.scan_code == 16 && b.chord() == 0);
         if !q_taken && !self.vehicles.iter().any(|b| b.action.eq_ignore_ascii_case("IBIS_vor")) {
             self.vehicles.push(KeyBinding { action: "IBIS_vor".into(), scan_code: 16, modifier: 0 });
+        }
+        self
+    }
+
+    pub fn with_vr_defaults(mut self) -> Self {
+        // VR controls are included in the same editable list as the game's
+        // other keys. An existing entry (including an unbound one) wins.
+        for (action, scan_code, modifier) in [
+            ("vr_recenter", 19, KEY_SHIFT | KEY_CTRL),
+            ("vr_toggle_desktop_mirror", 65, 0),
+            ("vr_toggle_mode", 66, 0),
+        ] {
+            if !self.game.iter().any(|b| b.action.eq_ignore_ascii_case(action)) {
+                self.game.push(KeyBinding { action: action.into(), scan_code, modifier });
+            }
         }
         self
     }
@@ -183,6 +198,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_third_value_is_held_shift_ctrl_as_omsi_reads_it() {
+        let b = |m: i32| KeyBinding { action: "a".into(), scan_code: 38, modifier: m };
+        // throttle-like (1: held): the plain key, not Shift+key
+        assert!(b(1).matches(0) && !b(1).matches(KEY_SHIFT));
+        // Standlicht: Shift+L; exit: Ctrl+Q; the changer: Shift+Ctrl
+        assert!(b(2).matches(chord(true, false, false)) && !b(2).matches(chord(false, true, false)));
+        assert!(b(4).matches(chord(false, true, false)) && !b(4).matches(chord(true, false, false)));
+        assert!(b(6).matches(chord(true, true, false)) && b(3).matches(KEY_SHIFT) && b(5).matches(KEY_CTRL));
+        // Alt: Omsi.exe's keys fire with it held; ours with Alt want it
+        assert!(b(0).matches(KEY_ALT) && b(8).matches(KEY_ALT) && !b(8).matches(0));
+        assert_eq!(b(3).chord(), KEY_SHIFT);
+    }
+
+    #[test]
+    fn vr_defaults_keep_custom_and_unbound_keys() {
+        let custom = KeyBinding { action: "vr_recenter".into(), scan_code: 0, modifier: 0 };
+        let cfg = KeyboardCfg { game: vec![custom.clone()], ..Default::default() }
+            .with_vr_defaults().with_vr_defaults();
+        assert_eq!(cfg.game.iter().filter(|b| b.action == "vr_recenter").count(), 1);
+        assert!(cfg.game.contains(&custom));
+        assert!(cfg.game.iter().any(|b| b.action == "vr_toggle_mode" && b.scan_code == 66));
+    }
+
+    #[test]
     fn keyboard_cfg_round_trips_through_save() {
         let k = KeyboardCfg {
             game: vec![KeyBinding {
@@ -209,28 +248,5 @@ mod tests {
         let back = KeyboardCfg::load(&path).unwrap();
         let _ = std::fs::remove_file(&path);
         assert_eq!(back, k);
-    }
-
-    #[test]
-    fn duration_is_not_a_keyboard_modifier() {
-        assert_eq!(key_modifiers(KEY_FLAG_DURATION), 0);
-        assert_eq!(key_modifiers(KEY_FLAG_DURATION | KEY_MOD_SHIFT), KEY_MOD_SHIFT);
-        assert_eq!(key_modifier_flags(true, true, false), KEY_MOD_SHIFT | KEY_MOD_CTRL);
-
-        let throttle = KeyBinding {
-            action: "throttle".into(),
-            scan_code: 17,
-            modifier: KEY_FLAG_DURATION,
-        };
-        assert!(throttle.matches(17, 0));
-        assert!(!throttle.matches(17, KEY_MOD_SHIFT));
-
-        let shifted = KeyBinding {
-            action: "wiper_interval".into(),
-            scan_code: 17,
-            modifier: KEY_FLAG_DURATION | KEY_MOD_SHIFT,
-        };
-        assert!(shifted.matches(17, KEY_MOD_SHIFT));
-        assert!(!shifted.matches(17, 0));
     }
 }

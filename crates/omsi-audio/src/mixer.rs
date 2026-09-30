@@ -32,6 +32,8 @@ pub struct VoiceParams {
     pub looping: bool,
     /// World position; `None` = non-spatial.
     pub position: Option<Vec3>,
+    /// Whether motion relative to the listener changes playback pitch.
+    pub doppler: bool,
     /// Distance of full volume for spatial voices.
     pub range: f32,
     /// A one-pole low-pass cutoff in Hz, or 0.0 for none: a sound heard through the
@@ -47,6 +49,7 @@ impl Default for VoiceParams {
             pitch: 1.0,
             looping: false,
             position: None,
+            doppler: true,
             range: 5.0,
             lowpass_hz: 0.0,
         }
@@ -299,7 +302,7 @@ impl Shared {
 /// shift from how fast the distance to the listener changes (the bus's own sounds move with
 /// the listener and keep their pitch).
 fn apply_params(v: &mut Voice, params: VoiceParams, now: std::time::Instant, listener: Vec3) {
-    if let (Some(p), true) = (params.position, DOPPLER.load(Ordering::Relaxed)) {
+    if let (Some(p), true) = (params.position, params.doppler && DOPPLER.load(Ordering::Relaxed)) {
         let dist = (p - listener).length();
         let (last, at, factor) = v.doppler;
         let mut f = factor;
@@ -313,7 +316,7 @@ fn apply_params(v: &mut Voice, params: VoiceParams, now: std::time::Instant, lis
         }
         v.doppler = (dist, Some(now), f);
     } else {
-        v.doppler.2 = 1.0;
+        v.doppler = (0.0, None, 1.0);
     }
     v.params = params;
 }
@@ -721,7 +724,7 @@ mod tests {
             id: 1,
             clip,
             stream: None,
-            params: VoiceParams { gain, pitch: 1.0, looping: true, position: None, range: 10.0, lowpass_hz: 0.0 },
+            params: VoiceParams { gain, pitch: 1.0, looping: true, position: None, doppler: true, range: 10.0, lowpass_hz: 0.0 },
             pos: 0.0,
             finished: false,
             cur_gain: gain,
@@ -751,6 +754,22 @@ mod tests {
         s.render(&mut out);
         assert_eq!(s.voices.lock()[0].params.gain, 0.0);
         assert!(s.updates.lock().is_empty());
+    }
+
+    #[test]
+    fn listener_vehicle_keeps_spatial_sound_at_its_original_pitch() {
+        let clip = Arc::new(Clip { sample_rate: 48_000, channels: 1, samples: vec![0; 5] });
+        let mut own = voice(clip.clone(), 1.0);
+        let mut passing = voice(clip, 1.0);
+        let now = std::time::Instant::now();
+        for (distance, elapsed) in [(2.0, 0), (2.2, 20)] {
+            let at = now + std::time::Duration::from_millis(elapsed);
+            let position = Some(Vec3::new(distance, 0.0, 0.0));
+            apply_params(&mut own, VoiceParams { position, doppler: false, ..Default::default() }, at, Vec3::ZERO);
+            apply_params(&mut passing, VoiceParams { position, ..Default::default() }, at, Vec3::ZERO);
+        }
+        assert_eq!(own.doppler.2, 1.0);
+        assert!(passing.doppler.2 < 1.0);
     }
 
     /// The stream opened again (as when the system's output device changed) keeps playing;

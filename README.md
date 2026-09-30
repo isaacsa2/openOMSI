@@ -11,6 +11,7 @@
   <a href="https://turbo-devv.github.io/openOMSI/"><img alt="Docs" src="https://img.shields.io/badge/docs-website-2d3138?style=for-the-badge"></a>
   <a href="https://discord.gg/VG2EKVafYG"><img alt="Discord" src="https://img.shields.io/badge/discord-join%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
   <a href="https://buymeacoffee.com/usonskyyy"><img alt="Buy me a coffee" src="https://img.shields.io/badge/buy%20me%20a%20coffee-support-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black"></a>
+  <a href="https://ko-fi.com/usonance"><img alt="Ko-fi" src="https://img.shields.io/badge/ko--fi-support-29abe0?style=for-the-badge&logo=kofi&logoColor=white"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/turbo-devv/openOMSI?style=for-the-badge"></a>
 </p>
 
@@ -121,6 +122,7 @@ pages live in [`docs/`](docs):
 | Document | What is in it |
 | --- | --- |
 | [User guide](docs/USER_GUIDE.md) | running, controls, launcher, settings, mods, LAN play, debug switches |
+| [Virtual reality](docs/VR.md) | OpenXR setup, VR settings and controls on Windows |
 | [Android](docs/ANDROID.md) | the mobile version: install, touch controls, building the APK |
 | [Modding](docs/MODDING.md) | limits lifted for modders: more interior lights, larger textures, additions OMSI 2 ignores |
 | [PBR materials](docs/PBR.md) | normal, roughness, metalness and occlusion maps for mods |
@@ -177,10 +179,11 @@ Issues and pull requests are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Support
 
 openOMSI is made in free time. If you enjoy it and want to help it along, you can buy me a
-coffee - thank you!
+coffee or support it on Ko-fi - thank you!
 
 <p>
   <a href="https://buymeacoffee.com/usonskyyy"><img alt="Buy me a coffee" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="48"></a>
+  <a href="https://ko-fi.com/usonance"><img alt="Support me on Ko-fi" src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" height="48"></a>
 </p>
 
 ## License

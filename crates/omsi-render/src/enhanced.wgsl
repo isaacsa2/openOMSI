@@ -52,6 +52,15 @@ fn to_cube(d: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(d.x, d.z, d.y);
 }
 
+// What a raindrop on a pane shows (`rain_light`): the sky probe that way, blurred a little
+// by the drop's small lens, and low down the street's light in place of the probe's
+// horizon (see the reflections in `shade_enhanced`).
+fn rain_env_enhanced(d: vec3<f32>, lod: f32) -> vec3<f32> {
+    let e = textureSampleLevel(t_probe, s_lin, to_cube(d), lod).rgb * enh.fog_color.w;
+    let surround = enh.fog_color.rgb * (0.25 / 0.9);
+    return mix(surround, e, smoothstep(-0.05, 0.35, d.z));
+}
+
 // A fixed, deterministic PCF kernel (shader.wgsl's SHADOW_OFFSETS). The old PCSS blocker
 // search was unstable for alpha-tested foliage: a few leaves entering or leaving its
 // 12-sample search changed the penumbra radius, producing checkerboard patches and
@@ -271,18 +280,24 @@ fn fs_enhanced(in: VsOut) -> EnhancedOut {
 
 fn shade_enhanced(in: VsOut) -> vec4<f32> {
     if (material.emissive.w > 1.5) {
-        // a pane's film of water: drops, not the sliding texture (see `rain_drops`), lit by
-        // the sky they mirror
-        let wet = in.params.x;
-        let d = rain_drops(in.world, in.uv - in.params.zw, safe_normal(in.normal), wet, camera.post.y);
-        let light = (sh_irradiance(vec3<f32>(0.0, 0.0, 1.0)) * 0.6 + enh.sun.rgb * 0.08) / PI;
+        // a pane's film of water: drops, not the sliding texture (see `rain_glass`), each a
+        // lens that mirrors the sky probe and shows it upside down through itself
         let v = camera.cam_pos.xyz - in.world;
+        let vn = normalize(v);
+        let in_cab = inside_vehicle(camera.cam_pos.xyz) * near_player_vehicle(in.world) > 0.5;
+        let g = rain_glass(in.world, in.uv - in.params.zw, in.normal, in.params.x, camera.post.y, in_cab);
+        let through = rain_through(g, vn);
+        let valid = dot(through, through) > 1e-4;
+        let seen = select(vec3<f32>(0.0), rain_env_enhanced(normalize(select(g.out, through, valid)), 2.0), valid);
+        let mirrored = rain_env_enhanced(reflect(-vn, g.n), 1.0);
+        let d = rain_light(g, vn, through, mirrored, seen, sh_irradiance(g.out) / PI * 0.9, enh.sun.rgb / PI);
         let aer = air(-normalize(v), fog_distance(in.world), camera.cam_pos.z - enh.fog.z, in.world.z - enh.fog.z);
         // Drops a few pixels across are a pane's sparkle close up; further off each
         // darker rim was a black fleck, and a bus seen from the pavement in the rain wore
-        // windows peppered black. They fade out over the first dozen metres.
-        let near = 1.0 - smoothstep(4.0, 12.0, length(v));
-        return vec4<f32>(d.rgb * light * enh.exposure.x * 2.0 * aer.a, d.a * near);
+        // windows peppered black. Drops smaller than a pixel give way to the mist now
+        // (`rain_dome`), and the rest fade out over the first fifteen metres.
+        let near = 1.0 - smoothstep(5.0, 15.0, length(v));
+        return vec4<f32>(d.rgb * enh.exposure.x * aer.a, d.a * near);
     }
     // --- the surface's texture and alpha, exactly as the vanilla pass reads them
     let terrain = material.extra.x > 0.5;
@@ -424,9 +439,10 @@ fn shade_enhanced(in: VsOut) -> vec4<f32> {
         // the pane instead of leaving a flat pale surface at normal incidence.
         rough = 0.04;
         // the pane's [matl_envmap] factor says how much it mirrors (its alpha is its
-        // transparency, never a mask): 0.4 on the Scania's panes, which the fixed 0.08
-        // left looking like empty frames
-        f0 = vec3<f32>(clamp(0.06 + 0.2 * min(material.params2.y, 1.0), 0.08, 0.26));
+        // transparency, never a mask): from glass's own 4 % up to 12 % for a factor of 1
+        // (0.4 on the Scania's panes). Up to 26 % as before, every window of every bus
+        // was a mirror - far more than the original's panes reflect (issue #176).
+        f0 = vec3<f32>(clamp(0.04 + 0.08 * min(material.params2.y, 1.0), 0.04, 0.12));
     } else if (reflective_env) {
         // Paint reflects its few per cent through a smooth clear coat; much more than a few
         // per cent is polished metal - but only where the model says so with a mask of its

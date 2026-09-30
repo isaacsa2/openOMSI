@@ -253,6 +253,26 @@ impl VehicleType {
         Self::load_with(root, bus_file, true)
     }
 
+    /// The box the whole model takes (least, greatest corner; y forward), None without
+    /// vertices.
+    pub fn model_box(&self) -> Option<(Vec3, Vec3)> {
+        let (lo, hi) = self
+            .mesh_boxes
+            .iter()
+            .filter(|(lo, hi)| hi.x > lo.x || hi.y > lo.y)
+            .fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(a, b), (lo, hi)| (a.min(*lo), b.max(*hi)));
+        (hi.y > lo.y).then_some((lo, hi))
+    }
+
+    /// Half its length as Omsi.exe keeps it (type +0xd4): half the `[boundingbox]`'s
+    /// length, else half the model's.
+    pub fn half_length(&self) -> Option<f32> {
+        match self.def.bounding_box {
+            Some(bb) if bb[1] > 0.0 => Some(bb[1] * 0.5),
+            _ => self.model_box().map(|(lo, hi)| (hi.y - lo.y) * 0.5),
+        }
+    }
+
     /// A type for AI copies: its meshes are measured (the tyres) and let go - nothing but
     /// the upload to the GPU needs them, and a timetable fleet kept half a gigabyte of
     /// vertices on the CPU. [`VehicleType::mesh_data`] reads a mesh again.
@@ -358,6 +378,18 @@ impl VehicleType {
         for c in &model.ctc {
             let d = omsi_cfg::resolve_path(&dir, &c.path);
             paint_schemes.extend(load_paint_schemes(&d));
+        }
+        // the model's own items, after the `.cti` files' (their textures in the first
+        // `[CTC]` folder, as a `.cti` of that folder has them)
+        let item_dir = model.ctc.first().map(|c| omsi_cfg::resolve_path(&dir, &c.path)).unwrap_or_else(|| dir.clone());
+        for it in &model.items {
+            match paint_schemes.last_mut().filter(|s: &&mut PaintScheme| s.name.eq_ignore_ascii_case(&it.name) && s.dir == item_dir) {
+                Some(s) => {
+                    s.textures.push((it.ctc.clone(), it.texture.clone()));
+                    s.set_vars.extend(it.set_vars.iter().cloned());
+                }
+                None => paint_schemes.push(PaintScheme { name: it.name.clone(), dir: item_dir.clone(), textures: vec![(it.ctc.clone(), it.texture.clone())], set_vars: it.set_vars.clone() }),
+            }
         }
         let texchanges = omsi_model::load_texchanges(&dir, &model.texchanges);
         let (wheel_meshes, suspension_axles) = wheel_meshes(&model, &meshes);
@@ -935,16 +967,26 @@ impl VehicleInstance {
                 state.vars[*i as usize] = 1.0;
             }
         }
-        // A model.cfg can choose a vehicle variant with `[setvar]` (dashboard, doors,
-        // destination display, and so on). OMSI makes these values visible to `{init}`;
-        // merely parsing them left converted vehicles on the script's zero defaults.
-        apply_model_set_vars(&mut state, &var_index, &ty.model.set_vars);
         // `$.yard` is the depot the bus runs from, the [name] of its .hof, known before
         // {init}: the matrix displays build their line list and palette paths from it
         // (`Linienlisten\<yard>_ANX.jpg`, `palettes\<yard>.bmp`), the roller blind its
         // line list, and some IBIS scripts branch on it.
         if let (Some(i), Some(h)) = (program.str_var("yard"), host.hof.as_ref()) {
             state.str_vars[i as usize] = h.name.clone();
+        }
+        if let Some(scheme) = host.paint_scheme {
+            let scheme = scheme.filter(|i| *i < ty.paint_schemes.len());
+            let mut put = |name: &str, v: f32| {
+                if let Some(id) = var_index.get(&name.to_ascii_lowercase()) {
+                    state.vars[*id as usize] = v;
+                }
+            };
+            put("Colorscheme", scheme.map(|i| i as f32).unwrap_or(-1.0));
+            if let Some(i) = scheme {
+                for (var, v) in &ty.paint_schemes[i].set_vars {
+                    put(var, *v);
+                }
+            }
         }
         vm.run_init(&program, &mut state, &mut host);
         let mut animators: Vec<MeshAnimator> = ty
@@ -2438,14 +2480,6 @@ impl VehicleInstance {
     }
 }
 
-fn apply_model_set_vars(state: &mut State, var_index: &HashMap<String, omsi_script::VarId>, set_vars: &[(String, f32)]) {
-    for (name, value) in set_vars {
-        if let Some(i) = var_index.get(&name.to_ascii_lowercase()) {
-            state.vars[*i as usize] = *value;
-        }
-    }
-}
-
 /// Per-mesh `[visible]`, `[matl_alphascale]` and texture offsets from variables. The
 /// vehicles use the same rules through `PropsPlan`, resolved once; this is the plain
 /// statement of them (and what the plan is tested against).
@@ -2490,7 +2524,7 @@ pub fn compute_mesh_props(ty: &VehicleType, var: &dyn Fn(&str) -> Option<f32>) -
                             .ok()
                             .or_else(|| var(v))
                             .unwrap_or(0.0);
-                        props.slot_light[slot] = props.slot_light[slot].max(x.clamp(0.0, 1.0));
+                        props.slot_light[slot] = props.slot_light[slot].max(if x >= 0.5 { 1.0 } else { 0.0 });
                     }
                 }
             }
@@ -2688,8 +2722,10 @@ impl PropsPlan {
             for &(slot, _) in &plan.light {
                 props.slot_light[slot] = 0.0;
             }
+            // (a light map is on at its variable's 0.5 and off below - Omsi.exe skips the
+            // texture stage of one whose variable reads under 0.5, 0x7fe51f - never half lit)
             for &(slot, src) in &plan.light {
-                props.slot_light[slot] = props.slot_light[slot].max(src.value(vars, 0.0).clamp(0.0, 1.0));
+                props.slot_light[slot] = props.slot_light[slot].max(if src.value(vars, 0.0) >= 0.5 { 1.0 } else { 0.0 });
             }
             if let Some((i, value)) = plan.visible {
                 if let Some(x) = vars.get(i) {
@@ -3027,6 +3063,15 @@ impl TrailerPart {
     /// World transform of the part's body (f32, for sound positions).
     pub fn world_transform(&self) -> Mat4 {
         Mat4::from_translation(self.position.as_vec3()) * self.body_rotation()
+    }
+
+    /// Position/direction of one of the part's own `.bus` cameras in world space: (eye,
+    /// yaw, pitch) - as `VehicleInstance::camera_world` for the front part.
+    pub fn camera_world(&self, cam: &omsi_vehicle::Camera) -> (DVec3, f32, f32) {
+        let local = Vec3::new(cam.pos[0], cam.pos[1], cam.pos[2]);
+        let eye = self.position + self.body_rotation().transform_point3(local).as_dvec3();
+        let heading = if self.reversed { self.heading + 180.0 } else { self.heading };
+        (eye, heading as f32 + cam.yaw, cam.pitch)
     }
 
     /// Transform for mesh `i` relative to the part's position; a shadow blob lies on the
@@ -3486,19 +3531,6 @@ pub fn skin_vertices(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn model_setvars_are_applied_case_insensitively_before_init() {
-        let mut state = State { vars: vec![0.0, 0.0], str_vars: Vec::new() };
-        let mut vars = HashMap::new();
-        vars.insert("dashboard_variant".into(), 0);
-        vars.insert("door_type".into(), 1);
-        let set_vars = [("Dashboard_Variant".into(), 2.0), ("door_TYPE".into(), 1.5), ("not_in_varlist".into(), 9.0)];
-
-        apply_model_set_vars(&mut state, &vars, &set_vars);
-
-        assert_eq!(state.vars, [2.0, 1.5]);
-    }
 
     /// A shadow blob at the model's z = 0 is laid onto the plane through the wheels: 15 cm
     /// up with the body sagging, and following a pitch; one axle gives a level plane.

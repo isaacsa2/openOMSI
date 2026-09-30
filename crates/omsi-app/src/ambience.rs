@@ -176,6 +176,7 @@ impl Ambience {
             pitch: 1.0,
             looping: true,
             position: None,
+            doppler: true,
             range: 1.0,
             lowpass_hz: if inside { 400.0 } else { 0.0 },
         };
@@ -205,6 +206,7 @@ impl Ambience {
             pitch: 1.0,
             looping: true,
             position: None,
+            doppler: true,
             range: 1.0,
             lowpass_hz: 300.0,
         };
@@ -271,6 +273,7 @@ impl Ambience {
                 pitch: pitch * (0.94 + 0.12 * self.rand()),
                 looping: false,
                 position: Some(f.position.as_vec3()),
+                doppler: true,
                 range: self.step_range,
                 lowpass_hz: lowpass,
             };

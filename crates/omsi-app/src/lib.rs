@@ -12,6 +12,8 @@
 mod admin;
 mod discord;
 mod headtrack;
+#[cfg(windows)]
+mod openxr;
 #[cfg(target_os = "macos")]
 mod mac_hid;
 #[cfg(target_os = "android")]
@@ -406,6 +408,8 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         window: None,
         surface: None,
         renderer: None,
+        #[cfg(windows)]
+        vr: None,
         scene: None,
         camera: None,
         player: None,
@@ -447,11 +451,15 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         audio: None,
         ambience: None,
         cursor: (0.0, 0.0),
+        vr_cursor_physical: None,
+        vr_cursor_warp_pending: None,
+        window_focused: false,
         keys: Default::default(),
         door_key_triggers: Default::default(),
         last: Instant::now(),
         speed: 30.0,
         mouse_look: false,
+        vr_zoom_active: false,
         hover: None,
         hover_part: None,
         input_script: parse_input_script(),
@@ -491,12 +499,9 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         admin_list: None,
         list_kind: None,
         route_arrows: Default::default(),
-        game_keys: omsi_content::KeyboardCfg::load(&crate::startup::keyboard_cfg(&args_root_for_keys)).map(|k| k.game).unwrap_or_default(),
+        game_keys: omsi_content::KeyboardCfg::load(&crate::startup::keyboard_cfg(&args_root_for_keys)).map(|k| k.with_vr_defaults().game).unwrap_or_default(),
         own_keys: crate::startup::own_keys(&args_root_for_keys),
-        own_shift: crate::startup::own_bindings(
-            &args_root_for_keys,
-            omsi_content::input::KEY_MOD_SHIFT,
-        ),
+        own_shift: crate::startup::own_bindings(&args_root_for_keys, omsi_content::input::KEY_SHIFT),
         menu_prev_pause: false,
         info_bar: false,
         pending_time: None,
@@ -526,6 +531,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         spikes: 0,
         worst_ms: 0.0,
         governor: (0.0, 0, 0.0),
+        governor_low: 0,
         governor_wait_prev: 0.0,
         hidden_frames: 0,
         exiting: false,

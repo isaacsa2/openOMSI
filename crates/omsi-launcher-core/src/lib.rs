@@ -1458,7 +1458,7 @@ fn binding_from_json(v: &Value) -> Option<omsi_content::input::KeyBinding> {
 
 pub fn get_keybindings() -> Result<Value> {
     let path = keyboard_cfg_read_path()?;
-    let k = omsi_content::input::KeyboardCfg::load(&path)?;
+    let k = omsi_content::input::KeyboardCfg::load(&path)?.with_vr_defaults();
     Ok(json!({ "game": k.game.iter().map(binding_to_json).collect::<Vec<_>>(), "vehicles": k.vehicles.iter().map(binding_to_json).collect::<Vec<_>>() }))
 }
 
@@ -1572,6 +1572,11 @@ pub fn graphics_mode(v: &str) -> &'static str {
 /// The page's view of a `settings.cfg` text (None: no file yet, the game's defaults).
 pub fn settings_from_text(text: Option<&str>) -> Value {
     let mut v = json!({ "msaa": 4, "anisotropy": 8, "ssao": true, "shadows": true, "shadow_size": 2048, "navigator": true, "navigator_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "texture_memory": 0, "texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
+    v["vr"] = json!(false);
+    v["vr_scale"] = json!(0.65);
+    v["vr_head_smoothing_ms"] = json!(0);
+    v["vr_mirror_rate"] = json!(16);
+    v["vr_desktop_mirror"] = json!(true);
     // OMSI's own options
     for (k, d) in [("maintenance", json!(0)), ("ai_unsched_factor", json!(100)), ("ai_max_scheduled", json!(0)), ("ai_max_parked", json!(0)), ("use_real_time", json!(false)), ("use_real_date", json!(false)), ("use_real_year", json!(false)), ("collision_vehicles", json!(true)), ("collision_objects", json!(true)), ("collision_pedestrians", json!(true)), ("head_movement", json!(true))] {
         v[k] = d;
@@ -1601,9 +1606,12 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
             "msaa" | "shadow_size" => v[&k] = json!(val.parse::<i64>().unwrap_or(0)),
             "navigator_opacity" | "volume" | "vol_ai" | "vol_scenery" | "min_obj_size" => v[&k] = json!(val.parse::<f64>().unwrap_or(0.0)),
             "pax_density" => v[&k] = json!(val.trim_end_matches('%').parse::<f64>().map(|x| if x > 5.0 { x / 100.0 } else { x }).unwrap_or(1.0)),
+            "vr_scale" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.5, 1.0)).unwrap_or(0.65)),
+            "vr_head_smoothing_ms" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 30.0) as i64).unwrap_or(0)),
+            "vr_mirror_rate" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 60.0) as i64).unwrap_or(16)),
             "mirror_size" | "max_fps" => v[&k] = json!(val.parse::<f64>().map(|x| x as i64).unwrap_or(0)),
             "max_obj_dist" => v[&k] = if val.eq_ignore_ascii_case("auto") { json!("auto") } else { json!(val.parse::<f64>().map(|m| (m.round() as i64).to_string()).unwrap_or_else(|_| "auto".into())) },
-            "ssao" | "shadows" | "navigator" | "enhanced" | "fullscreen" | "vsync" | "exact_fare" | "detail_textures" | "texture_compression" | "chat" | "tooltips" | "name_tags" | "show_fps" | "clouds" | "doppler" | "driver" | "use_real_time" | "use_real_date" | "use_real_year" | "collision_vehicles" | "collision_objects" | "collision_pedestrians" | "head_movement" => v[&k] = json!(b(val)),
+            "ssao" | "shadows" | "navigator" | "enhanced" | "vr" | "vr_desktop_mirror" | "fullscreen" | "vsync" | "exact_fare" | "detail_textures" | "texture_compression" | "chat" | "tooltips" | "name_tags" | "show_fps" | "clouds" | "doppler" | "driver" | "use_real_time" | "use_real_date" | "use_real_year" | "collision_vehicles" | "collision_objects" | "collision_pedestrians" | "head_movement" => v[&k] = json!(b(val)),
             "maintenance" | "ai_unsched_factor" | "ai_max_scheduled" | "ai_max_parked" => v[&k] = json!(val.trim_end_matches('%').parse::<f64>().map(|x| x.max(0.0) as i64).unwrap_or(0)),
             "drive_keys" | "navigator_corner" | "boarding" | "render_scale" | "pax_voices" => v[&k] = json!(val),
             "ctrl_off" => v[&k] = json!(val),
@@ -1855,6 +1863,10 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         b("ff_enabled", true),
         b("brake_hold", true),
     );
+    let vr_scale = v.get("vr_scale").and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).filter(|x| x.is_finite()).unwrap_or(0.65).clamp(0.5, 1.0);
+    let vr_head_smoothing_ms = v.get("vr_head_smoothing_ms").and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).filter(|x| x.is_finite()).unwrap_or(0.0).clamp(0.0, 30.0);
+    let vr_mirror_rate = v.get("vr_mirror_rate").and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).filter(|x| x.is_finite()).unwrap_or(16.0).clamp(0.0, 60.0);
+    let text = format!("{text}vr={}\nvr_scale={vr_scale}\nvr_head_smoothing_ms={vr_head_smoothing_ms}\nvr_mirror_rate={vr_mirror_rate}\nvr_desktop_mirror={}\n", b("vr", false), b("vr_desktop_mirror", true));
     // what the page does not manage (keys of newer games, hand-written ones) stays as it
     // was in the file; other spellings of the keys just written go
     let mut text = text;
@@ -2291,6 +2303,21 @@ mod tests {
         assert_eq!((v["update_check"].clone(), v["update_auto"].clone()), (json!(false), json!(true)));
         let text = settings_to_text(&v, None);
         assert!(text.lines().any(|l| l == "update_check=0") && text.lines().any(|l| l == "update_auto=1"), "{text}");
+    }
+
+    #[test]
+    fn vr_settings_round_trip() {
+        let mut settings = settings_from_text(None);
+        settings["vr"] = json!(true);
+        settings["vr_scale"] = json!(0.8);
+        settings["vr_head_smoothing_ms"] = json!(10);
+        settings["vr_mirror_rate"] = json!(0);
+        settings["vr_desktop_mirror"] = json!(false);
+        let saved = settings_to_text(&settings, None);
+        let loaded = settings_from_text(Some(&saved));
+        for key in ["vr", "vr_scale", "vr_head_smoothing_ms", "vr_mirror_rate", "vr_desktop_mirror"] {
+            assert_eq!(loaded[key], settings[key], "{key} was not saved");
+        }
     }
 
     #[test]

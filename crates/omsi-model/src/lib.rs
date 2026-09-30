@@ -373,8 +373,22 @@ pub struct Model {
     pub interior_lights: Vec<InteriorLight>,
     /// `[light]` legacy lights (raw).
     pub lights: Vec<Vec<String>>,
+    /// `[setvar]` lines before any `[item]`: Omsi.exe files them under an item that is
+    /// never chosen, so they set nothing (kept for the record).
     pub set_vars: Vec<(String, f32)>,
+    /// The model's own paint items (`[item]`: name, `[CTCTexture]` name, texture), each with
+    /// the `[setvar]` lines after it - a `.cti` written into the model.cfg (0x5efae8 files
+    /// a `[setvar]` under the item before it).
+    pub items: Vec<ModelItem>,
     pub unknown_keywords: Vec<(String, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ModelItem {
+    pub name: String,
+    pub ctc: String,
+    pub texture: String,
+    pub set_vars: Vec<(String, f32)>,
 }
 
 impl Model {
@@ -538,11 +552,19 @@ impl Model {
                 let illumination_interior = self.meshes.last().map(|m| m.illumination_interior.clone()).unwrap_or_else(|| vec![0, 1, 2, 3]);
                 self.meshes.push(MeshDef { file, lod: self.lods.len() - 1, illumination_interior, ..Default::default() });
             }
-            "item" => {}
+            "item" => {
+                let name = r.str().to_string();
+                let ctc = r.str().to_string();
+                let texture = r.str().to_string();
+                self.items.push(ModelItem { name, ctc, texture, set_vars: Vec::new() });
+            }
             "setvar" => {
                 let n = r.str().to_string();
                 let v = r.f32();
-                self.set_vars.push((n, v));
+                match self.items.last_mut() {
+                    Some(i) => i.set_vars.push((n, v)),
+                    None => self.set_vars.push((n, v)),
+                }
             }
             "mesh_ident" => {
                 let s = r.str().to_string();
@@ -1001,14 +1023,20 @@ mod tests {
         assert_eq!(m.lod_meshes(1)[0].file, "low.o3d");
     }
 
-    #[test]
-    fn model_setvars_are_kept_for_vehicle_initialisation() {
-        let text = "[setvar]\nDashboard_variant\n2\n\n[setvar]\ndoor_type\n1.5\n";
-        let m = Model::parse(&CfgFile::from_str("model.cfg", text));
-        assert_eq!(m.set_vars, [("Dashboard_variant".into(), 2.0), ("door_type".into(), 1.5)]);
-    }
-
     use super::*;
+
+    /// `[setvar]` belongs to the `[item]` before it (a paint scheme in the model.cfg), as
+    /// Omsi.exe files it; one before any item sets nothing.
+    #[test]
+    fn setvar_belongs_to_the_item_before_it() {
+        let text = "[setvar]\nlost\n1\n[item]\nBVG\nbody\nbvg.dds\n[setvar]\nDisplay_Type\n2\n[item]\nHVL\nbody\nhvl.dds\n";
+        let m = Model::parse(&CfgFile::from_str("model.cfg", text));
+        assert_eq!(m.items.len(), 2);
+        assert_eq!(m.items[0].set_vars, vec![("Display_Type".to_string(), 2.0)]);
+        assert!(m.items[1].set_vars.is_empty());
+        assert_eq!((m.items[1].name.as_str(), m.items[1].ctc.as_str(), m.items[1].texture.as_str()), ("HVL", "body", "hvl.dds"));
+        assert_eq!(m.set_vars, vec![("lost".to_string(), 1.0)]);
+    }
 
     /// A tab-indented block (the stock F90 lorry's second rear axle, whose mesh does not
     /// exist) is switched off: no mesh, and its lines do not reach the animation above.

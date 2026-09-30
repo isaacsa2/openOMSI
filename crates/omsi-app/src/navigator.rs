@@ -240,7 +240,7 @@ pub struct Navigator {
     shown: f32,
     /// The trip's next stops (place, name, the bus's heading there) and where the bus is,
     /// for the route arrows.
-    stop_spots: Vec<(DVec3, String, f64)>,
+    stop_spots: Vec<(DVec3, String, f64, i64)>,
     bus_at: DVec3,
     next_turn: Option<(i32, f32, f64, Option<String>)>,
     /// The street the bus is on.
@@ -761,7 +761,7 @@ impl Navigator {
         };
         self.follow(f);
         self.bus_at = f.bus;
-        self.stop_spots = f.stops.iter().take(3).map(|st| (st.position, st.name.clone(), f.heading)).collect();
+        self.stop_spots = f.stops.iter().take(3).map(|st| (st.position, st.name.clone(), f.heading, st.object_id)).collect();
         if omsi_cfg::env::var_os("OMSI_DEBUG_NAV").is_some() && (self.time % 1.0) < f.dt {
             log::info!("navigator: route {} lanes (complete {}, provisional {}, at {}, on it {}, off for {:.1} s), {} stops ahead, next {:?}, key {:?}", self.route.lanes.len(), self.route.complete, self.route.provisional, self.route.progress, self.route.on_route, self.route.off_for, f.stops.len(), f.stops.first().map(|s| (s.name.clone(), s.position.x.round(), s.position.y.round())), self.route.key);
         }
@@ -1739,7 +1739,8 @@ impl Navigator {
     /// (`L`, `R`, or `dn` for straight on), and the stops of the trip ahead with their
     /// names (`busstop`). Each: a key that stays the same while it is ahead, the place,
     /// the heading, the kind and its text.
-    pub fn arrow_spots(&self, traffic: Option<&Network>, reach: f64) -> Vec<(u64, DVec3, f64, &'static str, String)> {
+    /// `stop_pose` gives a stop object's place and heading where its tile is loaded.
+    pub fn arrow_spots(&self, traffic: Option<&Network>, reach: f64, stop_pose: &dyn Fn(i64) -> Option<(DVec3, f64)>) -> Vec<(u64, DVec3, f64, &'static str, String)> {
         let mut out = Vec::new();
         if !self.arrows {
             return out;
@@ -1780,10 +1781,15 @@ impl Navigator {
             prev_end = Some(h1);
             acc += len as f64;
         }
-        for (k, (p, name, h)) in self.stop_spots.iter().enumerate() {
-            let d = (*p - self.bus_at).truncate().length();
+        // The stop's helper: Omsi.exe puts `routearrows_busstop.sco` on the stop object
+        // itself, at its place and with its rotation (0x61fc04: the station record's
+        // position +0x3c and quaternion +0x54) - where and how the mapper set the stop down,
+        // not turned to the bus as it comes.
+        for (k, (p, name, h, id)) in self.stop_spots.iter().enumerate() {
+            let (p, h) = stop_pose(*id).unwrap_or((*p, *h));
+            let d = (p - self.bus_at).truncate().length();
             if d < reach && k < 2 {
-                out.push(((1u64 << 40) + p.x.to_bits().rotate_left(7) ^ p.y.to_bits(), *p, *h, "busstop", name.clone()));
+                out.push(((1u64 << 40) + p.x.to_bits().rotate_left(7) ^ p.y.to_bits() ^ h.to_bits(), p, h, "busstop", name.clone()));
             }
         }
         out

@@ -235,15 +235,16 @@ pub(crate) fn parse_cam(s: &str) -> Result<Camera> {
         .split(',')
         .map(|x| x.trim().parse::<f32>())
         .collect::<Result<_, _>>()?;
-    if v.len() != 5 {
-        return Err(anyhow!("--cam needs x,y,z,yaw,pitch"));
+    // (a sixth number is the field of view)
+    if v.len() != 5 && v.len() != 6 {
+        return Err(anyhow!("--cam needs x,y,z,yaw,pitch[,fov]"));
     }
     Ok(Camera {
         position: DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64),
         yaw: v[3],
         pitch: v[4],
         roll: 0.0,
-        fov_deg: 60.0,
+        fov_deg: v.get(5).copied().unwrap_or(60.0),
         near: 0.5,
         far: 6000.0,
     })

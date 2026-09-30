@@ -417,7 +417,7 @@ impl App {
         }
     }
 
-    fn finger_down(&mut self, event_loop: &ActiveEventLoop, id: u64, p: Vec2) {
+    pub(crate) fn finger_down(&mut self, event_loop: &ActiveEventLoop, id: u64, p: Vec2) {
         self.touch.fingers.retain(|f| f.id != id);
         let menu_mode = self.game_menu.is_some() || self.chooser.is_some() || self.navigator.as_ref().is_some_and(|n| n.map_open());
         let t = &self.touch;
@@ -476,7 +476,7 @@ impl App {
         }
     }
 
-    fn finger_move(&mut self, id: u64, p: Vec2) {
+    pub(crate) fn finger_move(&mut self, id: u64, p: Vec2) {
         let u = self.touch.u;
         let Some(k) = self.touch.fingers.iter().position(|f| f.id == id) else { return };
         let last = self.touch.fingers[k].pos;
@@ -566,7 +566,7 @@ impl App {
         }
     }
 
-    fn finger_up(&mut self, event_loop: &ActiveEventLoop, id: u64, p: Vec2, cancelled: bool) {
+    pub(crate) fn finger_up(&mut self, event_loop: &ActiveEventLoop, id: u64, p: Vec2, cancelled: bool) {
         let Some(k) = self.touch.fingers.iter().position(|f| f.id == id) else { return };
         let f = self.touch.fingers.remove(k);
         if self.touch.fingers.iter().filter(|f| matches!(f.role, Role::Look | Role::Mouse)).count() < 2 {
@@ -705,7 +705,7 @@ impl App {
                 // driver → outside → passenger → driver (on foot: back to the bus)
                 self.view = match self.view.as_str() {
                     "driver" => "outside",
-                    "outside" if self.player.as_ref().is_some_and(|p| !p.vehicle.ty.def.cameras_pax.is_empty()) => "pax",
+                    "outside" if self.player.as_ref().is_some_and(|p| p.pax_camera_count() > 0) => "pax",
                     _ => "driver",
                 }
                 .into();

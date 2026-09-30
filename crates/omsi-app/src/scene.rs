@@ -235,6 +235,9 @@ pub struct LightObject {
     pub script: Option<Arc<Mutex<omsi_sim::scenery::SceneryInstance>>>,
     /// `[light_enh_2]` coronas switched by a lamp variable, and that variable.
     pub coronas: Vec<(omsi_render::Corona, String)>,
+    /// Per corona the mesh its light belongs to and the light's place and direction in the
+    /// model: an animated lamp's lights move with their mesh (see `model_light_sources`).
+    pub corona_mesh: Vec<(usize, glam::Vec3, glam::Vec3)>,
     /// Current brightness of each corona (set with the lamp state every frame).
     pub lit: Vec<f32>,
     /// The object's rotation, and whether its script moves meshes of it: a level
@@ -1723,6 +1726,25 @@ pub fn model_lights_faded(
     model_lights_owned(model, mesh_transforms, pos, value_of, fades).into_iter().map(|c| c.0).collect()
 }
 
+/// Every light of a model in the order [`model_lights_owned`] numbers them: the mesh it
+/// belongs to, its place and its direction (zero for a `[light_enh]` and an omni light).
+/// Omsi.exe files each `[light_enh]`/`[light_enh_2]` with the `[mesh]` before it (the
+/// model loader, 0x5f3140: the light goes into the current mesh's list, mesh +0x1b0) and
+/// draws it where that mesh's animation takes it - the lamps along a level crossing's arm
+/// rise with the arm.
+pub fn model_light_sources(model: &Model) -> Vec<(usize, glam::Vec3, glam::Vec3)> {
+    let mut out = Vec::new();
+    for (i, md) in model.meshes.iter().enumerate() {
+        for l in &md.light_enh {
+            out.push((i, glam::Vec3::from(l.pos), glam::Vec3::ZERO));
+        }
+        for l in &md.light_enh_2 {
+            out.push((i, glam::Vec3::from(l.pos), if l.omni { glam::Vec3::ZERO } else { glam::Vec3::from(l.dir) }));
+        }
+    }
+    out
+}
+
 /// [`model_lights_faded`], each sprite with the light it belongs to (the n-th light of the
 /// model, `[light_enh]` and `[light_enh_2]` in file order - the order `value_of` is asked
 /// in): one light gives several sprites (its glow, star, fog halo and cone).
@@ -2212,6 +2234,7 @@ impl World {
             .with_context(|| format!("loading {}", global_cfg.display()))?;
         let map_dir = global.dir().to_path_buf();
         omsi_map::configure_grid(&global);
+        crate::humans::LEFT_HAND.store(global.left_hand_traffic, std::sync::atomic::Ordering::Relaxed);
         log::info!(
             "tile size {:.1} m ({})",
             omsi_map::tile_size(),
@@ -2906,6 +2929,12 @@ impl World {
     }
 
     /// The map index, built on first use (every tile file read once, in parallel).
+    /// How many passengers get off at stop object `id` (see `tiles::stop_exit_weight`; a
+    /// stop without strings: the defaults' mean, 0.5).
+    pub fn stop_exit_weight(&self, id: i64) -> f32 {
+        self.index().stop_weights.get(&id).copied().unwrap_or(0.5)
+    }
+
     pub fn index(&self) -> Arc<MapIndex> {
         let mut g = self.index.lock();
         if let Some(ix) = g.as_ref() {
@@ -3222,6 +3251,23 @@ impl World {
                 }
             }
             let mesh = build_spline_mesh(&st.def, &curve, s.mirror, origin);
+            // OMSI_CHECK_SPIKES: a face standing taller than the profile, the gradient and
+            // the cant allow (a spike out of the road)
+            if omsi_cfg::env::var_os("OMSI_CHECK_SPIKES").is_some() && !mesh.is_empty() {
+                let (zlo, zhi) = st.def.profiles.iter().flat_map(|p| p.points.iter().map(|q| q.z)).fold((f32::MAX, f32::MIN), |(a, b), z| (a.min(z), b.max(z)));
+                let n = omsi_geometry::spline_station_count(&st.def, &curve).max(1);
+                let step = curve.length / n as f64;
+                let slope = curve.grad_start.abs().max(curve.grad_end.abs()) / 100.0;
+                let cant = curve.cant_start.abs().max(curve.cant_end.abs()) / 100.0 * 2.0 * omsi_geometry::half_cant_width(&st.def).min(20.0);
+                let allow = (zhi - zlo) as f64 + slope * step * 2.0 + cant + 0.5;
+                let worst = mesh.indices.chunks_exact(3).map(|t| {
+                    let z = [t[0], t[1], t[2]].map(|i| mesh.positions[i as usize].z);
+                    (z.iter().cloned().fold(f32::MIN, f32::max) - z.iter().cloned().fold(f32::MAX, f32::min)) as f64
+                }).fold(0.0f64, f64::max);
+                if worst > allow {
+                    log::info!("spike: tile {tx},{ty} spline {} {} face {worst:.1} m tall (allowed {allow:.1}) len {:.1} r {:.1} grad {:.2}/{:.2} h {:?} cant {:.1}/{:.1} skew {:.2}/{:.2} at ({:.1}, {:.1}, {:.1})", s.id, s.file, s.length, s.radius, s.grad_start, s.grad_end, s.delta_h, s.cant_start, s.cant_end, s.skew_start, s.skew_end, origin2.x + s.pos[0], origin2.y + s.pos[1], s.pos[2]);
+                }
+            }
             if debug_splines {
                 let (lo, hi) = mesh.positions.iter().fold(
                     (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN)),
@@ -3584,26 +3630,16 @@ impl World {
             .objects
             .iter()
             .map(|o| match &o.place {
-                Placement::Ground { x, y, z, rot } => {
-                    // a parked car stands on its wheels: on a slope it leans with the ground
-                    // under it (the map gives it no pitch or bank of its own), as OMSI puts it
-                    // down - it stood level on every inclined street
-                    let mut rot = *rot;
-                    if o.parked && rot[1] == 0.0 && rot[2] == 0.0 {
-                        let h = rot[0].to_radians();
-                        let (f, r) = (DVec2::new(h.sin(), h.cos()), DVec2::new(h.cos(), -h.sin()));
-                        let at = |d: DVec2| ground_at(x + d.x, y + d.y);
-                        let (l, w) = (2.0, 0.8);
-                        let pitch = ((at(f * l) - at(-f * l)) / (2.0 * l)).atan().to_degrees();
-                        let bank = ((at(-r * w) - at(r * w)) / (2.0 * w)).atan().to_degrees();
-                        rot[1] = pitch.clamp(-15.0, 15.0);
-                        rot[2] = bank.clamp(-15.0, 15.0);
-                    }
-                    Some(Pose {
-                        pos: DVec3::new(*x, *y, z + ground_at(*x, *y)),
-                        rot: object_rotation(rot),
-                    })
-                }
+                // Omsi.exe places every object, a parking space's car as well, with the pitch
+                // and bank of the map file on the terrain height at its position (0x79e3c8
+                // .. 0x79e5fb: RotationX(pitch), RotationZ(bank), RotationY(heading), the
+                // translation) - it is never leaned to the slope. Leaned by the terrain under
+                // it, a car at the kerb of a hill street stood crooked on a road that runs
+                // on a different grade from the ground beneath.
+                Placement::Ground { x, y, z, rot } => Some(Pose {
+                    pos: DVec3::new(*x, *y, z + ground_at(*x, *y)),
+                    rot: object_rotation(*rot),
+                }),
                 Placement::Pose(p) => Some(*p),
                 Placement::Attached { .. } => None,
             })
@@ -5985,6 +6021,22 @@ impl World {
                     } else {
                         None
                     };
+                    // Some signs derive filenames in {frame}. Probe on a separate
+                    // instance: its placeholder inputs must not mutate the live script
+                    // state or retain queued sounds/animations.
+                    let freetex_probe = if ot.meshes.iter().any(|(_, _, overrides)| {
+                        overrides.iter().any(|o| !o.item && o.freetex.is_some())
+                    }) {
+                        ot.program.as_ref().map(|program| {
+                            let mut probe = omsi_sim::scenery::SceneryInstance::new(
+                                program.clone(), &ot.mesh_defs(), self.script_clock(), &strings,
+                            );
+                            probe.update(0.0, &omsi_sim::scenery::SceneryVars {
+                                in_use: 1.0, ..Default::default()
+                            });
+                            probe
+                        })
+                    } else { None };
                     // a crossing warped onto the ground has meshes of its own
                     let own_meshes: Option<Vec<(MeshId, Vec<MaterialId>)>> = warped.as_ref().map(|ms| {
                         ms.iter()
@@ -6079,7 +6131,10 @@ impl World {
                                 let Some(slot) = omsi_sim::vehicle::override_slot(o3d_mats, override_) else { continue };
                                 let Some((_, var)) = &override_.freetex else { continue };
                                 let Some(started) = object_script.as_ref() else { continue };
-                                let name = started.str_var(var).trim().to_string();
+                                let initial = started.str_var(var).trim();
+                                let name = if initial.is_empty() {
+                                    freetex_probe.as_ref().map(|p| p.str_var(var).trim()).unwrap_or("")
+                                } else { initial }.to_string();
                                 if name.is_empty() {
                                     continue;
                                 }
@@ -6193,14 +6248,16 @@ impl World {
                                         .cloned()
                                         .unwrap_or_default();
                                     let (w, h) = (tt.width.max(1) as u32, tt.height.max(1) as u32);
+                                    let alpha = text_alpha(o3d_mats, slot, overrides);
                                     let key = format!(
-                                        "{}|{}|{}x{}|{}|{:?}",
+                                        "{}|{}|{}x{}|{}|{:?}|{:?}",
                                         tt.font.to_ascii_lowercase(),
                                         text,
                                         w,
                                         h,
                                         tt.full_color,
-                                        tt.color
+                                        tt.color,
+                                        alpha
                                     );
                                     if let Some(e) = gpu.text_textures.get_mut(&key) {
                                         e.2 += 1;
@@ -6245,7 +6302,7 @@ impl World {
                                     let mat = renderer.add_material(
                                         scene,
                                         Some(tex),
-                                        AlphaMode::Blend,
+                                        alpha,
                                         [1.0; 4],
                                         true,
                                     );
@@ -6331,6 +6388,8 @@ impl World {
                             || ot.model.no_distance_check
                             || ot.model.meshes.iter().any(|m| m.no_distance_check);
                         for inst in all_instances.iter().chain(&lod_instances) {
+                            scene.instances[*inst].presurface =
+                                ot.sco.render_type == omsi_scenery::sco::RenderType::PreSurface;
                             renderer.set_object_culling(scene, *inst, radius, detail, any_distance);
                         }
                     }
@@ -6381,13 +6440,14 @@ impl World {
                             1.0
                         }, &[]);
                         let names = names.into_inner();
-                        let coronas: Vec<(omsi_render::Corona, String)> = lights
+                        let sources = model_light_sources(&ot.model);
+                        let (coronas, corona_mesh): (Vec<(omsi_render::Corona, String)>, Vec<(usize, glam::Vec3, glam::Vec3)>) = lights
                             .into_iter()
                             .filter_map(|(c, k)| match names.get(k) {
-                                Some(LightSwitch::Variable(v)) => Some((c, v.clone())),
+                                Some(LightSwitch::Variable(v)) => Some(((c, v.clone()), sources.get(k).copied().unwrap_or((0, glam::Vec3::ZERO, glam::Vec3::ZERO)))),
                                 _ => None,
                             })
-                            .collect();
+                            .unzip();
                         let script = ot.program.as_ref().map(|p| {
                             Arc::new(Mutex::new(omsi_sim::scenery::SceneryInstance::new(
                                 p.clone(),
@@ -6410,6 +6470,7 @@ impl World {
                             pos,
                             script,
                             coronas,
+                            corona_mesh,
                             lit,
                             xf,
                             animated,
@@ -6555,6 +6616,38 @@ impl World {
         self.departed_objects.lock().insert(key, (p.clone(), obst, boxes));
         self.refresh_tile_lists();
         Some(p)
+    }
+
+    /// The parking spaces whose cars have driven off (LAN host: the clients take the same
+    /// cars away).
+    pub fn departed_keys(&self) -> Vec<i64> {
+        let mut k: Vec<i64> = self.departed.lock().iter().copied().collect();
+        k.sort_unstable();
+        k
+    }
+
+    /// LAN client: the parked cars as the host has them - the spaces it lists empty, and
+    /// (when the list is `complete`) every other one taken again. A space on a tile not
+    /// loaded here yet is remembered: the tile comes up with it empty.
+    pub fn mirror_departed(&self, renderer: &Renderer, scene: &mut Scene, keys: &[i64], complete: bool) {
+        let before = self.departed.lock().len();
+        for &k in keys {
+            if !self.departed.lock().contains(&k) && self.depart_parked(renderer, scene, k).is_none() {
+                self.departed.lock().insert(k);
+            }
+        }
+        if complete {
+            let back: Vec<i64> = self.departed.lock().iter().copied().filter(|k| !keys.contains(k)).collect();
+            for k in back {
+                if !self.return_parked(renderer, scene, k) {
+                    self.departed.lock().remove(&k);
+                }
+            }
+        }
+        let after = self.departed.lock().len();
+        if after != before {
+            log::info!("LAN: parked cars as the host has them: {after} spaces empty (were {before})");
+        }
     }
 
     /// Parked cars standing where `b` is (the player's bus just put down at a depot's entry
@@ -6787,7 +6880,8 @@ impl World {
                 };
                 let text = tt.variable.trim().parse::<usize>().ok().and_then(|k| strings.get(k)).cloned().unwrap_or_default();
                 let (w, h) = (tt.width.max(1) as u32, tt.height.max(1) as u32);
-                let key = format!("{}|{}|{}x{}|{}|{:?}", tt.font.to_ascii_lowercase(), text, w, h, tt.full_color, tt.color);
+                let alpha = text_alpha(o3d_mats, slot, overrides);
+                let key = format!("{}|{}|{}x{}|{}|{:?}|{:?}", tt.font.to_ascii_lowercase(), text, w, h, tt.full_color, tt.color, alpha);
                 if let Some(e) = gpu.text_textures.get_mut(&key) {
                     e.2 += 1;
                     let mat = e.1;
@@ -6801,7 +6895,7 @@ impl World {
                     None => vec![0u8; (w * h * 4) as usize],
                 };
                 let tex = gpu.add_image(renderer, scene, &Image { width: w, height: h, rgba, has_alpha: true }, false);
-                let mat = renderer.add_material(scene, Some(tex), AlphaMode::Blend, [1.0; 4], true);
+                let mat = renderer.add_material(scene, Some(tex), alpha, [1.0; 4], true);
                 let mat = gpu.material(renderer, scene, mat);
                 gpu.text_textures.insert(key.clone(), (tex, mat, 1));
                 tg.texts.push(key);
@@ -7273,6 +7367,11 @@ impl World {
             .store(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// The textures' budget now (bytes, 0 = none).
+    pub fn texture_budget_bytes(&self) -> u64 {
+        self.texture_limit.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Keep the textures within their budget, once a second (`force`: now): while they take
     /// more, the scenery textures only far tiles use lose their finest mip level, the
     /// farthest first, down to 64 texels a side and never within 150 m of `centers` (the
@@ -7387,6 +7486,22 @@ impl World {
             .collect();
         let mut shrunk: Vec<TextureId> = Vec::new();
         let mut restoring = 0usize;
+        // A texture shrunk while its tiles were far that is near now comes back whole at
+        // once, room or not: the far ones give way for it in the seconds after. (Waiting for
+        // room left the buildings right in front of the bus blurred for good on a map that
+        // filled the budget - they had lost their levels on the way in.)
+        {
+            let pending = self.upgrades_pending.lock();
+            for (d, p) in &entries {
+                if *d >= NEAR || restoring >= 24 {
+                    continue;
+                }
+                if gpu.textures.get(p).is_some_and(|e| e.dropped > 0) && !pending.contains(p) && !gpu.wants_restore.contains(p) {
+                    gpu.wants_restore.push(p.clone());
+                    restoring += 1;
+                }
+            }
+        }
         if usage > limit {
             entries.sort_by(|a, b| b.0.total_cmp(&a.0));
             let mut over = usage - limit;
@@ -8546,7 +8661,7 @@ pub fn sync_vehicle_textures(
     }
     let mut rebound = Vec::new();
     for (i, st) in vehicle.host.script_textures.iter_mut().enumerate() {
-        // (far away the texture is a stand-in: the picture goes up when the vehicle is near)
+        // (far away what the scripts redraw goes up every half second: `displays_far`)
         if st.dirty && !st.locked && !render.displays_far {
             if let Some(Some(tex)) = render.script_textures.get(i) {
                 let img = Image {
@@ -8569,62 +8684,9 @@ pub fn sync_vehicle_textures(
     renderer.rebind_textures(scene, &rebound);
 }
 
-/// Distances (m) beyond which a vehicle's script textures are stood in for, and within
-/// which they come back: a 30 cm display 50 m away is five pixels wide.
+/// Distance (m) beyond which what a vehicle's scripts redraw is uploaded only every half
+/// second (the picture itself stays: see `Traffic::sync`).
 pub const DISPLAYS_FAR: f64 = 50.0;
-pub const DISPLAYS_NEAR: f64 = 40.0;
-
-/// Put a vehicle's script textures into stand-in (`far`) or full form; the textures swapped
-/// go to `swapped` (their materials need `Renderer::rebind_textures`).
-pub fn swap_vehicle_displays(
-    renderer: &Renderer,
-    scene: &mut Scene,
-    vehicle: &mut omsi_sim::VehicleInstance,
-    render: &mut VehicleRender,
-    far: bool,
-    swapped: &mut Vec<TextureId>,
-) {
-    if render.displays_far == far {
-        return;
-    }
-    for (i, st) in vehicle.host.script_textures.iter_mut().enumerate() {
-        let Some(Some(tex)) = render.script_textures.get(i) else {
-            continue;
-        };
-        let data = if far {
-            // the mean colour of a sparse sample of the picture
-            let (mut sum, mut n) = ([0u64; 4], 0u64);
-            for px in st.rgba.chunks_exact(4).step_by(61) {
-                for k in 0..4 {
-                    sum[k] += px[k] as u64;
-                }
-                n += 1;
-            }
-            let mean: Vec<u8> = sum.iter().map(|v| (v / n.max(1)) as u8).collect();
-            TextureData {
-                width: 1,
-                height: 1,
-                format: omsi_texture::PixelFormat::Rgba8,
-                levels: vec![mean],
-                has_alpha: true,
-                gpu_mips: false,
-            }
-        } else {
-            st.dirty = false;
-            TextureData {
-                width: st.width,
-                height: st.height,
-                format: omsi_texture::PixelFormat::Rgba8,
-                levels: vec![st.rgba.clone()],
-                has_alpha: true,
-                gpu_mips: st.mipmaps,
-            }
-        };
-        renderer.replace_texture(scene, *tex, &data);
-        swapped.push(*tex);
-    }
-    render.displays_far = far;
-}
 
 /// A texture name that stands for "no texture": exporters write `null.bmp` into slots
 /// that have none (the SD202's IBIS key click spots). The slot shows its material colour;
@@ -8827,6 +8889,17 @@ fn alpha_mode(a: i32) -> AlphaMode {
     }
 }
 
+/// How a `[texttexture]` shows on its slot: alpha tested where the slot's `[matl_alpha]` is 1
+/// (the stock route helpers, `routearrows_busstop.sco`: blended, the empty part of the text
+/// wrote depth and cut away whatever was drawn behind it later - a bus beside the stop lost
+/// half its roof), blended otherwise.
+fn text_alpha(materials: &[omsi_o3d::Material], slot: usize, overrides: &[MaterialDef]) -> AlphaMode {
+    match material_alpha(materials, slot, overrides) {
+        AlphaMode::Test => AlphaMode::Test,
+        _ => AlphaMode::Blend,
+    }
+}
+
 /// Identify a solid vehicle body material that should participate in the depth buffer.
 /// Some bus packs put either `[matl_alpha] 2` or `[matl_noZcheck]` on a complete body mesh.
 /// The decision must not depend on one creator's language or on a particular bus name:
@@ -8938,9 +9011,11 @@ pub struct VehicleRender {
     /// `script_textures` belong to the vehicle this part is coupled to (`[scriptshare]`):
     /// they are not this render's to give back.
     pub shared_script: bool,
-    /// The script textures (cockpit and passenger displays, 1024×512 pictures for a C2) are
-    /// stood in for by a texel of their mean colour while the vehicle is far from the camera.
+    /// The script textures (cockpit and passenger displays, 1024×512 pictures for a C2) wait
+    /// with their upload this frame: the vehicle is far and it is not its half second.
     pub displays_far: bool,
+    /// The half second a far vehicle's displays were last uploaded in.
+    pub display_tick: u64,
     /// `[smoothskin]` meshes drawn from a copy of their own (the player's articulated bus's
     /// bellows): (mesh index, the copy, the bone transforms it was last shaped for).
     pub skinned: Vec<(usize, MeshId, Vec<Mat4>)>,
@@ -10251,6 +10326,7 @@ impl World {
             own_materials,
             set: key,
             displays_far: false,
+            display_tick: 0,
             skinned: Vec::new(),
             hidden: false,
             interior_lamps: std::cell::Cell::new(None),

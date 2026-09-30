@@ -4,6 +4,272 @@ Every push to `main` is released as `MAJOR.MINOR.COMMIT` (see
 [docs/VERSIONING.md](docs/VERSIONING.md)); the downloads are on the
 [Releases](https://github.com/turbo-devv/openOMSI/releases) page.
 
+## 0.1.237 - 2026-09-30
+
+The testers' second round: the crashes with "the graphics device was lost", weak cards and
+phones, traffic that stood on free roads and roundabouts, passengers' necks, VR, gamepads,
+and six pull requests.
+
+### Crashes and graphics cards
+- A lost graphics device (the driver reset the card: "the graphics device was lost",
+  #219, #223) no longer ends the drive: the game saves the situation and starts again on
+  it by itself with lighter graphics (no MSAA, no SSAO, smaller shadow maps, mirrors and
+  texture budget; on Windows DirectX 12 when it was Vulkan that was lost), at most twice. The launcher does not
+  report such a restart as a crash.
+- Windows tries DirectX 12 before Vulkan.
+- When the card runs out of memory, the textures are cut down (to 60 % of the budget each
+  time, not below 300 MB) before the driver gives up.
+- The interface's vertex buffers are made where a failure can be seen: after the card ran
+  out of memory, one invalid buffer was written to every frame, flooding the log with
+  thousands of GPU errors and taking the frame rate down to 12 fps (#217). A failed one
+  is now made again at the next frame and nothing draws from it meanwhile.
+- The automatic render scale moves in three steps (100, 85, 70 %), at most every five
+  seconds. Every 5 % step every two seconds made all the picture's targets anew -
+  hundreds of MB each time - a stutter and memory the driver ran out of. At the smallest
+  scale and still too slow, SSAO and then the shadows go off.
+- A small or shared graphics chip (integrated graphics outside a Mac, a phone, a card of up
+  to 2.5 GB, OpenGL) is drawn without SSAO and MSAA; a card of up to 4 GB without SSAO and
+  with at most 2x MSAA. `OMSI_FULL_GPU=1` keeps the settings as they are.
+- The status log shows the GPU memory the textures and meshes take; on Windows the
+  machine's memory sets the texture budget.
+- Textures shrunk while far away come back whole at once when they are near again:
+  buildings right in front of the bus stayed blurred on a map that filled the budget.
+
+### Traffic
+- A roundabout's entry no longer waits at its line for a gap at the far side of the ring:
+  a nine-second gap that never came kept the queue standing for minutes (Westcountry: no
+  car stuck any more, mean speed 13 -> 21 km/h).
+- A hold of one frame winds a waiting driver's reaction back only a little: a junction
+  "free, not free" by turns kept cars about to go for good, on open roads too.
+- A car at the stop line when the light turns green goes; a green of a second let nobody
+  through before.
+- Nobody waits for a car of the ring that is itself creeping in a queue.
+- `OMSI_DEBUG_STUCK` names the light programs and the hidden reasons a car holds.
+
+### People
+- Passengers who look at the bus turn their shoulders with it, and the head turns no more
+  than 45 degrees on them. The people have no neck bone: a head turned 60 degrees on still
+  shoulders twisted the neck.
+
+### VR
+- The bus's own head movement is off in the headset (the cab swayed before the eyes).
+- The sphere-map reflections are laid out by the bus's heading, not by each eye's view:
+  they no longer swim with every turn of the head.
+
+### Controllers
+- Gamepads (#200): the stick sets where the wheel turns to, on a gentler curve and less the
+  faster the bus goes, and the wheel follows at a hand's pace; the bus no longer swerves
+  with every touch of the stick.
+- An Xbox pad on Windows named in OMSI's `gamectrler.cfg` keeps its sticks and triggers
+  (#171).
+- Force feedback (#224, #230, by tistron): DirectInput wheels have their own centring
+  spring turned off before they are acquired, and again when they are acquired anew; the
+  steering is lighter while turning, heavier when parking, centres itself under control
+  and follows the bus's sideways acceleration; the front wheels' bumps and kerbs are felt
+  as short vibrations (also in a gamepad's rumble). Steering force and vibration are set
+  per controller under Controls -> Game controllers and kept in `Inputs/gamectrler.cfg`.
+
+### Pictures
+- Raindrops on the glass are lenses (#228, by Jaja80330): each drop shows the world behind
+  it upside down and mirrors the sky; drops sit in three sizes on turned grids, a mist of
+  droplets greys the pane, and runners slide down in fits and starts, wiping a track and
+  leaving beads behind. Storms are denser and less regular (#222, by TruckiHD).
+- `[rendertype] presurface` objects draw before the terrain, so excavations under the
+  ground show through their invisible covers (#218 by TruckiHD, #215).
+
+### Sound
+- The player's bus's own sounds keep their pitch while the camera follows it: sound and
+  listener were moved at different moments and the Doppler shift made them waver (#214,
+  by TruckiHD).
+
+### Launcher
+- The timetable chooser shows the chosen trip's duration, in words as OMSI's BBS writes
+  them (#233, by tistron).
+
+### Checks
+- `OMSI_AUTOPILOT=<km/h>` (offscreen): the player's bus follows the lanes and logs where
+  it stands against the ground, for roundabouts and places buses fall through.
+
+### Pull requests
+- Merged: #214, #218, #222, #224 / #230 (the same commits), #228 (with #222's hash; its
+  own patches replace #222's density field), #233.
+
+## 0.1.221 - 2026-09-30
+
+Everything since 0.1.178: the testers' reports from Fikcyjny Szczecin (MAN NL/NG Enhanced),
+KS Węglin, Cotterell and The Adstow Project, multiplayer, the trains, ten GitHub issues and
+six pull requests. Where OMSI 2 has the behaviour, it was taken from Omsi.exe itself (the
+addresses are in the commits).
+
+### Driving and physics
+- The suspension is Omsi.exe's: the body hangs on a spring and damper at each wheel over the
+  ground point under it (`achse_feder`, `achse_daempfer`, `Axle_Springfactor`, capped at
+  `achse_maxforce`), with no tyre spring, wheel mass or bump stop of our own in between.
+  Buses no longer float over the road "like a boat"; every bus drives on its own `.bus`
+  values. (`OMSI_TYRE_SUSPENSION=1` brings the old model back for comparison.)
+- The driver's head moves as in OMSI: thrown by the body at the eye, up and down always,
+  sideways and fore and aft with `[driverview_moving]`, never more than 10 cm.
+- Mouse steering switched off (right click, O, the menu) leaves the wheel where it is; the
+  keys go on from there (#184).
+- While the view is turned with the mouse, the cursor shows OMSI's four arrows (#185).
+
+### Keyboard
+- `Inputs/keyboard.cfg` is read as Omsi.exe reads it (#195): the third value's bit 1 means
+  "the action follows the key's state" (throttle, brake, steering), 2 is Shift and 4 is Ctrl.
+  The stock driving keys no longer need Shift; parking lights are Shift+L, the quicksave
+  Ctrl+S, the screenshot Ctrl+Shift+P, the information display Shift+Y, the timetable Insert
+  and the ticket desk camera Home. Rebinding a key in the launcher keeps the entry's own
+  "held" bit; an Alt chord of our own is bit 8, which OMSI ignores.
+
+### Pictures, lights and mirrors
+- Material highlights are Direct3D's per-vertex specular term from the sun and the light
+  above, as in OMSI: gear selectors, buttons and screens no longer catch sharp sun spots.
+- `[matl_envmap]` on glass and paint blends as Omsi.exe blends it: windows are no longer
+  mirrors of the street; the enhanced picture's glass reflects 4-12 %.
+- `[matl_lightmap]` is on or off at its variable's 0.5 and is added to the light before the
+  texture (ADDSMOOTH): lit saloons glow at night and hardly show by day.
+- Mirrors and door monitors (the BMC Procity's `camera_TFT` among them) show what they
+  reflect: each frame the ray from the eye to the mirror is reflected in the mirror's face,
+  as Omsi.exe does; left mirrors, kerb-side blind-spot mirrors and middle-door monitors no
+  longer look into the saloon or the sky (#192).
+- A lamp's `[light_enh]` lights move with the mesh they belong to: a level crossing's
+  barrier lamps stay on the barrier.
+
+### Map objects
+- Parked cars stand on the ground as Omsi.exe puts them, with the map's own pitch and bank,
+  no longer tilted by the slope under them (Cotterell).
+- Attached objects turn as Omsi.exe turns them (own rotation, then the parent's).
+- The stop helper (`routearrows_busstop.sco`) stands on the stop object with its rotation;
+  it no longer "cuts" into the bus beside it.
+- A far AI bus keeps its destination sign instead of a flat colour beyond 50 m.
+- Scenery whose free-texture filename is built in `{frame}` shows its texture (#198).
+- `model.cfg` `[item]`/`[setvar]` are paint schemes of the model, as in Omsi.exe, and the
+  chosen scheme's variables are there for the scripts' `{init}` (#190).
+- Checks for road builders: `OMSI_CHECK_SPIKES`, `OMSI_HOLE_PHOTO`, `OMSI_ROAD_PHOTO_N`;
+  `--cam` takes a field of view.
+
+### Passengers and people
+- Passengers get off where Omsi.exe sends them: each rider's stop is drawn among the stops
+  ahead by the stops' "passengers alighting" numbers. They no longer all leave after one or
+  two stops.
+- Waiting passengers keep to their nearest door while it opens: a bus whose rear doors open a
+  moment before the front one no longer sends the people at the front to the back.
+- People on foot wait for a car or bus standing in their way on a crossing, then go round
+  it, instead of pressing against its side.
+- F2 reaches the passenger cameras of an articulated bus's rear section.
+
+### Traffic
+- Traffic keeps to the middle of its lane beside parked cars (narrow British streets, The
+  Adstow Project).
+- Random traffic keeps to its pool's path densities (`unsched_vehgroups.txt` pools with their
+  own `[rule] trafficdensity`), and a positive density as low as 0.001 still lets cars on
+  (#201, #199, from Aurora Studio). A car whose pool may go nowhere at a junction goes on
+  where cars may instead of standing there.
+
+### Trains
+- `[trainreverse]` works as in Omsi.exe: a train whose next trip runs the other way is turned
+  round where it stands - its last car leads - and goes on with the trip. The Berlin U-Bahn
+  no longer drives off the end of its siding while another train appears for the trip back.
+- Trains stop with their front at the station, as Omsi.exe measures it (half the train's
+  length and the `[ai_brakeperformance]` holding offset): the S-Bahn and U-Bahn no longer
+  stand half a car past the end of the platform. Train cars without `[boundingbox]` take
+  their model's length (18 m, not 12 m).
+
+### Multiplayer and servers
+- No more micro-teleports: states are stamped with the moment of the frame they show, and the
+  other players' buses and the host's traffic are drawn by a clock that runs smoothly
+  instead of jumping with every datagram. Another player's bus: speed jitter per frame
+  median 11 % -> 1.4 %; the host's cars at a client are drawn within 2 cm of where the host
+  has them.
+- A joining player sees the host's traffic and people whatever their own traffic settings
+  ("passengers but no traffic" on a server).
+- A server no longer stalls when someone drives a bus it cannot load: it tries again after
+  half a minute, loads only the buses its `vehicles` list allows and shows the first of them
+  for any other.
+- Joining by code starts on the host's map.
+- Session codes end in a full group of four characters (#152); old codes are still read.
+- Each camera keeps where it was turned, as in OMSI 2.
+- A door whose entry point lies on the aisle opens to the kerb: the left where traffic keeps
+  left.
+
+### VR (Windows)
+- OpenXR VR support (#168, by EpixXx): stereo rendering with head tracking, a spatial Esc
+  menu and cockpit pointer, right-click zoom, the headset picture on the monitor, its own
+  settings and keys (Ctrl+Shift+R recentre, F7 monitor picture, F8 VR / desktop). See
+  [docs/VR.md](docs/VR.md).
+
+### Phones and on-screen controls
+- With `OMSI_TOUCH=1` on a computer, the mouse works the on-screen controls as a finger
+  (from #202).
+
+### Translations
+- Hungarian refined (from #143, by agost4002).
+
+### GitHub issues closed
+- #127 (an overlay layer drawn opaque), #151 (default specular), #152 (session code), #176
+  (shiny windows), #184 (mouse steering), #185 (look cursor), #187 (envmap brightness), #190
+  (`[setvar]`), #192 (mirrors and door monitors), #195 (keyboard.cfg bits).
+
+### Pull requests
+- Merged: #168 (VR), #198, #199, #201. Taken in part: #202 (the mouse as a finger; its fixed
+  gear panel and the committed rustup installer were left out), #143 (the Hungarian lines;
+  its edits to the English texts would have dropped those lines in every language).
+
+## 0.1.178 - 2026-09-30
+
+Everything since 0.1.146. Where OMSI 2 has the behaviour, it was taken from Omsi.exe itself.
+
+### Roads, splines and the ground
+- Roads no longer disappear under the grass. Splines the map marks `[spline_terrain_align]`
+  cut their outline out of the ground, as Omsi.exe does: whole stretches of Spandau's roads,
+  the six-lane Falkenseer Chaussee among them, were buried. The cut is exact to a few
+  centimetres: no sky along the kerbs, and narrow medians stay green.
+- The ground is no longer taken away under every road in rough 1.5-3 m steps (the "holes in
+  the world" beside kerbs and car parks); only where the map says.
+- Road cant takes its width from the spline's height profiles, as in Omsi.exe.
+
+### Vehicles
+- Bellows of articulated buses bend with the rear section on slopes instead of away from it.
+- Skinned meshes (bellows, levers of mod buses such as the AA-FR Agora) deform as in OMSI 2.
+- Headlights in the classic picture shine forward from the lamps, one beam per headlamp,
+  as bright as in OMSI 2, and no longer light up the bus's own saloon and dashboard.
+- Roller-blind destination displays (`[texcoordtransY]`, `[matl_freetex]`, borders) work.
+- Thüringer Wald buses keep their roof at night.
+- Mirrors see closer and further (0.1 m to the objects' range, as Omsi.exe).
+
+### Trains
+- Trains are put together as in OMSI 2: every unit with its cars, the last car turned round
+  (Berlin U-Bahn A3, S-Bahn BR 275).
+
+### AI traffic and passengers
+- AI cars no longer wait for each other for ever: a long wait at a side road now gets its
+  turn, and two cars that each waited for the other drive on.
+- Passengers at a stop no longer all stare at the driver: each watches a coming bus on their
+  own, and only the people it takes keep looking once it stands.
+- Timetable buses' door handshake follows Omsi.exe (a trace: `OMSI_DEBUG_DOORS=1`).
+
+### Weather and administration
+- Weather cycle (launcher, phone launcher, `weather = cycle` in server.cfg): a new weather
+  every 25-60 game minutes, fitting the month; every weather change blends in over 4 minutes.
+- Server admins: set any installed weather, switch the cycle on and off, clear jammed traffic.
+
+### Multiplayer
+- The official server: type `openomsi` to join "openOMSI | Official Server"; it is first in
+  the server list.
+- Any server address works: an IP, a host name, host:port or a link.
+- Parked cars are the same for everybody: a car that drove off at the host is gone for the
+  other players too (their buses drove through cars only one side had).
+- Joining keeps the duty on the host's map; the launcher never hangs on a job that died.
+
+### Phones
+- A launcher made for phones: tabs at the bottom, a Play screen, full-screen choice sheets.
+- Manual gearboxes on the touch controls, with a clutch pedal.
+- Installing mods works again (it stood at "reading the archive's table of contents").
+- On foot, the own bus answers clicks.
+
+### Performance
+- Less stutter when the camera moves (culling buffers are kept between frames).
+
 ## 0.1.14 - 2026-09-28
 
 ### More fixes

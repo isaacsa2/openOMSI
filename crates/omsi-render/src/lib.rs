@@ -4,7 +4,7 @@ pub mod atmosphere;
 pub mod clouds;
 
 use anyhow::{anyhow, Context, Result};
-use glam::{DVec3, Mat4, Vec3};
+use glam::{DVec3, Mat4, Vec3, Vec4};
 use omsi_geometry::MeshData;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -768,6 +768,9 @@ pub struct Instance {
     /// Surface geometry (roads, markings, crossings) that lies on the terrain: drawn with a
     /// depth bias so it wins over coincident ground, like the original's render priorities.
     pub surface: bool,
+    /// `[rendertype] presurface`: drawn before terrain, including blended materials whose
+    /// transparent texels write depth to reveal excavations below the ground.
+    pub presurface: bool,
     /// Screen-size range [min, max) in which this instance is drawn (`[LOD]` levels).
     pub lod: (f32, f32),
     /// A vehicle's flat shadow blob (`[isshadow]`, a surface). It is drawn always, as OMSI
@@ -1081,6 +1084,7 @@ pub struct Renderer {
     pub instant_exposure: bool,
     /// Overlay pipeline without multisampling, for drawing the HUD after the post pass.
     overlay_pipeline_1x: wgpu::RenderPipeline,
+    xr_ui_pipeline: wgpu::RenderPipeline,
     started: std::time::Instant,
     /// `[matl_texadress_clamp]`: the diffuse of the next material is sampled clamped.
     clamp_sampler: wgpu::Sampler,
@@ -1100,6 +1104,11 @@ pub struct Renderer {
     mip_sampler: wgpu::Sampler,
     /// Set by the device's error handler when something failed with multisampling on.
     gpu_error: Arc<std::sync::atomic::AtomicBool>,
+    /// The headset's pictures: the heading (degrees) the `[matl_envmap]` sphere maps are
+    /// laid out by instead of each eye's view (see `set_env_heading`).
+    env_heading: std::cell::Cell<Option<f32>>,
+    /// The card ran out of memory since the last `take_out_of_memory`.
+    out_of_memory: Arc<std::sync::atomic::AtomicBool>,
     /// Why the graphics device was lost (a driver reset, the card removed), once it was.
     device_lost: Arc<std::sync::Mutex<Option<String>>>,
     /// Render scale: the pipeline that scales the 3D picture up to the window, its
@@ -1130,6 +1139,8 @@ pub struct Renderer {
     shadow_far_cache: std::cell::Cell<(Mat4, u32, DVec3, Vec3)>,
     /// The same for the near cascade, drawn every other frame (see `render_inner`).
     shadow_near_cache: std::cell::Cell<(Mat4, u32, DVec3, Vec3)>,
+    /// Shadow atlas matrices from the first OpenXR eye, reused by the second eye.
+    xr_shadow_cache: std::cell::Cell<Option<(DVec3, Vec3, Mat4, Mat4, Mat4)>>,
     /// Depth-only pipeline that fills its viewport with the far depth: clears the close
     /// cascade's part of the atlas when the near part is kept from the frame before.
     shadow_clear_pipeline: wgpu::RenderPipeline,
@@ -1374,6 +1385,27 @@ impl Renderer {
         } else {
             options
         };
+        // A small or shared graphics chip (the processor's graphics outside a Mac, a phone,
+        // a card of up to 2.5 GB, anything on OpenGL) gets a lighter picture whatever the
+        // settings ask: no SSAO and no multisampling, smaller shadow maps; a card of up to
+        // 4 GB no SSAO and at most 2x. (The settings' "High" on such a machine ran out of
+        // memory or at a dozen frames a second.) OMSI_FULL_GPU=1 asks for the settings as
+        // they are.
+        let full = omsi_cfg::env::var_os("OMSI_FULL_GPU").is_some();
+        let weak = !full
+            && (info.backend == wgpu::Backend::Gl
+                || (info.device_type == wgpu::DeviceType::IntegratedGpu && info.backend != wgpu::Backend::Metal)
+                || vram.is_some_and(|v| v <= 2560));
+        let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
+        let options = if weak {
+            log::warn!("{}: a small or shared graphics chip - no SSAO, no MSAA, shadow maps of at most 1024 (OMSI_FULL_GPU=1 keeps the settings)", info.name);
+            RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), ..options }
+        } else if modest {
+            log::info!("{}: {} MB of its own - no SSAO, at most 2x MSAA and 2048 shadow maps (OMSI_FULL_GPU=1 keeps the settings)", info.name, vram.unwrap_or(0));
+            RenderOptions { msaa: options.msaa.min(2), ssao: false, shadow_size: options.shadow_size.min(2048), ..options }
+        } else {
+            options
+        };
         let shadow_size = options
             .shadow_size
             .clamp(512, if intel_vulkan_safe { 2048 } else { 8192 });
@@ -1521,7 +1553,7 @@ impl Renderer {
         let renderer = Self::build(
             device.clone(),
             queue.clone(),
-            info.name.clone(),
+            format!("{} ({:?})", info.name, info.backend),
             format,
             options,
         );
@@ -1538,7 +1570,7 @@ impl Renderer {
                 Ok(Self::build(
                     device,
                     queue,
-                    info.name,
+                    format!("{} ({:?})", info.name, info.backend),
                     format,
                     RenderOptions { msaa: 1, ..options },
                 ))
@@ -1563,6 +1595,7 @@ impl Renderer {
         // drive - a wrong picture for a frame is better than no game. The first errors and
         // then every thousandth reach the log.
         let gpu_error = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let out_of_memory = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let device_lost: Arc<std::sync::Mutex<Option<String>>> = Default::default();
         {
             let lost = device_lost.clone();
@@ -1577,8 +1610,12 @@ impl Renderer {
         }
         {
             let flag = gpu_error.clone();
+            let oom = out_of_memory.clone();
             let count = Arc::new(std::sync::atomic::AtomicU64::new(0));
             device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
+                if matches!(e, wgpu::Error::OutOfMemory { .. }) {
+                    oom.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 let n = count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if msaa > 1 && !flag.swap(true, std::sync::atomic::Ordering::Relaxed) {
                     log::error!("GPU error with {msaa}x MSAA (drawing without it from now on): {}", gpu_error_text(&e));
@@ -1867,7 +1904,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -3373,6 +3410,40 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let xr_ui_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("OpenXR spatial UI"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("xr_ui.wgsl").into()),
+        });
+        let xr_ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("OpenXR spatial UI"),
+            layout: Some(&overlay_pl),
+            vertex: wgpu::VertexState {
+                module: &xr_ui_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                front_face: wgpu::FrontFace::Ccw,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &xr_ui_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(premul),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         // --- render scale: the smaller 3D picture scaled up to the window
         let upscale_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("upscale"),
@@ -3463,6 +3534,7 @@ impl Renderer {
             object_sizes_scratch: std::cell::RefCell::new(HashMap::new()),
             shadow_far_cache: std::cell::Cell::new((Mat4::IDENTITY, 0, DVec3::ZERO, Vec3::ZERO)),
             shadow_near_cache: std::cell::Cell::new((Mat4::IDENTITY, 0, DVec3::ZERO, Vec3::ZERO)),
+            xr_shadow_cache: std::cell::Cell::new(None),
             shadow_clear_pipeline,
             mip_pipeline,
             mip_layout,
@@ -3496,6 +3568,7 @@ impl Renderer {
             last_frame: None,
             instant_exposure: false,
             overlay_pipeline_1x,
+            xr_ui_pipeline,
             started: std::time::Instant::now(),
             ao: None,
             ao_sampler,
@@ -3540,6 +3613,8 @@ impl Renderer {
             shadow_pipelines,
             options,
             gpu_error,
+            env_heading: Default::default(),
+            out_of_memory,
             device_lost,
             blend_by_origin: false,
             gpu_timers,
@@ -3571,7 +3646,10 @@ impl Renderer {
     /// it again when there is room. Steps of a twentieth, so that the few sizes it takes
     /// keep their render targets.
     pub fn set_dynamic_scale(&self, s: f32) {
-        self.dynamic_scale.set(((s.clamp(0.6, 1.0) * 20.0).round() / 20.0).clamp(0.6, 1.0));
+        // (1, 0.85 or 0.7: see the game's governor)
+        let s = s.clamp(0.7, 1.0);
+        let level = [1.0f32, 0.85, 0.7].into_iter().min_by(|a, b| (a - s).abs().total_cmp(&(b - s).abs())).unwrap_or(1.0);
+        self.dynamic_scale.set(level);
     }
 
     pub fn dynamic_scale(&self) -> f32 {
@@ -3857,6 +3935,18 @@ impl Renderer {
     }
 
     /// Bytes of all textures of the scene on the GPU (render targets included).
+    /// Bytes the meshes' vertex and index buffers take on the GPU (the freed ones' shared
+    /// placeholder not counted).
+    pub fn mesh_bytes(&self, scene: &Scene) -> u64 {
+        let freed = self.freed.get().map(|f| (f.vertex_buf.clone(), f.index_buf.clone()));
+        scene
+            .meshes
+            .iter()
+            .filter(|m| freed.as_ref().is_none_or(|(v, _)| m.vertex_buf != *v))
+            .map(|m| m.vertex_buf.size() + m.index_buf.size())
+            .sum()
+    }
+
     pub fn texture_bytes(&self, scene: &Scene) -> u64 {
         scene.textures.iter().map(|t| t.bytes).sum()
     }
@@ -4044,7 +4134,7 @@ impl Renderer {
         let view = t.view.clone();
         let (w, h) = t.size;
         self.texture_aspect = Some(aspect);
-        self.render_inner(scene, &view, w, h, camera, lighting, false, Some(id));
+        self.render_inner(scene, &view, w, h, camera, lighting, false, Some(id), None, false);
         self.texture_aspect = None;
     }
 
@@ -4935,6 +5025,7 @@ impl Renderer {
             interior_lamps: 0,
             base: 0,
             surface: false,
+            presurface: false,
             lod: (0.0, f32::MAX),
             blob: false,
             ground_layer: false,
@@ -4980,6 +5071,7 @@ impl Renderer {
             interior_lamps: 0,
             base: 0,
             surface: true,
+            presurface: false,
             lod: (0.0, f32::MAX),
             blob: false,
             ground_layer: false,
@@ -6472,6 +6564,16 @@ impl Renderer {
         }
     }
 
+    /// One step lighter on the graphics card, for a picture the card cannot keep up with at
+    /// the smallest render scale: SSAO off. What was switched off, or None when it is off.
+    pub fn lighten(&mut self) -> Option<&'static str> {
+        if self.options.ssao {
+            self.options.ssao = false;
+            return Some("ambient occlusion (SSAO) off");
+        }
+        None
+    }
+
     /// Rebuild the pipelines and targets without multisampling after a GPU error with it.
     /// The scene's materials stay valid (the device hands out the same bind group layout
     /// for identical entries); its per-draw buffers and camera bind group are made anew,
@@ -6510,7 +6612,136 @@ impl Renderer {
         camera: &Camera,
         lighting: &Lighting,
     ) {
-        self.render_inner(scene, target, width, height, camera, lighting, true, None);
+        self.render_inner(scene, target, width, height, camera, lighting, true, None, None, false);
+    }
+
+    /// Render one OpenXR view using the headset's asymmetric projection matrix.
+    /// The matrix uses the same reversed depth range as the desktop camera. The
+    /// second eye reuses the first eye's shadow atlas when both share an origin.
+    pub fn render_xr_eye(
+        &mut self,
+        scene: &mut Scene,
+        target: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        camera: &Camera,
+        lighting: &Lighting,
+        projection: Mat4,
+        second_eye: bool,
+    ) {
+        self.render_inner(scene, target, width, height, camera, lighting, false, None, Some(projection), second_eye);
+    }
+
+    /// Composite the shared game menu and a world-positioned pointer into each eye.
+    /// Eye-specific positions make the menu fuse into one virtual panel.
+    pub fn render_xr_ui(
+        &self,
+        scene: &Scene,
+        eyes: &[wgpu::TextureView; 2],
+        desktop_size: (u32, u32),
+        eye_size: (u32, u32),
+        menu_range: std::ops::Range<usize>,
+        menu_transforms: [Mat4; 2],
+        cursor_overlay: Option<usize>,
+        tooltip_overlay: Option<usize>,
+        cursor_transforms: [Option<Mat4>; 2],
+    ) {
+        let Some(menu) = scene.overlays.get(menu_range) else { return };
+        if menu.is_empty() && cursor_transforms.iter().all(Option::is_none) {
+            return;
+        }
+        let (w, h) = (desktop_size.0.max(1) as f32, desktop_size.1.max(1) as f32);
+        let (eye_w, eye_h) = (eye_size.0.max(1) as f32, eye_size.1.max(1) as f32);
+        let prepare = |id: &TextureId, quad: [Vec4; 4]| {
+            let texture = scene.textures.get(*id)?;
+            let mut uniform = [0.0f32; 20];
+            for (index, corner) in quad.iter().enumerate() {
+                uniform[index * 4..index * 4 + 4].copy_from_slice(&corner.to_array());
+            }
+            uniform[16] = scene.premultiplied.contains(id) as u8 as f32;
+            let buffer = buffer_init(&self.device, &self.queue, Some("OpenXR menu rectangle"), bytemuck::cast_slice(&uniform), wgpu::BufferUsages::UNIFORM);
+            let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("OpenXR menu rectangle"),
+                layout: &self.overlay_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&texture.view) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sky_sampler) },
+                ],
+            });
+            Some((buffer, group))
+        };
+        let mut prepared = [Vec::new(), Vec::new()];
+        for eye in 0..2 {
+            for (index, (id, rect)) in menu.iter().enumerate() {
+                // The first rectangle dims the view. Every other rectangle is
+                // projected from the same menu plane in world space.
+                let transform = if index == 0 && rect[0] <= 0.0 && rect[1] <= 0.0 && rect[2] >= w && rect[3] >= h {
+                    Mat4::IDENTITY
+                } else {
+                    menu_transforms[eye]
+                };
+                let x0 = rect[0] / w * 2.0 - 1.0;
+                let y0 = 1.0 - rect[1] / h * 2.0;
+                let x1 = rect[2] / w * 2.0 - 1.0;
+                let y1 = 1.0 - rect[3] / h * 2.0;
+                let quad = [
+                    transform * Vec4::new(x0, y0, 0.0, 1.0),
+                    transform * Vec4::new(x1, y0, 0.0, 1.0),
+                    transform * Vec4::new(x1, y1, 0.0, 1.0),
+                    transform * Vec4::new(x0, y1, 0.0, 1.0),
+                ];
+                if let Some(item) = prepare(id, quad) { prepared[eye].push(item); }
+            }
+            if let (Some(index), Some(transform)) = (cursor_overlay, cursor_transforms[eye]) {
+                if let Some((id, rect)) = scene.overlays.get(index) {
+                    let half_x = (rect[2] - rect[0]) / eye_w;
+                    let half_y = (rect[3] - rect[1]) / eye_h;
+                    let quad = [
+                        transform * Vec4::new(-half_x, half_y, 0.0, 1.0),
+                        transform * Vec4::new(half_x, half_y, 0.0, 1.0),
+                        transform * Vec4::new(half_x, -half_y, 0.0, 1.0),
+                        transform * Vec4::new(-half_x, -half_y, 0.0, 1.0),
+                    ];
+                    if let Some(item) = prepare(id, quad) { prepared[eye].push(item); }
+                }
+                if let Some((id, rect)) = tooltip_overlay.and_then(|i| scene.overlays.get(i)) {
+                    let pointer_width = scene.overlays.get(index).map(|(_, r)| r[2] - r[0]).unwrap_or(24.0);
+                    let left = (pointer_width * 0.5 + 8.0) * 2.0 / eye_w;
+                    let right = left + (rect[2] - rect[0]) * 2.0 / eye_w;
+                    let bottom = -(rect[3] - rect[1]) * 2.0 / eye_h;
+                    let quad = [
+                        transform * Vec4::new(left, 0.0, 0.0, 1.0),
+                        transform * Vec4::new(right, 0.0, 0.0, 1.0),
+                        transform * Vec4::new(right, bottom, 0.0, 1.0),
+                        transform * Vec4::new(left, bottom, 0.0, 1.0),
+                    ];
+                    if let Some(item) = prepare(id, quad) { prepared[eye].push(item); }
+                }
+            }
+        }
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("OpenXR menu") });
+        for (eye, target) in eyes.iter().enumerate() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("OpenXR menu"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.xr_ui_pipeline);
+            for (_, group) in &prepared[eye] {
+                pass.set_bind_group(0, group, &[]);
+                pass.draw(0..6, 0..1);
+            }
+        }
+        self.queue.submit(Some(encoder.finish()));
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6524,6 +6755,8 @@ impl Renderer {
         lighting: &Lighting,
         with_overlays: bool,
         exclude_texture: Option<TextureId>,
+        projection: Option<Mat4>,
+        second_eye: bool,
     ) {
         // test hook for a lost device (a driver reset): its resources are taken away and
         // the session has to end in order
@@ -6711,7 +6944,15 @@ impl Renderer {
         }
         // sun shadow map: an orthographic box around the camera, looking along the sun
         let sun = lighting.sun_dir.normalize_or_zero();
-        let shadows = with_overlays && lighting.casts_sun_shadows();
+        let shadows = (with_overlays || projection.is_some()) && lighting.casts_sun_shadows();
+        let shared_xr_shadows = if second_eye && shadows {
+            self.xr_shadow_cache
+                .get()
+                .filter(|(origin, previous_sun, _, _, _)| *origin == scene.render_origin && *previous_sun == sun)
+        } else {
+            None
+        };
+        let draw_shadows = shadows && shared_xr_shadows.is_none();
         let light_matrix = |range: f32| {
             // Snap the centre to whole texels so the map does not shimmer while driving.
             let texel = range * 2.0 / self.options.shadow_size as f32;
@@ -6737,14 +6978,16 @@ impl Renderer {
         let near_wanted = light_matrix(SHADOW_RANGE);
         let (near_m, near_age, near_origin, near_sun) = self.shadow_near_cache.get();
         let near_jumped = (near_m.project_point3(cam_rel) - near_wanted.project_point3(cam_rel)).length() > 0.03;
-        let redraw_near = shadows
+        let redraw_near = draw_shadows
             && (near_age >= 1
                 || near_jumped
                 || near_m == Mat4::IDENTITY
                 || near_origin != scene.render_origin
                 || near_sun.dot(sun) < 0.99999
                 || omsi_cfg::env::var_os("OMSI_SHADOW_NEAR_EVERY_FRAME").is_some());
-        let light_view_proj = if !shadows {
+        let light_view_proj = if let Some((_, _, near, _, _)) = shared_xr_shadows {
+            near
+        } else if !shadows {
             near_wanted
         } else if redraw_near {
             self.shadow_near_cache.set((near_wanted, 0, scene.render_origin, sun));
@@ -6753,7 +6996,9 @@ impl Renderer {
             self.shadow_near_cache.set((near_m, near_age + 1, near_origin, near_sun));
             near_m
         };
-        let light_view_proj_close = light_matrix(SHADOW_RANGE_CLOSE);
+        let light_view_proj_close = shared_xr_shadows
+            .map(|(_, _, _, _, close)| close)
+            .unwrap_or_else(|| light_matrix(SHADOW_RANGE_CLOSE));
         // The far cascade (700 m, metre-sized texels) is drawn every 4th frame, or at once
         // when the camera has left the middle of the one drawn, the sun has moved or the
         // render origin has jumped (its matrix is relative to that). Drawn every frame it
@@ -6762,7 +7007,7 @@ impl Renderer {
         let far_wanted = light_matrix(SHADOW_RANGE_FAR);
         let (far_m, far_age, far_origin, far_sun) = self.shadow_far_cache.get();
         let far_moved = (far_m.project_point3(cam_rel) - far_wanted.project_point3(cam_rel)).length() > 0.12;
-        let redraw_far = shadows
+        let redraw_far = draw_shadows
             && (far_age >= 3
                 || far_moved
                 || far_m == Mat4::IDENTITY
@@ -6772,8 +7017,11 @@ impl Renderer {
         if redraw_far && omsi_cfg::env::var_os("OMSI_DEBUG_SHADOW_FAR").is_some() {
             log::info!("far shadow redrawn: age {far_age} moved {far_moved} origin {} sun {:.6}", far_origin != scene.render_origin, far_sun.dot(sun));
         }
-        // (only the main view draws shadows; the mirrors and the probe leave the cache be)
-        let light_view_proj_far = if !shadows {
+        // The desktop view and the first XR eye maintain this cache; mirrors and
+        // the second XR eye leave it alone.
+        let light_view_proj_far = if let Some((_, _, _, far, _)) = shared_xr_shadows {
+            far
+        } else if !shadows {
             far_wanted
         } else if redraw_far {
             self.shadow_far_cache.set((far_wanted, 0, scene.render_origin, sun));
@@ -6782,9 +7030,20 @@ impl Renderer {
             self.shadow_far_cache.set((far_m, far_age + 1, far_origin, far_sun));
             far_m
         };
+        if projection.is_some() && !second_eye && shadows {
+            self.xr_shadow_cache.set(Some((
+                scene.render_origin,
+                sun,
+                light_view_proj,
+                light_view_proj_far,
+                light_view_proj_close,
+            )));
+        }
         // where the sun stands on the screen (camera uniform post.zw; no shader reads it
         // since the light shafts were removed)
-        let vp_mat = camera.view_proj(aspect, ro);
+        let vp_mat = projection
+            .map(|p| p * Mat4::look_to_rh((camera.position - ro).as_vec3(), camera.forward(), camera.up()))
+            .unwrap_or_else(|| camera.view_proj(aspect, ro));
         let sun_clip = vp_mat * (cam_rel + sun * 5000.0).extend(1.0);
         let sun_ndc = if sun_clip.w > 0.0 {
             Vec3::new(sun_clip.x / sun_clip.w, sun_clip.y / sun_clip.w, 1.0)
@@ -6806,7 +7065,7 @@ impl Renderer {
                 // shadow map's share of its half of the atlas)
                 self.options.shadow_size.min(SHADOW_CLOSE_MAX) as f32 / self.options.shadow_size.max(1) as f32,
             ],
-            view_proj: camera.view_proj(aspect, ro).to_cols_array_2d(),
+            view_proj: vp_mat.to_cols_array_2d(),
             cam_pos: cam_rel.extend(1.0).to_array(),
             // (modulo the shaders' PATTERN_PERIOD, 1000 m: the patterns repeat with it, and
             // the whole map coordinate has no precision left for them in 32 bits)
@@ -6847,12 +7106,14 @@ impl Renderer {
                 lighting.cloud_offset[1],
                 if ao_on { 1.0 } else { 0.0 },
             ],
-            cam_right: camera.right().extend(0.0).to_array(),
+            // (w: the heading the sphere maps are laid out by in the headset, see
+            // `set_env_heading`; flagged by cam_up.w)
+            cam_right: camera.right().extend(self.env_heading.get().map(|h| h.to_radians()).unwrap_or(0.0)).to_array(),
             cam_up: camera
                 .right()
                 .cross(camera.forward())
                 .normalize_or_zero()
-                .extend(0.0)
+                .extend(if self.env_heading.get().is_some() { 1.0 } else { 0.0 })
                 .to_array(),
             light_view_proj: light_view_proj.to_cols_array_2d(),
             light_view_proj_far: light_view_proj_far.to_cols_array_2d(),
@@ -6924,7 +7185,7 @@ impl Renderer {
             if d <= radius { f32::MAX } else { 2.0 * radius / (d.max(0.01) * lod_fov) }
         };
         for cascade in 0..3usize {
-            if !shadows || (cascade == 1 && !redraw_far) || (cascade == 0 && !redraw_near) {
+            if !draw_shadows || (cascade == 1 && !redraw_far) || (cascade == 0 && !redraw_near) {
                 continue;
             }
             // casters within the light box (no road surfaces, no blended glass, nothing
@@ -7059,10 +7320,23 @@ impl Renderer {
             );
         }
         stage(self, "shadow items", "mirror.shadow items");
-        // frustum culling by bounding sphere in view space
+        // Frustum culling by bounding sphere in view space. OpenXR projections
+        // are asymmetric; the desktop field of view must not clip an eye's
+        // wider side as the head turns.
         let view = Mat4::look_to_rh(cam_rel, camera.forward(), camera.up());
-        let tan_y = (camera.fov_deg.to_radians() * 0.5).tan();
-        let tan_x = tan_y * aspect;
+        let (tan_x, tan_y) = if let Some(p) = projection {
+            (
+                ((p.z_axis.x - 1.0) / p.x_axis.x)
+                    .abs()
+                    .max(((p.z_axis.x + 1.0) / p.x_axis.x).abs()),
+                ((p.z_axis.y - 1.0) / p.y_axis.y)
+                    .abs()
+                    .max(((p.z_axis.y + 1.0) / p.y_axis.y).abs()),
+            )
+        } else {
+            let tan_y = (camera.fov_deg.to_radians() * 0.5).tan();
+            (tan_y * aspect, tan_y)
+        };
         let cos_y = 1.0 / (1.0 + tan_y * tan_y).sqrt();
         let cos_x = 1.0 / (1.0 + tan_x * tan_x).sqrt();
         // nothing behind the fog is drawn: where the fog has swallowed 99 % of a thing
@@ -7115,14 +7389,17 @@ impl Renderer {
         // One thread: a few nanoseconds an instance. Spread over the worker pool the
         // hand-over cost more than the work (5 ms a frame for 8 500 instances while the
         // traffic's scripts kept the workers busy).
-        // (the main view's last picture, for the hysteresis)
-        let mut drawn_before = if with_overlays {
+        // (the main view's last picture, for the hysteresis; the headset's eyes are main
+        // views too: without their previous draw list small meshes and LODs blinked at
+        // their thresholds while the head turned)
+        let main_view = with_overlays || projection.is_some();
+        let mut drawn_before = if main_view {
             std::mem::take(&mut *self.cull_drawn.borrow_mut())
         } else {
             Vec::new()
         };
         let was_drawn = |i: usize| drawn_before.get(i / 64).is_some_and(|w| w & (1u64 << (i % 64)) != 0);
-        let (mut sizes_before, mut sizes_now) = if with_overlays {
+        let (mut sizes_before, mut sizes_now) = if main_view {
             let sizes_before = std::mem::take(&mut *self.object_sizes.borrow_mut());
             let mut sizes_now = std::mem::take(&mut *self.object_sizes_scratch.borrow_mut());
             sizes_now.clear();
@@ -7135,7 +7412,7 @@ impl Renderer {
                 .filter_map(|i| {
                     let inst = &scene.instances[i];
                     let m = &scene.meshes[inst.mesh];
-                    if m.ranges.is_empty() || !inst.visible || (inst.mirror_only && with_overlays) {
+                    if m.ranges.is_empty() || !inst.visible || (inst.mirror_only && main_view) {
                         return None;
                     }
                     let (c, r) = Self::bounding_sphere(scene, inst);
@@ -7200,7 +7477,7 @@ impl Renderer {
                                 Some(&last) if fresh > last * 0.94 && fresh < last * 1.06 => last,
                                 _ => fresh,
                             };
-                            if with_overlays {
+                            if main_view {
                                 sizes_now.insert(key, size);
                             }
                             size
@@ -7235,12 +7512,12 @@ impl Renderer {
                 })
                 .collect()
         };
-        if with_overlays {
+        if main_view {
             *self.object_sizes.borrow_mut() = sizes_now;
             sizes_before.clear();
             *self.object_sizes_scratch.borrow_mut() = sizes_before;
         }
-        if with_overlays {
+        if main_view {
             drawn_before.resize(scene.instances.len().div_ceil(64), 0);
             drawn_before.fill(0);
             for &(i, _, _) in &visible {
@@ -7311,7 +7588,7 @@ impl Renderer {
                     let mat_id = inst.materials.get(*slot as usize).copied().unwrap_or(0);
                     let mat = &scene.materials[mat_id];
                     let kind = kind_of(mat.alpha);
-                    if let Some(pre_kind) = depth_prepass_kind(kind, mat) {
+                    if let Some(pre_kind) = depth_prepass_kind(kind, mat, inst.presurface) {
                         // plain/alpha-tested materials use their ordinary depth pass;
                         // blended transmaps use the opaque-pixels-only pass.
                         items.push(DrawItem {
@@ -7326,8 +7603,8 @@ impl Renderer {
             }
             batch_items(scene, &mut items, true, &mut list, &mut prepass_batches);
         }
-        // The main pass: opaque ground, opaque surfaces, alpha-tested ground, alpha-tested
-        // surfaces (`pipe` 0..3, batched in that order), then everything blended in one run,
+        // The main pass: presurfaces, then opaque ground/surfaces and alpha-tested
+        // ground/surfaces (`pipe` 0..3, batched in that order), then everything blended in one run,
         // far to near (`pipe` 4..7: surface, no depth write). The blended draws must not
         // be split into ground and surfaces: the painted ground of a tile is a blended
         // surface and the bus's windscreen is a blended mesh, and with the surfaces
@@ -7335,11 +7612,51 @@ impl Renderer {
         // road ahead was there from outside the bus and gone from the driver's seat.
         let mut main_batches: Vec<Batch> = Vec::new();
         let mut main_draws = [0usize; 2];
+        // Keep mesh/material order here: an excavation's floor is drawn before its
+        // invisible cover writes depth. Sorting its blended cover after the terrain
+        // leaves the terrain's colour in place even though the cover writes depth.
+        items.clear();
+        for &(i, _, _) in &visible {
+            let inst = &scene.instances[i];
+            if !inst.presurface {
+                continue;
+            }
+            let cull = culls_back_faces(scene, inst);
+            for (ri, (_, _, slot)) in scene.meshes[inst.mesh].ranges.iter().enumerate() {
+                let mat_id = inst.materials.get(*slot as usize).copied().unwrap_or(0);
+                let mat = &scene.materials[mat_id];
+                if exclude_texture.is_some_and(|t| mat.uses_texture(t)) {
+                    continue;
+                }
+                let kind = if mat.no_z_check || (mat.alpha == AlphaMode::Blend && mat.no_z_write) {
+                    PIPE_BLEND_NO_WRITE
+                } else {
+                    kind_of(mat.alpha)
+                };
+                items.push(DrawItem {
+                    pipe: pipe_code(
+                        kind,
+                        cull,
+                        inst.surface || mat.z_bias > 0 || mat.no_z_check,
+                    ),
+                    mesh: inst.mesh as u32,
+                    range: ri as u32,
+                    material: mat_id as u32,
+                    entry: inst.base + *slot,
+                });
+            }
+        }
+        let presurface_draws = items.len();
+        let has_presurface = presurface_draws > 0;
+        batch_items(scene, &mut items, false, &mut list, &mut main_batches);
         {
             items.clear();
             let mut blended: Vec<usize> = Vec::new();
             for &(i, _, _) in &visible {
                 let inst = &scene.instances[i];
+                if inst.presurface {
+                    continue;
+                }
                 if inst.ordered {
                     blended.push(i);
                     continue;
@@ -7370,7 +7687,7 @@ impl Renderer {
                     blended.push(i);
                 }
             }
-            main_draws[0] = items.len();
+            main_draws[0] = presurface_draws + items.len();
             batch_items(scene, &mut items, true, &mut list, &mut main_batches);
             // Blended draws: objects far to near by the distance of their nearest blended
             // mesh (see `near_by_origin` below - not the single local origin all of an
@@ -7591,7 +7908,7 @@ impl Renderer {
                 label: Some("picture"),
             });
         for cascade in [0usize, 1] {
-            if !shadows || (cascade == 1 && !redraw_far) {
+            if !draw_shadows || (cascade == 1 && !redraw_far) {
                 continue;
             }
             let view = if cascade == 0 {
@@ -7823,7 +8140,10 @@ impl Renderer {
         // done once per pixel for the surface that is seen, not for every tree and wall
         // hidden behind it.
         let single = self.options.msaa <= 1;
-        let share_depth = prepass_on && single && self.ao.is_some();
+        // A presurface must colour its below-ground faces before its invisible cover
+        // seals them. Reusing prepass depth would reject those faces (or let terrain
+        // reject them first). The prepass still supplies AO; colour rebuilds its depth.
+        let share_depth = prepass_on && single && self.ao.is_some() && !has_presurface;
         let targets = if share_depth {
             None
         } else {
@@ -7835,6 +8155,7 @@ impl Renderer {
         // the one in front ran the whole enhanced shading (11 ms of a 1080p frame in
         // central Spandau with 4x MSAA).
         let msaa_prepass = enhanced
+            && !has_presurface
             && with_overlays
             && !single
             && prepass_on
@@ -9126,14 +9447,19 @@ const PIPE_KINDS: u8 = 4;
 /// Which depth-prepass variant a material contributes to. A blended material normally has
 /// no prepass because its fragments are see-through; a transmap is the useful exception:
 /// fully opaque texels are usually the vehicle body while lower-alpha texels are its windows.
+/// Presurfaces also contribute fully transparent blended texels, which seal the ground.
 /// Materials explicitly marked no-Z-write/no-Z-check remain excluded, just as they are from
 /// the ordinary prepass.
-fn depth_prepass_kind(kind: u8, material: &Material) -> Option<u8> {
+fn depth_prepass_kind(kind: u8, material: &Material, presurface: bool) -> Option<u8> {
     if material.no_z_check {
         return None;
     }
     if kind < PIPE_BLEND {
         Some(kind)
+    } else if presurface && !material.no_z_write {
+        // Alpha blending preserves colour, but even fully transparent cover texels
+        // occlude later ground. AO must see the same cover as the colour pass.
+        Some(PIPE_OPAQUE)
     } else if kind == PIPE_BLEND && material.transmap.is_some() && !material.no_z_write {
         Some(2)
     } else {
@@ -9266,6 +9592,20 @@ fn scene_scale_for(requested: f32, width: u32, height: u32) -> f32 {
 /// A GPU error with what the validation layer said, not just its kind.
 impl Renderer {
     /// Why the graphics device was lost, if it was: nothing can be drawn any more.
+    /// Lay the sphere maps of `[matl_envmap]` out by this heading instead of the view
+    /// (None: by the view, as Omsi.exe does). A sphere map turns with the view it is drawn
+    /// for: in the headset every turn of the player's head turned every reflection of the
+    /// bus with it, the two eyes each their own way - the reflections swam about.
+    pub fn set_env_heading(&self, heading: Option<f32>) {
+        self.env_heading.set(heading);
+    }
+
+    /// Whether the card ran out of memory since the last call (the game then keeps fewer
+    /// textures, before the driver gives up the device).
+    pub fn take_out_of_memory(&self) -> bool {
+        self.out_of_memory.swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub fn device_lost(&self) -> Option<String> {
         self.device_lost.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -9368,6 +9708,16 @@ impl<'w> SurfaceState<'w> {
         if renderer.device_lost().is_some() {
             return;
         }
+        self.surface.configure(&renderer.device, &self.config);
+    }
+
+    pub fn set_vsync(&mut self, renderer: &Renderer, enabled: bool) {
+        let mode = if enabled { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
+        if self.config.present_mode == mode || renderer.device_lost().is_some() {
+            return;
+        }
+        self.config.present_mode = mode;
+        self.config.desired_maximum_frame_latency = if enabled { 1 } else { 2 };
         self.surface.configure(&renderer.device, &self.config);
     }
 }
@@ -9601,6 +9951,197 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+    fn presurface_reveals_excavation_before_terrain_is_drawn() {
+        fn quad(renderer: &Renderer, scene: &mut Scene, y: f32, half: f32) -> MeshId {
+            renderer.add_mesh(
+                scene,
+                &MeshData {
+                    positions: vec![
+                        Vec3::new(-half, y, -half),
+                        Vec3::new(half, y, -half),
+                        Vec3::new(half, y, half),
+                        Vec3::new(-half, y, half),
+                    ],
+                    normals: vec![-Vec3::Y; 4],
+                    uvs: vec![glam::Vec2::ZERO; 4],
+                    ranges: vec![(0, 6, 0)],
+                    indices: vec![0, 1, 2, 0, 2, 3],
+                    one_sided: false,
+                },
+            )
+        }
+        let camera = Camera {
+            position: DVec3::ZERO,
+            yaw: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
+            fov_deg: 90.0,
+            near: 0.1,
+            far: 100.0,
+        };
+        for (msaa, ssao, enhanced) in [
+            (1, false, false),
+            (1, true, false),
+            (1, true, true),
+            (4, true, true),
+        ] {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let mut renderer = pollster::block_on(Renderer::new_with(
+                &instance,
+                None,
+                Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+                RenderOptions {
+                    msaa,
+                    ssao,
+                    shadow_size: 1024,
+                    fxaa: false,
+                    render_scale: 1.0,
+                    ..Default::default()
+                },
+            ))
+            .expect("test renderer");
+            let mut scene = renderer.new_scene();
+            let green = renderer.add_material(
+                &mut scene,
+                None,
+                AlphaMode::Opaque,
+                [0.0, 1.0, 0.0, 1.0],
+                true,
+            );
+            let blue = renderer.add_material(
+                &mut scene,
+                None,
+                AlphaMode::Opaque,
+                [0.0, 0.0, 1.0, 1.0],
+                true,
+            );
+            let red = renderer.add_material(
+                &mut scene,
+                None,
+                AlphaMode::Opaque,
+                [1.0, 0.0, 0.0, 1.0],
+                true,
+            );
+            let texture = renderer.add_texture(
+                &mut scene,
+                &omsi_texture::Image {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255, 255, 255, 0],
+                    has_alpha: true,
+                },
+                false,
+            );
+            let transparent =
+                renderer.add_material(&mut scene, Some(texture), AlphaMode::Blend, [1.0; 4], true);
+            let cutout =
+                renderer.add_material(&mut scene, Some(texture), AlphaMode::Test, [1.0; 4], true);
+            // Put terrain first in the scene to catch reliance on insertion order. The
+            // excavation floor is behind it, with a transparent cover in front of both.
+            let terrain = quad(&renderer, &mut scene, 6.0, 10.0);
+            renderer.add_instance(
+                &mut scene,
+                terrain,
+                DVec3::ZERO,
+                Mat4::IDENTITY,
+                vec![green],
+            );
+            let floor = quad(&renderer, &mut scene, 8.0, 10.0);
+            let floor = renderer.add_surface_instance(
+                &mut scene,
+                floor,
+                DVec3::ZERO,
+                Mat4::IDENTITY,
+                vec![blue],
+            );
+            scene.instances[floor].presurface = true;
+            let cover_mesh = quad(&renderer, &mut scene, 4.0, 1.5);
+            let cover = renderer.add_surface_instance(
+                &mut scene,
+                cover_mesh,
+                DVec3::ZERO,
+                Mat4::IDENTITY,
+                vec![transparent],
+            );
+            scene.instances[cover].presurface = true;
+            let foreground_mesh = quad(&renderer, &mut scene, 2.0, 0.25);
+            let foreground = renderer.add_instance(
+                &mut scene,
+                foreground_mesh,
+                DVec3::ZERO,
+                Mat4::IDENTITY,
+                vec![red],
+            );
+            scene.instances[foreground].visible = false;
+            let lighting = Lighting {
+                enhanced,
+                shadows: false,
+                fog_density: 0.0,
+                ..Default::default()
+            };
+            let pixel = |rgba: &[u8], x: usize| -> [u8; 3] {
+                rgba[(32 * 64 + x) * 4..(32 * 64 + x) * 4 + 3]
+                    .try_into()
+                    .unwrap()
+            };
+            let rgba = renderer
+                .render_to_image(&mut scene, 64, 64, &camera, &lighting)
+                .unwrap();
+            let centre = pixel(&rgba, 32);
+            assert!(
+                centre[2] > centre[1] + 40,
+                "floor must show through cover: {centre:?}; {msaa}/{ssao}/{enhanced}"
+            );
+            let outside = pixel(&rgba, 4);
+            assert!(
+                outside[1] > outside[2] + 40,
+                "terrain outside cover: {outside:?}"
+            );
+            scene.instances[foreground].visible = true;
+            Renderer::mark_changed(&mut scene, foreground);
+            let rgba = renderer
+                .render_to_image(&mut scene, 64, 64, &camera, &lighting)
+                .unwrap();
+            let centre = pixel(&rgba, 32);
+            assert!(
+                centre[0] > centre[2] + 40,
+                "foreground stays visible: {centre:?}"
+            );
+            scene.instances[foreground].visible = false;
+            Renderer::mark_changed(&mut scene, foreground);
+            // Ordinary blended surfaces must keep showing the terrain, as must covers
+            // whose material explicitly disables depth writes or uses alpha testing.
+            for (presurface, alpha, no_z_write) in [
+                (false, AlphaMode::Blend, false),
+                (true, AlphaMode::Blend, true),
+                (true, AlphaMode::Test, false),
+            ] {
+                scene.instances[cover].presurface = presurface;
+                scene.materials[transparent].no_z_write = no_z_write;
+                renderer.set_material(
+                    &mut scene,
+                    cover,
+                    0,
+                    if alpha == AlphaMode::Test {
+                        cutout
+                    } else {
+                        transparent
+                    },
+                );
+                let rgba = renderer
+                    .render_to_image(&mut scene, 64, 64, &camera, &lighting)
+                    .unwrap();
+                let centre = pixel(&rgba, 32);
+                assert!(
+                    centre[1] > centre[2] + 40,
+                    "terrain should show: {centre:?}; {presurface}/{alpha:?}/{no_z_write}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn render_scale_auto_keeps_ordinary_windows_sharp() {
         // the default window and a 2560x1080 screen are drawn at full size
         assert_eq!(scene_scale_for(0.0, 1600, 900), 1.0);
@@ -9681,6 +10222,7 @@ mod tests {
             ("ssao", include_str!("ssao.wgsl").to_string()),
             ("upscale", include_str!("upscale.wgsl").to_string()),
             ("mip", include_str!("mip.wgsl").to_string()),
+            ("xr_ui", include_str!("xr_ui.wgsl").to_string()),
         ];
         let sizes: &[(&str, usize)] = &[
             ("Enhanced", std::mem::size_of::<EnhancedUniform>()),

@@ -13,7 +13,8 @@ there.
 * [Rust stable](https://rustup.rs), 1.85 or newer.
 * **macOS**: Xcode Command Line Tools (`xcode-select --install`). Metal is used for drawing.
 * **Windows**: Rust *x86_64 MSVC* and Visual Studio Build Tools with *Desktop development
-  with C++* and the Windows SDK. Vulkan or DirectX 12 is used for drawing.
+  with C++* and the Windows SDK. CMake is needed to build the OpenXR dependency;
+  it must be on `PATH`. Vulkan or DirectX 12 is used for drawing.
 * **Linux** (Debian/Ubuntu names):
   `sudo apt install build-essential pkg-config libasound2-dev libudev-dev libgtk-3-dev libxkbcommon-dev libwayland-dev libssl-dev`.
   Vulkan drivers (Mesa, NVIDIA) are needed to play.

@@ -457,6 +457,9 @@ impl State {
     }
 
     pub fn launch(&mut self) {
+        if !self.save_pending_settings() {
+            return;
+        }
         if !omsi_cfg::missing_original_essentials(std::path::Path::new(&self.config.root)).is_empty() {
             self.set_status("A session needs the original OMSI 2: choose its folder under Setup first.", true);
             return;
@@ -474,8 +477,17 @@ impl State {
             "join" => format!("join:{}", c.lan_addr.trim()),
             _ => "off".to_string(),
         };
+        // Joining: the host's map, as its status gives it (a code's host is asked when the
+        // code is typed). The game takes it from the host's welcome too, but only when that
+        // comes before the map is loaded: through a tunnel it came later, the game started
+        // on the map chosen here, and the players never met ("the host drives on X10 Berlin,
+        // you on Berlin-Spandau"). A map not installed here comes with the host's mods.
+        let host_map = (c.lan_mode == "join")
+            .then(|| self.joined_server.clone().unwrap_or_else(|| c.lan_addr.clone()))
+            .and_then(|k| self.server_info.get(&k).and_then(|x| x.1.as_ref().ok()).map(|i| i.map.trim().replace('\\', "/")))
+            .filter(|m| m.to_ascii_lowercase().contains("maps/"));
         core::Duty {
-            map: c.map.clone(),
+            map: host_map.unwrap_or_else(|| c.map.clone()),
             bus: c.bus.clone(),
             paint: Some(c.paint.clone()).filter(|p| !p.is_empty()),
             hof: Some(c.hof.clone()).filter(|p| !p.is_empty()),
@@ -513,6 +525,9 @@ impl State {
 
     /// Continue the situation the game left on the chosen map (`laststn.osn`).
     pub fn launch_last_situation(&mut self) {
+        if !self.save_pending_settings() {
+            return;
+        }
         let Some(file) = core::last_situation(&self.choice.map) else {
             self.set_status("No situation left on this map yet", true);
             return;
@@ -526,11 +541,30 @@ impl State {
 
     /// Start one of OMSI's tutorials (1..4).
     pub fn launch_tutorial(&mut self, n: usize) {
+        if !self.save_pending_settings() {
+            return;
+        }
         let mut d = self.duty();
         d.tutorial = Some(n);
         d.lan = Some("off".into());
         self.set_status("Starting the tutorial…", false);
         self.spawn(move || Msg::Launched(core::launch(&d).map_err(|e| format!("{e:#}"))));
+    }
+
+    fn save_pending_settings(&mut self) -> bool {
+        if self.settings_dirty <= 0.0 {
+            return true;
+        }
+        match core::save_settings(&self.settings) {
+            Ok(()) => {
+                self.settings_dirty = 0.0;
+                true
+            }
+            Err(e) => {
+                self.set_status(format!("Could not save settings: {e:#}"), true);
+                false
+            }
+        }
     }
 
     /// Something of the duty changed: remember it (soon) and refresh what depends on it.
@@ -581,6 +615,23 @@ impl State {
                 self.set_status(format!("Reading the content stopped on an error: {why}"), true);
             }
             Msg::Server { address, info } => {
+                // the host of the code typed in: its map is the one the duty is chosen on
+                // (installed here: the line, tour and entry point of another map go)
+                if self.choice.lan_mode == "join" && self.joined_server.is_none() && address == self.choice.lan_addr {
+                    if let Ok(i) = &info {
+                        let theirs = i.map.trim().replace('\\', "/");
+                        if let Some((file, name)) = self.maps.iter().find(|m| m.file.eq_ignore_ascii_case(&theirs)).map(|m| (m.file.clone(), m.name.clone())) {
+                            if !self.choice.map.eq_ignore_ascii_case(&file) {
+                                self.choice.map = file;
+                                self.choice.line = None;
+                                self.choice.tour = None;
+                                self.choice.entry = 0;
+                                self.touched();
+                                self.set_status(format!("The host drives on {name}: that map is chosen"), false);
+                            }
+                        }
+                    }
+                }
                 self.server_info.insert(address, (Instant::now(), info));
             }
             Msg::Content(Ok((maps, vehicles, weathers))) => {
@@ -887,8 +938,13 @@ impl State {
     pub fn first_trip(&self) -> Option<usize> {
         let t = self.tour()?;
         let now = self.choice.time as f64 * 60.0;
-        t.trips.iter().position(|x| x.departure >= now - 120.0).or(if t.trips.is_empty() { None } else { Some(t.trips.len() - 1) })
+        trip_index_at(t, now)
     }
+}
+
+/// The trip a tour starts with at `now`, shared by the route preview and the launch choice.
+pub(super) fn trip_index_at(tour: &core::TourInfo, now: f64) -> Option<usize> {
+    tour.trips.iter().position(|x| x.departure >= now - 120.0).or(if tour.trips.is_empty() { None } else { Some(tour.trips.len() - 1) })
 }
 
 pub fn hhmm(seconds: f64) -> String {
@@ -938,6 +994,10 @@ pub fn crash_of(log: &std::path::Path) -> Option<(String, String)> {
     let lines: Vec<&str> = text.lines().collect();
     // (a lost graphics device ends the game in order - it saves the run - but it is a crash
     // for the player all the same: the driver gave up)
+    // (one the game got over by starting again with safer graphics is no crash)
+    if lines.iter().any(|l| l.contains("starting again with safer graphics")) {
+        return None;
+    }
     let lost = lines.iter().rposition(|l| l.contains("the graphics device was lost"));
     if lost.is_none() && lines.iter().any(|l| l.contains("game ends")) {
         return None;

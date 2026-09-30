@@ -234,6 +234,8 @@ pub struct Frame<'a> {
     pub width: f32,
     pub height: f32,
     pub cursor: (f32, f32),
+    /// An OpenXR headset is drawing this frame.
+    pub vr: bool,
     /// The name of what the cursor points at (a switch, a part), shown next to it.
     pub tooltip: Option<String>,
     /// The chat, when a LAN session runs and the chat is not switched off.
@@ -264,6 +266,11 @@ pub struct Ui {
     pub chat: ChatWidget,
     /// Where the game menu's lines were drawn this frame (physical pixels), for the mouse.
     pub menu_rects: Vec<[f32; 4]>,
+    /// Overlay entries belonging to the game menu.
+    pub menu_overlay_range: std::ops::Range<usize>,
+    /// The pointer texture, positioned separately for each headset eye.
+    pub vr_cursor_overlay: Option<usize>,
+    pub vr_tooltip_overlay: Option<usize>,
     /// The first line of the menu shown (a long menu scrolls: `menu_rects[k]` is line
     /// `menu_start + k`).
     pub menu_start: usize,
@@ -277,7 +284,7 @@ pub struct Ui {
 
 impl Ui {
     pub fn new() -> Option<Ui> {
-        Some(Ui { text: TextCache::new()?, chat: ChatWidget::default(), menu_rects: Vec::new(), menu_start: 0, menu_rows: 0, menu_row_h: 1.0, images: Default::default() })
+        Some(Ui { text: TextCache::new()?, chat: ChatWidget::default(), menu_rects: Vec::new(), menu_overlay_range: 0..0, vr_cursor_overlay: None, vr_tooltip_overlay: None, menu_start: 0, menu_rows: 0, menu_row_h: 1.0, images: Default::default() })
     }
 
     /// Draw the frame's interface: its overlays go after the HUD's in `scene.overlays`.
@@ -485,15 +492,18 @@ impl Ui {
         }
         // --- the game menu, in the middle over a dimmed picture
         self.menu_rects.clear();
+        let menu_overlay_start = scene.overlays.len();
         if let Some((sel, items)) = f.menu {
             let dim = self.text.plate(r, scene, 6);
             scene.overlays.push((dim, [0.0, 0.0, f.width, f.height]));
             let w = 340.0 * s;
-            let title_h = 56.0 * s;
+            let title_h = if f.vr { 50.0 * s } else { 56.0 * s };
             // as many lines as fit at a readable height; a longer menu scrolls (the wheel,
             // the arrow keys), the chosen line kept in view
-            let room = f.height * 0.92 - title_h - 16.0 * s;
-            let row_h = (44.0 * s).min(room / items.len().max(1) as f32).max(34.0 * s);
+            let room = f.height * (if f.vr { 0.60 } else { 0.92 }) - title_h - 16.0 * s;
+            let row_h = (if f.vr { 40.0 } else { 44.0 }) * s;
+            let row_h = row_h
+                .min(room / items.len().max(1) as f32).max(34.0 * s);
             let rows = ((room / row_h).floor() as usize).clamp(1, items.len().max(1));
             let start = match (items.len() > rows, f.menu_top) {
                 (false, _) => 0,
@@ -553,7 +563,9 @@ impl Ui {
                 self.menu_rects.push(rect);
             }
         }
+        self.menu_overlay_range = menu_overlay_start..scene.overlays.len();
         // --- the mouse-over name, right of the cursor
+        self.vr_tooltip_overlay = None;
         if let Some(t) = f.tooltip.as_ref().filter(|t| !t.is_empty()) {
             let l = self.text.label(r, scene, t, (14.0 * s) as u32, [255, 255, 255, 235]);
             let mut x = f.cursor.0 + 16.0 * s;
@@ -564,13 +576,52 @@ impl Ui {
             if y + l.h as f32 > f.height {
                 y = f.height - l.h as f32;
             }
+            if f.vr { self.vr_tooltip_overlay = Some(scene.overlays.len()); }
             scene.overlays.push((l.tex, [x, y, x + l.w as f32, y + l.h as f32]));
+        }
+        if f.vr {
+            let pointer = self.text.vr_pointer(r, scene);
+            self.vr_cursor_overlay = Some(scene.overlays.len());
+            scene.overlays.push((pointer, [0.0, 0.0, 7.0 * s, 7.0 * s]));
+        } else {
+            self.vr_cursor_overlay = None;
         }
         self.text.end_frame(r, scene);
     }
 }
 
 impl TextCache {
+    /// A small white circle, centred on the point that receives the click.
+    fn vr_pointer(&mut self, r: &Renderer, scene: &mut Scene) -> TextureId {
+        let key = ("\u{0}vr_pointer_dot".to_string(), 0, [0, 0, 0, 0]);
+        if let Some(label) = self.labels.get_mut(&key) {
+            label.used = self.frame;
+            return label.tex;
+        }
+        const W: usize = 32;
+        const H: usize = 32;
+        let mut rgba = vec![0u8; W * H * 4];
+        for y in 0..H {
+            for x in 0..W {
+                let dx = x as f32 + 0.5 - W as f32 * 0.5;
+                let dy = y as f32 + 0.5 - H as f32 * 0.5;
+                let radius = (dx * dx + dy * dy).sqrt();
+                let alpha = (16.0 - radius).clamp(0.0, 1.0);
+                let white = radius < 13.0;
+                let color = if white {
+                    [255, 255, 255, (alpha * 255.0) as u8]
+                } else {
+                    [0, 0, 0, (alpha * 220.0) as u8]
+                };
+                rgba[(y * W + x) * 4..(y * W + x + 1) * 4].copy_from_slice(&color);
+            }
+        }
+        let image = omsi_texture::Image { width: W as u32, height: H as u32, rgba, has_alpha: true };
+        let tex = r.add_texture(scene, &image, false);
+        self.labels.insert(key, Label { tex, w: W as u32, h: H as u32, used: self.frame });
+        tex
+    }
+
     /// A plate of one colour: 0 the chat's dark translucent input box, 1 the loading
     /// screen's bar track, 2 its fill.
     fn plate(&mut self, r: &Renderer, scene: &mut Scene, kind: u8) -> TextureId {
@@ -716,4 +767,3 @@ mod tests {
         assert_eq!(filter_chat("next stop Rathaus Spandau"), "next stop Rathaus Spandau");
     }
 }
-

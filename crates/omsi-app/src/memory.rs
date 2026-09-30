@@ -37,7 +37,15 @@ pub(crate) fn physical_memory() -> Option<u64> {
         let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
         Some(kb * 1024)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut m = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+        // SAFETY: a MEMORYSTATUSEX with its length set, as the call wants it
+        unsafe { GlobalMemoryStatusEx(&mut m) }.ok()?;
+        (m.ullTotalPhys > 0).then_some(m.ullTotalPhys)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android", windows)))]
     {
         None
     }
