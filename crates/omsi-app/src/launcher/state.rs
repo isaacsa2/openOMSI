@@ -457,6 +457,9 @@ impl State {
     }
 
     pub fn launch(&mut self) {
+        if !self.save_pending_settings() {
+            return;
+        }
         if !omsi_cfg::missing_original_essentials(std::path::Path::new(&self.config.root)).is_empty() {
             self.set_status("A session needs the original OMSI 2: choose its folder under Setup first.", true);
             return;
@@ -522,6 +525,9 @@ impl State {
 
     /// Continue the situation the game left on the chosen map (`laststn.osn`).
     pub fn launch_last_situation(&mut self) {
+        if !self.save_pending_settings() {
+            return;
+        }
         let Some(file) = core::last_situation(&self.choice.map) else {
             self.set_status("No situation left on this map yet", true);
             return;
@@ -535,11 +541,30 @@ impl State {
 
     /// Start one of OMSI's tutorials (1..4).
     pub fn launch_tutorial(&mut self, n: usize) {
+        if !self.save_pending_settings() {
+            return;
+        }
         let mut d = self.duty();
         d.tutorial = Some(n);
         d.lan = Some("off".into());
         self.set_status("Starting the tutorial…", false);
         self.spawn(move || Msg::Launched(core::launch(&d).map_err(|e| format!("{e:#}"))));
+    }
+
+    fn save_pending_settings(&mut self) -> bool {
+        if self.settings_dirty <= 0.0 {
+            return true;
+        }
+        match core::save_settings(&self.settings) {
+            Ok(()) => {
+                self.settings_dirty = 0.0;
+                true
+            }
+            Err(e) => {
+                self.set_status(format!("Could not save settings: {e:#}"), true);
+                false
+            }
+        }
     }
 
     /// Something of the duty changed: remember it (soon) and refresh what depends on it.
@@ -913,8 +938,13 @@ impl State {
     pub fn first_trip(&self) -> Option<usize> {
         let t = self.tour()?;
         let now = self.choice.time as f64 * 60.0;
-        t.trips.iter().position(|x| x.departure >= now - 120.0).or(if t.trips.is_empty() { None } else { Some(t.trips.len() - 1) })
+        trip_index_at(t, now)
     }
+}
+
+/// The trip a tour starts with at `now`, shared by the route preview and the launch choice.
+pub(super) fn trip_index_at(tour: &core::TourInfo, now: f64) -> Option<usize> {
+    tour.trips.iter().position(|x| x.departure >= now - 120.0).or(if tour.trips.is_empty() { None } else { Some(tour.trips.len() - 1) })
 }
 
 pub fn hhmm(seconds: f64) -> String {
@@ -964,6 +994,10 @@ pub fn crash_of(log: &std::path::Path) -> Option<(String, String)> {
     let lines: Vec<&str> = text.lines().collect();
     // (a lost graphics device ends the game in order - it saves the run - but it is a crash
     // for the player all the same: the driver gave up)
+    // (one the game got over by starting again with safer graphics is no crash)
+    if lines.iter().any(|l| l.contains("starting again with safer graphics")) {
+        return None;
+    }
     let lost = lines.iter().rposition(|l| l.contains("the graphics device was lost"));
     if lost.is_none() && lines.iter().any(|l| l.contains("game ends")) {
         return None;

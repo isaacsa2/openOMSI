@@ -2,6 +2,7 @@
 
 How to run openOMSI, drive, use the launcher, install mods and play over LAN. For building
 from source see [BUILDING.md](BUILDING.md).
+For OpenXR headset setup and controls on Windows, see [VR.md](VR.md).
 
 > openOMSI runs on the content of an **original OMSI 2 installation**. Without one the game does not start.
 
@@ -53,7 +54,7 @@ Everything can also be given on the command line, which then skips both:
 
 Keys in the window: **W** throttle, **S** brake, **A**/**D** steering - the arrow keys do the
 same - and every vehicle key of `Inputs/keyboard.cfg` works as it does in OMSI: throttle
-Num 8, brake Num 2, steering Num 4/6, **E** battery and ignition, **M**
+Shift+Num 8, brake Shift+Num 2, steering Shift+Num 4/6, **E** battery and ignition, **M**
 starter, **N**/**R** the automatic, **.** the parking brake. W, S and D are OMSI's wiper,
 viewpoint and **D of the automatic gearbox**, so hold shift for those: **Shift+D** selects D.
 `--drive-keys arrows` leaves W/A/S/D to OMSI entirely.
@@ -108,7 +109,7 @@ LAN session. Esc opens the game menu: drive the next placed vehicle, place any v
 the installation in front of the camera (or beside the bus), couple what stands close behind
 the bus and uncouple it again, save the situation or load the quicksave, the next weather, the clock an hour on or back, refuel and wash (only at a
 petrol station, as in OMSI), repair (the team needs the map's travel time when the bus stands
-in no depot yard), screenshot, timetable, the object editor (below), quit. Shift+Home is the ticket desk camera, and the
+in no depot yard), screenshot, timetable, the object editor (below), quit. Home is the ticket desk camera and Insert the timetable view (as OMSI's keyboard.cfg binds them), and the
 change keys of keyboard.cfg hand out or take back the change. The HUD
 shows time, speed, line, next stop, delay and what the workshop just did (and why the bus
 stands: the parking brake, low air pressure, a line the date's chrono takes off), and the
@@ -142,12 +143,17 @@ again only when something changes; drag on it to turn the bus, scroll to zoom. I
   joysticks and button boxes as in OMSI's `gamectrler.cfg` - a connected device not set up
   yet has **Set up**, and **Set up step by step** finds its axes (turn the wheel left, press
   each pedal); every button of the device is listed (press one to jump to it). On Windows the
-  devices are read through DirectInput, as OMSI does, so every wheel Windows lists works
-  (a wheel's force feedback: the centring that grows with the speed, the heavy steering of a
-  bus standing still and the scripts' shaking, `FF_Vib_Amp`); a wheel nobody has set up
-  steers with its X axis. A wheel that a community controller mapping also makes a gamepad (a
+  devices are read through DirectInput, as OMSI does, so wheels Windows lists can be
+  configured for steering. Force feedback needs a driver that supports constant force:
+  parking resistance eases as the bus rolls, with centring and
+  feedback from the bus's sideways acceleration, short bumps when the front wheels cross
+  an edge, plus the scripts' shaking, `FF_Vib_Amp`. A wheel nobody has set up steers with
+  its X axis. A wheel that a community controller mapping also makes a gamepad (a
   Logitech G29) is listed once, and *Use this device* switches any device off
-  (it is then neither read nor listed as steering).
+  (it is then neither read nor listed as steering). Select a device to adjust *Steering force*
+  (centering and resistance) and *Vibration* separately, then press **Save**. The values are stored
+  for that device in the content folder's `Inputs/gamectrler.cfg`; restart a running game to use
+  the new values. *Force feedback and vibration* in Settings remains the global on/off switch.
 * **Sessions** - every game started from the launcher, with its log, a **Stop** that lets
   it save its run (SIGTERM, up to 8 s, and only a stuck game is killed) and, for a LAN
   session, the code to copy, who is playing and the chat.
@@ -203,7 +209,7 @@ in). The file also carries a `version`; older files that say
 
 `drive_keys` is a control preset: `simple` (W/S/A/D and the arrow keys drive; the default),
 `wasd`, `arrows`, or `omsi` ("Custom controls") - only the layout of `Inputs/keyboard.cfg`
-(OMSI's numpad, or what the Controls page made of it), nothing added. **T** sells the ticket a passenger asks for on a bus without a
+(OMSI's Shift + numpad, or what the Controls page made of it), nothing added. **T** sells the ticket a passenger asks for on a bus without a
 ticket printer (the original's `ticket_give` key).
 
 `boarding` is how passengers board: `auto` (default) - they walk to the standing place the

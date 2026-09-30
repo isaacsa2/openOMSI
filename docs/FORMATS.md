@@ -387,6 +387,11 @@ add_camera_reflexion(_2) mass momentofintertia cog boundingbox crashmode_pole ne
 (attach_trans attach_rot_x/y/z) maplight rail_enh third_rail triggerbox_new triggerbox_setreverb
 plus the whole model.cfg vocabulary inline.
 
+`[rendertype] presurface` draws the object before terrain and ordinary scenery, keeping
+its mesh/material order. Alpha-blended materials still write depth at transparent texels:
+an invisible cover can keep terrain from hiding an excavation already drawn below it.
+Alpha-tested materials retain their cutouts, and `[matl_noZwrite]` disables blended depth writes.
+
 ## Model (.cfg) - unit `mc_complobj`
 
 LOD VFDmaxmin detail_factor tex_detail_factor noDistanceCheck terrainhole CTC CTCTexture
@@ -637,8 +642,10 @@ onlytypes end types_prefered number_tour.
 * `wearlifespan` is a plain vehicle variable the engine sets, and it must be 1: at 0 every
   random part lifetime the stock scripts draw is 0, which makes the SD200's rear door
   reopen by itself for ever.
-* Input: keyboard.cfg `[game]/[vehicles]` + `[entry] name scancode flags` (the flags are
-  a mask: 1 duration/held, 2 Shift, 4 Ctrl, 8 Alt - OMSI's own driving keys use the numpad);
+* Input: keyboard.cfg `[game]/[vehicles]` + `[entry] name scancode modifier` (the modifier
+  is a mask, as Omsi.exe reads it (0x6478d0): 1 the action is told the key's state every
+  frame - the throttle, brake and steering keys, " *" in OMSI's key list - 2 Shift, 4 Ctrl;
+  Omsi.exe has no Alt, openOMSI's own Alt is 8, which OMSI leaves alone);
   gamectrler.cfg ctrl axis buttons FFScale.
 * Startup order (logfile.txt) documents the manager creation sequence, mirrored in `omsi-sim`.
 

@@ -61,7 +61,7 @@ pub(crate) struct DeviceCfg {
     pub(crate) axis_flags: [i32; 8],
     /// Per button: the key action (empty: none) and the number after it.
     pub(crate) buttons: Vec<(String, String)>,
-    /// `[FFScale]`: the force feedback's strength (two factors).
+    /// `[FFScale]`: steering forces (centering and drag), then vibration strength.
     pub(crate) ff_scale: Option<(f32, f32)>,
 }
 
@@ -146,9 +146,23 @@ pub(crate) fn cfg_text(devices: &[DeviceCfg]) -> String {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Analog {
     pub steering: Option<f32>,
+    /// The steering is a gamepad's stick (not a wheel): see `gamepad_steering`.
+    pub stick: bool,
     pub throttle: Option<f32>,
     pub brake: Option<f32>,
     pub clutch: Option<f32>,
+}
+
+/// Where a gamepad's stick turns the wheel to (#200): a stick is no steering wheel - taken
+/// as the wheel's place, the smallest movement turned the wheel a long way and a push to
+/// the side was the full lock at any speed. As the bus games take it: a gentler curve
+/// (squared), and less of the lock the faster the bus goes (the whole of it standing, a
+/// third of it at 50 km/h, a fifth at 90 km/h).
+pub fn gamepad_steering(x: f32, kmh: f32) -> f32 {
+    let x = x.clamp(-1.0, 1.0);
+    let curve = x * x.abs();
+    let reach = 1.0 / (1.0 + (kmh.abs() - 10.0).max(0.0) / 20.0);
+    curve * reach
 }
 
 /// A device connected now: its name, its axes (DirectInput slot, -1..1), whether the system
@@ -345,6 +359,10 @@ pub struct FfInput {
     /// Driving (from the driver's seat): the forces are on; else the wheel is let go.
     pub on: bool,
     pub kmh: f32,
+    /// Sideways acceleration in the bus frame (m/s², right positive).
+    pub lateral_accel: f32,
+    /// Short front-wheel jolt from suspension travel or an impact, 0..1.
+    pub wheel_bump: f32,
     /// `FF_Vib_Amp` 0..1 and `FF_Vib_Period` (hundredths of a second) of the scripts.
     pub vib_amp: f32,
     pub vib_period: f32,
@@ -379,6 +397,8 @@ pub struct Controllers {
     /// whether it pushes back.
     steer: Option<(String, f32, f32, bool)>,
     ff_t: f32,
+    ff_lateral: f32,
+    ff_bump: f32,
     /// The rumble playing (`FF_Vib_Amp` and `FF_Vib_Period` of the bus), rebuilt when
     /// either changes.
     rumble: Option<(gilrs::ff::Effect, f32, f32)>,
@@ -399,7 +419,7 @@ impl Controllers {
         for c in devices.connected() {
             log::info!("game controller: {} ({})", c.name, if cfg.iter().any(|d| names_match(&d.name, &c.name)) { "set up in gamectrler.cfg" } else if c.gamepad { "as a gamepad" } else { "not set up: its X axis steers" });
         }
-        Controllers { devices, cfg, deadzone: 0.0, pedal_throttle: 1.0, pedal_brake: 1.0, disabled: Vec::new(), ff_invert: false, ff_enabled: true, steer_gain: 1.0, enabled: true, actions: Vec::new(), announced: Vec::new(), notice: None, steer: None, ff_t: 0.0, rumble: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel_tried: None }
+        Controllers { devices, cfg, deadzone: 0.0, pedal_throttle: 1.0, pedal_brake: 1.0, disabled: Vec::new(), ff_invert: false, ff_enabled: true, steer_gain: 1.0, enabled: true, actions: Vec::new(), announced: Vec::new(), notice: None, steer: None, ff_t: 0.0, ff_lateral: 0.0, ff_bump: 0.0, rumble: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel_tried: None }
     }
 
     /// A wheel or joystick steers the bus (then the arrow keys look around, as in OMSI:
@@ -486,7 +506,12 @@ impl Controllers {
         let off = self.disabled.clone();
         if let Some(g) = self.devices.gilrs.as_ref() {
             for (_, pad) in g.gamepads() {
-                if pad.mapping_source() == gilrs::MappingSource::None || self.cfg.iter().any(|d| names_match(&d.name, pad.name())) {
+                // (a pad OMSI's gamectrler.cfg names is driven by that file through DirectInput
+                // - except an Xbox-type pad on Windows, whose DirectInput twin is left out
+                // for the system's own layout: with the file naming it, nobody read it, and
+                // its triggers were no pedals, #171)
+                let xinput = cfg!(windows) && pad.mapping_source() == gilrs::MappingSource::Driver;
+                if pad.mapping_source() == gilrs::MappingSource::None || (!xinput && self.cfg.iter().any(|d| names_match(&d.name, pad.name()))) {
                     continue;
                 }
                 #[cfg(target_os = "macos")]
@@ -500,7 +525,10 @@ impl Controllers {
                 let dead = |v: f32| if v.abs() < 0.08 { 0.0 } else { v };
                 let rt = pad.button_data(gilrs::Button::RightTrigger2).map(|d| d.value()).unwrap_or(0.0);
                 let lt = pad.button_data(gilrs::Button::LeftTrigger2).map(|d| d.value()).unwrap_or(0.0);
-                out.steering.get_or_insert(dead(x));
+                if out.steering.is_none() {
+                    out.steering = Some(dead(x));
+                    out.stick = true;
+                }
                 out.throttle.get_or_insert(crate::settings::pedal_curve(rt, self.pedal_throttle));
                 out.brake.get_or_insert(crate::settings::pedal_curve(lt, self.pedal_brake));
             }
@@ -510,15 +538,26 @@ impl Controllers {
         out
     }
 
-    /// The force feedback: on a wheel that can push back (Windows, DirectInput) the forces
-    /// OMSI puts on it - the centring that grows with the speed, the heavy steering of a bus
-    /// standing still, the shaking of the engine and the road (`FF_Vib_Amp`); on any other
-    /// device that can, the shaking as a rumble.
+    /// On a force-feedback wheel, combine parking resistance, centring, the bus's
+    /// lateral motion, front-wheel bumps and script-driven vibration. Other devices
+    /// get vibration as rumble.
     pub fn feedback(&mut self, f: FfInput) {
         let on = self.enabled && f.on && self.ff_enabled;
+        let mut f = f;
+        if on {
+            // The bus body reacts to road and tyre forces every physics step. A short
+            // filter keeps those impulses from becoming sharp forces at the wheel.
+            let blend = (f.dt / 0.15).clamp(0.0, 1.0);
+            self.ff_lateral += (f.lateral_accel.clamp(-6.0, 6.0) - self.ff_lateral) * blend;
+        } else {
+            self.ff_lateral = 0.0;
+        }
+        f.lateral_accel = self.ff_lateral;
+        self.ff_bump = if on { (self.ff_bump - f.dt.max(0.0) * 4.0).max(f.wheel_bump.clamp(0.0, 1.0)) } else { 0.0 };
+        f.wheel_bump = self.ff_bump;
         #[cfg(windows)]
         if let (Some((name, x, x0, true)), Some(di)) = (self.steer.clone(), self.devices.di.as_mut()) {
-            // (the file's [FFScale] of the device: springs and drag, the effects)
+            // (the file's [FFScale] of the device: steering forces, then vibration)
             let (k_s, k_e) = self.cfg.iter().find(|d| names_match(&d.name, &name)).and_then(|d| d.ff_scale).unwrap_or((1.0, 1.0));
             let force = if on { wheel_force(&f, x, x0, &mut self.ff_t, k_s, k_e) } else { 0.0 };
             let force = if self.ff_invert { -force } else { force };
@@ -544,7 +583,7 @@ impl Controllers {
             }
         }
         let _ = (&self.steer, &self.ff_t, wheel_force);
-        self.rumble_feedback(if on { f.vib_amp } else { 0.0 }, f.vib_period);
+        self.rumble_feedback(if on { f.vib_amp.max(f.wheel_bump * 0.75) } else { 0.0 }, f.vib_period);
     }
 
     /// The shaking as a rumble (`FF_Vib_Amp`, `FF_Vib_Period`: OMSI hands DirectInput
@@ -598,19 +637,50 @@ impl Controllers {
     }
 }
 
+/// A short jolt from suspension motion or a wheel striking a raised edge.
+pub(crate) fn front_wheel_bump(body: &omsi_sim::rigid::RigidBody, kmh: f32) -> f32 {
+    body.wheels.iter().enumerate().filter(|(_, w)| w.steered).map(|(i, w)| {
+        let impact_speed = body.wheel_impacts.iter().filter(|hit| hit.obstacle == i).map(|hit| hit.speed).fold(0.0, f32::max);
+        bump_strength(w.compression_rate, impact_speed, kmh)
+    }).fold(0.0, f32::max)
+}
+
+fn bump_strength(compression_rate: f32, impact_speed: f32, kmh: f32) -> f32 {
+    let suspension = ((compression_rate.abs() - 0.2) / 1.2).clamp(0.0, 1.0);
+    let impact = ((impact_speed - 0.2) / 1.5).clamp(0.0, 1.0);
+    suspension.max(impact) * (kmh.abs() / 4.0).clamp(0.0, 1.0)
+}
+
 /// The force on a wheel standing at `x` (-1 full left .. 1), `x0` the frame before: -1..1.
-/// The centring pulls back harder the faster the bus goes (from a quarter of it standing
-/// still to all of it at 50 km/h), the steering is heavy and damped standing still (the
-/// power steering helps once the bus rolls), and the scripts' shaking comes on top.
+/// Tyre scrub resists turning the wheel at a standstill and falls away once the bus rolls.
+/// Self-aligning torque then returns the wheel to centre, with a softer response near full
+/// lock and feedback from the bus's lateral acceleration. Front-wheel jolts and the
+/// scripts' shaking come on top.
 fn wheel_force(f: &FfInput, x: f32, x0: f32, t: &mut f32, k_springs: f32, k_effects: f32) -> f32 {
     let dt = f.dt.max(1e-3);
     let v = f.kmh.abs();
-    let spring = -x * (0.25 + 0.5 * (v / 50.0).min(1.0));
-    let drag = -(x - x0) / dt * 0.05 * (1.0 + 2.0 * (1.0 - v / 20.0).max(0.0));
+    let x = x.clamp(-1.0, 1.0);
+    let spring_strength = 0.22 + 0.28 * v / (v + 10.0);
+    let spring = -spring_strength * x / (1.0 + 0.65 * x.abs());
+    let road_align = -(f.lateral_accel / 9.81).clamp(-0.45, 0.45) * 0.25 * (v / 5.0).clamp(0.0, 1.0);
+    // Assisted steering should not demand ever more hand force near full lock.
+    let lock_assist = 1.0 / (1.0 + 0.55 * x * x);
+    let turning_speed = ((x - x0) / dt).clamp(-4.0, 4.0);
+    // Without a steering-column torque sensor, motion away from the centre is our
+    // indication that the driver is actively turning. Assist that motion, but keep
+    // the full self-aligning torque when the wheel is held or let go.
+    let turning_out = (x * turning_speed * 2.0).clamp(0.0, 1.0);
+    let assist = 1.0 - (0.4 - 0.16 * (v / 80.0).min(1.0)) * turning_out;
+    let parking_drag = 0.018 + 0.12 / (1.0 + (v / 6.0).powi(2));
+    // The power steering helps the wheel return; do not let parking resistance
+    // cancel the centring force while it is already moving towards the middle.
+    let returning = x * turning_speed < 0.0;
+    let drag = -turning_speed * parking_drag * if returning { 0.2 } else { 1.0 };
     *t += dt;
     let period = (f.vib_period * 0.01).max(0.02);
     let shake = f.vib_amp.clamp(0.0, 1.0) * 0.25 * (std::f32::consts::TAU * *t / period).sin();
-    ((spring + drag) * k_springs.clamp(0.0, 2.0) + shake * k_effects.clamp(0.0, 2.0)).clamp(-1.0, 1.0)
+    let bump = f.wheel_bump.clamp(0.0, 1.0) * 0.4 * (std::f32::consts::TAU * *t * 11.0).cos();
+    (((spring + road_align) * lock_assist * assist + drag) * k_springs.clamp(0.0, 2.0) + (shake + bump) * k_effects.clamp(0.0, 2.0)).clamp(-1.0, 1.0)
 }
 
 /// A control several set-up devices give: the first one set wins, unless a later one is
@@ -810,6 +880,17 @@ mod slot_tests {
 #[cfg(test)]
 mod cfg_tests {
     #[test]
+    fn force_feedback_scales_are_saved_per_controller() {
+        let devices = vec![
+            super::DeviceCfg { name: "Wheel A".into(), ff_scale: Some((2.0, 0.5)), ..Default::default() },
+            super::DeviceCfg { name: "Wheel B".into(), ff_scale: Some((0.75, 1.25)), ..Default::default() },
+        ];
+        let saved = super::parse_cfg(&super::cfg_text(&devices));
+        assert_eq!(saved[0].ff_scale, Some((2.0, 0.5)));
+        assert_eq!(saved[1].ff_scale, Some((0.75, 1.25)));
+    }
+
+    #[test]
     fn the_stock_file_round_trips() {
         let Ok(bytes) = std::fs::read("../../../OMSI 2 Original/Inputs/gamectrler.cfg") else { return };
         let text = omsi_cfg::codepage::decode(&bytes);
@@ -858,5 +939,75 @@ mod button_tests {
         // turned to the right, it is pushed left; turning, it is held back
         let turning = super::wheel_force(&f(0.0), 0.0, -0.05, &mut t, 1.0, 1.0);
         assert!(turning < 0.0);
+    }
+
+    #[test]
+    fn steering_resistance_drops_as_the_bus_starts_rolling() {
+        let mut t = 0.0;
+        let f = |kmh| super::FfInput { on: true, kmh, dt: 0.016, ..Default::default() };
+        let parked = super::wheel_force(&f(0.0), 0.2, 0.15, &mut t, 1.0, 0.0);
+        let moving = super::wheel_force(&f(30.0), 0.2, 0.15, &mut t, 1.0, 0.0);
+        assert!(parked < moving && moving < 0.0, "{parked} {moving}");
+    }
+
+    #[test]
+    fn a_returning_wheel_is_not_stopped_by_parking_drag() {
+        let mut t = 0.0;
+        let f = super::FfInput { on: true, kmh: 20.0, dt: 0.016, ..Default::default() };
+        let right = super::wheel_force(&f, 0.5, 0.55, &mut t, 1.0, 0.0);
+        let left = super::wheel_force(&f, -0.5, -0.55, &mut t, 1.0, 0.0);
+        assert!(right < 0.0 && left > 0.0, "{right} {left}");
+    }
+
+    #[test]
+    fn a_real_turn_adds_aligning_torque_but_a_parked_bus_does_not() {
+        let mut t = 0.0;
+        let mut f = super::FfInput { on: true, kmh: 30.0, dt: 0.016, ..Default::default() };
+        let straight = super::wheel_force(&f, 0.2, 0.2, &mut t, 1.0, 0.0);
+        f.lateral_accel = 3.0;
+        let right_turn = super::wheel_force(&f, 0.2, 0.2, &mut t, 1.0, 0.0);
+        assert!(right_turn < straight, "{straight} {right_turn}");
+        f.kmh = 0.0;
+        let parked = super::wheel_force(&f, 0.2, 0.2, &mut t, 1.0, 0.0);
+        f.lateral_accel = 0.0;
+        let parked_without_accel = super::wheel_force(&f, 0.2, 0.2, &mut t, 1.0, 0.0);
+        assert_eq!(parked, parked_without_accel);
+    }
+
+    #[test]
+    fn steering_assist_lightens_turning_out_without_weakening_return() {
+        let mut t = 0.0;
+        let f = super::FfInput { on: true, kmh: 25.0, lateral_accel: 2.0, dt: 0.016, ..Default::default() };
+        let turning_out = super::wheel_force(&f, 0.5, 0.48, &mut t, 1.0, 0.0);
+        let returning = super::wheel_force(&f, 0.5, 0.52, &mut t, 1.0, 0.0);
+        assert!(returning < turning_out && turning_out < 0.0, "{turning_out} {returning}");
+    }
+
+    #[test]
+    fn centering_does_not_grow_linearly_to_full_lock() {
+        let mut t = 0.0;
+        let f = super::FfInput { on: true, kmh: 30.0, dt: 0.016, ..Default::default() };
+        let quarter = super::wheel_force(&f, 0.25, 0.25, &mut t, 1.0, 0.0);
+        let full = super::wheel_force(&f, 1.0, 1.0, &mut t, 1.0, 0.0);
+        assert!(full < quarter && full > 2.5 * quarter, "{quarter} {full}");
+    }
+
+    #[test]
+    fn wheel_bumps_need_motion_and_a_suspension_or_impact_event() {
+        assert_eq!(super::bump_strength(0.0, 0.0, 20.0), 0.0);
+        assert_eq!(super::bump_strength(1.0, 0.0, 0.0), 0.0);
+        assert!(super::bump_strength(1.0, 0.0, 20.0) > 0.5);
+        assert!(super::bump_strength(0.0, 1.0, 20.0) > 0.5);
+    }
+
+    #[test]
+    fn a_wheel_bump_uses_the_device_vibration_strength() {
+        let mut t = 0.0;
+        let f = super::FfInput { on: true, kmh: 20.0, wheel_bump: 1.0, dt: 0.016, ..Default::default() };
+        let off = super::wheel_force(&f, 0.0, 0.0, &mut t, 0.0, 0.0);
+        t = 0.0;
+        let on = super::wheel_force(&f, 0.0, 0.0, &mut t, 0.0, 1.0);
+        assert_eq!(off, 0.0);
+        assert!(on.abs() > 0.15, "{on}");
     }
 }

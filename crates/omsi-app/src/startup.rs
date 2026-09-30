@@ -84,8 +84,7 @@ pub(crate) fn own_keys(root: &Path) -> std::collections::HashSet<i32> {
     own_bindings(root, 0)
 }
 
-/// The keys held with the physical `modifier` flags (2: Shift, 4: Ctrl, 8: Alt) that the
-/// file in use binds otherwise than OMSI 2's
+/// The keys held with `modifier` (a chord: `KEY_SHIFT` …) that the file in use binds otherwise than OMSI 2's
 /// own assignment ([`crate::stock_keys::STOCK_KEYS`]): the player's own. Told apart from the
 /// built-in list, not from the installation's file - a player who edited that file had
 /// every change overridden by the game's conveniences (Z / X / C, Shift+number).
@@ -95,7 +94,7 @@ pub(crate) fn own_bindings(root: &Path, modifier: i32) -> std::collections::Hash
     m.vehicles
         .iter()
         .chain(m.game.iter())
-        .filter(|b| omsi_content::input::key_modifiers(b.modifier) == modifier && b.scan_code != 0 && !stock.contains(&(b.action.to_ascii_lowercase(), b.scan_code, b.modifier)))
+        .filter(|b| b.chord() == modifier && b.scan_code != 0 && !stock.contains(&(b.action.to_ascii_lowercase(), b.scan_code, b.modifier)))
         .map(|b| b.scan_code)
         .collect()
 }
@@ -166,18 +165,24 @@ pub(crate) fn graphics_instance() -> wgpu::Instance {
     last.unwrap_or_else(|| wgpu::Instance::new(descriptor))
 }
 
-/// The graphics interfaces in the order they are tried: Metal on a Mac; elsewhere Vulkan
-/// first, and where the graphics chip or its driver has none (an older card - a GeForce GT
-/// 530 -, an old phone) DirectX 12 on Windows and then OpenGL. Settings → Graphics API
+/// The graphics interfaces in the order they are tried: Metal on a Mac; on Windows DirectX
+/// 12 first (the Windows drivers' best-kept path: on Vulkan they reset the device -
+/// "the graphics device was lost" - far more often), then Vulkan, then OpenGL for a card
+/// without either (a GeForce GT 530); elsewhere Vulkan, then OpenGL. Settings → Graphics API
 /// (`graphics_api`) or OMSI_BACKEND=vulkan|dx12|gl puts one first: a driver whose Vulkan
 /// misbehaves is got round.
 pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(target_os = "macos") {
         return vec![wgpu::Backends::METAL];
     }
-    let wanted = omsi_cfg::env::var("OMSI_BACKEND").ok().unwrap_or_else(|| crate::settings::Settings::load().graphics_api);
+    let settings = crate::settings::Settings::load();
+    let wanted = if settings.vr_requested() {
+        "dx12".to_owned()
+    } else {
+        omsi_cfg::env::var("OMSI_BACKEND").ok().unwrap_or(settings.graphics_api)
+    };
     let all: Vec<wgpu::Backends> = if cfg!(windows) {
-        vec![wgpu::Backends::VULKAN, wgpu::Backends::DX12, wgpu::Backends::GL]
+        vec![wgpu::Backends::DX12, wgpu::Backends::VULKAN, wgpu::Backends::GL]
     } else {
         vec![wgpu::Backends::VULKAN, wgpu::Backends::GL]
     };
@@ -353,6 +358,6 @@ mod own_key_tests {
             return;
         }
         assert!(super::own_bindings(root, 0).is_empty());
-        assert!(super::own_bindings(root, 1).is_empty());
+        assert!(super::own_bindings(root, omsi_content::input::KEY_SHIFT).is_empty());
     }
 }

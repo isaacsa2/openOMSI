@@ -116,6 +116,40 @@ impl<T: Copy> Track<T> {
     }
 }
 
+/// The moment the others' things are drawn at, on their clock: it runs on with ours and is
+/// pulled towards where it should be (now, less the delay, on their clock) by at most a
+/// few per cent of its pace. Set anew each frame from the offset of the clocks and the
+/// delay, it jumped with them - a datagram that came quicker than the others, a delay
+/// grown after a slow frame of theirs - and everything drawn went back or on a bit at
+/// once: the micro-teleports.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct PlayClock {
+    /// (the moment drawn, our clock then)
+    at: Option<(f64, f64)>,
+}
+
+impl PlayClock {
+    /// The moment to draw at `now` (our clock) when it should be `want`; more than `snap`
+    /// off (a new session, a pause), it is taken at once.
+    pub(crate) fn step(&mut self, now: f64, want: f64, snap: f64) -> f64 {
+        let t = match self.at {
+            Some((t, then)) => {
+                let d = (now - then).max(0.0);
+                let run = t + d;
+                let err = want - run;
+                if err.abs() > snap {
+                    want
+                } else {
+                    run + err.clamp(-0.06 * d, 0.06 * d)
+                }
+            }
+            None => want,
+        };
+        self.at = Some((t, now));
+        t
+    }
+}
+
 fn lerp_angle(a: f64, b: f64, t: f64) -> f64 {
     let d = (b - a + 540.0).rem_euclid(360.0) - 180.0;
     (a + d * t).rem_euclid(360.0)
@@ -146,6 +180,7 @@ struct Mirror {
     odometer: HashMap<u32, f32>,
     /// The host's clock minus ours (ms), from the frames that came fastest.
     offset: Option<f64>,
+    play: PlayClock,
     epoch: Option<Instant>,
     bytes_at: u64,
     granted: u32,
@@ -167,6 +202,7 @@ struct Upstream {
     /// Their ids here, by the client's.
     ids: HashMap<u32, u32>,
     offset: Option<f64>,
+    play: PlayClock,
 }
 
 /// What a client sends the host of its own people.
@@ -439,7 +475,9 @@ impl LanWorld {
                 .unwrap_or(0.0);
             let off = f.host_ms as f64 - arrived;
             up.offset = Some(match up.offset {
-                Some(o) if (off - o).abs() < 1000.0 => off.max(o - 20.0),
+                // (drifting down 2 ms a second at their 8 frames a second: 20 ms a frame
+                // made it follow every frame's way over the network)
+                Some(o) if (off - o).abs() < 1000.0 => off.max(o - 0.25),
                 _ => off,
             });
             for p in f.people {
@@ -475,7 +513,7 @@ impl LanWorld {
                     h.mirror_remove(local);
                 }
             }
-            let render_ms = now + up.offset.unwrap_or(0.0) - INTERP_DELAY;
+            let render_ms = up.play.step(now, now + up.offset.unwrap_or(0.0) - INTERP_DELAY, 500.0);
             for (pid, track) in &up.tracks {
                 let Some((a, b, k)) = track.around(render_ms) else {
                     continue;
@@ -795,7 +833,7 @@ impl LanWorld {
                 lan.send_desc(id, d);
             }
             if let Some(f) = self.trace.as_mut() {
-                let ms = lan.world_ms();
+                let ms = lan.stamp_ms();
                 for c in &frame.cars {
                     let _ = writeln!(f, "host,{ms},{id},c,{},{:.3},{:.3},{:.3},{:.2}", c.id, c.x, c.y, c.z, c.heading);
                 }
@@ -939,7 +977,7 @@ impl LanWorld {
                 }
             }
         }
-        let render_ms = now + m.offset.unwrap_or(0.0) - INTERP_DELAY;
+        let render_ms = m.play.step(now, now + m.offset.unwrap_or(0.0) - INTERP_DELAY, 500.0);
         // descriptions still missing: asked for (again)
         let mut want: Vec<EntityRef> = Vec::new();
         for (person, ids) in [
@@ -1428,5 +1466,31 @@ fn describe(
     } else {
         let c = traffic?.cars.iter().find(|c| c.id == r.id as u64)?;
         Some(describe_car(args, c))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PlayClock;
+
+    #[test]
+    fn the_moment_drawn_follows_a_changed_delay_smoothly() {
+        let mut c = PlayClock::default();
+        let mut now = 0.0;
+        let mut t = c.step(now, now - 120.0, 500.0);
+        // a slow frame of theirs: the delay grows by 70 ms at once
+        let mut steps = Vec::new();
+        for _ in 0..100 {
+            now += 16.0;
+            let n = c.step(now, now - 190.0, 500.0);
+            steps.push(n - t);
+            t = n;
+        }
+        // never back, never on more than a few per cent faster or slower than the clock
+        assert!(steps.iter().all(|d| *d > 16.0 * 0.93 && *d < 16.0 * 1.07), "{steps:?}");
+        assert!((t - (now - 190.0)).abs() < 1e-6, "caught up: {}", t - (now - 190.0));
+        // a new session: taken at once
+        now += 16.0;
+        assert_eq!(c.step(now, now + 5000.0, 500.0), now + 5000.0);
     }
 }

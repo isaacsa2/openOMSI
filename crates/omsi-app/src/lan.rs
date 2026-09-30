@@ -409,6 +409,8 @@ pub struct RemoteVehicle {
     /// state, and whoever stood in it shook).
     samples: std::collections::VecDeque<(f64, Pose)>,
     offset: Option<f64>,
+    /// The moment of theirs drawn (see `PlayClock`).
+    play: crate::lan_world::PlayClock,
 }
 
 impl RemoteVehicle {
@@ -521,6 +523,10 @@ pub struct LanGame {
     last_received: u64,
     /// The host's weather last taken over from its clock messages.
     weather_seen: Option<String>,
+    /// Vehicles another player drives that could not be made here, and when that was
+    /// tried: tried again only after a while (every frame, a server read a big add-on bus
+    /// it could not load over and over and stood still for everybody).
+    failed: hashbrown::HashMap<(u32, String), std::time::Instant>,
 }
 
 /// What the frame knows that LAN play needs.
@@ -2071,19 +2077,32 @@ fn remote_bus_file(args: &Args, bus: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Load the type a remote player drives, or ours as a stand-in.
+/// Load the type a remote player drives, or a stand-in: ours, or on a server the first of
+/// the buses its `vehicles` list allows. A bus the list does not allow is not loaded at all
+/// (a player joining with another than the server offers).
 fn remote_type(
     args: &Args,
     pose: &Pose,
     player: Option<&Player>,
 ) -> Option<(Arc<omsi_sim::VehicleType>, bool)> {
-    let loaded = remote_bus_file(args, &pose.bus)
-        .and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()));
+    let allowed = crate::server::SERVER_VEHICLES.get().filter(|l| !l.is_empty());
+    let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
+    let listed = allowed.map(|l| l.iter().any(|v| norm(v) == norm(&pose.bus) || norm(&pose.bus).ends_with(&norm(v)))).unwrap_or(true);
+    let loaded = if listed {
+        remote_bus_file(args, &pose.bus).and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
+    } else {
+        Err("the server does not offer it".to_string())
+    };
     match loaded {
         Ok(t) => Some((Arc::new(t), false)),
         Err(e) => {
-            log::warn!("LAN: player {} drives {:?}, which cannot be loaded here ({e}); showing our own bus type", pose.id, pose.bus);
-            player.map(|p| (p.vehicle.ty.clone(), true))
+            log::warn!("LAN: player {} drives {:?}, which cannot be loaded here ({e}); showing a stand-in", pose.id, pose.bus);
+            if let Some(p) = player {
+                return Some((p.vehicle.ty.clone(), true));
+            }
+            let first = allowed.and_then(|l| l.first())?;
+            let path = remote_bus_file(args, first).ok()?;
+            omsi_sim::VehicleType::load(&args.root, &path).ok().map(|t| (Arc::new(t), true))
         }
     }
 }
@@ -2106,6 +2125,14 @@ fn new_remote(
     host.font_lib = Some(world.fonts.clone());
     let hof = crate::find_hof(args, world, &ty);
     host.hof = hof.clone();
+    let scheme = if pose.paint.is_empty() {
+        None
+    } else {
+        ty.paint_schemes
+            .iter()
+            .position(|s| s.name.eq_ignore_ascii_case(&pose.paint))
+    };
+    host.paint_scheme = Some(scheme);
     let mut vehicle = omsi_sim::VehicleInstance::new(ty.clone(), host);
     vehicle.ground = None;
     if !ty.model.text_textures.is_empty() {
@@ -2115,13 +2142,6 @@ fn new_remote(
                 .map(|i| (i.width, i.height, i.rgba))
         });
     }
-    let scheme = if pose.paint.is_empty() {
-        None
-    } else {
-        ty.paint_schemes
-            .iter()
-            .position(|s| s.name.eq_ignore_ascii_case(&pose.paint))
-    };
     vehicle.apply_paint_vars(scheme);
     let render = world.add_vehicle_shared(r, scene, &ty, scheme);
     // the coupled sections of an articulated bus
@@ -2206,6 +2226,7 @@ fn new_remote(
         driver_tried: false,
         samples: std::collections::VecDeque::new(),
         offset: None,
+        play: Default::default(),
     })
 }
 
@@ -2234,6 +2255,7 @@ impl RemoteVehicle {
                 if self.samples.back().map(|b| b.0 - sent > 30.0).unwrap_or(false) {
                     self.samples.clear();
                     self.offset = None;
+                    self.play = Default::default();
                 } else {
                     continue;
                 }
@@ -2256,7 +2278,7 @@ impl RemoteVehicle {
     /// Their state as it was `INTERP_DELAY` ago: between the two states around that moment,
     /// or carried on from the last one along its way for a short while. None without
     /// stamped states (an older game).
-    fn interpolated(&self) -> Option<Pose> {
+    fn interpolated(&mut self) -> Option<Pose> {
         // (`OMSI_NO_INTERP=1`: the old way, for comparing)
         static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *OFF.get_or_init(|| omsi_cfg::env::var_os("OMSI_NO_INTERP").is_some()) {
@@ -2273,7 +2295,11 @@ impl RemoteVehicle {
         } else {
             0.05
         };
-        let t = lan_now() - off - (gap * 2.0 + 0.02).clamp(INTERP_DELAY, 0.45);
+        // (the moment drawn follows that smoothly: set anew each frame, it went back a
+        // few hundredths of a second whenever one of their frames had taken long, and on
+        // again when that one was no longer among the last four - the bus jumped)
+        let now = lan_now();
+        let t = self.play.step(now, now - off - (gap * 2.0 + 0.02).clamp(INTERP_DELAY, 0.45), 0.5);
         let k = self.samples.iter().rposition(|(st, _)| *st <= t);
         let Some(k) = k else {
             return self.samples.front().map(|x| x.1.clone());
@@ -2781,6 +2807,10 @@ pub fn tick(
             }
         }
         if !game.remotes.contains_key(&pose.id) {
+            let key = (pose.id, pose.bus.clone());
+            if game.failed.get(&key).is_some_and(|t| t.elapsed().as_secs_f32() < 30.0) {
+                continue;
+            }
             let Some(rv) = new_remote(
                 game,
                 args,
@@ -2791,8 +2821,10 @@ pub fn tick(
                 scene,
                 frame.clock,
             ) else {
+                game.failed.insert(key, std::time::Instant::now());
                 continue;
             };
+            game.failed.remove(&key);
             game.remotes.insert(pose.id, rv);
         }
         let Some(rv) = game.remotes.get_mut(&pose.id) else {

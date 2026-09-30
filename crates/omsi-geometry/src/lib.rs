@@ -747,6 +747,16 @@ pub fn object_rotation(rot_deg: [f64; 3]) -> Mat4 {
     Mat4::from_quat(q)
 }
 
+/// The same angles in the order D3DX's `QuaternionRotationYawPitchRoll` applies them (the
+/// bank first, then the pitch, then the heading), which is how Omsi.exe turns an attached
+/// object by its own angles (0x79d547).
+pub fn object_rotation_ypr(rot_deg: [f64; 3]) -> Mat4 {
+    let heading = (-rot_deg[0]).to_radians() as f32;
+    let pitch = rot_deg[1].to_radians() as f32;
+    let bank = rot_deg[2].to_radians() as f32;
+    Mat4::from_quat(Quat::from_rotation_z(heading) * Quat::from_rotation_x(pitch) * Quat::from_rotation_y(bank))
+}
+
 /// A map file's heading, pitch and bank (`[object]`, `[attachObj]`, `[splineAttachement]`)
 /// in the terms [`object_rotation`] takes. The file keeps the angles of Direct3D's
 /// left-handed frame, where a positive pitch lowers the nose and a positive bank raises the

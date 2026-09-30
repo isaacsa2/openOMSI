@@ -143,6 +143,8 @@ pub(crate) fn spawn_player(
             h.info_trips.len()
         );
     }
+    // (the paint scheme's variables are there for the scripts' {init})
+    host.paint_scheme = Some(paint_scheme(&vt, args.paint.as_deref()));
     let mut vehicle = omsi_sim::VehicleInstance::new(vt.clone(), host);
     // place at the entry point
     if let Some(ep) = world
@@ -391,6 +393,8 @@ pub(crate) fn spawn_player(
         rail_bound,
         rail: None,
         head: Vec3::ZERO,
+        head_vel: Vec3::ZERO,
+        head_omega: Vec3::ZERO,
         seat: Vec3::ZERO,
         mirror_offsets: crate::settings::mirror_offsets(&vt.def.path),
         mirrors_dirty: false,

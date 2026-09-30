@@ -122,6 +122,7 @@ pages live in [`docs/`](docs):
 | Document | What is in it |
 | --- | --- |
 | [User guide](docs/USER_GUIDE.md) | running, controls, launcher, settings, mods, LAN play, debug switches |
+| [Virtual reality](docs/VR.md) | OpenXR setup, VR settings and controls on Windows |
 | [Android](docs/ANDROID.md) | the mobile version: install, touch controls, building the APK |
 | [Modding](docs/MODDING.md) | limits lifted for modders: more interior lights, larger textures, additions OMSI 2 ignores |
 | [PBR materials](docs/PBR.md) | normal, roughness, metalness and occlusion maps for mods |

@@ -14,6 +14,11 @@ pub const AI_WEAR_LIFESPAN: f32 = 1.5e6;
 
 #[derive(Default)]
 pub struct VehicleHost {
+    /// The paint scheme the vehicle is made with (`Some(None)`: the model's own textures),
+    /// set before it is made: `Colorscheme` and the scheme's `[setvar]`s are there for its
+    /// `{init}`, as Omsi.exe sets them when it makes the vehicle (0x70a174), before the
+    /// scripts start. None: not known yet (`apply_paint_vars` later).
+    pub paint_scheme: Option<Option<usize>>,
     /// A time of day a script wrote to `(S.S.Time)` this frame: the game's clock takes it.
     pub time_written: Option<f64>,
     pub clock: SimClock,
@@ -82,6 +87,8 @@ pub struct VehicleHost {
     pub tt_line: String,
     pub tt_delay: f32,
     pub tt_stops: Vec<(String, f32, f32)>,
+    /// The map objects of `tt_stops` (0: not known).
+    pub tt_stop_ids: Vec<i64>,
     pub tt_terminus_index: i32,
     pub tt_busstop_index: i32,
     /// The next buses due at the bus stop a scenery object belongs to (its `[varparent]`),
@@ -175,6 +182,7 @@ impl VehicleHost {
             tt_line: self.tt_line.clone(),
             tt_delay: self.tt_delay,
             tt_stops: self.tt_stops.clone(),
+            tt_stop_ids: self.tt_stop_ids.clone(),
             tt_terminus_index: self.tt_terminus_index,
             tt_busstop_index: self.tt_busstop_index,
             ..Default::default()

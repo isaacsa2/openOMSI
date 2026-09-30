@@ -46,6 +46,7 @@ pub(crate) struct Device {
     has_axis: [bool; 8],
     state: RawState,
     ff: Option<IDirectInputEffect>,
+    ff_error_logged: bool,
     pub buttons: usize,
 }
 
@@ -54,18 +55,12 @@ pub(crate) struct Device {
 /// to the middle after the pause until mouse steering was switched on and off.
 fn reacquire(dev: &IDirectInputDevice8W, ff: bool) -> bool {
     unsafe {
-        let off = || {
+        let _ = dev.Unacquire();
+        if ff {
             let mut ac = DIPROPDWORD { diph: DIPROPHEADER { dwSize: std::mem::size_of::<DIPROPDWORD>() as u32, dwHeaderSize: std::mem::size_of::<DIPROPHEADER>() as u32, dwObj: 0, dwHow: DIPH_DEVICE }, dwData: DIPROPAUTOCENTER_OFF };
             let _ = dev.SetProperty(prop(9), &mut ac.diph);
-        };
-        if ff {
-            off();
         }
-        let ok = dev.Acquire().is_ok();
-        if ff {
-            off();
-        }
-        ok
+        dev.Acquire().is_ok()
     }
 }
 
@@ -349,14 +344,16 @@ impl DirectInput {
                 let mut d = DIPROPDWORD { diph: DIPROPHEADER { dwSize: std::mem::size_of::<DIPROPDWORD>() as u32, dwHeaderSize: std::mem::size_of::<DIPROPHEADER>() as u32, dwObj: 0, dwHow: DIPH_DEVICE }, dwData: v };
                 let _ = dev.SetProperty(prop(p_id), &mut d.diph);
             }
-            let _ = dev.Acquire();
             let mut ff = None;
             if wants_ff {
                 // the wheel's own centring off: the game's forces take its place
                 let mut ac = DIPROPDWORD { diph: DIPROPHEADER { dwSize: std::mem::size_of::<DIPROPDWORD>() as u32, dwHeaderSize: std::mem::size_of::<DIPROPHEADER>() as u32, dwObj: 0, dwHow: DIPH_DEVICE }, dwData: DIPROPAUTOCENTER_OFF };
-                if dev.SetProperty(prop(9), &mut ac.diph).is_err() {
-                    log::warn!("{name}: force feedback could not be activated (autocenter deactivation impossible)");
+                if let Err(err) = dev.SetProperty(prop(9), &mut ac.diph) {
+                    log::warn!("{name}: autocenter could not be disabled ({err})");
                 }
+            }
+            let _ = dev.Acquire();
+            if wants_ff {
                 let mut axes = [0u32; 1];
                 let mut dirs = [0i32; 1];
                 let mut cf = DICONSTANTFORCE { lMagnitude: 0 };
@@ -377,7 +374,9 @@ impl DirectInput {
                 match dev.CreateEffect(&GUID_ConstantForce, &mut eff, &mut e, None) {
                     Ok(()) => {
                         if let Some(e) = e.as_ref() {
-                            let _ = e.Start(1, 0);
+                            if let Err(err) = e.Start(1, 0) {
+                                log::warn!("{name}: force feedback effect could not start ({err})");
+                            }
                         }
                         ff = e;
                     }
@@ -385,7 +384,7 @@ impl DirectInput {
                 }
             }
             log::info!("game controller (DirectInput): {name}, {} axes, {} buttons{}", has_axis.iter().filter(|a| **a).count(), caps.dwButtons, if ff.is_some() { ", force feedback" } else { "" });
-            Some(Device { name: name.to_string(), guid: *guid, dev, has_axis, state: RawState::default(), ff, buttons: caps.dwButtons as usize })
+            Some(Device { name: name.to_string(), guid: *guid, dev, has_axis, state: RawState::default(), ff, ff_error_logged: false, buttons: caps.dwButtons as usize })
         }
     }
 
@@ -455,7 +454,7 @@ impl DirectInput {
             return;
         }
         self.last_force = Instant::now();
-        for d in self.devices.iter().filter(|d| d.name == name) {
+        for d in self.devices.iter_mut().filter(|d| d.name == name) {
             let Some(e) = d.ff.as_ref() else { continue };
             let mut axes = [0u32; 1];
             let mut dirs = [0i32; 1];
@@ -472,9 +471,20 @@ impl DirectInput {
             };
             unsafe {
                 // (a device taken away - the window left the front - is taken again)
-                if e.SetParameters(&mut eff, DIEP_TYPESPECIFICPARAMS | DIEP_START).is_err() {
+                let result = e.SetParameters(&mut eff, DIEP_TYPESPECIFICPARAMS | DIEP_START);
+                let result = if result.is_err() {
                     reacquire(&d.dev, true);
-                    let _ = e.SetParameters(&mut eff, DIEP_TYPESPECIFICPARAMS | DIEP_START);
+                    e.SetParameters(&mut eff, DIEP_TYPESPECIFICPARAMS | DIEP_START)
+                } else {
+                    result
+                };
+                match result {
+                    Ok(_) => d.ff_error_logged = false,
+                    Err(err) if !d.ff_error_logged => {
+                        log::warn!("{name}: force feedback effect could not be updated ({err})");
+                        d.ff_error_logged = true;
+                    }
+                    Err(_) => {}
                 }
             }
         }
