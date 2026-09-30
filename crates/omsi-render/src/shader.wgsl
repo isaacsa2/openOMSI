@@ -316,6 +316,21 @@ fn has_transmap_declared() -> bool {
     return (u32(material.params2.w + 0.5) & 2u) != 0u;
 }
 
+// [matl_texadress_border]: where the diffuse texture's coordinates leave [0, 1] (a roller
+// blind's band scrolled away by [texcoordtransX/Y]) Direct3D reads the border colour, not
+// the texture's edge (the sampler only clamps). Its rgb comes packed in flags.z.
+fn diffuse_border(tex: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    let p = u32(material.flags.z + 0.5);
+    let border = vec4<f32>(
+        f32((p >> 16u) & 0xffu) / 255.0,
+        f32((p >> 8u) & 0xffu) / 255.0,
+        f32(p & 0xffu) / 255.0,
+        material.flags.w,
+    );
+    let outside = any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0));
+    return select(tex, border, material.flags.y > 0.5 && outside);
+}
+
 fn reflection_mask(uv: vec2<f32>, diffuse_a: f32) -> f32 {
     let mask = textureSample(t_envmask, s_diffuse, uv).a;
     return select(diffuse_a, mask, has_env_mask());
@@ -490,9 +505,10 @@ fn fs_shadow_test(in: VsOut) {
     // paint/gloss value rather than coverage (vehicle bodies use values such as 0.03). Only
     // alpha-test materials use diffuse alpha as a cutout; blended bodies are solid unless a
     // real transmap supplies coverage.
-    var a = select(textureSample(t_diffuse, s_diffuse, duv).a, 1.0, material.params.x > 1.5 && material.params.z < 0.5);
+    var a = select(diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv).a, 1.0, material.params.x > 1.5 && material.params.z < 0.5);
     if (material.params.z > 0.5) {
-        let tm = textureSample(t_trans, s_diffuse, in.uv);
+        // (the transmap stays where it is: [texcoordtransX/Y] only moves the diffuse stage)
+        let tm = textureSample(t_trans, s_diffuse, in.uv - in.params.zw);
         a = select(1.0, tm.a, material.params.w > 0.5);
     }
     if (a < 0.5) {
@@ -512,7 +528,7 @@ fn fs_transmap_depth(in: VsOut) {
     if (material.params.z < 0.5) {
         discard;
     }
-    let tm = textureSample(t_trans, s_diffuse, in.uv);
+    let tm = textureSample(t_trans, s_diffuse, in.uv - in.params.zw);
     let a = select(1.0, tm.a, material.params.w > 0.5) * in.params.x;
     // Only what the colour pass will cover completely may hide what lies behind it: a
     // texel that is merely more opaque than not (the dimmer and anti-aliased dots of a
@@ -988,7 +1004,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // terrain: uv is tile space; the ground texture repeats extra.z times per tile
         duv = in.uv * material.extra.z;
     }
-    var tex = textureSample(t_diffuse, s_diffuse, duv);
+    var tex = diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv);
+    // The texture coordinates without the [texcoordtransX/Y] offset: in Omsi.exe's
+    // fixed-function pipeline the texture transform is the diffuse stage's alone, the
+    // transmap, night map and light map stay in place under a scrolling roller blind.
+    let buv = in.uv - in.params.zw;
     if (material.extra.x > 0.5 && material.extra.y > 0.0) {
         // the ground texture's detail texture, repeated finer than the texture itself and
         // modulated over it as the original's terrain pass does. The stock detail maps are
@@ -1002,7 +1022,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // is opaque, as D3D samples it: the WH UK AI cars' paint layer has a black 24-bit
         // `transmap_null.tga`, read as luminance the paint was invisible);
         // for terrain the map is the per-tile surface mask in tile space
-        let tm = textureSample(t_trans, s_diffuse, in.uv);
+        let tm = textureSample(t_trans, s_diffuse, buv);
         tex.a = select(1.0, tm.a, material.params.w > 0.5);
         if (material.extra.x > 0.5 && material.params.x > 1.5) {
             // A painted ground layer. The brush mask is coarse (0.6-3 m per texel) and
@@ -1087,7 +1107,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (material.extra.w > 0.5) {
         // [matl_nightmap]: self-illumination that fades in with the night
         // terrain: the tile light map in tile space (north at the top row)
-        let nuv = select(duv, vec2<f32>(in.uv.x, 1.0 - in.uv.y), material.extra.x > 0.5);
+        let nuv = select(buv, vec2<f32>(in.uv.x, 1.0 - in.uv.y), material.extra.x > 0.5);
         let nm = textureSample(t_night, s_diffuse, nuv);
         // a [matl_item] night map is switched by its variable (warning lamps, displays):
         // it glows whenever that is on, by day as well; the others fade in with the night
@@ -1097,7 +1117,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (material.params2.x > 0.5 && material.extra.x < 0.5) {
         // [matl_lightmap]: a light mask (interior lighting) multiplied with the diffuse
         // texture, scaled by a script variable
-        let lm = textureSample(t_light, s_diffuse, duv);
+        let lm = textureSample(t_light, s_diffuse, buv);
         lit = lit + tex.rgb * lm.rgb * clamp(in.params2.x, 0.0, 1.0);
     }
     // a pane's reflection, laid over what shows through it (see the end)
@@ -1121,7 +1141,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let glass = material.params.x > 1.5 && material.bump.z > 0.5 &&
             (material.params2.y > 0.0 || material.params.z > 0.5 || material.emissive.w > 0.5);
         let env = textureSampleBias(t_env, s_diffuse, env_uv, select(2.0, 0.0, glass));
-        let diffuse_a = textureSample(t_diffuse, s_diffuse, duv).a;
+        let diffuse_a = diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv).a;
         // strength: reflection mask x factor; the factor saturates at 1 like a D3D texture
         // factor (the SD202 body writes 10 for "full": its paint alpha of 0.03-0.08 is the
         // gloss, and the far LOD's own mask of 0.05-0.12 matches that, not ten times it),

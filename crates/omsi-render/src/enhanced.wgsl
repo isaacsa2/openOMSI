@@ -290,14 +290,17 @@ fn shade_enhanced(in: VsOut) -> vec4<f32> {
     if (terrain) {
         duv = in.uv * material.extra.z;
     }
-    var tex = textureSample(t_diffuse, s_diffuse, duv);
+    var tex = diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv);
     let diffuse_a = tex.a;
+    // (without the [texcoordtransX/Y] offset: the transmap, night map and light map stay
+    // in place, see fs_main)
+    let buv = in.uv - in.params.zw;
     if (terrain && material.extra.y > 0.0) {
         let det = textureSample(t_light, s_diffuse, in.uv * material.extra.y);
         tex = vec4<f32>(clamp(tex.rgb * det.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), tex.a);
     }
     if (material.params.z > 0.5) {
-        let tm = textureSample(t_trans, s_diffuse, in.uv);
+        let tm = textureSample(t_trans, s_diffuse, buv);
         tex.a = select(1.0, tm.a, material.params.w > 0.5);
         if (terrain && material.params.x > 1.5) {
             let lum = dot(tex.rgb, vec3<f32>(0.333, 0.333, 0.333));
@@ -698,7 +701,7 @@ fn shade_enhanced(in: VsOut) -> vec4<f32> {
     // other surface - added on top it lit the roads twice, with a hard edge where a road
     // met a square that is an object)
     if (material.extra.w > 0.5) {
-        let nuv = select(duv, vec2<f32>(in.uv.x, 1.0 - in.uv.y), terrain);
+        let nuv = select(buv, vec2<f32>(in.uv.x, 1.0 - in.uv.y), terrain);
         let switched = material.extra.w > 1.5;
         let night = select(camera.sun_color.w, 1.0, switched);
         // (a switched one is the display's own state: not dimmed with the instance's night
@@ -715,7 +718,7 @@ fn shade_enhanced(in: VsOut) -> vec4<f32> {
     }
     if (material.params2.x > 0.5 && !terrain) {
         // [matl_lightmap]: the cabin lamps and displays, visible by day as well
-        let lm = textureSample(t_light, s_diffuse, duv).rgb;
+        let lm = textureSample(t_light, s_diffuse, buv).rgb;
         emit = emit + tex.rgb * lm * clamp(in.params2.x, 0.0, 1.0) * max(enh.exposure.z * 2.0, 0.6);
     }
     if (material.emissive.w < -0.5) {

@@ -366,7 +366,8 @@ struct MaterialUniform {
     /// The PBR maps beside the diffuse texture (`Scene::pbr_maps`): x has a normal map,
     /// y an occlusion, z a roughness, w a metalness channel.
     pbr: [f32; 4],
-    /// x: a screen (`MaterialExtra::screen`); y, z, w unused.
+    /// x: a screen (`MaterialExtra::screen`); y: `[matl_texadress_border]`, z its colour's
+    /// rgb packed as r * 65536 + g * 256 + b (bytes), w its alpha.
     flags: [f32; 4],
 }
 
@@ -716,6 +717,11 @@ pub struct MaterialExtra {
     /// material's transmap flag before it reads the name (0x7fbbf4), and with it the
     /// `[matl_envmap]` reflection goes by the texture's alpha instead of the factor.
     pub transmap_declared: bool,
+    /// `[matl_texadress_border]`: its colour (RGBA, 0..1). Where the (scrolled) texture
+    /// coordinates leave [0, 1] the diffuse texture reads this colour instead of its edge,
+    /// as Direct3D's border addressing does: a roller blind's band that has scrolled away
+    /// vanishes in a transparent border.
+    pub border: Option<[f32; 4]>,
 }
 
 /// The textures a material's bind group samples.
@@ -1117,6 +1123,8 @@ pub struct Renderer {
     /// frame: all its meshes and LOD levels take the same one, so exactly one level of an
     /// object is drawn and it does not flip between levels with the view's jitter.
     object_sizes: std::cell::RefCell<HashMap<[u64; 4], f32>>,
+    /// Cleared and reused as the next main view's object-size history.
+    object_sizes_scratch: std::cell::RefCell<HashMap<[u64; 4], f32>>,
     /// The far shadow cascade as last drawn: its light matrix, frames since, the render
     /// origin and the sun it was drawn for.
     shadow_far_cache: std::cell::Cell<(Mat4, u32, DVec3, Vec3)>,
@@ -3452,6 +3460,7 @@ impl Renderer {
             flicker: std::cell::RefCell::new(HashMap::new()),
             cull_drawn: std::cell::RefCell::new(Vec::new()),
             object_sizes: std::cell::RefCell::new(HashMap::new()),
+            object_sizes_scratch: std::cell::RefCell::new(HashMap::new()),
             shadow_far_cache: std::cell::Cell::new((Mat4::IDENTITY, 0, DVec3::ZERO, Vec3::ZERO)),
             shadow_near_cache: std::cell::Cell::new((Mat4::IDENTITY, 0, DVec3::ZERO, Vec3::ZERO)),
             shadow_clear_pipeline,
@@ -4540,7 +4549,15 @@ impl Renderer {
                 if extra.no_z_check { 1.0 } else { 0.0 },
             ],
             pbr: texture.and_then(|t| scene.pbr_maps.get(&t)).map(|m| m.flags).unwrap_or([0.0; 4]),
-            flags: [if extra.screen { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+            flags: {
+                let b = extra.border.unwrap_or([0.0; 4]).map(|c| (c.clamp(0.0, 1.0) * 255.0).round());
+                [
+                    if extra.screen { 1.0 } else { 0.0 },
+                    if extra.border.is_some() { 1.0 } else { 0.0 },
+                    b[0] * 65536.0 + b[1] * 256.0 + b[2],
+                    b[3] / 255.0,
+                ]
+            },
         };
         let slot = |t: Option<TextureId>| {
             t.and_then(|t| scene.textures.get(t).map(|g| (t, g.gen)))
@@ -5199,11 +5216,15 @@ impl Renderer {
     }
 
     /// A dynamic alpha value is never allowed to fade an opaque body panel; only
-    /// genuinely transparent materials (blend/test) may follow the script value.
+    /// blended materials follow the script value. An alpha-tested slot is cut out by its
+    /// texture or transmap alone: the Thüringer Wald buses put `[alphascale]
+    /// Envir_Brightness` on their transmapped body and roof (`[matl_alpha] 1`), which is 0
+    /// at night, and scaled by it the whole roof went at dusk - with alpha to coverage
+    /// under MSAA the colour pass drew none of its samples - while in OMSI it stays.
     pub fn clamp_slot_alpha(alpha: f32, material_alpha: AlphaMode) -> f32 {
         match material_alpha {
-            AlphaMode::Opaque => 1.0,
-            _ => alpha,
+            AlphaMode::Opaque | AlphaMode::Test => 1.0,
+            AlphaMode::Blend => alpha,
         }
     }
 
@@ -7095,10 +7116,20 @@ impl Renderer {
         // hand-over cost more than the work (5 ms a frame for 8 500 instances while the
         // traffic's scripts kept the workers busy).
         // (the main view's last picture, for the hysteresis)
-        let drawn_before = if with_overlays { std::mem::take(&mut *self.cull_drawn.borrow_mut()) } else { Vec::new() };
+        let mut drawn_before = if with_overlays {
+            std::mem::take(&mut *self.cull_drawn.borrow_mut())
+        } else {
+            Vec::new()
+        };
         let was_drawn = |i: usize| drawn_before.get(i / 64).is_some_and(|w| w & (1u64 << (i % 64)) != 0);
-        let sizes_before = if with_overlays { std::mem::take(&mut *self.object_sizes.borrow_mut()) } else { HashMap::new() };
-        let sizes_now: std::cell::RefCell<HashMap<[u64; 4], f32>> = Default::default();
+        let (mut sizes_before, mut sizes_now) = if with_overlays {
+            let sizes_before = std::mem::take(&mut *self.object_sizes.borrow_mut());
+            let mut sizes_now = std::mem::take(&mut *self.object_sizes_scratch.borrow_mut());
+            sizes_now.clear();
+            (sizes_before, sizes_now)
+        } else {
+            (HashMap::new(), HashMap::new())
+        };
         let visible: Vec<(usize, f32, bool)> = {
             (0..scene.instances.len())
                 .filter_map(|i| {
@@ -7170,7 +7201,7 @@ impl Renderer {
                                 _ => fresh,
                             };
                             if with_overlays {
-                                sizes_now.borrow_mut().insert(key, size);
+                                sizes_now.insert(key, size);
                             }
                             size
                         }
@@ -7205,14 +7236,17 @@ impl Renderer {
                 .collect()
         };
         if with_overlays {
-            *self.object_sizes.borrow_mut() = sizes_now.into_inner();
+            *self.object_sizes.borrow_mut() = sizes_now;
+            sizes_before.clear();
+            *self.object_sizes_scratch.borrow_mut() = sizes_before;
         }
         if with_overlays {
-            let mut bits = vec![0u64; scene.instances.len().div_ceil(64)];
+            drawn_before.resize(scene.instances.len().div_ceil(64), 0);
+            drawn_before.fill(0);
             for &(i, _, _) in &visible {
-                bits[i / 64] |= 1u64 << (i % 64);
+                drawn_before[i / 64] |= 1u64 << (i % 64);
             }
-            *self.cull_drawn.borrow_mut() = bits;
+            *self.cull_drawn.borrow_mut() = drawn_before;
         }
         // OMSI_DEBUG_FLICKER: a near instance in view in two frames running that is drawn in
         // one and not in the other - the objects blinking in and out as the view moves
@@ -9862,7 +9896,8 @@ mod tests {
     fn opaque_materials_ignore_dynamic_alpha() {
         assert_eq!(Renderer::clamp_slot_alpha(0.0, AlphaMode::Opaque), 1.0);
         assert_eq!(Renderer::clamp_slot_alpha(0.35, AlphaMode::Opaque), 1.0);
-        assert_eq!(Renderer::clamp_slot_alpha(0.35, AlphaMode::Test), 0.35);
+        assert_eq!(Renderer::clamp_slot_alpha(0.0, AlphaMode::Test), 1.0);
+        assert_eq!(Renderer::clamp_slot_alpha(0.35, AlphaMode::Test), 1.0);
         assert_eq!(Renderer::clamp_slot_alpha(0.85, AlphaMode::Blend), 0.85);
     }
 }
