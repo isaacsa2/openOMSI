@@ -165,6 +165,10 @@ pub struct State {
     pub weathers: Vec<core::WeatherInfo>,
     pub lines: Vec<core::LineInfo>,
     pub lines_for: (String, String),
+    /// Increased whenever a newly loaded timetable replaces `lines`. Launcher views use it
+    /// to rebuild their search indexes once instead of cloning and normalising every line
+    /// on every frame.
+    pub lines_revision: u64,
     pub loading_content: bool,
     pub loading_lines: bool,
     pub choice: Choice,
@@ -227,6 +231,7 @@ impl State {
             weathers: Vec::new(),
             lines: Vec::new(),
             lines_for: (String::new(), String::new()),
+            lines_revision: 0,
             loading_content: false,
             loading_lines: false,
             choice,
@@ -696,6 +701,7 @@ impl State {
                 match lines {
                     Ok(l) => {
                         self.lines = l;
+                        self.lines_revision = self.lines_revision.wrapping_add(1);
                         let mut note = String::new();
                         if let Some(line) = self.choice.line.clone() {
                             match self.lines.iter().find(|x| x.name == line) {
