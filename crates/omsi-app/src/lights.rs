@@ -15,6 +15,12 @@ use omsi_sim::{Daylight, VehicleInstance};
 /// OMSI's buses throw a clear pool.)
 const HEADLIGHT_INTENSITY: f32 = 45.0;
 
+/// A headlight's strength in the classic picture, as a map lamp's (`PointLight::intensity`).
+/// Measured against OMSI 2 from above, the stock NL202 at night in Spandau: its pool is
+/// some 18 of 255 over the unlit cobbles 1.5 - 2.5 m ahead, 12 at 4 - 5 m and nearly gone
+/// at 7 m; this gives 20, 12 and 5 there. (At 1 it was 60, 40 and 15.)
+const VANILLA_HEADLIGHT_INTENSITY: f32 = 0.2;
+
 /// Lighting parameters for the renderer from the daylight model.
 pub fn lighting_from(d: &Daylight, fog_range: f32) -> Lighting {
     // fog density from the weather's visibility range (an object at `range` is ~90% fogged)
@@ -151,59 +157,98 @@ pub fn vehicle_lights(
                 let d = body
                     .transform_vector3(Vec3::new(vals[3], vals[4], vals[5]))
                     .normalize_or_zero();
-                let range = vals[9].clamp(5.0, 45.0);
                 let color = [vals[6] / 255.0, vals[7] / 255.0, vals[8] / 255.0];
-                // enhanced: the real spot, as D3D's [spotlight] describes it - inner and
-                // outer cone as full angles (values 10 and 11), the range (clamped to what
-                // the light grid carries), falling off with the square of the distance from
-                // a one-metre core
+                // D3D's spot is only a direction: the stock NL202 puts it 3.8 m behind its
+                // nose, where the real one lit the dashboard and the windscreen from inside.
+                // It shines from the vehicle's front (or rear) face at its own height. The face
+                // is where the model's lamps ([light_enh], [light_enh_2]) reach furthest: the
+                // AA-FR Agora's spot sits 4 m behind its headlamps, and moved at most 1.5 m it
+                // still shone from inside the bus onto its own front. (Within the bounding box;
+                // without lamps, the box alone, by at most 1.5 m: a box grown by mirrors, a
+                // coupling or a mod's odd bounds threw the light well ahead of the bus.)
+                let mut apex = Vec3::new(vals[0], vals[1], vals[2]);
+                let dl = Vec3::new(vals[3], vals[4], vals[5]).normalize_or_zero();
+                let lamps: Vec<[f32; 3]> = ty
+                    .model
+                    .meshes
+                    .iter()
+                    .flat_map(|m| m.light_enh.iter().map(|l| l.pos).chain(m.light_enh_2.iter().map(|l| l.pos)))
+                    .collect();
+                let nose = lamps.iter().map(|l| l[1]).reduce(f32::max);
+                let tail = lamps.iter().map(|l| l[1]).reduce(f32::min);
+                let bb = ty.def.bounding_box.map(|bb| (bb[4] + bb[1] * 0.5, bb[4] - bb[1] * 0.5));
+                if dl.y > 0.3 {
+                    let face = match (nose.filter(|n| *n > apex.y), bb) {
+                        (Some(n), Some((front, _))) => Some(n.min(front)),
+                        (Some(n), None) => Some(n),
+                        (None, Some((front, _))) => Some(front.min(apex.y + 1.5)),
+                        (None, None) => None,
+                    };
+                    if let Some(face) = face.filter(|f| *f > apex.y) {
+                        apex.y = face + 0.05;
+                    }
+                } else if dl.y < -0.3 {
+                    let face = match (tail.filter(|t| *t < apex.y), bb) {
+                        (Some(t), Some((_, rear))) => Some(t.max(rear)),
+                        (Some(t), None) => Some(t),
+                        (None, Some((_, rear))) => Some(rear.max(apex.y - 1.5)),
+                        (None, None) => None,
+                    };
+                    if let Some(face) = face.filter(|f| *f < apex.y) {
+                        apex.y = face - 0.05;
+                    }
+                }
+                // One spot on the vehicle's axis threw one narrow beam: it is split into one
+                // per headlamp on that face (within 35 cm of it), as far apart as the mean of
+                // their distances from the axis (the outermost are indicators and position
+                // lamps). The Agora's headlamps are 1.8 to 2.4 m apart.
+                let half_width = ty.def.bounding_box.map_or(1.25, |bb| (bb[0] * 0.5).min(1.25));
+                let on_face: Vec<f32> = lamps
+                    .iter()
+                    .filter(|l| (dl.y > 0.3 || dl.y < -0.3) && (l[1] - apex.y).abs() < 0.35)
+                    .map(|l| (l[0] - apex.x).abs())
+                    .collect();
+                let spread = (on_face.iter().sum::<f32>() / on_face.len().max(1) as f32).min(half_width);
+                let right = body.transform_vector3(Vec3::X).normalize_or_zero();
+                let apex = body.transform_point3(apex);
+                // inner and outer cone as full angles (values 10 and 11)
                 let (inner, outer) = (
                     vals.get(10).copied().unwrap_or(30.0),
                     vals.get(11).copied().unwrap_or(70.0),
                 );
                 let half = |deg: f32| (deg.clamp(1.0, 179.0) * 0.5).to_radians().cos();
-                // D3D's spot is only a direction: the stock NL202 puts it 3.8 m behind its
-                // nose, where the real one lit the dashboard and the windscreen from inside.
-                // It shines from the vehicle's front (or rear) face at its own height.
-                let mut apex = Vec3::new(vals[0], vals[1], vals[2]);
-                let dl = Vec3::new(vals[3], vals[4], vals[5]).normalize_or_zero();
-                if let Some(bb) = ty.def.bounding_box {
-                    let (front, rear) = (bb[4] + bb[1] * 0.5, bb[4] - bb[1] * 0.5);
-                    // (at most 1.5 m: a box grown by mirrors, a coupling or a mod's odd bounds
-                    // threw the light well ahead of the bus)
-                    if dl.y > 0.3 && apex.y < front {
-                        apex.y = (front + 0.05).min(apex.y + 1.5);
-                    } else if dl.y < -0.3 && apex.y > rear {
-                        apex.y = (rear - 0.05).max(apex.y - 1.5);
-                    }
+                let cone = [half(inner.min(outer)), half(outer)];
+                let sides: &[f32] = if spread > 0.1 { &[-1.0, 1.0] } else { &[0.0] };
+                for side in sides {
+                    let at = v.position + (apex + right * spread * side).as_dvec3();
+                    // vanilla: the spot, lit as the classic picture lights a lamp, only inside
+                    // its cone (three point lights along its axis stood in for it before: they
+                    // shone every way, on the bus's own body and saloon)
+                    lights.push(PointLight {
+                        position: at,
+                        radius: vals[9].clamp(10.0, 45.0),
+                        color,
+                        intensity: VANILLA_HEADLIGHT_INTENSITY / sides.len() as f32 * (0.3 + 0.7 * night),
+                        direction: d,
+                        cone,
+                        mode: LightMode::Vanilla,
+                        ..Default::default()
+                    });
+                    // enhanced: falling off with the square of the distance from a one-metre core
+                    lights.push(PointLight {
+                        position: at,
+                        radius: vals[9].clamp(10.0, 60.0),
+                        color,
+                        intensity: HEADLIGHT_INTENSITY / sides.len() as f32,
+                        direction: d,
+                        cone,
+                        core: 1.0,
+                        // (a plain spot, as Direct3D lights OMSI's road: the low-beam profile's
+                        // bright band under a hard cut-off has nothing like it in the original)
+                        beam: 0.0,
+                        mode: LightMode::Enhanced,
+                    });
                 }
-                let apex = body.transform_point3(apex);
-                // vanilla: the same spot, lit as Direct3D's vertex lighting would (three point
-                // lights along its axis stood in for it before: they shone every way, on the
-                // bus's own body and on the pavement beside its doors)
-                lights.push(PointLight {
-                    position: v.position + apex.as_dvec3(),
-                    radius: range,
-                    color,
-                    intensity: 1.6 * (0.3 + 0.7 * night),
-                    direction: d,
-                    cone: [half(inner.min(outer)), half(outer)],
-                    mode: LightMode::Vanilla,
-                    ..Default::default()
-                });
-                lights.push(PointLight {
-                    position: v.position + apex.as_dvec3(),
-                    radius: vals[9].clamp(10.0, 60.0),
-                    color,
-                    intensity: HEADLIGHT_INTENSITY,
-                    direction: d,
-                    cone: [half(inner.min(outer)), half(outer)],
-                    core: 1.0,
-                    // (a plain spot, as Direct3D lights OMSI's road: the low-beam profile's
-                    // bright band under a hard cut-off has nothing like it in the original)
-                    beam: 0.0,
-                    mode: LightMode::Enhanced,
-                });
             }
         }
     }

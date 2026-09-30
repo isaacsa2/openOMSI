@@ -8343,7 +8343,7 @@ fn sync_materials(
                     Some(p) => *p,
                     None => {
                         let dirs: Vec<&Path> = f.dirs.iter().map(|p| p.as_path()).collect();
-                        let tex = if name.is_empty() {
+                        let found = if name.is_empty() {
                             None
                         } else {
                             omsi_texture::find_texture(&name, &dirs).and_then(|path| {
@@ -8364,6 +8364,11 @@ fn sync_materials(
                                 Some(id)
                             })
                         };
+                        // An empty string or a file not found leaves the slot its own
+                        // texture from the mesh (with its addressing): a roller blind's idle
+                        // "next" band then stays out of sight in its transparent border
+                        // instead of covering the display as an untextured white plane.
+                        let tex = found.or(v.base_tex);
                         let p = v.spec.build(renderer, scene, tex);
                         f.cache.insert(key, p);
                         p
@@ -8735,6 +8740,13 @@ fn material_extra(
         no_map_lights: false,
         moisture: 0.0,
         transmap_declared: ov.iter().any(|o| o.transmap.is_some()),
+        // (the last addressing command of the slot decides; the colour is given in bytes)
+        border: ov
+            .iter()
+            .rev()
+            .find(|o| o.tex_address != omsi_model::TexAddress::Wrap)
+            .filter(|o| o.tex_address == omsi_model::TexAddress::Border)
+            .map(|o| o.border_color.map(|c| (c / 255.0).clamp(0.0, 1.0))),
     }
 }
 
@@ -11257,6 +11269,22 @@ mod material_tests {
             material_extra(&[], None, Some((3, 0.0)), [0.0; 4]).bump,
             None
         );
+        // [matl_texadress_border]: the colour in bytes, as 0..1
+        let roller = MaterialDef {
+            texture: "rlb_512.tga".into(),
+            tex_address: omsi_model::TexAddress::Border,
+            border_color: [255.0, 255.0, 255.0, 0.0],
+            ..Default::default()
+        };
+        assert_eq!(
+            material_extra(&[&roller], None, None, [0.0; 4]).border,
+            Some([1.0, 1.0, 1.0, 0.0])
+        );
+        let clamped = MaterialDef {
+            tex_address: omsi_model::TexAddress::Clamp,
+            ..roller.clone()
+        };
+        assert_eq!(material_extra(&[&roller, &clamped], None, None, [0.0; 4]).border, None);
     }
 }
 
