@@ -479,7 +479,18 @@ fn tour_sheet(l: &mut Launcher, r: Rect) -> bool {
         .iter()
         .map(|t| {
             let when = format!("{} – {}", super::state::hhmm(t.first), super::state::hhmm(t.last));
-            let sub = if t.runs { format!("{when} · {} trips · {}", t.trips.len(), t.days) } else { format!("{when} · {} · runs {}", t.days, t.next_run.clone().unwrap_or_else(|| "never".into())) };
+            let endpoints = t
+                .trips
+                .first()
+                .zip(t.trips.last())
+                .map(|(first, last)| format!("{} → {}", first.from.trim(), last.terminus.trim()))
+                .unwrap_or_default();
+            let details = if endpoints.is_empty() { when } else { format!("{endpoints} · {when}") };
+            let sub = if t.runs {
+                format!("{details} · {} trips · {}", t.trips.len(), t.days)
+            } else {
+                format!("{details} · {} · runs {}", t.days, t.next_run.clone().unwrap_or_else(|| "never".into()))
+            };
             (t.number.clone(), sub, t.runs, t.next_run.clone())
         })
         .collect();
