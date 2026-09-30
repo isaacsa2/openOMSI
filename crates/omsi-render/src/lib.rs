@@ -1547,7 +1547,7 @@ impl Renderer {
         let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
         let options = if weak {
             log::warn!("{}: a small or shared graphics chip - no SSAO, no MSAA, shadow maps of at most 1024 (OMSI_FULL_GPU=1 keeps the settings)", info.name);
-            RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), ..options }
+            RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), no_enhanced: cfg!(target_os = "android") || options.no_enhanced, ..options }
         } else if modest {
             log::info!("{}: {} MB of its own - no SSAO, at most 2x MSAA and 2048 shadow maps (OMSI_FULL_GPU=1 keeps the settings)", info.name, vram.unwrap_or(0));
             RenderOptions { msaa: options.msaa.min(2), ssao: false, shadow_size: options.shadow_size.min(2048), ..options }
@@ -8162,6 +8162,14 @@ impl Renderer {
             }
             list.extend(pre_list);
             prepass_batches = pre_batches;
+        }
+        // Motorola sky-only diagnostic: keep the real renderer, camera bind group,
+        // sky shader, sky textures and depth target, but remove every world mesh/material
+        // draw from the main pass. If the sky appears, the failure is in the scene/material
+        // pipeline rather than the shared camera/sky path.
+        if cfg!(target_os = "android") && with_overlays {
+            main_batches.clear();
+            main_draws = [0, 0];
         }
         if debug_draws {
             log::info!("  main pass: {} opaque/alpha-tested and {} blended draws in {} batches; prepass {} batches; draw list {} entries", main_draws[0], main_draws[1], main_batches.len(), prepass_batches.len(), list.len());
