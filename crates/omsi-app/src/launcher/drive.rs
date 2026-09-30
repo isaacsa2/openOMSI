@@ -581,6 +581,40 @@ mod line_selector_tests {
     }
 }
 
+#[cfg(test)]
+mod line_selector_tests {
+    use super::LineItem;
+    use omsi_launcher_lib::{LineInfo, TourInfo};
+
+    fn line() -> LineInfo {
+        LineInfo {
+            name: "42E".into(),
+            user_allowed: true,
+            termini: vec!["Central Station".into(), "Airport".into()],
+            tours: vec![TourInfo {
+                number: "School 7".into(),
+                ai_group: String::new(),
+                first: 0.0,
+                last: 0.0,
+                days: "Mon-Fri".into(),
+                runs: true,
+                next_run: None,
+                trips: Vec::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn line_filter_finds_name_destination_and_tour() {
+        let line = LineItem::new(&line());
+        assert!(line.matches("42e"));
+        assert!(line.matches("central"));
+        assert!(line.matches("airport"));
+        assert!(line.matches("school 7"));
+        assert!(!line.matches("harbour"));
+    }
+}
+
 /// The name of the server the Drive page is joined to (see the Multiplayer page).
 fn joined_server_name(l: &Launcher) -> Option<String> {
     let a = l.state.joined_server.as_ref()?;
