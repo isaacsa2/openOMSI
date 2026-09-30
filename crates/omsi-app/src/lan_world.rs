@@ -191,6 +191,8 @@ pub struct LanWorld {
     trace: Option<std::io::BufWriter<std::fs::File>>,
     trace_t: f32,
     trace_opened: bool,
+    /// Host: the parking spaces whose cars have driven off, as the world has them now.
+    departed: Vec<i64>,
 }
 
 fn quant(x: f64, y: f64, z: f64, h: f64) -> [i64; 4] {
@@ -289,6 +291,7 @@ impl LanWorld {
         match lan.role {
             Role::Host => {
                 let mut humans = humans;
+                self.departed = world.map(|w| w.departed_keys()).unwrap_or_default();
                 self.host(lan, dt, args, traffic, humans.as_deref_mut(), me);
                 if let (Some(w), Some(r), Some(sc), Some(h)) = (world, renderer, scene, humans) {
                     self.people_from_clients(lan, w, r, sc, h);
@@ -760,6 +763,8 @@ impl LanWorld {
             }
             if view.lights_acc >= nw::LIGHTS_EVERY {
                 view.lights_acc = 0.0;
+                let keys: Vec<u32> = self.departed.iter().filter_map(|k| u32::try_from(*k).ok()).collect();
+                frame.parked = Some((keys.len() == self.departed.len(), keys));
                 if let Some(t) = t_ref {
                     frame.lights = t
                         .light_states(at, LIGHT_RADIUS)
@@ -921,6 +926,10 @@ impl LanWorld {
                     let late = ((m.offset.unwrap_or(off) + arrived) - ms).max(0.0) / 1000.0;
                     t.set_light_state(l.object, l.time + if l.held { 0.0 } else { late }, l.held);
                 }
+            }
+            if let Some((complete, keys)) = &f.parked {
+                let keys: Vec<i64> = keys.iter().map(|k| *k as i64).collect();
+                world.mirror_departed(renderer, scene, &keys, *complete);
             }
             for (person, id) in f.gone {
                 if person {

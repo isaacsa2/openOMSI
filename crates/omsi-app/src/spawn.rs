@@ -30,6 +30,25 @@ pub(crate) fn player_bus_path(root: &Path, bus: &str) -> Result<PathBuf> {
     }
 }
 
+/// The next vehicle of a consist from one with definition `def` (turned round: `rev`),
+/// towards the back of the train or its front, and whether that one is turned round - as
+/// Omsi.exe builds a consist (0x70a174): towards the back a vehicle goes on with its
+/// `[couple_back]`, or with its `[couple_front]` when it is itself turned round (towards the
+/// front the other way about); the coupled one is turned round when the coupling says so,
+/// against the one it hangs on; a coupling back to its own file that turns nothing round
+/// is not followed. (Following `[couple_back]` whatever the way, the Berlin A3's unit - the
+/// S car and its K car turned round, whose `[couple_back]` names the S car - went on S, K,
+/// S, K, S, none of them turned.)
+pub(crate) fn next_coupled(def: &omsi_vehicle::vehicle::Vehicle, rev: bool, toward_back: bool) -> Option<(PathBuf, bool)> {
+    let (file, flag) = if toward_back != rev { def.couple_back.as_ref() } else { def.couple_front.as_ref() }?;
+    let path = omsi_cfg::resolve_path(def.dir(), file);
+    let same = path.file_name().map(|f| f.to_ascii_lowercase()) == def.path.file_name().map(|f| f.to_ascii_lowercase());
+    if !flag && same {
+        return None;
+    }
+    Some((path, flag ^ rev))
+}
+
 /// Load the `[couple_back]` chain behind `vehicle` (articulated rear sections, trailers),
 /// each file resolved from the folder of the part before it in whichever content root
 /// holds it.
@@ -39,11 +58,11 @@ pub(crate) fn load_coupled_parts(
 ) -> Vec<Arc<omsi_sim::VehicleType>> {
     let mut parts = Vec::new();
     let mut lead = vehicle.ty.clone();
+    let mut lead_rev = false;
     for _ in 0..8 {
-        let Some((file, reversed)) = lead.def.couple_back.clone() else {
+        let Some((path, reversed)) = next_coupled(&lead.def, lead_rev, true) else {
             break;
         };
-        let path = omsi_cfg::resolve_path(lead.def.dir(), &file);
         match omsi_sim::VehicleType::load(root, &path) {
             Ok(t) => {
                 let t = Arc::new(t);
@@ -61,6 +80,7 @@ pub(crate) fn load_coupled_parts(
                 vehicle.attach_trailer_ex(t.clone(), reversed);
                 parts.push(t.clone());
                 lead = t;
+                lead_rev = reversed;
             }
             Err(e) => {
                 log::warn!(

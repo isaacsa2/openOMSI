@@ -1035,6 +1035,11 @@ pub(crate) fn run_offscreen(
             log::info!(
                 "traffic health: {stuck} stuck for over a minute, {overlapping} pairs overlapping"
             );
+            if omsi_cfg::env::var_os("OMSI_DEBUG_STUCK").is_some() {
+                for c in t.cars.iter().filter(|c| c.stopped > 30.0) {
+                    log::info!("  waiting {:.0} s: car {} ({}) lane {} at ({:.1}, {:.1}) lead {:?} why {:?} {:.1} junction {}", c.stopped, c.id, c.vehicle.ty.def.type_name, c.state.lane, c.vehicle.position.x, c.vehicle.position.y, c.lead_car, c.why.0, c.why.1, c.junction_why);
+                }
+            }
             for c in t.cars.iter().filter(|c| c.stopped > 60.0).take(4) {
                 log::info!(
                     "  stuck {:.0} s at ({:.0}, {:.0}) on lane {} of {} ({}): {}",

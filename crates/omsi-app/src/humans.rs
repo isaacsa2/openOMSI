@@ -7478,21 +7478,33 @@ impl Humans {
                             facing = Some(sp.face);
                         }
                     }
-                    // a bus coming in or standing there is watched
+                    // A bus coming in is watched, and one standing there by the people it
+                    // takes - each on their own: some never look up, the rest turn to it
+                    // after a moment of their own. (Everybody at the stop looked at the
+                    // front door of whatever bus came near and kept looking: the whole stop
+                    // stared at the driver at once, and at a bus that was not theirs.)
+                    let h = (p.id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                    let watcher = h % 5 != 0;
                     let near = buses
                         .iter()
                         .filter(|b| b.speed.abs() < 14.0)
                         .map(|b| (b, (b.pos - p.position).length()))
                         .filter(|(_, d)| *d < 45.0)
                         .min_by(|a, b| a.1.total_cmp(&b.1));
-                    if let Some((b, _)) = near {
-                        let front = b
-                            .cabin
-                            .entries
-                            .first()
-                            .map(|d| b.world(d.inside))
-                            .unwrap_or(b.pos);
-                        look = Some(to_model(front + DVec3::Z * 1.3));
+                    if let (Some((b, d)), true) = (near, watcher) {
+                        let coming = b.speed.abs() > 0.5 && d > 8.0 + ((h >> 8) % 12) as f64;
+                        let theirs = b.stop == Some(*stop) && self.goes_their_way(i, *stop, b);
+                        if coming || theirs {
+                            // (where on the bus: its door, or somewhere along its front half)
+                            let aim = b
+                                .cabin
+                                .entries
+                                .first()
+                                .map(|e| b.world(e.inside))
+                                .unwrap_or(b.pos)
+                                + DVec3::new(((h >> 16) % 100) as f64 / 50.0 - 1.0, ((h >> 24) % 100) as f64 / 50.0 - 1.0, 0.0);
+                            look = Some(to_model(aim + DVec3::Z * 1.3));
+                        }
                     }
                 }
                 _ => {}

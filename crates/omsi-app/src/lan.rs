@@ -2127,11 +2127,11 @@ fn new_remote(
     // the coupled sections of an articulated bus
     let mut trailer_renders = Vec::new();
     let mut lead = ty.clone();
-    for _ in 0..4 {
-        let Some((file, _)) = lead.def.couple_back.clone() else {
+    let mut lead_rev = false;
+    for _ in 0..8 {
+        let Some((path, rev)) = crate::spawn::next_coupled(&lead.def, lead_rev, true) else {
             break;
         };
-        let path = omsi_cfg::resolve_path(lead.def.dir(), &file);
         match omsi_sim::VehicleType::load(&args.root, &path) {
             Ok(t) => {
                 let t = Arc::new(t);
@@ -2141,8 +2141,9 @@ fn new_remote(
                     &t,
                     scheme.filter(|i| *i < t.paint_schemes.len()),
                 ));
-                vehicle.attach_trailer(t.clone());
+                vehicle.attach_trailer_ex(t.clone(), rev);
                 lead = t;
+                lead_rev = rev;
             }
             Err(e) => {
                 log::warn!("LAN: rear section {}: {e}", path.display());

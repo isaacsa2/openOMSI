@@ -1120,7 +1120,7 @@ impl Schedule {
                 continue;
             }
             crate::traffic::warm_up(world, ty, hof.clone());
-            for tr in t.trailer_chain(ty) {
+            for (tr, _) in t.trailer_chain(ty) {
                 if seen.insert(tr.def.path.clone()) {
                     crate::traffic::warm_up(world, &tr, None);
                 }
@@ -1258,7 +1258,7 @@ impl Schedule {
     /// further cars.
     fn choice_sets(c: &Choice, traffic: &mut Traffic) -> Vec<(Arc<VehicleType>, Option<usize>)> {
         let mut out = vec![(c.ty.clone(), c.scheme)];
-        for t in traffic.trailer_chain(&c.ty) {
+        for (t, _) in traffic.trailer_chain(&c.ty) {
             let s = c.scheme.filter(|i| *i < t.paint_schemes.len());
             out.push((t, s));
         }
@@ -2274,9 +2274,21 @@ impl Schedule {
         };
         self.car_departure.insert(traffic.cars[ci].id, i);
         if let Some(cars) = &train {
-            traffic.attach_cars(world, renderer, scene, ci, &cars[1..]);
+            // every further car of the train with the cars of its unit, as Omsi.exe creates
+            // each car of a `.zug` (the first has had its own with `create_car`): the ones
+            // before it (towards the front of the train), the car, the ones behind it
+            let mut rest: Vec<(Arc<VehicleType>, bool)> = Vec::new();
+            for (t, rev) in &cars[1..] {
+                let mut front = traffic.coupled_chain(t, *rev, false);
+                front.reverse();
+                rest.extend(front);
+                rest.push((t.clone(), *rev));
+                rest.extend(traffic.coupled_chain(t, *rev, true));
+            }
+            traffic.attach_cars(world, renderer, scene, ci, &rest);
+            log::info!("train: {}", std::iter::once(ty.def.path.file_stem().unwrap_or_default().to_string_lossy().to_string()).chain(traffic.cars[ci].vehicle.trailers.iter().map(|t| format!("{}{}", t.ty.def.path.file_stem().unwrap_or_default().to_string_lossy(), if t.reversed { " (turned)" } else { "" }))).collect::<Vec<_>>().join(" + "));
             traffic.cars[ci].state.max_speed_kmh = 90.0;
-            traffic.cars[ci].state.length = 20.0 * cars.len() as f32;
+            traffic.cars[ci].state.length = 20.0 * (1 + traffic.cars[ci].vehicle.trailers.len()) as f32;
         }
         let car = &mut traffic.cars[ci];
         // on its layover only when it stands at its first stop now (the trip's first station
