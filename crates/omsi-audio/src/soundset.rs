@@ -291,6 +291,7 @@ impl SoundSet {
                 doppler: !self.listener_vehicle,
                 range: if s.def.range > 0.0 { s.def.range } else { 5.0 },
                 lowpass_hz: Self::lowpass_of(muffled, exterior),
+                important: s.def.important,
             };
             if let Some(id) = s.voice.take() {
                 engine.stop(id);
@@ -442,6 +443,7 @@ impl SoundSet {
                 doppler,
                 range: range_of(s.def.range),
                 lowpass_hz: Self::lowpass_of(muffled, exterior),
+                important: s.def.important,
             };
             if !triggered && !s.def.no_loop {
                 let params = params(true);
