@@ -175,6 +175,12 @@ pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(target_os = "macos") {
         return vec![wgpu::Backends::METAL];
     }
+    // Motorola/Android compatibility: the launcher must not touch Vulkan first because
+    // some drivers terminate the process during the earliest Vulkan bootstrap. GLES gets
+    // the launcher on screen; the game itself gets a separate Vulkan-first attempt below.
+    if cfg!(target_os = "android") {
+        return vec![wgpu::Backends::GL, wgpu::Backends::VULKAN];
+    }
     let settings = crate::settings::Settings::load();
     let wanted = if settings.vr_requested() {
         "dx12".to_owned()
@@ -200,6 +206,82 @@ fn backend_instance(b: wgpu::Backends) -> wgpu::Instance {
     let mut d = wgpu::InstanceDescriptor::new_without_display_handle();
     d.backends = b;
     wgpu::Instance::new(d)
+}
+
+#[cfg(target_os = "android")]
+static ANDROID_GAME_PROBE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+#[cfg(target_os = "android")]
+static ANDROID_GAME_BACKEND: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0);
+#[cfg(target_os = "android")]
+static ANDROID_VULKAN_GUARD: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Start an Android game session with Vulkan first, after the GLES launcher is already
+/// alive. A small persistent guard makes even a native driver crash recoverable: if Vulkan
+/// kills this process before it proves it can present frames, the next launch skips it and
+/// uses GLES. Recoverable Vulkan errors already fall through to GLES in window_renderer.
+#[cfg(target_os = "android")]
+pub(crate) fn android_game_graphics_instance(root: &Path) -> wgpu::Instance {
+    let guard = root.join(".openomsi-vulkan-fallback");
+    let previous_failed_attempt = guard.exists();
+    let _ = ANDROID_VULKAN_GUARD.set(guard.clone());
+    ANDROID_GAME_PROBE.store(true, std::sync::atomic::Ordering::Relaxed);
+    ANDROID_GAME_BACKEND.store(0, std::sync::atomic::Ordering::Relaxed);
+
+    if previous_failed_attempt {
+        log::warn!(
+            "Android graphics: previous Vulkan game start did not complete; starting the game on GLES"
+        );
+        return backend_instance(wgpu::Backends::GL);
+    }
+
+    if let Err(e) = std::fs::write(&guard, b"vulkan pending\n") {
+        log::warn!("Android graphics: could not write Vulkan fallback guard {}: {e}", guard.display());
+    }
+    log::info!("Android graphics: launcher is alive on GLES; trying Vulkan for the game");
+    backend_instance(wgpu::Backends::VULKAN)
+}
+
+#[cfg(target_os = "android")]
+fn android_record_game_backend(backend: wgpu::Backend) {
+    if !ANDROID_GAME_PROBE.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let code = match backend {
+        wgpu::Backend::Vulkan => 1,
+        wgpu::Backend::Gl => 2,
+        _ => 3,
+    };
+    ANDROID_GAME_BACKEND.store(code, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(target_os = "android")]
+fn android_note_vulkan_failure(what: &str) {
+    if ANDROID_GAME_PROBE.load(std::sync::atomic::Ordering::Relaxed) {
+        log::warn!("Android graphics: Vulkan game path failed ({what}); falling back to GLES");
+    }
+}
+
+/// After the Vulkan game has actually presented a healthy run of frames, remove the crash
+/// guard. A GLES fallback deliberately leaves it in place so the next launch stays safe.
+#[cfg(target_os = "android")]
+pub(crate) fn android_confirm_graphics_after_frames() {
+    if !ANDROID_GAME_PROBE.load(std::sync::atomic::Ordering::Relaxed)
+        || ANDROID_GAME_BACKEND.load(std::sync::atomic::Ordering::Relaxed) != 1
+    {
+        return;
+    }
+    if let Some(path) = ANDROID_VULKAN_GUARD.get() {
+        if let Err(e) = std::fs::remove_file(path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("Android graphics: could not clear Vulkan fallback guard {}: {e}", path.display());
+                return;
+            }
+        }
+        log::info!("Android graphics: Vulkan presented successfully; fallback guard cleared");
+    }
+    ANDROID_GAME_PROBE.store(false, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The renderer for a window: on `instance` if it can, else on the next graphics interface
@@ -239,16 +321,26 @@ pub(crate) fn window_renderer(
                     if !failures.is_empty() {
                         log::warn!("graphics: drawing on {what}; before it {}", failures.join("; "));
                     }
+                    #[cfg(target_os = "android")]
+                    android_record_game_backend(info.backend);
                     drop(surface);
                     *instance = inst;
                     return Ok(r);
                 }
                 Some(Err(e)) => {
                     log::warn!("graphics: {what} could not be opened: {e:#}");
+                    #[cfg(target_os = "android")]
+                    if info.backend == wgpu::Backend::Vulkan {
+                        android_note_vulkan_failure(&format!("{what}: {e:#}"));
+                    }
                     failures.push(format!("{what}: {e:#}"));
                 }
                 None => {
                     log::warn!("graphics: {what} failed while being opened");
+                    #[cfg(target_os = "android")]
+                    if info.backend == wgpu::Backend::Vulkan {
+                        android_note_vulkan_failure(&format!("{what}: failed while being opened"));
+                    }
                     failures.push(format!("{what}: failed while being opened"));
                 }
             }
