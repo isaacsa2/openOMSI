@@ -150,22 +150,27 @@ impl Shared {
         // `[important]` sounds first, then the ordinary voices that reach the listener
         // loudest. Voices left out still advance in time, so an engine loop comes back at
         // the right phase when it becomes audible again.
-        let mixed: Option<std::collections::HashSet<VoiceId>> = if voices.iter().filter(|v| !v.finished && v.stream.is_none()).count() > MAX_VOICES {
-            let mut ranked: Vec<(bool, f32, VoiceId)> = voices
+        let mixed: Option<Vec<bool>> = if voices.iter().filter(|v| !v.finished && v.stream.is_none()).count() > MAX_VOICES {
+            let mut ranked: Vec<(bool, f32, usize)> = voices
                 .iter()
-                .filter(|v| !v.finished && v.stream.is_none())
-                .map(|v| (v.params.important, heard_gain(v, &listener), v.id))
+                .enumerate()
+                .filter(|(_, v)| !v.finished && v.stream.is_none())
+                .map(|(i, v)| (v.params.important, heard_gain(v, &listener), i))
                 .collect();
             ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.total_cmp(&a.1)));
-            Some(ranked.into_iter().take(MAX_VOICES).map(|(_, _, id)| id).collect())
+            let mut keep = vec![false; voices.len()];
+            for (_, _, i) in ranked.into_iter().take(MAX_VOICES) {
+                keep[i] = true;
+            }
+            Some(keep)
         } else {
             None
         };
-        for v in voices.iter_mut() {
+        for (i, v) in voices.iter_mut().enumerate() {
             if v.finished {
                 continue;
             }
-            if v.stream.is_none() && mixed.as_ref().is_some_and(|keep| !keep.contains(&v.id)) {
+            if v.stream.is_none() && mixed.as_ref().is_some_and(|keep| !keep[i]) {
                 skip_clip(v, frames, dev_rate);
                 continue;
             }
