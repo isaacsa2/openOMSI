@@ -183,6 +183,12 @@ pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(target_os = "macos") {
         return vec![wgpu::Backends::METAL];
     }
+    // Motorola/Android workaround: avoid touching Vulkan during the earliest bootstrap.
+    // The latest upstream phone renderer already disables the Enhanced pipelines on
+    // Android/OpenGL; GLES-first lets affected Motorola devices reach that path.
+    if cfg!(target_os = "android") {
+        return vec![wgpu::Backends::GL, wgpu::Backends::VULKAN];
+    }
     let settings = crate::settings::Settings::load();
     let wanted = if settings.vr_requested() {
         "dx12".to_owned()
