@@ -52,7 +52,7 @@ pub(crate) struct Args {
     /// Control preset: `simple` (W/S/A/D and the arrow keys drive; the default), `wasd`,
     /// `arrows` (leaves W, S and D to the jobs `Inputs/keyboard.cfg` gives them - wipers,
     /// viewpoint and the D of the automatic gearbox) or `omsi` (only the original layout,
-    /// Shift + numpad). With WASD driving, hold shift for the OMSI meaning of a key.
+    /// the numpad). With WASD driving, hold shift for the OMSI meaning of a key.
     #[arg(long, default_value = "simple")]
     pub(crate) drive_keys: String,
     /// LAN play: host a session on this UDP port (27015 when the value is 0).
