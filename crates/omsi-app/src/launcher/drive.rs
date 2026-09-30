@@ -13,6 +13,47 @@ use omsi_ui::{Color, Rect, Weight};
 /// A line of the bus list: index, name, file, new, installed, liveries, parts missing.
 type BusItem = (usize, String, String, bool, bool, usize, bool);
 
+#[derive(Clone)]
+struct LineItem {
+    name: String,
+    termini: String,
+    tours: usize,
+    today: usize,
+    user_allowed: bool,
+    /// Lowercase line name, destinations and tour numbers, built once per timetable load.
+    search: String,
+}
+
+impl LineItem {
+    fn new(line: &omsi_launcher_lib::LineInfo) -> Self {
+        let today = line.tours.iter().filter(|tour| tour.runs).count();
+        let mut search = String::with_capacity(
+            line.name.len() + line.termini.iter().map(String::len).sum::<usize>() + line.tours.iter().map(|tour| tour.number.len()).sum::<usize>() + 2,
+        );
+        search.push_str(&line.name);
+        for terminus in &line.termini {
+            search.push('\n');
+            search.push_str(terminus);
+        }
+        for tour in &line.tours {
+            search.push('\n');
+            search.push_str(&tour.number);
+        }
+        Self {
+            name: line.name.clone(),
+            termini: line.termini.join(" · "),
+            tours: line.tours.len(),
+            today,
+            user_allowed: line.user_allowed,
+            search: search.to_lowercase(),
+        }
+    }
+
+    fn matches(&self, query: &str) -> bool {
+        query.is_empty() || self.search.contains(query)
+    }
+}
+
 #[derive(Default)]
 pub struct DriveView {
     pub step: usize,
@@ -26,10 +67,16 @@ pub struct DriveView {
     /// Lines without `[userallowed]` are hidden by default, like OMSI's timetable dialog,
     /// but can still be inspected when a map author needs to test an AI duty.
     pub show_ai_lines: bool,
+    /// Search-ready line rows, rebuilt only after `State::lines` changes.
+    line_items: std::sync::Arc<Vec<LineItem>>,
+    line_items_revision: u64,
+    /// Indices into `line_items` for the current query and AI-lines switch.
+    visible_lines: std::sync::Arc<Vec<usize>>,
+    visible_lines_key: (u64, String, bool, String),
     /// What the line list was last brought into view for. Map/date/filter are part of the
     /// key because a remembered line can otherwise be left several screens out of sight
     /// after the timetable is reloaded.
-    line_scroll_key: Option<(String, String, String, String, bool)>,
+    line_scroll_key: Option<(String, String, String, String, bool, u64)>,
     /// The list was scrolled to the chosen bus (once, when the lists came).
     pub scrolled_to_bus: bool,
 }
@@ -276,29 +323,44 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
         l.drive.line_scroll_key = None;
     }
     let q = l.drive.line_filter.trim().to_lowercase();
-    let has_player_lines = l.state.lines.iter().any(|x| x.user_allowed);
-    let mut lines: Vec<(String, String, usize, usize, bool)> = l
-        .state
-        .lines
-        .iter()
-        // Keep an already selected AI line visible even after the toggle is turned off: a
-        // saved duty must not appear to vanish while it is still the active choice.
-        .filter(|x| x.user_allowed || show_ai || chosen.as_deref() == Some(x.name.as_str()))
-        .filter(|x| line_matches(x, &q))
-        .map(|x| {
-            let today = x.tours.iter().filter(|t| t.runs).count();
-            (x.name.clone(), x.termini.join(" · "), x.tours.len(), today, x.user_allowed)
-        })
-        .collect();
-    // Player-selectable lines are what most people came for; AI-only lines stay available
-    // below them when requested without disturbing the timetable's natural-number order.
-    lines.sort_by_key(|x| !x.4);
+    if l.drive.line_items_revision != l.state.lines_revision {
+        l.drive.line_items = std::sync::Arc::new(l.state.lines.iter().map(LineItem::new).collect());
+        l.drive.line_items_revision = l.state.lines_revision;
+        l.drive.visible_lines_key = (u64::MAX, String::new(), false, String::new());
+    }
+    let items = l.drive.line_items.clone();
+    let has_player_lines = items.iter().any(|x| x.user_allowed);
+    let visible_key = (l.state.lines_revision, q.clone(), show_ai, chosen.clone().unwrap_or_default());
+    if l.drive.visible_lines_key != visible_key {
+        let mut visible: Vec<usize> = items
+            .iter()
+            .enumerate()
+            // Keep an already selected AI line visible even after the toggle is turned off:
+            // a saved duty must not appear to vanish while it is still the active choice.
+            .filter(|(_, x)| x.user_allowed || show_ai || chosen.as_deref() == Some(x.name.as_str()))
+            .filter(|(_, x)| x.matches(&q))
+            .map(|(index, _)| index)
+            .collect();
+        // Player-selectable lines are what most people came for; AI-only lines stay below
+        // them without disturbing the timetable's natural-number order.
+        visible.sort_by_key(|index| !items[*index].user_allowed);
+        l.drive.visible_lines = std::sync::Arc::new(visible);
+        l.drive.visible_lines_key = visible_key;
+    }
+    let lines = l.drive.visible_lines.clone();
     let mut pick_line = None;
     let loading = l.state.loading_lines;
     let line_area = Rect::new(left.x - 4.0, left.y + 98.0, left.w + 8.0, (left.h - 98.0).max(40.0));
-    let scroll_key = (l.state.lines_for.0.clone(), l.state.lines_for.1.clone(), chosen.clone().unwrap_or_default(), q.clone(), show_ai);
+    let scroll_key = (
+        l.state.lines_for.0.clone(),
+        l.state.lines_for.1.clone(),
+        chosen.clone().unwrap_or_default(),
+        q.clone(),
+        show_ai,
+        l.state.lines_revision,
+    );
     if l.drive.line_scroll_key.as_ref() != Some(&scroll_key) {
-        if let Some(k) = chosen.as_ref().and_then(|n| lines.iter().position(|x| &x.0 == n)) {
+        if let Some(k) = chosen.as_ref().and_then(|n| lines.iter().position(|index| &items[*index].name == n)) {
             l.ui.scroll_to("line-list", k as f32 * 48.0, 48.0 * 2.0, line_area.h);
         }
         l.drive.line_scroll_key = Some(scroll_key);
@@ -317,7 +379,8 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
             };
             ui.text_in(empty, Rect::new(v.x + 10.0, v.y, v.w - 20.0, 52.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
         }
-        for (k, (name, termini, tours, today, user_allowed)) in lines.iter().enumerate() {
+        for (k, index) in lines.iter().enumerate() {
+            let LineItem { name, termini, tours, today, user_allowed, .. } = &items[*index];
             let rr = Rect::new(v.x + 4.0, v.y + k as f32 * rh, v.w - 12.0, rh - 4.0);
             if rr.bottom() < line_area.y - rh || rr.y > line_area.bottom() + rh {
                 continue;
@@ -404,20 +467,9 @@ fn natural(s: &str) -> (u64, String) {
     (digits.parse().unwrap_or(u64::MAX), s.to_string())
 }
 
-/// The launcher used to search only the line's `.ttl` name. A destination or a tour number
-/// is often what a driver actually remembers, especially on maps whose file names are not
-/// their public line numbers.
-fn line_matches(line: &omsi_launcher_lib::LineInfo, query: &str) -> bool {
-    let query = query.trim().to_lowercase();
-    query.is_empty()
-        || line.name.to_lowercase().contains(&query)
-        || line.termini.iter().any(|x| x.to_lowercase().contains(&query))
-        || line.tours.iter().any(|x| x.number.to_lowercase().contains(&query))
-}
-
 #[cfg(test)]
 mod line_selector_tests {
-    use super::line_matches;
+    use super::LineItem;
     use omsi_launcher_lib::{LineInfo, TourInfo};
 
     fn line() -> LineInfo {
@@ -440,12 +492,12 @@ mod line_selector_tests {
 
     #[test]
     fn line_filter_finds_name_destination_and_tour() {
-        let line = line();
-        assert!(line_matches(&line, "42e"));
-        assert!(line_matches(&line, " CENTRAL "));
-        assert!(line_matches(&line, "airport"));
-        assert!(line_matches(&line, "school 7"));
-        assert!(!line_matches(&line, "harbour"));
+        let line = LineItem::new(&line());
+        assert!(line.matches("42e"));
+        assert!(line.matches("central"));
+        assert!(line.matches("airport"));
+        assert!(line.matches("school 7"));
+        assert!(!line.matches("harbour"));
     }
 }
 
