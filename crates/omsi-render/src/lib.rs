@@ -2022,7 +2022,6 @@ impl Renderer {
         } else {
             wgpu::CompareFunction::GreaterEqual
         };
-        let scene_depth_clear = if cfg!(target_os = "android") { 1.0 } else { 0.0 };
         let make = |format: wgpu::TextureFormat,
                     fs: &str,
                     blend: Option<wgpu::BlendState>,
@@ -7707,7 +7706,7 @@ impl Renderer {
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &ao.depth_view,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(scene_depth_clear),
+                            load: wgpu::LoadOp::Clear(if cfg!(target_os = "android") { 1.0 } else { 0.0 }),
                             store: wgpu::StoreOp::Store,
                         }),
                         stencil_ops: None,
@@ -7883,7 +7882,7 @@ impl Renderer {
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &t.1,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(scene_depth_clear),
+                            load: wgpu::LoadOp::Clear(if cfg!(target_os = "android") { 1.0 } else { 0.0 }),
                             store: wgpu::StoreOp::Store,
                         }),
                         stencil_ops: None,
@@ -7985,7 +7984,7 @@ impl Renderer {
                         load: if share_depth || msaa_prepass {
                             wgpu::LoadOp::Load
                         } else {
-                            wgpu::LoadOp::Clear(scene_depth_clear)
+                            wgpu::LoadOp::Clear(if cfg!(target_os = "android") { 1.0 } else { 0.0 })
                         },
                         store: wgpu::StoreOp::Store,
                     }),
