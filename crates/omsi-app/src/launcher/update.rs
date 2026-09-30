@@ -29,7 +29,9 @@ impl Launcher {
         self.update.poll();
         match self.update.status() {
             // "install updates without asking"
-            Status::Available(r) if self.setting("update_auto", false) && !self.update.dismissed && !self.update.auto_started => {
+            // Diagnostic Android build: never auto-install an upstream release, otherwise
+            // this test APK could replace itself before the Motorola GLES test is complete.
+            Status::Available(r) if !cfg!(target_os = "android") && self.setting("update_auto", false) && !self.update.dismissed && !self.update.auto_started => {
                 self.update.auto_started = true;
                 log::info!("update: installing {} by itself (update_auto)", r.version);
                 self.update.install(r);
