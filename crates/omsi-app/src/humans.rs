@@ -100,11 +100,6 @@ const EXIT_REACH: f64 = 0.6;
 const DOOR_GRACE: f64 = 4.0;
 /// How long after a door of a standing bus was last open the people at it wait on (s).
 const DOOR_SHUT_PATIENCE: f64 = 25.0;
-/// How long a passenger physically holds the stop-request button (s).  Firing the press
-/// and release triggers in the same frame made scripts which sample the button state miss
-/// it, and automatic rear-door scripts could consequently lose their close interlock.
-const STOP_REQUEST_PRESS: f64 = 0.25;
-
 fn debug_pax() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
@@ -1863,9 +1858,6 @@ pub struct Humans {
     pub money: Option<crate::money::Money>,
     /// A rider pressed the stop button for the next stop (the app fires `door_haltewunsch`).
     pub stop_request: bool,
-    /// The timed button press ended (the app fires `door_haltewunsch_off`).
-    pub stop_request_release: bool,
-    stop_request_release_at: Option<f64>,
     /// Somebody at the kerb pressed the outside door opener (`door_aussenoeffner`).
     pub door_request: bool,
     /// Stop whose waiting passengers have already pressed the outside opener once.
@@ -2089,8 +2081,6 @@ impl Humans {
             change_due: None,
             money: None,
             stop_request: false,
-            stop_request_release: false,
-            stop_request_release_at: None,
             door_request: false,
             pressed_at_stop: None,
             tickets_sold: 0,
@@ -3035,12 +3025,6 @@ impl Humans {
         p.t_state = 0.0;
         p.stuck = 0.0;
         p.why = "";
-    }
-
-    fn press_stop_request(&mut self) {
-        self.stop_request = true;
-        self.stop_request_release = false;
-        self.stop_request_release_at = Some(self.time + STOP_REQUEST_PRESS);
     }
 
     fn free_spot(&mut self, stop: i64, spot: usize, id: u32) {
@@ -4595,10 +4579,6 @@ impl Humans {
     ) -> bool {
         self.use_map_humans(world);
         self.time += dt as f64;
-        if self.stop_request_release_at.is_some_and(|at| self.time >= at) {
-            self.stop_request_release_at = None;
-            self.stop_request_release = true;
-        }
         let net = traffic.map(|t| &t.net);
         if let Some(b) = bus {
             self.center = b.position;
@@ -4813,7 +4793,7 @@ impl Humans {
                     .any(|p| p.inside(BusId::Player) && p.exit_stop >= 0 && p.exit_stop <= next)
             {
                 self.requested_for = Some(next);
-                self.press_stop_request();
+                self.stop_request = true;
                 if debug_pax() {
                     log::info!("t={:.1} stop request for timetable stop {next}", self.time);
                 }
@@ -6406,7 +6386,7 @@ impl Humans {
                         && (t - dt) % 45.0 > t % 45.0
                     {
                         // pressed again, the driver seems to have missed it
-                        self.press_stop_request();
+                        self.stop_request = true;
                         if debug_pax() {
                             log::info!(
                                 "t={:.1} pax {} presses the stop button again",
@@ -9031,16 +9011,6 @@ mod tests {
         // precisely the same target on the following frame.
         assert_eq!(kerb_target(home, DVec2::ZERO, along, 2.0), target);
         assert_eq!(kerb_target(DVec2::new(2.2, 0.0), DVec2::ZERO, along, 2.0), DVec2::new(2.2, 0.0));
-    }
-
-    #[test]
-    fn stop_request_is_a_timed_press() {
-        let mut h = Humans::new(Path::new("/nonexistent"));
-        h.time = 10.0;
-        h.press_stop_request();
-        assert!(h.stop_request);
-        assert!(!h.stop_request_release);
-        assert_eq!(h.stop_request_release_at, Some(10.0 + STOP_REQUEST_PRESS));
     }
 
     /// Berlin 1991's pack: full fare, short haul, day ticket (adults), and two reduced
