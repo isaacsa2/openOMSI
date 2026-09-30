@@ -100,7 +100,6 @@ const EXIT_REACH: f64 = 0.6;
 const DOOR_GRACE: f64 = 4.0;
 /// How long after a door of a standing bus was last open the people at it wait on (s).
 const DOOR_SHUT_PATIENCE: f64 = 25.0;
-
 fn debug_pax() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
@@ -1787,6 +1786,19 @@ fn arrive(from: DVec2, to: DVec2, pace: f64) -> DVec2 {
     }
     let speed = (pace * dist.min(1.0)).max(if dist > 0.3 { 0.25 } else { 0.0 });
     d / dist * speed
+}
+
+/// A stable place to step towards while a bus pulls in.  It is derived from the assigned
+/// waiting place, not the person's crowd-displaced position: otherwise avoidance changes
+/// the target on the next frame and a group shuffles indecisively towards the carriageway.
+fn kerb_target(home: DVec2, bus: DVec2, along: DVec2, clear: f64) -> DVec2 {
+    let rel = home - bus;
+    let side = rel - along * rel.dot(along);
+    let lateral = side.length();
+    if lateral <= clear + 0.3 || lateral < 1e-6 {
+        return home;
+    }
+    home + (-side / lateral * (lateral - clear)).clamp_length_max(1.2)
 }
 
 /// Seconds after one passenger's greeting or complaint before anybody says another.
@@ -5616,9 +5628,6 @@ impl Humans {
                 if let Some(bn) = coming {
                     let h = bn.heading.to_radians();
                     let dir = DVec2::new(h.sin(), h.cos());
-                    let rel = pos2 - bn.pos.truncate();
-                    let side = rel - dir * rel.dot(dir);
-                    let lat = side.length();
                     let to_bus = bn.pos.truncate() - pos2;
                     let face = to_bus.x.atan2(to_bus.y).to_degrees();
                     // a metre clear of its side, and a step or two from the waiting place at
@@ -5627,13 +5636,13 @@ impl Humans {
                     // (a bus pulling in along the far lane, #123)
                     let clear = bn.half.x + 1.0;
                     let home = sp.floor().truncate();
-                    let target = home + (pos2 - side / lat.max(1e-6) * (lat - clear) - home).clamp_length_max(1.2);
+                    let target = kerb_target(home, bn.pos.truncate(), dir, clear);
                     // (never off the pavement: a waiting place at the kerb's edge had them
                     // step out onto the carriageway in front of the bus, #123)
                     let off_kerb = net.is_some_and(|n| {
                         on_carriageway(n, target.extend(sp.floor().z)) || crosses_street(n, home, target)
                     });
-                    if lat > clear + 0.3 && !off_kerb {
+                    if target != home && !off_kerb {
                         let d = (target - pos2).length();
                         self.people[i].why = "steps forward to meet the bus";
                         return Want {
@@ -8990,6 +8999,19 @@ impl Humans {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approaching_a_bus_has_a_stable_pavement_target() {
+        let home = DVec2::new(5.0, 0.0);
+        let along = DVec2::Y;
+        let target = kerb_target(home, DVec2::ZERO, along, 2.0);
+        assert_eq!(target, DVec2::new(3.8, 0.0));
+        assert!((target - home).length() <= 1.2 + 1e-9);
+        // Crowd avoidance may move the person, but the assigned waiting place still yields
+        // precisely the same target on the following frame.
+        assert_eq!(kerb_target(home, DVec2::ZERO, along, 2.0), target);
+        assert_eq!(kerb_target(DVec2::new(2.2, 0.0), DVec2::ZERO, along, 2.0), DVec2::new(2.2, 0.0));
+    }
 
     /// Berlin 1991's pack: full fare, short haul, day ticket (adults), and two reduced
     /// fares for 6..13.
