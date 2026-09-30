@@ -440,7 +440,13 @@ impl Camera {
         // stops distant roads, kerbs and painted ground from flickering against each other
         // - with a plain 0..1 depth the resolution at a kilometre is a good quarter of a
         // metre, less than the gap between a road surface and the ground under it.
-        let proj = Mat4::perspective_rh(self.fov_deg.to_radians(), aspect, self.far, self.near);
+        let proj = if cfg!(target_os = "android") {
+            // GLES compatibility path: keep the conventional near -> far depth range.
+            Mat4::perspective_rh(self.fov_deg.to_radians(), aspect, self.near, self.far)
+        } else {
+            // Reversed Z on desktop/native backends.
+            Mat4::perspective_rh(self.fov_deg.to_radians(), aspect, self.far, self.near)
+        };
         proj * view
     }
 
@@ -1164,7 +1170,11 @@ struct Freed {
     buf: wgpu::Buffer,
 }
 
-pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub const DEPTH_FORMAT: wgpu::TextureFormat = if cfg!(target_os = "android") {
+    wgpu::TextureFormat::Depth24Plus
+} else {
+    wgpu::TextureFormat::Depth32Float
+};
 /// Samples per pixel of the scene passes when nothing else is asked for (the shadow maps
 /// stay single-sampled). Four samples take the staircase off every edge; the multisampled
 /// colour target resolves into the window or the mirror texture at the end of the main pass.
@@ -1359,6 +1369,7 @@ impl Renderer {
             && info.backend == wgpu::Backend::Vulkan
             && info.vendor == 0x8086
             && omsi_cfg::env::var_os("OMSI_INTEL_FULL_GPU").is_none();
+        let android_gles_safe = cfg!(target_os = "android") && info.backend == wgpu::Backend::Gl;
         let options = if intel_vulkan_safe {
             log::warn!(
                 "Intel Vulkan adapter detected ({}): using the stable driver profile (1x MSAA, 1x anisotropy, SSAO and runtime texture compression off); set OMSI_INTEL_FULL_GPU=1 after updating the Intel driver to retry the requested settings",
@@ -1371,15 +1382,31 @@ impl Renderer {
                 compress_textures: false,
                 ..options
             }
+        } else if android_gles_safe {
+            log::warn!(
+                "Android GLES compatibility renderer on {}: standard depth, Depth24Plus, direct draw encoding, 1x MSAA, 1x anisotropy, SSAO/FXAA/reflections/runtime compression off",
+                info.name
+            );
+            RenderOptions {
+                msaa: 1,
+                anisotropy: 1,
+                shadow_size: 512,
+                ssao: false,
+                render_scale: 1.0,
+                compress_textures: false,
+                fxaa: false,
+                reflections: false,
+                ..options
+            }
         } else {
             options
         };
         let shadow_size = options
             .shadow_size
-            .clamp(512, if intel_vulkan_safe { 2048 } else { 8192 });
+            .clamp(512, if intel_vulkan_safe || android_gles_safe { 2048 } else { 8192 });
         let mut limits = wgpu::Limits::default().using_resolution(adapter.limits());
-        if intel_vulkan_safe {
-            // Do not request every large limit the Intel driver advertises. In particular,
+        if intel_vulkan_safe || android_gles_safe {
+            // Do not request every large limit a compatibility driver advertises. In particular,
             // asking for its maximum storage-buffer and buffer sizes makes 31.0.101.2141
             // crash in vkCreateDevice instead of returning a VkResult. The WebGPU defaults
             // are ample for the renderer and stay on the driver's well-tested path.
@@ -1458,8 +1485,8 @@ impl Renderer {
         if omsi_cfg::env::var_os("OMSI_NO_BC").is_none() {
             required_features |= adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC;
         }
-        if intel_vulkan_safe {
-            // Keep vkCreateDevice entirely free of optional extensions. Compressed source
+        if intel_vulkan_safe || android_gles_safe {
+            // Keep compatibility devices free of optional extensions. Compressed source
             // textures are decoded to RGBA by upload_texture on this device.
             required_features = wgpu::Features::empty();
         }
@@ -1990,6 +2017,12 @@ impl Renderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
         };
+        let scene_depth_compare = if cfg!(target_os = "android") {
+            wgpu::CompareFunction::LessEqual
+        } else {
+            wgpu::CompareFunction::GreaterEqual
+        };
+        let scene_depth_clear = if cfg!(target_os = "android") { 1.0 } else { 0.0 };
         let make = |format: wgpu::TextureFormat,
                     fs: &str,
                     blend: Option<wgpu::BlendState>,
@@ -2014,12 +2047,12 @@ impl Renderer {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(depth_write),
-                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    depth_compare: Some(scene_depth_compare),
                     stencil: Default::default(),
                     bias: wgpu::DepthBiasState {
-                        constant: -bias,
+                        constant: if cfg!(target_os = "android") { bias } else { -bias },
                         slope_scale: if bias != 0 {
-                            -bias.signum() as f32 * 2.0
+                            if cfg!(target_os = "android") { bias.signum() as f32 * 2.0 } else { -bias.signum() as f32 * 2.0 }
                         } else {
                             0.0
                         },
@@ -2362,7 +2395,7 @@ impl Renderer {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    depth_compare: Some(scene_depth_compare),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -2766,7 +2799,7 @@ impl Renderer {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    depth_compare: Some(scene_depth_compare),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -7553,7 +7586,7 @@ impl Renderer {
         // pass in two to finish the halves side by side was tried as well: the second half
         // has to load the first one's targets back into the GPU's tile memory, which cost
         // more GPU time than it saved on the CPU.)
-        let main_bundles = if omsi_cfg::env::var_os("OMSI_NO_BUNDLES").is_none() {
+        let main_bundles = if !cfg!(target_os = "android") && omsi_cfg::env::var_os("OMSI_NO_BUNDLES").is_none() {
             let (pp, format) = if enhanced {
                 (&self.hdr_pass, wgpu::TextureFormat::Rgba16Float)
             } else {
@@ -7650,8 +7683,11 @@ impl Renderer {
         }
         // --- depth prepass + ambient occlusion (single-sampled, camera projection)
         if prepass_on {
-            let proj =
-                Mat4::perspective_rh(camera.fov_deg.to_radians(), aspect, camera.far, camera.near);
+            let proj = if cfg!(target_os = "android") {
+                Mat4::perspective_rh(camera.fov_deg.to_radians(), aspect, camera.near, camera.far)
+            } else {
+                Mat4::perspective_rh(camera.fov_deg.to_radians(), aspect, camera.far, camera.near)
+            };
             let u = SsaoUniform {
                 inv_proj: proj.inverse().to_cols_array_2d(),
                 params: [
@@ -7671,7 +7707,7 @@ impl Renderer {
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &ao.depth_view,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(0.0),
+                            load: wgpu::LoadOp::Clear(scene_depth_clear),
                             store: wgpu::StoreOp::Store,
                         }),
                         stencil_ops: None,
@@ -7847,7 +7883,7 @@ impl Renderer {
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &t.1,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(0.0),
+                            load: wgpu::LoadOp::Clear(scene_depth_clear),
                             store: wgpu::StoreOp::Store,
                         }),
                         stencil_ops: None,
@@ -7949,7 +7985,7 @@ impl Renderer {
                         load: if share_depth || msaa_prepass {
                             wgpu::LoadOp::Load
                         } else {
-                            wgpu::LoadOp::Clear(0.0)
+                            wgpu::LoadOp::Clear(scene_depth_clear)
                         },
                         store: wgpu::StoreOp::Store,
                     }),
