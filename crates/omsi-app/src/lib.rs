@@ -404,7 +404,18 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     let clock_note = args.clock_moved.clone();
     let mut app = App {
         args,
-        instance: graphics_instance(),
+        instance: if cfg!(target_os = "android") {
+            #[cfg(target_os = "android")]
+            {
+                crate::startup::android_game_graphics_instance(&args.root)
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                unreachable!()
+            }
+        } else {
+            graphics_instance()
+        },
         window: None,
         surface: None,
         renderer: None,
