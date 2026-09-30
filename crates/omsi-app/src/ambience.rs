@@ -181,6 +181,7 @@ impl Ambience {
             doppler: true,
             range: 1.0,
             lowpass_hz: if inside { 400.0 } else { 0.0 },
+            important: false,
         };
         match (self.rain_voice, gain > 0.001) {
             (Some(id), true) => {
@@ -211,6 +212,7 @@ impl Ambience {
             doppler: true,
             range: 1.0,
             lowpass_hz: 300.0,
+            important: false,
         };
         match (self.hum_voice, gain > 0.001) {
             (Some(id), true) => {
@@ -283,6 +285,7 @@ impl Ambience {
                 doppler: true,
                 range: self.step_range,
                 lowpass_hz: lowpass,
+                important: false,
             };
             engine.play(clip, params);
             played += 1;
