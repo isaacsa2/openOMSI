@@ -678,7 +678,8 @@ impl ApplicationHandler for App {
                     // (out of the seat: nobody at the wheel)
                     p.sync_driver(r, scene, dt, self.settings.driver && self.on_foot.is_none(), self.view == "driver");
                     if self.view != "free" && self.view != "foot" {
-                        crate::input_script::swap_view_look(&mut self.look, &mut self.view_looks, &mut self.look_view, &self.view);
+                        let key = crate::input_script::look_key_of(&self.view, Some(p.cam_choice));
+                        crate::input_script::swap_view_look(&mut self.look, &mut self.view_looks, &mut self.look_view, &key);
                         if let Some(cam) = self.camera.as_ref() {
                             p.seat = glam::Vec3::from_array(self.settings.seat);
                             // head tracking: the head's turn on top of the look, its movement

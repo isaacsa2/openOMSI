@@ -36,6 +36,7 @@
   <div class="drawer-section">
     <a href="https://discord.gg/VG2EKVafYG"><span class="material-icons">forum</span>Discord</a>
     <a href="https://buymeacoffee.com/usonskyyy" target="_blank" rel="noopener"><span class="material-icons">local_cafe</span>Buy me a coffee</a>
+    <a href="https://ko-fi.com/usonance" target="_blank" rel="noopener"><span class="material-icons">volunteer_activism</span>Ko-fi</a>
     <a href="https://github.com/turbo-devv/openOMSI"><span class="material-icons">code</span>Source code</a>
     <a href="#/releases" data-route="/releases"><span class="material-icons">new_releases</span>Releases</a>
     <a href="#/issues" data-route="/issues"><span class="material-icons">bug_report</span>Issues</a>
@@ -43,9 +44,15 @@
 </nav>
 <div class="scrim" id="scrim"></div>
 
-<a class="bmc-fab elevation-4" href="https://buymeacoffee.com/usonskyyy" target="_blank" rel="noopener" aria-label="Buy me a coffee" title="Support openOMSI">
-  <span class="bmc-cup" aria-hidden="true">☕</span><span class="bmc-text">Buy me a coffee</span>
-</a>
+<div class="donate" id="donate">
+  <div class="donate-menu elevation-4" id="donate-menu" role="menu" aria-labelledby="donate-button" hidden>
+    <a role="menuitem" href="https://buymeacoffee.com/usonskyyy" target="_blank" rel="noopener"><span class="donate-icon" aria-hidden="true">☕</span>Buy Me a Coffee</a>
+    <a role="menuitem" href="https://ko-fi.com/usonance" target="_blank" rel="noopener"><span class="material-icons donate-icon" aria-hidden="true">volunteer_activism</span>Ko-fi</a>
+  </div>
+  <button class="donate-fab elevation-4" id="donate-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="donate-menu" title="Support openOMSI">
+    <span class="material-icons" aria-hidden="true">favorite</span><span class="donate-text">Donate</span>
+  </button>
+</div>
 
 <main id="main">
   <div id="view"></div>

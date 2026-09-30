@@ -2212,6 +2212,7 @@ impl World {
             .with_context(|| format!("loading {}", global_cfg.display()))?;
         let map_dir = global.dir().to_path_buf();
         omsi_map::configure_grid(&global);
+        crate::humans::LEFT_HAND.store(global.left_hand_traffic, std::sync::atomic::Ordering::Relaxed);
         log::info!(
             "tile size {:.1} m ({})",
             omsi_map::tile_size(),

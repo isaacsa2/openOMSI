@@ -474,8 +474,17 @@ impl State {
             "join" => format!("join:{}", c.lan_addr.trim()),
             _ => "off".to_string(),
         };
+        // Joining: the host's map, as its status gives it (a code's host is asked when the
+        // code is typed). The game takes it from the host's welcome too, but only when that
+        // comes before the map is loaded: through a tunnel it came later, the game started
+        // on the map chosen here, and the players never met ("the host drives on X10 Berlin,
+        // you on Berlin-Spandau"). A map not installed here comes with the host's mods.
+        let host_map = (c.lan_mode == "join")
+            .then(|| self.joined_server.clone().unwrap_or_else(|| c.lan_addr.clone()))
+            .and_then(|k| self.server_info.get(&k).and_then(|x| x.1.as_ref().ok()).map(|i| i.map.trim().replace('\\', "/")))
+            .filter(|m| m.to_ascii_lowercase().contains("maps/"));
         core::Duty {
-            map: c.map.clone(),
+            map: host_map.unwrap_or_else(|| c.map.clone()),
             bus: c.bus.clone(),
             paint: Some(c.paint.clone()).filter(|p| !p.is_empty()),
             hof: Some(c.hof.clone()).filter(|p| !p.is_empty()),
@@ -581,6 +590,23 @@ impl State {
                 self.set_status(format!("Reading the content stopped on an error: {why}"), true);
             }
             Msg::Server { address, info } => {
+                // the host of the code typed in: its map is the one the duty is chosen on
+                // (installed here: the line, tour and entry point of another map go)
+                if self.choice.lan_mode == "join" && self.joined_server.is_none() && address == self.choice.lan_addr {
+                    if let Ok(i) = &info {
+                        let theirs = i.map.trim().replace('\\', "/");
+                        if let Some((file, name)) = self.maps.iter().find(|m| m.file.eq_ignore_ascii_case(&theirs)).map(|m| (m.file.clone(), m.name.clone())) {
+                            if !self.choice.map.eq_ignore_ascii_case(&file) {
+                                self.choice.map = file;
+                                self.choice.line = None;
+                                self.choice.tour = None;
+                                self.choice.entry = 0;
+                                self.touched();
+                                self.set_status(format!("The host drives on {name}: that map is chosen"), false);
+                            }
+                        }
+                    }
+                }
                 self.server_info.insert(address, (Instant::now(), info));
             }
             Msg::Content(Ok((maps, vehicles, weathers))) => {

@@ -58,6 +58,9 @@ use std::sync::Arc;
 /// Walking pace inside a bus (m/s): people are careful on a bus floor.
 /// The "stop" of a player's bus standing with a door open that everybody leaves: its
 /// driver has got up, or it is not in service. No waiting place belongs to it.
+/// The map's traffic keeps left (its stops are on the left): see the doors of `Cabin`.
+pub(crate) static LEFT_HAND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const ALL_OUT_STOP: i64 = -7;
 const PACE_IN: f64 = 0.9;
 /// Gap between two people in a queue (m).
@@ -354,12 +357,18 @@ impl Cabin {
             });
         }
         let graph = PathGraph::new(points.clone(), &links);
+        // (the side of the road the stops are on: where a door's own point does not tell)
+        let kerb = if LEFT_HAND.load(std::sync::atomic::Ordering::Relaxed) { -1.0f32 } else { 1.0 };
         let door = |pp: i32, sells: bool, half_width: f32| -> Door {
             let point = (pp >= 0 && (pp as usize) < points.len()).then_some(pp as usize);
             let inside = point
                 .map(|i| points[i])
-                .unwrap_or(Vec3::new(half_width - 0.1, 4.0, 0.4));
-            let side = if inside.x >= 0.0 { 1.0 } else { -1.0 };
+                .unwrap_or(Vec3::new(kerb * (half_width - 0.1), 4.0, 0.4));
+            // A door's side is the side of its entry point; one in the middle of the aisle
+            // (or none) is taken to open to the kerb - on the left where the traffic keeps
+            // left. (Always the right: a UK bus whose entry point lies on the aisle had the
+            // people come to its door from the road side, round the bus.)
+            let side = if inside.x.abs() < 0.6 { kerb } else if inside.x >= 0.0 { 1.0 } else { -1.0 };
             let outside = Vec3::new(side * (half_width + DOOR_OUT), inside.y, 0.0);
             // the aisle point next to the door: its neighbour nearest the middle
             let wait_point = point

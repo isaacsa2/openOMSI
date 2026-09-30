@@ -639,7 +639,16 @@ impl App {
     /// view left is put away and the one of the view entered comes back (straight ahead
     /// the first time).
     pub(crate) fn sync_view_look(&mut self) {
-        swap_view_look(&mut self.look, &mut self.view_looks, &mut self.look_view, &self.view);
+        let key = self.look_key();
+        swap_view_look(&mut self.look, &mut self.view_looks, &mut self.look_view, &key);
+    }
+
+    /// Which camera the look belongs to: the view, and for the driver's and the passengers'
+    /// view the camera chosen in it. Each of Omsi.exe's cameras keeps where it was turned
+    /// (a `TCamera` has its own yaw and pitch besides the file's, 0x7edde4 resets them): the
+    /// look went back to straight ahead whenever the viewpoint changed.
+    pub(crate) fn look_key(&self) -> String {
+        look_key_of(&self.view, self.player.as_ref().map(|p| p.cam_choice))
     }
 
     /// Zoom the view inside the bus by `notches` of the mouse wheel (in: positive).
@@ -1949,7 +1958,6 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
                             self.view = "driver".into();
                         }
                         self.sync_view_look();
-                        self.look = (0.0, 0.0);
                     } else if !schedule {
                         self.service_msg = Some(("This bus has no ticket desk camera".into(), 3.0));
                     }
@@ -1970,7 +1978,8 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
                     let c = if pax { &mut p.cam_choice.1 } else { &mut p.cam_choice.0 };
                     *c = if name == "view_interiorcam_minus" { (*c + count - 1) % count } else { (*c + 1) % count };
                     let n = *c + 1;
-                    self.look = (0.0, 0.0);
+                    // (the camera left keeps its look, the one taken finds its own again)
+                    self.sync_view_look();
                     self.service_msg = Some((format!("{} camera {n} of {count}", if pax { "Passenger" } else { "Driver" }), 2.0));
                 }
             }
@@ -2429,6 +2438,15 @@ pub(crate) const GAME_MENU: [(&str, &str); 33] = [
 ];
 
 /// `App::sync_view_look` for where `self` is borrowed in parts.
+/// See `App::look_key`.
+pub(crate) fn look_key_of(view: &str, cam: Option<(usize, usize)>) -> String {
+    match (view, cam) {
+        ("driver", Some((d, _))) => format!("driver#{d}"),
+        ("pax", Some((_, x))) => format!("pax#{x}"),
+        _ => view.to_string(),
+    }
+}
+
 pub(crate) fn swap_view_look(look: &mut (f32, f32), looks: &mut std::collections::HashMap<String, (f32, f32)>, look_view: &mut String, view: &str) {
     if look_view != view {
         let old = std::mem::replace(look_view, view.to_string());
