@@ -2056,10 +2056,12 @@ pub(crate) fn script_key(name: &str) -> Option<KeyCode> {
                 #[cfg(windows)]
                 if let Some(vr) = self.vr.as_mut() { vr.recenter(); }
             }
-            // (Space in Inputs/keyboard.cfg: every view looks ahead again)
+            // Space in Inputs/keyboard.cfg: every view goes back to its normal look and zoom.
             "view_reset_all_directions" => {
                 self.look = (0.0, 0.0);
                 self.view_looks.clear();
+                self.view_zoom.clear();
+                self.orbit = ORBIT_DEFAULT;
             }
             "view_toggle_viewpoint" | "view_interiorcam_plus" | "view_interiorcam_minus" => {
                 let Some(p) = self.player.as_mut() else { return true };
