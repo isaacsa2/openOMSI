@@ -298,15 +298,22 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
     let mut tours: Vec<&omsi_launcher_lib::TourInfo> = line.tours.iter().collect();
     tours.sort_by(|a, b| b.runs.cmp(&a.runs).then_with(|| natural(&a.number).cmp(&natural(&b.number))));
     let now = l.state.choice.time as f64 * 60.0;
-    let tours: Vec<(String, usize, String, bool, Option<String>, Option<(f64, f64)>)> = tours.iter().map(|t| {
+    let tours: Vec<(String, usize, String, bool, Option<String>, Option<(f64, f64, String, String)>)> = tours.iter().map(|t| {
         let trip = trip_index_at(t, now).and_then(|i| t.trips.get(i));
-        (t.number.clone(), t.trips.len(), t.days.clone(), t.runs, t.next_run.clone(), trip.map(|x| (x.departure, x.arrival)))
+        (
+            t.number.clone(),
+            t.trips.len(),
+            t.days.clone(),
+            t.runs,
+            t.next_run.clone(),
+            trip.map(|x| (x.departure, x.arrival, x.from.clone(), x.terminus.clone())),
+        )
     }).collect();
     let chosen_t = l.state.choice.tour.clone();
     let mut pick = None;
     l.ui.scroll_area("tour-list", Rect::new(right.x - 4.0, right.y + 30.0, right.w + 8.0, right.h - 30.0), &mut |ui, v| {
-        let rh = 66.0;
-        for (k, (num, trips, days, runs, next, trip_time)) in tours.iter().enumerate() {
+        let rh = 84.0;
+        for (k, (num, trips, days, runs, next, trip_info)) in tours.iter().enumerate() {
             let rr = Rect::new(v.x + 4.0, v.y + k as f32 * rh, v.w - 12.0, rh - 4.0);
             let on = chosen_t.as_deref() == Some(num.as_str());
             if ui.row(&format!("tour-{num}"), rr, on) {
@@ -316,9 +323,10 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
             // (the tour's name as the map writes it and OMSI lists it: "1", "Mo-Fr 1")
             let name = num.clone();
             ui.text_in(&name, Rect::new(rr.x + 10.0, rr.y + 5.0, rr.w - 110.0, 18.0), 13.5, Weight::Bold, c, Align::Left);
-            if let Some((departure, arrival)) = trip_time {
+            if let Some((departure, arrival, from, terminus)) = trip_info {
                 ui.text_in(&format!("{} - {}", hhmm(*departure), hhmm(*arrival)), Rect::new(rr.right() - 110.0, rr.y + 6.0, 100.0, 18.0), 12.0, Weight::Medium, if *runs { ACCENT } else { TEXT_FAINT }, Align::Right);
-                ui.text_in(&format!("{}: {}", omsi_ui::tr("Trip duration"), trip_duration(*departure, *arrival)), Rect::new(rr.x + 10.0, rr.y + 25.0, rr.w - 20.0, 16.0), 12.0, Weight::Medium, c, Align::Left);
+                ui.text_in(&format!("{from} → {terminus}"), Rect::new(rr.x + 10.0, rr.y + 25.0, rr.w - 20.0, 16.0), 11.5, Weight::Medium, c, Align::Left);
+                ui.text_in(&format!("{}: {}", omsi_ui::tr("Trip duration"), trip_duration(*departure, *arrival)), Rect::new(rr.x + 10.0, rr.y + 43.0, rr.w - 20.0, 16.0), 12.0, Weight::Medium, c, Align::Left);
             }
             let sub = if *runs {
                 format!("{trips} trips · {days}")
@@ -328,7 +336,7 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
                     None => format!("{trips} trips · never within a year"),
                 }
             };
-            ui.text_in(&sub, Rect::new(rr.x + 10.0, rr.y + 43.0, rr.w - 20.0, 16.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
+            ui.text_in(&sub, Rect::new(rr.x + 10.0, rr.y + 61.0, rr.w - 20.0, 16.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
         }
         tours.len() as f32 * rh + 4.0
     });
