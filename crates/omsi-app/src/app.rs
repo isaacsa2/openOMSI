@@ -206,6 +206,10 @@ pub(crate) struct App {
     pub(crate) career: career::Career,
     /// How wet the roads are (0..1), built up by rain and dried by the sun.
     pub(crate) wetness: f32,
+    /// A change of weather coming in (see `weather_cycle`).
+    pub(crate) weather_blend: Option<crate::weather_cycle::Blend>,
+    /// The weather cycle, when the weather chosen is `cycle`.
+    pub(crate) weather_cycle: Option<crate::weather_cycle::Cycle>,
     /// The mouse cursor currently shows the hand (it is over a switch).
     pub(crate) cursor_kind: u8,
     pub(crate) settings: settings::Settings,
@@ -340,6 +344,18 @@ impl App {
         let renderer = self.renderer.take().expect("renderer");
         let mut scene = renderer.new_scene();
         self.envir = omsi_content::Envir::load(&self.args.root.join("envir.cfg")).ok();
+        // the weather cycle: a first weather that suits the month, the others after it
+        if crate::weather_cycle::is_cycle(self.args.weather.as_deref()) {
+            let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7);
+            let mut c = crate::weather_cycle::Cycle::new(seed);
+            let month = start_clock(&self.args).day_month().1;
+            let all = crate::weather_cycle::installed();
+            let clear = omsi_content::weather::Weather { fog: (50000.0, 1.0), ..Default::default() };
+            let r = c.rand();
+            self.args.weather = crate::weather_cycle::pick(&all, &clear, "", month, r);
+            log::info!("weather cycle: starting with {:?}", self.args.weather);
+            self.weather_cycle = Some(c);
+        }
         self.weather = Some(load_weather(&self.args));
         // the roads start in the state this weather has already left them in, as they do
         // offscreen: a session begun in the rain used to open on a bone-dry street

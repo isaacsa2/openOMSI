@@ -680,8 +680,22 @@ pub fn open_public_gateway(session: &LanSession, info: omsi_net::ws::ServerInfo,
         // relay keeps it for hours, a joining game takes the latest - and counts the posts)
         let mut posted: Option<(String, Instant)> = None;
         let mut checked = Instant::now();
+        // the official server (`OMSI_OFFICIAL_KEY`: its signing key's file) says where it is
+        // reached every five minutes, for the players who type `openomsi`
+        let official = omsi_cfg::env::var_os("OMSI_OFFICIAL_KEY").and_then(|p| std::fs::read(&p).map_err(|e| log::warn!("official key {}: {e}", std::path::Path::new(&p).display())).ok());
+        let mut announced: Option<(String, Instant)> = None;
         loop {
             let now = url.lock().ok().and_then(|u| u.clone());
+            if let (Some(key), Some(u)) = (official.as_ref(), now.as_ref()) {
+                let due = announced.as_ref().is_none_or(|(a, t)| a != u || t.elapsed() > Duration::from_secs(300));
+                if due {
+                    match omsi_net::official::announce(u, key) {
+                        Ok(()) => log::info!("official server: announced at {u}"),
+                        Err(e) => log::warn!("official server: not announced: {e}"),
+                    }
+                    announced = Some((u.clone(), Instant::now()));
+                }
+            }
             match (now, &posted) {
                 (Some(u), None) => {
                     omsi_net::bridge::post_tunnel(sid, &u);
@@ -1020,7 +1034,16 @@ pub fn take_host_map(args: &mut Args, lan: &mut LanSession) {
     let Some(theirs) = lan.welcome.as_ref().map(|w| w.world.map.trim().replace('\\', "/")) else {
         return;
     };
-    let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
+    // (the same map, however its path was written: from its `maps/` folder on - a map
+    // chosen as a whole path, or out of an archive, is still the host's one, and taking it
+    // for another map dropped the line and tour chosen: everybody drove without a duty)
+    let norm = |s: &str| {
+        let s = s.trim().replace('\\', "/").to_ascii_lowercase();
+        match s.rfind("maps/") {
+            Some(k) => s[k..].to_string(),
+            None => s,
+        }
+    };
     if theirs.is_empty() || norm(&theirs) == norm(&args.map) {
         return;
     }

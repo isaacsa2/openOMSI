@@ -142,27 +142,17 @@ pub fn vehicle_lights(
     }
     let body = v.body_rotation();
     // headlights: the spotlight selected by Spot_Select
-    if let Some(sel) = v.var("Spot_Select") {
+    // (OMSI_SPOT_SELECT=n: that spotlight on, for checking the headlights in a picture)
+    let forced = omsi_cfg::env::var("OMSI_SPOT_SELECT").ok().and_then(|s| s.trim().parse::<f32>().ok());
+    if let Some(sel) = forced.or_else(|| v.var("Spot_Select")) {
         if sel >= 0.0 {
             if let Some(sp) = ty.model.spotlights.get(sel as usize) {
                 let vals = sp.values;
-                let p = body.transform_point3(Vec3::new(vals[0], vals[1], vals[2]));
                 let d = body
                     .transform_vector3(Vec3::new(vals[3], vals[4], vals[5]))
                     .normalize_or_zero();
                 let range = vals[9].clamp(5.0, 45.0);
                 let color = [vals[6] / 255.0, vals[7] / 255.0, vals[8] / 255.0];
-                // vanilla: a spot approximated by point lights along its axis
-                for (k, f) in [(0.12, 1.0), (0.3, 0.8), (0.55, 0.5)] {
-                    lights.push(PointLight {
-                        position: v.position + (p + d * range * k).as_dvec3(),
-                        radius: range * 0.6,
-                        color,
-                        intensity: f * (0.3 + 0.7 * night),
-                        mode: LightMode::Vanilla,
-                        ..Default::default()
-                    });
-                }
                 // enhanced: the real spot, as D3D's [spotlight] describes it - inner and
                 // outer cone as full angles (values 10 and 11), the range (clamped to what
                 // the light grid carries), falling off with the square of the distance from
@@ -188,6 +178,19 @@ pub fn vehicle_lights(
                     }
                 }
                 let apex = body.transform_point3(apex);
+                // vanilla: the same spot, lit as Direct3D's vertex lighting would (three point
+                // lights along its axis stood in for it before: they shone every way, on the
+                // bus's own body and on the pavement beside its doors)
+                lights.push(PointLight {
+                    position: v.position + apex.as_dvec3(),
+                    radius: range,
+                    color,
+                    intensity: 1.6 * (0.3 + 0.7 * night),
+                    direction: d,
+                    cone: [half(inner.min(outer)), half(outer)],
+                    mode: LightMode::Vanilla,
+                    ..Default::default()
+                });
                 lights.push(PointLight {
                     position: v.position + apex.as_dvec3(),
                     radius: vals[9].clamp(10.0, 60.0),

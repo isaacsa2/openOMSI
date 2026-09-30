@@ -434,6 +434,9 @@ pub struct StagedTile {
     base_terrain: Terrain,
     /// `[spline_terrain_align]` splines: (index into `splines`, reach in metres).
     align: Vec<(usize, f32)>,
+    /// The outlines (world x, y) those splines cut out of the ground (see
+    /// `omsi_geometry::spline_hole_outlines`).
+    hole_outlines: Vec<Vec<DVec2>>,
     water: Option<[f32; 4]>,
     splines: Vec<StagedSpline>,
     /// The whole spline meshes, in the order of `splines`, until the tile is placed.
@@ -1427,6 +1430,10 @@ fn tree_quad_mesh() -> MeshData {
 /// under it. Anything higher is a bridge or an embankment, where cutting would open a hole.
 /// `OMSI_HEIGHTPROFILE_GROUND=1`: the wheels stand on the splines' `[heightprofile]`s as
 /// they did before, instead of on the drawn splines as Omsi.exe stands them (A/B runs).
+/// `OMSI_CHECK_ROADS`: road points under the ground, and where.
+static OVER_ROAD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static OVER_ROAD_AT: std::sync::Mutex<Vec<(f64, f64, f32, f32)>> = std::sync::Mutex::new(Vec::new());
+
 fn heightprofile_ground() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| omsi_cfg::env::var_os("OMSI_HEIGHTPROFILE_GROUND").is_some())
@@ -3148,6 +3155,7 @@ impl World {
             path: path.to_path_buf(),
             base_terrain,
             align: Vec::new(),
+            hole_outlines: Vec::new(),
             water: None,
             splines: Vec::new(),
             meshes: Mutex::new(Some(Vec::new())),
@@ -3242,6 +3250,24 @@ impl World {
                 if aligned {
                     out.align
                         .push((out.splines.len(), s.terrain_align.unwrap_or(1.0) as f32));
+                    // Omsi.exe cuts the ground out under such a spline (the flag, or the
+                    // `_2` number, goes to the segment, 0x79b95e -> +0x205, and Generate
+                    // makes the outline from it; the terrain takes it with the `[terrainhole]`
+                    // meshes, "Terrain hole cutting: Spline")
+                    let mode = s.terrain_align.map(|v| v.clamp(0.0, 255.0) as u8).unwrap_or(1);
+                    if omsi_cfg::env::var_os("OMSI_LIST_ALIGNED").is_some() {
+                        let p = curve.point_at(curve.length * 0.5);
+                        log::info!("aligned spline {} {} mode {mode} mid ({:.1}, {:.1}, {:.1}) heading {:.0}", s.id, s.file, p.x, p.y, p.z, curve.heading_at(curve.length * 0.5));
+                    }
+                    for ring in omsi_geometry::spline_hole_outlines(&st.def, &curve, s.mirror, mode) {
+                        if omsi_geometry::outline_crosses_itself(&ring) {
+                            if debug_splines {
+                                log::info!("tile {tx},{ty} spline {} {}: its hole outline crosses itself, no hole (as in Omsi.exe)", s.id, s.file);
+                            }
+                            continue;
+                        }
+                        out.hole_outlines.push(ring);
+                    }
                 }
                 let bounds = mesh_bounds(&mesh, &Mat4::IDENTITY, origin);
                 // the rasters only need the shape; the whole mesh waits for the upload
@@ -3730,6 +3756,7 @@ impl World {
             let corners: Vec<glam::Vec3> = base.positions.clone();
             let mut meshes = Vec::with_capacity(ot.meshes.len());
             let mut moved = 0usize;
+            let mut biggest = 0f32;
             for (mesh, _, _) in &ot.meshes {
                 let mut m = mesh.clone();
                 for v in m.positions.iter_mut() {
@@ -3747,9 +3774,14 @@ impl World {
                     if d.abs() > 0.001 {
                         v.z += d;
                         moved += 1;
+                        biggest = biggest.max(d.abs());
                     }
                 }
                 meshes.push(m);
+            }
+            if biggest > 1.0 && omsi_cfg::env::var_os("OMSI_DEBUG_WARP").is_some() {
+                let (lo, hi) = base.positions.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.z), a.1.max(p.z)));
+                log::info!("crossing {} at ({:.1}, {:.1}, {:.1}) moved up to {biggest:.2} m (field {lo:.2}..{hi:.2}, {} points)", ot.sco.path.display(), pos.x, pos.y, pos.z, base.positions.len());
             }
             if moved > 0 {
                 log::debug!(
@@ -3796,7 +3828,15 @@ impl World {
         // tie should not depend on it either)
         let mut order: Vec<&Arc<StagedTile>> = src.values().collect();
         order.sort_by_key(|q| (q.tx, q.ty));
-        if omsi_cfg::env::var_os("OMSI_NO_TERRAIN_ALIGN").is_none() {
+        // (Omsi.exe does not move the ground at all when it loads a map: the editor's "align
+        // the terrain to the spline" wrote the heights into the tile's `.terrain`, and the
+        // flag left in the map only makes the spline cut its outline out of the ground -
+        // see `hole_outlines`. Pulled onto the road again here, every vertex under it took
+        // the height of whatever lay over it, and between those five-metre points the
+        // ground's triangles cut through the camber and past the kerbs: a piece of road
+        // gone under the grass, while beside it the ground stood lifted over the verge.
+        // `OMSI_TERRAIN_ALIGN=1` still does it.)
+        if omsi_cfg::env::var_os("OMSI_TERRAIN_ALIGN").is_some() {
             let mut ts = TileSurface::new(SURFACE_RASTER);
             let mut reach = 0.0f32;
             let mut any = false;
@@ -4540,6 +4580,11 @@ impl World {
                     else {
                         continue;
                     };
+                    if omsi_cfg::env::var_os("OMSI_NO_SPLINE_HOLES").is_none() {
+                        for ring in &q.hole_outlines {
+                            ts.add_outline(ring, tx, ty);
+                        }
+                    }
                     for (oi, (o, pose)) in q.objects.iter().zip(res.poses.iter()).enumerate() {
                         let Some(pose) = pose else { continue };
                         let ot = &o.ot;
@@ -4618,6 +4663,13 @@ impl World {
                             }
                             check.1 += 1;
                             let th = t.sample((i as f32 + 0.5) * cell, (j as f32 + 0.5) * cell);
+                            // the ground over a road: shows through it (Omsi.exe cuts nothing)
+                            if ts.road_covered(k) && th > ts.road_height(k) + 0.03 && th < ts.road_height(k) + 1.5 && !ts.cut_at((i as f32 + 0.5) * cell, (j as f32 + 0.5) * cell, th, surface_flush()) {
+                                OVER_ROAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                if let Ok(mut w) = OVER_ROAD_AT.lock() {
+                                    w.push((x0 + ((i as f32 + 0.5) * cell) as f64, y0 + ((j as f32 + 0.5) * cell) as f64, th - ts.road_height(k), th));
+                                }
+                            }
                             let old_rule = th >= ts.low_height(k) - surface_flush();
                             let new_rule = ts.low_height(k) - surface_flush() <= th
                                 && th <= ts.height(k) + surface_flush();
@@ -4642,10 +4694,17 @@ impl World {
                     if debug {
                         log::info!("tile ({tx}, {ty}): terrain cut under flush surfaces");
                     }
+                    let rgba = ts.mask_image(&terrain_at, surface_flush());
+                    if let Some(dir) = omsi_cfg::env::var("OMSI_DUMP_CUT").ok() {
+                        let a: Vec<u8> = rgba.chunks_exact(4).map(|p| p[3]).collect();
+                        if let Some(img) = image::GrayImage::from_raw(ts.size as u32, ts.size as u32, a) {
+                            let _ = image::imageops::flip_vertical(&img).save(format!("{dir}/cut_{tx}_{ty}.png"));
+                        }
+                    }
                     Some(Image {
                         width: ts.size as u32,
                         height: ts.size as u32,
-                        rgba: ts.mask_image(&terrain_at, surface_flush()),
+                        rgba,
                         has_alpha: true,
                     })
                 } else {
@@ -4712,7 +4771,7 @@ impl World {
         let mut where_: Vec<(f64, f64, f32)> = Vec::new();
         let (mut tris, mut wheel_meshes) = (0usize, 0usize);
         for (p, (ts, cut, check, wheels)) in prepared.iter_mut().zip(results) {
-            p.cut = cut.map(|c| tile_texture(c, true));
+            p.cut = cut.map(|c| if omsi_cfg::env::var_os("OMSI_CUT_PLAIN").is_some() { omsi_texture::gpu::TextureData { gpu_mips: false, ..omsi_texture::gpu::TextureData::from_image(c) } } else { tile_texture(c, true) });
             tris += ts.drive.tris.len();
             wheel_meshes += wheels;
             // the wheel surfaces come and go with the tile (World::unload_tile)
@@ -4727,6 +4786,19 @@ impl World {
         if check_roads {
             where_.sort_by(|a, b| b.2.total_cmp(&a.2));
             log::info!("ground-cut check: {holes} of {cells} covered ground points would be cut away with nothing under them ({:.2} %)", holes as f32 / cells.max(1) as f32 * 100.0);
+            let over = OVER_ROAD.load(std::sync::atomic::Ordering::Relaxed);
+            log::info!("ground-over-road check: {over} of {cells} road points lie under the ground (3 cm to 1.5 m)");
+            if let Ok(mut w) = OVER_ROAD_AT.lock() {
+                w.sort_by(|a, b| b.2.total_cmp(&a.2));
+                let by = |lo: f32, hi: f32| w.iter().filter(|p| p.2 >= lo && p.2 < hi).count();
+                log::info!("   by depth: 3-10 cm {}, 10-30 cm {}, 30-60 cm {}, 60 cm-1.5 m {}", by(0.0, 0.1), by(0.1, 0.3), by(0.3, 0.6), by(0.6, 9.0));
+                for (x, y, d, z) in w.iter().filter(|p| p.2 > 0.08 && p.2 < 0.3).step_by(97).take(6) {
+                    log::info!("   (shallow) ground {d:.2} m over the road at ({x:.1}, {y:.1}, {z:.1})");
+                }
+                for (x, y, d, _) in w.iter().take(8) {
+                    log::info!("   ground {d:.2} m over the road at ({x:.1}, {y:.1})");
+                }
+            }
             for (x, y, d) in where_.iter().take(5) {
                 log::info!("   {d:.1} m of nothing under the ground at ({x:.0}, {y:.0})");
             }

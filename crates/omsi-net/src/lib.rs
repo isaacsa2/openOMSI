@@ -80,6 +80,7 @@ pub mod wire;
 pub mod world;
 pub mod ws;
 pub mod tunnel;
+pub mod official;
 
 use std::cell::Cell;
 use std::collections::HashMap;

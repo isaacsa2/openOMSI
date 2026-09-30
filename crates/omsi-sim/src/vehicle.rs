@@ -3218,7 +3218,10 @@ impl TrailerPart {
         };
         let lead_pitch = if lead_pitch.abs() > 90.0 { lead_pitch - 180.0 * lead_pitch.signum() } else { lead_pitch };
         let alpha = ((lead_heading - self.heading + 540.0) % 360.0) - 180.0;
-        let beta = self.pitch as f64 - lead_pitch;
+        // (the part in front's pitch less this one's, as Omsi.exe's beta runs (0x7de798: it
+        // grows as the rear axle sinks): taken the other way round the bellows bent away
+        // from the rear section on any grade, their folds sheared and a gap opened at one end)
+        let beta = lead_pitch - self.pitch as f64;
         if let Some(id) = self.v_alpha {
             main.state.vars[id as usize] = (alpha * ARTICULATION_SIGN) as f32;
         }

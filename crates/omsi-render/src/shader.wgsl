@@ -732,7 +732,13 @@ fn point_lights(p: vec3<f32>, n: vec3<f32>, map_k: f32) -> vec3<f32> {
             let r0 = l.pos.w * 0.125;
             let att = min(1.0, (r0 * r0) / max(dist * dist, 0.01)) * clamp(1.0 - dist / l.pos.w, 0.0, 1.0) * 3.75;
             let ndl = max(dot(n, d / max(dist, 0.01)), 0.15);
-            let k = select(map_k, 1.0, l.dir.x > 0.5 && l.dir.w < -1.5);
+            var k = select(map_k, 1.0, l.dir.x > 0.5 && l.dir.w < -1.5);
+            if (l.dir.w >= -1.5) {
+                // a spot (a vehicle's [spotlight], as Direct3D lights with it): full inside
+                // the inner cone, fading to nothing at the outer one; nothing behind it
+                let c = dot(-d / max(dist, 0.01), l.dir.xyz);
+                k = smoothstep(l.dir.w, max(l.extra.x, l.dir.w + 1e-3), c);
+            }
             sum = sum + l.color.rgb * l.color.w * att * ndl * k;
         }
     }

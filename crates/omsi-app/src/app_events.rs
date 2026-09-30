@@ -1218,6 +1218,7 @@ impl ApplicationHandler for App {
                     if let Some(t) = self.traffic.as_mut() {
                         t.time_scale = speed;
                     }
+                    self.tick_weather(dt * speed as f32);
                 }
                 let daylight = omsi_sim::Daylight::compute(&self.clock, self.envir.as_ref());
                 if self.lamps_on != Some(daylight.lamps_on) {
