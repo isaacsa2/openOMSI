@@ -27,7 +27,9 @@ jobs:
         with:
           fetch-depth: 0
       - id: v
-        run: echo "version=$(sh scripts/version.sh)" >> "$GITHUB_OUTPUT"
+        # Fork releases end in I, so the launcher and download names cannot be confused
+        # with an upstream build carrying the same numeric version.
+        run: echo "version=$(sh scripts/version.sh)I" >> "$GITHUB_OUTPUT"
       - run: echo "### openOMSI ${{ steps.v.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
 
   windows:
@@ -153,6 +155,9 @@ jobs:
         run: scripts/build-linux.sh
       - name: Build the server
         run: scripts/build-server.sh
+      - name: Test launcher updates
+        if: matrix.arch == 'x64'
+        run: cargo test --locked --release -p omsi-app updater::tests
       - name: Validate shaders
         if: matrix.arch == 'x64'
         run: cargo test --locked --release -p omsi-render shaders_validate_and_match_the_uniforms
