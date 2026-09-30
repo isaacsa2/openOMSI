@@ -1976,7 +1976,106 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if !mirrored {
+                        if cfg!(target_os = "android") {
+                            // Second-stage Motorola diagnostic: the surface/present smoke
+                            // test worked, so now prove that a real WGSL render pipeline can
+                            // compile and draw through the same game surface.
+                            let shader = r.device.create_shader_module(
+                                wgpu::ShaderModuleDescriptor {
+                                    label: Some("android triangle smoke"),
+                                    source: wgpu::ShaderSource::Wgsl(
+                                        r#"
+@vertex
+fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-0.72, -0.62),
+        vec2<f32>( 0.72, -0.62),
+        vec2<f32>( 0.00,  0.72)
+    );
+    return vec4<f32>(p[i], 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.05, 1.0, 0.18, 1.0);
+}
+"#.into(),
+                                    ),
+                                },
+                            );
+                            let layout = r.device.create_pipeline_layout(
+                                &wgpu::PipelineLayoutDescriptor {
+                                    label: Some("android triangle smoke"),
+                                    bind_group_layouts: &[],
+                                    immediate_size: 0,
+                                },
+                            );
+                            let pipeline = r.device.create_render_pipeline(
+                                &wgpu::RenderPipelineDescriptor {
+                                    label: Some("android triangle smoke"),
+                                    layout: Some(&layout),
+                                    vertex: wgpu::VertexState {
+                                        module: &shader,
+                                        entry_point: Some("vs_main"),
+                                        buffers: &[],
+                                        compilation_options: Default::default(),
+                                    },
+                                    primitive: wgpu::PrimitiveState {
+                                        topology: wgpu::PrimitiveTopology::TriangleList,
+                                        ..Default::default()
+                                    },
+                                    depth_stencil: None,
+                                    multisample: Default::default(),
+                                    fragment: Some(wgpu::FragmentState {
+                                        module: &shader,
+                                        entry_point: Some("fs_main"),
+                                        targets: &[Some(wgpu::ColorTargetState {
+                                            format: s.config.format,
+                                            blend: None,
+                                            write_mask: wgpu::ColorWrites::ALL,
+                                        })],
+                                        compilation_options: Default::default(),
+                                    }),
+                                    multiview_mask: None,
+                                    cache: None,
+                                },
+                            );
+                            let mut encoder = r.device.create_command_encoder(
+                                &wgpu::CommandEncoderDescriptor {
+                                    label: Some("android triangle smoke"),
+                                },
+                            );
+                            {
+                                let mut pass = encoder.begin_render_pass(
+                                    &wgpu::RenderPassDescriptor {
+                                        label: Some("android triangle smoke"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &view,
+                                                depth_slice: None,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                                        r: 1.0,
+                                                        g: 0.0,
+                                                        b: 1.0,
+                                                        a: 1.0,
+                                                    }),
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: None,
+                                        timestamp_writes: None,
+                                        occlusion_query_set: None,
+                                        multiview_mask: None,
+                                    },
+                                );
+                                pass.set_pipeline(&pipeline);
+                                pass.draw(0..3, 0..1);
+                            }
+                            r.queue.submit([encoder.finish()]);
+                        } else if !mirrored {
                             r.render(
                                 scene,
                                 &view,
@@ -1986,8 +2085,10 @@ impl ApplicationHandler for App {
                                 &lighting,
                             );
                         }
-                        // the on-screen controls over the picture (a phone)
-                        self.touch.render(r, &view, s.config.width, s.config.height);
+                        if !cfg!(target_os = "android") {
+                            // the on-screen controls over the picture (a phone)
+                            self.touch.render(r, &view, s.config.width, s.config.height);
+                        }
                         *self.profile.entry("render").or_default() += __t.elapsed().as_secs_f64();
                         if omsi_cfg::env::var_os("OMSI_PROFILE_GPU").is_some() {
                             // wait for the GPU here, so that its time shows as a stage of its own
