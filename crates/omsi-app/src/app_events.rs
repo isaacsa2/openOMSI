@@ -1975,7 +1975,45 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if !mirrored {
+                        if cfg!(target_os = "android") {
+                            // Presentation smoke test: bypass the entire OMSI 3D renderer and
+                            // submit one unmistakable solid frame through the same game
+                            // surface. If this appears, Surface/queue/present are healthy and
+                            // the black picture is inside the 3D renderer pipeline.
+                            let mut encoder = r.device.create_command_encoder(
+                                &wgpu::CommandEncoderDescriptor {
+                                    label: Some("android present smoke"),
+                                },
+                            );
+                            {
+                                let _pass = encoder.begin_render_pass(
+                                    &wgpu::RenderPassDescriptor {
+                                        label: Some("android present smoke"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &view,
+                                                depth_slice: None,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                                        r: 1.0,
+                                                        g: 0.0,
+                                                        b: 1.0,
+                                                        a: 1.0,
+                                                    }),
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: None,
+                                        timestamp_writes: None,
+                                        occlusion_query_set: None,
+                                        multiview_mask: None,
+                                    },
+                                );
+                            }
+                            r.queue.submit([encoder.finish()]);
+                        } else if !mirrored {
                             r.render(
                                 scene,
                                 &view,
@@ -1985,8 +2023,10 @@ impl ApplicationHandler for App {
                                 &lighting,
                             );
                         }
-                        // the on-screen controls over the picture (a phone)
-                        self.touch.render(r, &view, s.config.width, s.config.height);
+                        // Keep the Android smoke frame untouched; desktop retains overlays.
+                        if !cfg!(target_os = "android") {
+                            self.touch.render(r, &view, s.config.width, s.config.height);
+                        }
                         *self.profile.entry("render").or_default() += __t.elapsed().as_secs_f64();
                         if omsi_cfg::env::var_os("OMSI_PROFILE_GPU").is_some() {
                             // wait for the GPU here, so that its time shows as a stage of its own
