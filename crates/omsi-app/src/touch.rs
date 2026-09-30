@@ -290,9 +290,10 @@ impl App {
             // (the kind of gearbox by what the bus's own scripts answer to: every key of
             // the keyboard layout is bound whatever the bus, the automatic's D included)
             let scripted = |name: &str| p.vehicle.ty.program.trigger(name).is_some();
-            // (a manual's scripts answer to the gear keys; the LiAZ's KPP has - and + too, and
-            // triggers up to 10 whatever its box has: `antrieb_number_gears` says how many)
-            let manual = scripted("kw_s_1") && scripted("kw_s_2") && !scripted("automatic_D");
+            // A manual add-on may still expose `automatic_D` as a compatibility trigger.
+            // Numbered gate triggers are stronger evidence of a manual gearbox than that
+            // generic automatic trigger, otherwise those buses get an R/N/D panel on phones.
+            let manual = scripted("kw_s_1") && scripted("kw_s_2");
             let count = p.vehicle.ty.program.constant("antrieb_number_gears").map(|n| n.round() as usize).filter(|n| (1..=8).contains(n));
             let gears: Vec<(&'static str, &'static str)> = if manual {
                 MANUAL.iter().copied().enumerate().filter(|(k, (a, _))| {
