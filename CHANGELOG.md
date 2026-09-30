@@ -4,6 +4,61 @@ Every push to `main` is released as `MAJOR.MINOR.COMMIT` (see
 [docs/VERSIONING.md](docs/VERSIONING.md)); the downloads are on the
 [Releases](https://github.com/turbo-devv/openOMSI/releases) page.
 
+## 0.1.178 - 2026-09-30
+
+Everything since 0.1.146. Where OMSI 2 has the behaviour, it was taken from Omsi.exe itself.
+
+### Roads, splines and the ground
+- Roads no longer disappear under the grass. Splines the map marks `[spline_terrain_align]`
+  cut their outline out of the ground, as Omsi.exe does: whole stretches of Spandau's roads,
+  the six-lane Falkenseer Chaussee among them, were buried. The cut is exact to a few
+  centimetres: no sky along the kerbs, and narrow medians stay green.
+- The ground is no longer taken away under every road in rough 1.5-3 m steps (the "holes in
+  the world" beside kerbs and car parks); only where the map says.
+- Road cant takes its width from the spline's height profiles, as in Omsi.exe.
+
+### Vehicles
+- Bellows of articulated buses bend with the rear section on slopes instead of away from it.
+- Skinned meshes (bellows, levers of mod buses such as the AA-FR Agora) deform as in OMSI 2.
+- Headlights in the classic picture shine forward from the lamps, one beam per headlamp,
+  as bright as in OMSI 2, and no longer light up the bus's own saloon and dashboard.
+- Roller-blind destination displays (`[texcoordtransY]`, `[matl_freetex]`, borders) work.
+- Thüringer Wald buses keep their roof at night.
+- Mirrors see closer and further (0.1 m to the objects' range, as Omsi.exe).
+
+### Trains
+- Trains are put together as in OMSI 2: every unit with its cars, the last car turned round
+  (Berlin U-Bahn A3, S-Bahn BR 275).
+
+### AI traffic and passengers
+- AI cars no longer wait for each other for ever: a long wait at a side road now gets its
+  turn, and two cars that each waited for the other drive on.
+- Passengers at a stop no longer all stare at the driver: each watches a coming bus on their
+  own, and only the people it takes keep looking once it stands.
+- Timetable buses' door handshake follows Omsi.exe (a trace: `OMSI_DEBUG_DOORS=1`).
+
+### Weather and administration
+- Weather cycle (launcher, phone launcher, `weather = cycle` in server.cfg): a new weather
+  every 25-60 game minutes, fitting the month; every weather change blends in over 4 minutes.
+- Server admins: set any installed weather, switch the cycle on and off, clear jammed traffic.
+
+### Multiplayer
+- The official server: type `openomsi` to join "openOMSI | Official Server"; it is first in
+  the server list.
+- Any server address works: an IP, a host name, host:port or a link.
+- Parked cars are the same for everybody: a car that drove off at the host is gone for the
+  other players too (their buses drove through cars only one side had).
+- Joining keeps the duty on the host's map; the launcher never hangs on a job that died.
+
+### Phones
+- A launcher made for phones: tabs at the bottom, a Play screen, full-screen choice sheets.
+- Manual gearboxes on the touch controls, with a clutch pedal.
+- Installing mods works again (it stood at "reading the archive's table of contents").
+- On foot, the own bus answers clicks.
+
+### Performance
+- Less stutter when the camera moves (culling buffers are kept between frames).
+
 ## 0.1.14 - 2026-09-28
 
 ### More fixes

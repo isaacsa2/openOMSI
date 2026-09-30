@@ -293,6 +293,9 @@ const MIRROR_ASPECT: f32 = 1.6;
 /// alike) look back and a little outwards, the bus a narrow strip at the near edge - drawn
 /// 1.6 wide (`MIRROR_ASPECT`) and turned this way, the pictures match them.
 pub(crate) fn reflexion_camera(c: &omsi_vehicle::Camera) -> omsi_vehicle::Camera {
+    if omsi_cfg::env::var_os("OMSI_MIRROR_YAW_AS_DRIVER").is_some() {
+        return c.clone();
+    }
     omsi_vehicle::Camera { yaw: -c.yaw, ..c.clone() }
 }
 
@@ -366,8 +369,12 @@ pub(crate) fn render_mirrors(
             pitch,
             roll,
             fov_deg: if c.fov > 1.0 { c.fov } else { 50.0 },
-            near: 0.3,
-            far: 450.0,
+            // (Omsi.exe's reflection pass, 0x6f68a8: near 0.1 m, far 100 km. Ours cut at
+            // 0.3 m and 450 m: what is close to an inside mirror's camera - a handrail, the
+            // driver's head - vanished, and the street behind ended at the next junction.
+            // The far end is the objects' own reach here, as in the main view.)
+            near: 0.1,
+            far: if renderer.options.max_obj_dist > 0.0 { renderer.options.max_obj_dist.clamp(450.0, 6000.0) } else { 3000.0 },
         };
         renderer.render_to_texture(scene, *tex, &cam, &lighting, MIRROR_ASPECT);
     }
