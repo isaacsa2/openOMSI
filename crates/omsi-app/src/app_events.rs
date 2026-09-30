@@ -2102,6 +2102,10 @@ impl ApplicationHandler for App {
                         }
                     }
                     self.total_frames += 1;
+                    #[cfg(target_os = "android")]
+                    if self.total_frames == 60 {
+                        crate::startup::android_confirm_graphics_after_frames();
+                    }
                     if self.fps_t.elapsed().as_secs_f32() >= 1.0 {
                         let speed = self
                             .player
