@@ -1014,8 +1014,18 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
     let funcs: Vec<String> = Func::LABELS.iter().map(|s| s.to_string()).collect();
     let mut actions: Vec<String> = vec!["<none>".into()];
     actions.extend(l.state.keybindings.get("vehicles").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|b| b.get("action").and_then(|x| x.as_str()).map(String::from)).collect::<Vec<_>>()).unwrap_or_default());
-    // the game's own view actions (looking around while held, the cameras, the views)
-    for a in ["gear_up", "gear_down", "view_look_left", "view_look_right", "view_look_up", "view_look_down", "view_reset_direction", "view_interiorcam_plus", "view_interiorcam_minus", "view_toggle_viewpoint", "view_set_driver", "view_set_passenger", "view_set_outside"] {
+    // Actions that only make sense on a controller are not in keyboard.cfg. The *_fest
+    // gears stay active while an H-pattern shifter is in that gate; releasing the button
+    // fires *_fest_off, which manual gearbox scripts use to return to neutral.
+    for a in [
+        "gear_up", "gear_down",
+        "kw_s_R_fest", "kw_s_1_fest", "kw_s_2_fest", "kw_s_3_fest", "kw_s_4_fest",
+        "kw_s_5_fest", "kw_s_6_fest", "kw_s_7_fest", "kw_s_8_fest", "kw_s_9_fest",
+        "kw_s_10_fest",
+        "view_look_left", "view_look_right", "view_look_up", "view_look_down",
+        "view_reset_direction", "view_interiorcam_plus", "view_interiorcam_minus",
+        "view_toggle_viewpoint", "view_set_driver", "view_set_passenger", "view_set_outside",
+    ] {
         if !actions.iter().any(|x| x == a) {
             actions.insert(1, a.to_string());
         }
