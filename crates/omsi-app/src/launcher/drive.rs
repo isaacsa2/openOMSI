@@ -13,6 +13,71 @@ use omsi_ui::{Color, Rect, Weight};
 /// A line of the bus list: index, name, file, new, installed, liveries, parts missing.
 type BusItem = (usize, String, String, bool, bool, usize, bool);
 
+#[derive(Clone)]
+struct LineItem {
+    name: String,
+    termini: String,
+    tours: usize,
+    today: usize,
+    user_allowed: bool,
+    /// Lowercase line name, destinations and tour numbers, built once per timetable load.
+    search: String,
+}
+
+impl LineItem {
+    fn new(line: &omsi_launcher_lib::LineInfo) -> Self {
+        let today = line.tours.iter().filter(|tour| tour.runs).count();
+        let mut search = String::with_capacity(
+            line.name.len() + line.termini.iter().map(String::len).sum::<usize>() + line.tours.iter().map(|tour| tour.number.len()).sum::<usize>() + 2,
+        );
+        search.push_str(&line.name);
+        for terminus in &line.termini {
+            search.push('\n');
+            search.push_str(terminus);
+        }
+        for tour in &line.tours {
+            search.push('\n');
+            search.push_str(&tour.number);
+        }
+        Self {
+            name: line.name.clone(),
+            termini: line.termini.join(" · "),
+            tours: line.tours.len(),
+            today,
+            user_allowed: line.user_allowed,
+            search: search.to_lowercase(),
+        }
+    }
+
+    fn matches(&self, query: &str) -> bool {
+        query.is_empty() || self.search.contains(query)
+    }
+}
+
+struct TourItem {
+    number: String,
+    trips: usize,
+    days: String,
+    runs: bool,
+    next_run: Option<String>,
+    first: f64,
+    last: f64,
+}
+
+impl TourItem {
+    fn new(tour: &omsi_launcher_lib::TourInfo) -> Self {
+        Self {
+            number: tour.number.clone(),
+            trips: tour.trips.len(),
+            days: tour.days.clone(),
+            runs: tour.runs,
+            next_run: tour.next_run.clone(),
+            first: tour.first,
+            last: tour.last,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct DriveView {
     pub step: usize,
@@ -23,6 +88,23 @@ pub struct DriveView {
     bus_items: std::sync::Arc<Vec<BusItem>>,
     bus_items_key: (String, usize, usize, usize),
     pub line_filter: String,
+    /// Lines without `[userallowed]` are hidden by default, like OMSI's timetable dialog,
+    /// but can still be inspected when a map author needs to test an AI duty.
+    pub show_ai_lines: bool,
+    /// Search-ready line rows, rebuilt only after `State::lines` changes.
+    line_items: std::sync::Arc<Vec<LineItem>>,
+    line_items_revision: u64,
+    /// Indices into `line_items` for the current query and AI-lines switch.
+    visible_lines: std::sync::Arc<Vec<usize>>,
+    visible_lines_key: (u64, String, bool, String),
+    /// Sorted display rows for the chosen line, rebuilt only when it or the timetable changes.
+    tour_items: std::sync::Arc<Vec<TourItem>>,
+    tour_items_key: (u64, String),
+    tour_scroll_key: Option<(u64, String, String)>,
+    /// What the line list was last brought into view for. Map/date/filter are part of the
+    /// key because a remembered line can otherwise be left several screens out of sight
+    /// after the timetable is reloaded.
+    line_scroll_key: Option<(String, String, String, String, bool, u64)>,
     /// The list was scrolled to the chosen bus (once, when the lists came).
     pub scrolled_to_bus: bool,
 }
@@ -248,35 +330,104 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
         l.ui.paragraph("Free driving: the bus starts where you chose, with the traffic and the timetable's buses around it, but no line of your own.", Vec2::new(r.x, y), r.w, 13.0, Weight::Regular, TEXT_DIM);
         return;
     }
-    // lines and tours side by side
-    let half = (r.w - 12.0) * 0.5;
-    let left = Rect::new(r.x, y, half, r.bottom() - y);
-    let right = Rect::new(r.x + half + 12.0, y, half, r.bottom() - y);
+    // A narrow launcher used to squeeze both lists into columns barely 190 px wide. Stack
+    // them when there is enough height: line names, termini and tour times stay readable on
+    // small windows, while a desktop still gets the quicker side-by-side view.
+    let remaining = (r.bottom() - y).max(0.0);
+    let stacked = r.w < 500.0 && remaining >= 380.0;
+    let (left, right) = if stacked {
+        let line_h = (remaining * 0.48).clamp(180.0, remaining - 190.0);
+        (Rect::new(r.x, y, r.w, line_h), Rect::new(r.x, y + line_h + 12.0, r.w, remaining - line_h - 12.0))
+    } else {
+        let half = (r.w - 12.0) * 0.5;
+        (Rect::new(r.x, y, half, remaining), Rect::new(r.x + half + 12.0, y, half, remaining))
+    };
     l.ui.heading(Rect::new(left.x, left.y, left.w, 28.0), "Line", None);
     l.ui.text_input("line-filter", Rect::new(left.x, left.y + 30.0, left.w, 34.0), &mut l.drive.line_filter, "Filter…", Some("search"));
-    let q = l.drive.line_filter.to_lowercase();
-    let lines: Vec<(String, String, usize)> = l.state.lines.iter().filter(|x| q.is_empty() || x.name.to_lowercase().contains(&q)).map(|x| (x.name.clone(), x.termini.join(" · "), x.tours.len())).collect();
     let chosen = l.state.choice.line.clone();
+    let mut show_ai = l.drive.show_ai_lines;
+    if l.ui.toggle("show-ai-lines", Rect::new(left.x, left.y + 66.0, left.w, 28.0), &mut show_ai, "Include AI-only lines") {
+        l.drive.show_ai_lines = show_ai;
+        l.drive.line_scroll_key = None;
+    }
+    let q = l.drive.line_filter.trim().to_lowercase();
+    if l.drive.line_items_revision != l.state.lines_revision {
+        l.drive.line_items = std::sync::Arc::new(l.state.lines.iter().map(LineItem::new).collect());
+        l.drive.line_items_revision = l.state.lines_revision;
+        l.drive.visible_lines_key = (u64::MAX, String::new(), false, String::new());
+    }
+    let items = l.drive.line_items.clone();
+    let has_player_lines = items.iter().any(|x| x.user_allowed);
+    let visible_key = (l.state.lines_revision, q.clone(), show_ai, chosen.clone().unwrap_or_default());
+    if l.drive.visible_lines_key != visible_key {
+        let mut visible: Vec<usize> = items
+            .iter()
+            .enumerate()
+            // Keep an already selected AI line visible even after the toggle is turned off:
+            // a saved duty must not appear to vanish while it is still the active choice.
+            .filter(|(_, x)| x.user_allowed || show_ai || chosen.as_deref() == Some(x.name.as_str()))
+            .filter(|(_, x)| x.matches(&q))
+            .map(|(index, _)| index)
+            .collect();
+        // Player-selectable lines are what most people came for; AI-only lines stay below
+        // them without disturbing the timetable's natural-number order.
+        visible.sort_by_key(|index| !items[*index].user_allowed);
+        l.drive.visible_lines = std::sync::Arc::new(visible);
+        l.drive.visible_lines_key = visible_key;
+    }
+    let lines = l.drive.visible_lines.clone();
     let mut pick_line = None;
     let loading = l.state.loading_lines;
-    l.ui.scroll_area("line-list", Rect::new(left.x - 4.0, left.y + 72.0, left.w + 8.0, left.h - 72.0), &mut |ui, v| {
+    let line_area = Rect::new(left.x - 4.0, left.y + 98.0, left.w + 8.0, (left.h - 98.0).max(40.0));
+    let scroll_key = (
+        l.state.lines_for.0.clone(),
+        l.state.lines_for.1.clone(),
+        chosen.clone().unwrap_or_default(),
+        q.clone(),
+        show_ai,
+        l.state.lines_revision,
+    );
+    if l.drive.line_scroll_key.as_ref() != Some(&scroll_key) {
+        if let Some(k) = chosen.as_ref().and_then(|n| lines.iter().position(|index| &items[*index].name == n)) {
+            l.ui.scroll_to("line-list", k as f32 * 48.0, 48.0 * 2.0, line_area.h);
+        }
+        l.drive.line_scroll_key = Some(scroll_key);
+    }
+    l.ui.scroll_area("line-list", line_area, &mut |ui, v| {
         let rh = 48.0;
         if lines.is_empty() {
-            ui.text_in(if loading { "Reading the timetable…" } else { "No lines on this date." }, Rect::new(v.x + 10.0, v.y, v.w, 36.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
+            let empty = if loading {
+                "Reading the timetable…"
+            } else if !q.is_empty() {
+                "No lines match the filter."
+            } else if !show_ai && !has_player_lines && !l.state.lines.is_empty() {
+                "No player lines on this date. Enable AI-only lines to see the rest."
+            } else {
+                "No lines on this date."
+            };
+            ui.text_in(empty, Rect::new(v.x + 10.0, v.y, v.w - 20.0, 52.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
         }
-        for (k, (name, termini, tours)) in lines.iter().enumerate() {
+        for (k, index) in lines.iter().enumerate() {
+            let LineItem { name, termini, tours, today, user_allowed, .. } = &items[*index];
             let rr = Rect::new(v.x + 4.0, v.y + k as f32 * rh, v.w - 12.0, rh - 4.0);
+            if rr.bottom() < line_area.y - rh || rr.y > line_area.bottom() + rh {
+                continue;
+            }
             let on = chosen.as_deref() == Some(name.as_str());
             if ui.row(&format!("line-{name}"), rr, on) {
                 pick_line = Some(name.clone());
             }
             // (a long line name, as Ahlheim's "Eichenhoehe TA11 Mo-Do Schule", is cut)
-            let count = format!("{tours}");
+            let count = if today == tours { format!("{tours}") } else { format!("{today}/{tours}") };
             let cw = ui.width(&count, 11.5, Weight::Bold) + 8.0;
-            let bw = (ui.width(name, 13.0, Weight::Black) + 14.0).clamp(34.0, (rr.w - cw - 24.0).max(34.0));
+            let ai_w = if *user_allowed { 0.0 } else { 42.0 };
+            let bw = (ui.width(name, 13.0, Weight::Black) + 14.0).clamp(34.0, (rr.w - cw - ai_w - 24.0).max(34.0));
             let badge = Rect::new(rr.x + 8.0, rr.y + 8.0, bw, 22.0);
             ui.p().rounded(badge, 4.0, Color::rgba(52, 52, 52, 1.0));
             ui.text_in(name, badge.pad(6.0, 0.0), 12.5, Weight::Bold, TEXT, Align::Center);
+            if !*user_allowed {
+                ui.badge(Vec2::new(badge.right() + 4.0, rr.y + 10.0), "AI", WARN);
+            }
             ui.icon("event", Vec2::new(rr.right() - cw - 8.0, rr.y + 19.0), 13.0, TEXT_FAINT);
             ui.text_in(&count, Rect::new(rr.right() - cw, rr.y + 8.0, cw - 4.0, 22.0), 11.5, Weight::Bold, TEXT_DIM, Align::Right);
             ui.text_in(termini, Rect::new(rr.x + 8.0, rr.y + 28.0, rr.w - 16.0, 16.0), 11.0, Weight::Regular, TEXT_FAINT, Align::Left);
@@ -291,34 +442,50 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
         }
     }
     l.ui.heading(Rect::new(right.x, right.y, right.w, 28.0), "Tour", None);
-    let Some(line) = l.state.line().cloned() else {
+    let Some(line) = l.state.line() else {
         l.ui.paragraph("Pick a line first. As in OMSI, the start time and date then say where in the tour the bus is: the trip under way, or the next to leave.", Vec2::new(right.x, right.y + 34.0), right.w, 12.5, Weight::Regular, TEXT_DIM);
         return;
     };
-    let mut tours: Vec<&omsi_launcher_lib::TourInfo> = line.tours.iter().collect();
-    tours.sort_by(|a, b| b.runs.cmp(&a.runs).then_with(|| natural(&a.number).cmp(&natural(&b.number))));
-    let tours: Vec<(String, usize, String, bool, Option<String>, f64, f64)> = tours.iter().map(|t| (t.number.clone(), t.trips.len(), t.days.clone(), t.runs, t.next_run.clone(), t.first, t.last)).collect();
+    let tour_key = (l.state.lines_revision, line.name.clone());
+    if l.drive.tour_items_key != tour_key {
+        let mut tours: Vec<TourItem> = line.tours.iter().map(TourItem::new).collect();
+        tours.sort_by(|a, b| b.runs.cmp(&a.runs).then_with(|| natural(&a.number).cmp(&natural(&b.number))));
+        l.drive.tour_items = std::sync::Arc::new(tours);
+        l.drive.tour_items_key = tour_key;
+        l.drive.tour_scroll_key = None;
+    }
+    let tours = l.drive.tour_items.clone();
     let chosen_t = l.state.choice.tour.clone();
     let mut pick = None;
-    l.ui.scroll_area("tour-list", Rect::new(right.x - 4.0, right.y + 30.0, right.w + 8.0, right.h - 30.0), &mut |ui, v| {
+    let tour_area = Rect::new(right.x - 4.0, right.y + 30.0, right.w + 8.0, (right.h - 30.0).max(40.0));
+    let tour_scroll_key = (l.state.lines_revision, line.name.clone(), chosen_t.clone().unwrap_or_default());
+    if l.drive.tour_scroll_key.as_ref() != Some(&tour_scroll_key) {
+        if let Some(k) = chosen_t.as_ref().and_then(|number| tours.iter().position(|tour| &tour.number == number)) {
+            l.ui.scroll_to("tour-list", k as f32 * 52.0, 52.0 * 2.0, tour_area.h);
+        }
+        l.drive.tour_scroll_key = Some(tour_scroll_key);
+    }
+    l.ui.scroll_area("tour-list", tour_area, &mut |ui, v| {
         let rh = 52.0;
-        for (k, (num, trips, days, runs, next, first, last)) in tours.iter().enumerate() {
+        for (k, tour) in tours.iter().enumerate() {
             let rr = Rect::new(v.x + 4.0, v.y + k as f32 * rh, v.w - 12.0, rh - 4.0);
-            let on = chosen_t.as_deref() == Some(num.as_str());
-            if ui.row(&format!("tour-{num}"), rr, on) {
-                pick = Some((num.clone(), *runs, next.clone()));
+            if rr.bottom() < tour_area.y - rh || rr.y > tour_area.bottom() + rh {
+                continue;
             }
-            let c = if *runs { TEXT } else { TEXT_FAINT };
+            let on = chosen_t.as_deref() == Some(tour.number.as_str());
+            if ui.row(&format!("tour-{}", tour.number), rr, on) {
+                pick = Some((tour.number.clone(), tour.runs, tour.next_run.clone()));
+            }
+            let c = if tour.runs { TEXT } else { TEXT_FAINT };
             // (the tour's name as the map writes it and OMSI lists it: "1", "Mo-Fr 1")
-            let name = num.clone();
-            ui.text_in(&name, Rect::new(rr.x + 10.0, rr.y + 6.0, rr.w - 110.0, 18.0), 13.5, Weight::Bold, c, Align::Left);
-            ui.text_in(&format!("{} - {}", hhmm(*first), hhmm(*last)), Rect::new(rr.right() - 110.0, rr.y + 6.0, 100.0, 18.0), 12.0, Weight::Medium, if *runs { ACCENT } else { TEXT_FAINT }, Align::Right);
-            let sub = if *runs {
-                format!("{trips} trips · {days}")
+            ui.text_in(&tour.number, Rect::new(rr.x + 10.0, rr.y + 6.0, rr.w - 110.0, 18.0), 13.5, Weight::Bold, c, Align::Left);
+            ui.text_in(&format!("{} - {}", hhmm(tour.first), hhmm(tour.last)), Rect::new(rr.right() - 110.0, rr.y + 6.0, 100.0, 18.0), 12.0, Weight::Medium, if tour.runs { ACCENT } else { TEXT_FAINT }, Align::Right);
+            let sub = if tour.runs {
+                format!("{} trips · {}", tour.trips, tour.days)
             } else {
-                match next {
-                    Some(n) => format!("{trips} trips · {days} · runs {n}"),
-                    None => format!("{trips} trips · never within a year"),
+                match &tour.next_run {
+                    Some(next) => format!("{} trips · {} · runs {next}", tour.trips, tour.days),
+                    None => format!("{} trips · never within a year", tour.trips),
                 }
             };
             ui.text_in(&sub, Rect::new(rr.x + 10.0, rr.y + 27.0, rr.w - 20.0, 16.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
@@ -339,9 +506,43 @@ fn step_route_rest(l: &mut Launcher, r: Rect, mut y: f32) {
     }
 }
 
-fn natural(s: &str) -> (u64, String) {
-    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-    (digits.parse().unwrap_or(u64::MAX), s.to_string())
+fn natural(s: &str) -> (u64, &str) {
+    let digits = s.bytes().take_while(u8::is_ascii_digit).count();
+    (s[..digits].parse().unwrap_or(u64::MAX), s)
+}
+
+#[cfg(test)]
+mod line_selector_tests {
+    use super::LineItem;
+    use omsi_launcher_lib::{LineInfo, TourInfo};
+
+    fn line() -> LineInfo {
+        LineInfo {
+            name: "42E".into(),
+            user_allowed: true,
+            termini: vec!["Central Station".into(), "Airport".into()],
+            tours: vec![TourInfo {
+                number: "School 7".into(),
+                ai_group: String::new(),
+                first: 0.0,
+                last: 0.0,
+                days: "Mon-Fri".into(),
+                runs: true,
+                next_run: None,
+                trips: Vec::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn line_filter_finds_name_destination_and_tour() {
+        let line = LineItem::new(&line());
+        assert!(line.matches("42e"));
+        assert!(line.matches("central"));
+        assert!(line.matches("airport"));
+        assert!(line.matches("school 7"));
+        assert!(!line.matches("harbour"));
+    }
 }
 
 /// The name of the server the Drive page is joined to (see the Multiplayer page).
@@ -520,7 +721,7 @@ fn step_time(l: &mut Launcher, r: Rect) {
 }
 
 fn step_roadbook(l: &mut Launcher, r: Rect) {
-    let (Some(line), Some(tour), false) = (l.state.line().cloned(), l.state.tour().cloned(), l.state.choice.free) else {
+    let (Some(line), Some(tour), false) = (l.state.line(), l.state.tour(), l.state.choice.free) else {
         let map = l.state.map().map(|m| if m.friendly.is_empty() { m.name.clone() } else { m.friendly.clone() }).unwrap_or_default();
         l.ui.paragraph(&format!("No duty chosen: free driving on {map}. Pick a line and a tour under Route to see the roadbook here."), Vec2::new(r.x, r.y), r.w, 13.0, Weight::Regular, TEXT_DIM);
         ibis_box(l, Rect::new(r.x, r.y + 60.0, r.w, 160.0));
@@ -528,20 +729,31 @@ fn step_roadbook(l: &mut Launcher, r: Rect) {
     };
     let from = l.state.first_trip().unwrap_or(0);
     l.ui.text_in(&format!("Line {} · tour {} · from {}", line.name, tour.number, hhmm(l.state.choice.time as f64 * 60.0)), Rect::new(r.x, r.y, r.w, 22.0), 14.0, Weight::Bold, TEXT, Align::Left);
-    let trips: Vec<omsi_launcher_lib::TripInfo> = tour.trips.iter().skip(from).cloned().collect();
+    let trips = &tour.trips[from.min(tour.trips.len())..];
     let ibis_h = 150.0;
     let list = Rect::new(r.x - 4.0, r.y + 30.0, r.w + 8.0, r.h - 30.0 - ibis_h - 10.0);
     l.ui.scroll_area("roadbook", list, &mut |ui, v| {
         let mut y = v.y;
         for (k, t) in trips.iter().enumerate() {
-            let head = Rect::new(v.x + 4.0, y, v.w - 12.0, 46.0);
-            ui.p().rounded(head, 6.0, if k == 0 { SELECTED } else { FIELD });
-            ui.text_in(&format!("{} · {} → {}", if k == 0 { "Your first trip" } else { "Then" }, if t.from.is_empty() { "?" } else { &t.from }, t.terminus), Rect::new(head.x + 10.0, head.y + 4.0, head.w - 20.0, 20.0), 13.0, Weight::Bold, TEXT, Align::Left);
-            ui.text_in(&format!("{} - {} · {:.1} km · {}{}", hhmm(t.departure), hhmm(t.arrival), t.km, if t.line.is_empty() { "depot run".to_string() } else { format!("line {}", t.line) }, format!(" · {}", t.name)), Rect::new(head.x + 10.0, head.y + 24.0, head.w - 20.0, 18.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
-            y += 52.0;
             let n = t.stops.len();
+            let trip_h = 64.0 + n as f32 * 24.0;
+            if y + trip_h < list.y - 64.0 || y > list.bottom() + 64.0 {
+                y += trip_h;
+                continue;
+            }
+            let head = Rect::new(v.x + 4.0, y, v.w - 12.0, 46.0);
+            if head.bottom() >= list.y - 46.0 && head.y <= list.bottom() + 46.0 {
+                ui.p().rounded(head, 6.0, if k == 0 { SELECTED } else { FIELD });
+                ui.text_in(&format!("{} · {} → {}", if k == 0 { "Your first trip" } else { "Then" }, if t.from.is_empty() { "?" } else { &t.from }, t.terminus), Rect::new(head.x + 10.0, head.y + 4.0, head.w - 20.0, 20.0), 13.0, Weight::Bold, TEXT, Align::Left);
+                ui.text_in(&format!("{} - {} · {:.1} km · {} · {}", hhmm(t.departure), hhmm(t.arrival), t.km, if t.line.is_empty() { "depot run".to_string() } else { format!("line {}", t.line) }, t.name), Rect::new(head.x + 10.0, head.y + 24.0, head.w - 20.0, 18.0), 11.0, Weight::Regular, TEXT_DIM, Align::Left);
+            }
+            y += 52.0;
             for (s, st) in t.stops.iter().enumerate() {
                 let rr = Rect::new(v.x + 4.0, y, v.w - 12.0, 24.0);
+                if rr.bottom() < list.y - 24.0 || rr.y > list.bottom() + 24.0 {
+                    y += 24.0;
+                    continue;
+                }
                 // the timeline: a line with a dot per stop
                 let cx = rr.x + 60.0;
                 if s + 1 < n {
