@@ -174,6 +174,13 @@ pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(target_os = "macos") {
         return vec![wgpu::Backends::METAL];
     }
+    // Android compatibility test: some Motorola devices exit inside the Vulkan
+    // bootstrap before the normal Vulkan -> GLES fallback can run. Prefer GLES
+    // first on Android so those devices can reach the renderer; Vulkan remains
+    // the fallback for devices where GLES cannot be opened.
+    if cfg!(target_os = "android") {
+        return vec![wgpu::Backends::GL, wgpu::Backends::VULKAN];
+    }
     let wanted = omsi_cfg::env::var("OMSI_BACKEND").ok().unwrap_or_else(|| crate::settings::Settings::load().graphics_api);
     let all: Vec<wgpu::Backends> = if cfg!(windows) {
         vec![wgpu::Backends::VULKAN, wgpu::Backends::DX12, wgpu::Backends::GL]
