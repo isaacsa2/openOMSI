@@ -202,6 +202,14 @@ fn backend_instance(b: wgpu::Backends) -> wgpu::Instance {
     wgpu::Instance::new(d)
 }
 
+/// Android diagnostic path: the launcher starts on GLES, but the game can create Vulkan
+/// only after the Activity/window is already alive. This avoids touching the Motorola
+/// Vulkan stack during the earliest launcher bootstrap.
+#[cfg(target_os = "android")]
+pub(crate) fn android_game_graphics_instance() -> wgpu::Instance {
+    backend_instance(wgpu::Backends::VULKAN)
+}
+
 /// The renderer for a window: on `instance` if it can, else on the next graphics interface
 /// and adapter that can (`instance` then becomes that one's). Laptops with a GeForce GT or
 /// GTX beside the processor's graphics listed a Vulkan adapter whose device then could not
