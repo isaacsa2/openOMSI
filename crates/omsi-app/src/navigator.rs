@@ -82,6 +82,20 @@ const LATE: Color = Color::rgba(235, 85, 70, 1.0);
 const EARLY: Color = Color::rgba(90, 160, 240, 1.0);
 const ON_TIME: Color = Color::rgba(110, 200, 120, 1.0);
 const WARN: Color = Color::rgba(235, 170, 60, 1.0);
+const STOP_REQUEST: Color = Color::hex(0xF0A030);
+
+pub(crate) fn stop_requested(vehicle: &omsi_sim::vehicle::VehicleInstance) -> bool {
+    ["haltewunsch", "haltewunschlampe"].iter().any(|name| vehicle.var(name).is_some_and(|v| v > 0.5))
+}
+
+fn stop_request_icon(ui: &mut Painter, atlas: &mut Atlas, requested: bool, mut row: Rect, scale: f32) -> Rect {
+    if requested {
+        let size = 32.0 * scale;
+        ui.icon(atlas, "stop_request", Vec2::new(row.right() - size * 0.5, row.center().y), size, STOP_REQUEST);
+        row.w -= size + 6.0 * scale;
+    }
+    row
+}
 
 /// Vertical field of view and tilt of the map camera (degrees).
 const FOV: f32 = 40.0;
@@ -121,6 +135,8 @@ pub struct NavFrame<'a> {
     /// How late the bus is (s, negative early), when on a duty.
     pub delay: Option<f64>,
     pub passengers: Option<usize>,
+    /// The vehicle script's latched stop request or illuminated request lamp.
+    pub stop_requested: bool,
     /// Seconds of the day and weekday (0 = Monday).
     pub time: f64,
     pub weekday: i32,
@@ -1091,6 +1107,12 @@ impl Navigator {
         // whether the bus is early or late
         let bottom = Rect::new(0.0, map.bottom(), pw, 46.0 * s);
         ui.rect(bottom, BAR);
+        let stop_row = if f.stops.is_empty() {
+            Rect::new(pad, bottom.y, pw - 2.0 * pad, bottom.h)
+        } else {
+            Rect::new(pad, bottom.y + 4.0 * s, pw - 2.0 * pad, 20.0 * s)
+        };
+        let stop_row = stop_request_icon(&mut ui, &mut self.atlas, f.stop_requested, stop_row, s);
         let note = if self.route.note > 0.0 {
             Some((wd.recalculated, ON_TIME))
         } else if self.route.joined && !self.route.lanes.is_empty() && !self.route.on_route && self.route.off_for > OFF_ROUTE_AFTER {
@@ -1108,7 +1130,7 @@ impl Navigator {
         match f.stops.first() {
             Some(st) => {
                 let name = if n_stops == 1 { format!("{} · {}", st.name.trim(), wd.last_stop) } else { st.name.trim().to_string() };
-                ui.text_in(&mut self.atlas, &self.fonts, &name, 13.5 * s, Weight::Bold, Rect::new(pad, bottom.y + 4.0 * s, pw - 2.0 * pad, 20.0 * s), Align::Left, TEXT);
+                ui.text_in(&mut self.atlas, &self.fonts, &name, 13.5 * s, Weight::Bold, stop_row, Align::Left, TEXT);
                 let mut parts = Vec::new();
                 if let Some(d) = self.next_dist {
                     parts.push(if d >= 1000.0 { format!("{:.1} km", d / 1000.0) } else { format!("{:.0} m", (d / 10.0).round() * 10.0) });
@@ -1144,7 +1166,7 @@ impl Navigator {
             }
             None => {
                 let t = f.terminus.clone().filter(|t| !t.trim().is_empty()).unwrap_or_else(|| wd.no_duty.to_string());
-                ui.text_in(&mut self.atlas, &self.fonts, &t, 13.0 * s, Weight::Medium, Rect::new(pad, bottom.y, pw - 2.0 * pad, bottom.h), Align::Left, TEXT_DIM);
+                ui.text_in(&mut self.atlas, &self.fonts, &t, 13.0 * s, Weight::Medium, stop_row, Align::Left, TEXT_DIM);
             }
         }
         // the schedule: the next stops with their planned times
@@ -1223,7 +1245,7 @@ fn congestion_on(net: &Network, traffic: &Network, c: &HashMap<usize, f32>) -> H
 
 impl<'a> NavFrame<'a> {
     fn clone_ref(&self) -> NavFrame<'a> {
-        NavFrame { traffic: self.traffic, bus: self.bus, heading: self.heading, speed_kmh: self.speed_kmh, outside_temp: self.outside_temp, inside_temp: self.inside_temp, line: self.line.clone(), terminus: self.terminus.clone(), stops: self.stops.clone(), delay: self.delay, passengers: self.passengers, time: self.time, weekday: self.weekday, language: self.language, screen: self.screen, ui_scale: self.ui_scale, follow_window: self.follow_window, dt: self.dt }
+        NavFrame { traffic: self.traffic, bus: self.bus, heading: self.heading, speed_kmh: self.speed_kmh, outside_temp: self.outside_temp, inside_temp: self.inside_temp, line: self.line.clone(), terminus: self.terminus.clone(), stops: self.stops.clone(), delay: self.delay, passengers: self.passengers, stop_requested: self.stop_requested, time: self.time, weekday: self.weekday, language: self.language, screen: self.screen, ui_scale: self.ui_scale, follow_window: self.follow_window, dt: self.dt }
     }
 }
 
@@ -2203,6 +2225,30 @@ impl Navigator {
 mod tests {
     use super::*;
     use omsi_sim::traffic::Lane;
+
+    #[test]
+    fn stop_request_icon_reserves_space_only_while_active() {
+        let mut atlas = Atlas::new(256);
+        for scale in [0.75, 1.0, 2.0] {
+            for height in [20.0, 46.0] {
+                let row = Rect::new(11.0 * scale, 300.0 * scale, 300.0 * scale, height * scale);
+                for requested in [false, true, false] {
+                    let mut ui = Painter::new();
+                    let text = stop_request_icon(&mut ui, &mut atlas, requested, row, scale);
+                    assert_eq!((text.x, text.y, text.h), (row.x, row.y, row.h));
+                    if requested {
+                        assert!(!ui.verts.is_empty(), "the stop sign must render");
+                        assert!(ui.verts.iter().all(|v| v.color == STOP_REQUEST.0));
+                        assert!(ui.verts.iter().all(|v| v.pos[0] > text.right() && v.pos[0] <= row.right()));
+                        assert!((text.w - (row.w - 38.0 * scale)).abs() < 0.01);
+                    } else {
+                        assert!(ui.verts.is_empty());
+                        assert_eq!(text.w, row.w);
+                    }
+                }
+            }
+        }
+    }
 
     fn straight(a: (f64, f64), b: (f64, f64)) -> Lane {
         omsi_sim::traffic::LaneBuilder::polyline(vec![DVec3::new(a.0, a.1, 0.0), DVec3::new(b.0, b.1, 0.0)], LaneKind::Street, 3.0)
