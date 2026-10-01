@@ -2440,6 +2440,7 @@ pub(crate) fn run_offscreen(
                 stops,
                 delay: duty.as_ref().map(|_| p.vehicle.host.tt_delay as f64),
                 passengers: humans_off.as_ref().map(|h| h.riding()),
+                stop_requested: navigator::stop_requested(&p.vehicle),
                 time: clock.time,
                 weekday: clock.weekday(),
                 language: &settings.language,
