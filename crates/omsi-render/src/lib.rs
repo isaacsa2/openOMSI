@@ -7470,6 +7470,107 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
+        if cfg!(target_os = "android") && with_overlays {
+            // Motorola diagnostic: use the *real* camera bind-group layout and the real
+            // camera bind group, but replace the openOMSI sky/scene shaders with a tiny
+            // shader that only reads camera binding 0. If this draws, the giant camera
+            // layout/group is valid and the fault is in the real sky shader/resources.
+            let smoke = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("android real camera-group smoke"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
+struct CameraHead {
+    view_proj: mat4x4<f32>,
+    cam_pos: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> camera: CameraHead;
+
+struct O {
+    @builtin(position) pos: vec4<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) i: u32) -> O {
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-0.58, -0.48),
+        vec2<f32>( 0.58, -0.48),
+        vec2<f32>( 0.00,  0.58)
+    );
+    let shift = clamp(camera.cam_pos.x * 0.000001, -0.08, 0.08);
+    var o: O;
+    o.pos = vec4<f32>(p[i] + vec2<f32>(shift, 0.0), 0.0, 1.0);
+    return o;
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.05, 1.0, 0.18, 1.0);
+}
+"#.into(),
+                ),
+            });
+            let pl = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("android real camera-group smoke"),
+                bind_group_layouts: &[Some(&self.camera_layout)],
+                immediate_size: 0,
+            });
+            let pipe = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("android real camera-group smoke"),
+                layout: Some(&pl),
+                vertex: wgpu::VertexState {
+                    module: &smoke,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &smoke,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("android real camera-group smoke"),
+            });
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("android real camera-group smoke"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 1.0,
+                                g: 0.0,
+                                b: 1.0,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&pipe);
+                pass.set_bind_group(0, scene.camera_bind_group.as_ref().expect("camera bind group"), &[]);
+                pass.draw(0..3, 0..1);
+            }
+            self.queue.submit([encoder.finish()]);
+            return;
+        }
         // (a mirror takes the window's light - its own call would move the exposure on -
         // unless it comes before the window's first frame)
         let probe_redraw = enhanced
