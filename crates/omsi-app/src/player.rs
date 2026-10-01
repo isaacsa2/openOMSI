@@ -1342,13 +1342,13 @@ impl Player {
         if let Some(i) = self.pick(origin, dir, spread) {
             let def = &self.vehicle.ty.model.meshes[self.vehicle.ty.meshes[i].def_index];
             if let Some(ev) = def.mouse_event.clone() {
-                // a whole panel that can be dragged into place (the VDV dashboard's
-                // `VDV_position`) is no switch to name: its name covered the whole cockpit
+                // A whole panel that can be dragged into place (the VDV dashboard's
+                // `VDV_position`) is still operable, so keep the hand cursor, but do not
+                // show its event name as a tooltip over most of the cockpit. Large movable
+                // parts such as cab doors use the same mechanism and must remain visibly
+                // interactive (#411).
                 let big = self.vehicle.ty.mesh_bounds.get(i).map(|b| b.1 > 0.45).unwrap_or(false);
-                if big {
-                    return None;
-                }
-                return Some((ev, true));
+                return Some((if big { String::new() } else { ev }, true));
             }
         }
         if let Some((ti, i)) = self.pick_trailer(origin, dir, spread) {
