@@ -2015,44 +2015,49 @@ impl ApplicationHandler for App {
                         // Procity) at 25 fps each was redrawn three times a second, and the
                         // street jerked past in them - up to two a frame then (each costs a
                         // few milliseconds of the frame).
-                        let mirrors = self.player.as_ref().map(|p| p.vehicle.ty.def.cameras_reflexion.len()).unwrap_or(0) as f32;
-                        let rate = {
-                            #[cfg(windows)]
-                            let vr_active = self.vr.is_some();
-                            #[cfg(not(windows))]
-                            let vr_active = false;
-                            if vr_active {
-                                // Each VR frame already draws two full-size eyes. Keep bus
-                                // mirrors useful without spending two more scene renders
-                                // on nearly every frame when the headset is below refresh.
-                                omsi_cfg::env::var("OMSI_OPENXR_MIRROR_RATE")
-                                    .ok()
-                                    .and_then(|s| s.parse::<f32>().ok())
-                                    .filter(|rate| rate.is_finite() && *rate >= 0.0)
-                                    .unwrap_or(self.settings.vr_mirror_rate)
-                            } else {
-                                MIRROR_RATE.max(mirrors * MIRROR_MIN_HZ).min(MIRROR_MAX_HZ * self.mirrors_seen.max(1) as f32)
+                        if self.settings.mirror_size == 0 {
+                            self.mirror_budget = 0.0;
+                            self.mirrors_seen = 0;
+                        } else {
+                            let mirrors = self.player.as_ref().map(|p| p.vehicle.ty.def.cameras_reflexion.len()).unwrap_or(0) as f32;
+                            let rate = {
+                                #[cfg(windows)]
+                                let vr_active = self.vr.is_some();
+                                #[cfg(not(windows))]
+                                let vr_active = false;
+                                if vr_active {
+                                    // Each VR frame already draws two full-size eyes. Keep bus
+                                    // mirrors useful without spending two more scene renders
+                                    // on nearly every frame when the headset is below refresh.
+                                    omsi_cfg::env::var("OMSI_OPENXR_MIRROR_RATE")
+                                        .ok()
+                                        .and_then(|s| s.parse::<f32>().ok())
+                                        .filter(|rate| rate.is_finite() && *rate >= 0.0)
+                                        .unwrap_or(self.settings.vr_mirror_rate)
+                                } else {
+                                    MIRROR_RATE.max(mirrors * MIRROR_MIN_HZ).min(MIRROR_MAX_HZ * self.mirrors_seen.max(1) as f32)
+                                }
+                            };
+                            self.mirror_budget = (self.mirror_budget + raw_dt.min(0.1) * rate).min(2.5);
+                            let mut drawn = 0;
+                            // (in the cab, and from outside too while the bus is near: its
+                            // mirrors are seen from the pavement and stood frozen)
+                            let near = self.player.as_ref().zip(self.camera.as_ref()).is_some_and(|(p, c)| (p.vehicle.position - c.position).length() < 12.0);
+                            while (self.in_cab || near) && self.mirror_budget >= 1.0 && drawn < self.mirrors_seen.clamp(1, 2) {
+                                let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) else { break };
+                                self.mirror_budget -= 1.0;
+                                drawn += 1;
+                                self.mirror_turn = self.mirror_turn.wrapping_add(1);
+                                self.mirrors_seen = render_mirrors(
+                                    r,
+                                    scene,
+                                    w,
+                                    p,
+                                    &lighting,
+                                    Some(self.mirror_turn),
+                                    Some((*cam, s.config.width as f32 / s.config.height.max(1) as f32)),
+                                );
                             }
-                        };
-                        self.mirror_budget = (self.mirror_budget + raw_dt.min(0.1) * rate).min(2.5);
-                        let mut drawn = 0;
-                        // (in the cab, and from outside too while the bus is near: its
-                        // mirrors are seen from the pavement and stood frozen)
-                        let near = self.player.as_ref().zip(self.camera.as_ref()).is_some_and(|(p, c)| (p.vehicle.position - c.position).length() < 12.0);
-                        while (self.in_cab || near) && self.mirror_budget >= 1.0 && drawn < self.mirrors_seen.clamp(1, 2) {
-                            let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) else { break };
-                            self.mirror_budget -= 1.0;
-                            drawn += 1;
-                            self.mirror_turn = self.mirror_turn.wrapping_add(1);
-                            self.mirrors_seen = render_mirrors(
-                                r,
-                                scene,
-                                w,
-                                p,
-                                &lighting,
-                                Some(self.mirror_turn),
-                                Some((*cam, s.config.width as f32 / s.config.height.max(1) as f32)),
-                            );
                         }
                         *self.profile.entry("mirrors").or_default() += __t.elapsed().as_secs_f64();
                         let __t = Instant::now();
