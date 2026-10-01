@@ -817,13 +817,10 @@ mod tests {
         s.voices.lock().push(quiet_important);
         let mut out = vec![0.0f32; 16];
         s.render(&mut out);
-        let voices = s.voices.lock();
-        let kept_ordinary = voices
-            .iter()
-            .filter(|v| v.id != 9_999 && v.pos > 0.0)
-            .count();
-        assert_eq!(kept_ordinary, MAX_VOICES - 1);
-        assert!(voices.iter().find(|v| v.id == 9_999).is_some_and(|v| v.pos > 0.0));
+        // 254 loud ordinary voices plus the quiet important one are mixed. If priority
+        // were ignored, this would be 255 loud ordinary voices instead.
+        let expect = ((MAX_VOICES - 1) as f32 + 0.001) * 64.0 / 32_768.0;
+        assert!((out[0] - expect).abs() < 1e-4, "{} vs {expect}", out[0]);
     }
 
     #[test]
