@@ -146,7 +146,7 @@ impl Shared {
         let frames = out.len() / ch;
         let rate = self.sample_rate.load(Ordering::Relaxed).max(1);
         let dev_rate = rate as f64;
-        // More voices than OMSI's `[sound_maxcount]` (200 by default): keep
+        // More voices than the mixer's 255-voice cap: keep
         // `[important]` sounds first, then the ordinary voices that reach the listener
         // loudest. Voices left out still advance in time, so an engine loop comes back at
         // the right phase when it becomes audible again.
@@ -335,8 +335,9 @@ fn apply_params(v: &mut Voice, params: VoiceParams, now: std::time::Instant, lis
     v.params = params;
 }
 
-/// At most this many voices are mixed at once (OMSI's `[sound_maxcount]` default).
-pub const MAX_VOICES: usize = 200;
+/// At most this many clip voices are mixed at once. 255 leaves more headroom for dense
+/// buses and traffic while still bounding the per-block mixing cost.
+pub const MAX_VOICES: usize = 255;
 
 /// How loud voice `v` reaches the listener (its gain and distance), to rank voices by.
 fn heard_gain(v: &Voice, listener: &Listener) -> f32 {
