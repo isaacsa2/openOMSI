@@ -1553,7 +1553,7 @@ impl Renderer {
         let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
         let options = if weak {
             log::warn!("{}: a small or shared graphics chip - no SSAO, no MSAA, shadow maps of at most 1024 (OMSI_FULL_GPU=1 keeps the settings)", info.name);
-            RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), ..options }
+            RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), no_enhanced: cfg!(target_os = "android") || options.no_enhanced, ..options }
         } else if modest {
             log::info!("{}: {} MB of its own - no SSAO, at most 2x MSAA and 2048 shadow maps (OMSI_FULL_GPU=1 keeps the settings)", info.name, vram.unwrap_or(0));
             RenderOptions { msaa: options.msaa.min(2), ssao: false, shadow_size: options.shadow_size.min(2048), ..options }
@@ -2726,7 +2726,7 @@ impl Renderer {
             })
         };
         let pass = PassPipelines {
-            pipelines: scene_pipelines(format, "fs_main"),
+            pipelines: scene_pipelines(format, if cfg!(target_os = "android") { "fs_motorola_debug" } else { "fs_main" }),
             corona_pipeline: corona_pipeline_for(format, "fs_main", additive),
             smoke_pipeline: corona_pipeline_for(format, "fs_smoke", alpha_blend),
             sky_pipeline: sky_pipeline_for(format, "fs_main"),
@@ -8602,7 +8602,11 @@ impl Renderer {
                 1
             };
             let per_part = main_bundles.len().div_ceil(parts.max(1));
-            let sky_clear = wgpu::LoadOp::Clear(wgpu::Color { r: sky.x as f64, g: sky.y as f64, b: sky.z as f64, a: 1.0 });
+            let sky_clear = if cfg!(target_os = "android") {
+                wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 0.0, b: 1.0, a: 1.0 })
+            } else {
+                wgpu::LoadOp::Clear(wgpu::Color { r: sky.x as f64, g: sky.y as f64, b: sky.z as f64, a: 1.0 })
+            };
             let depth_first = if share_depth || msaa_prepass { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(0.0) };
             for g in 0..parts.saturating_sub(1) {
                 let first = g == 0;
@@ -8627,12 +8631,14 @@ impl Renderer {
                     });
                     pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
                     if first {
-                        if let Some(sky) = &scene.sky_bind_group {
+                        if !cfg!(target_os = "android") {
+                            if let Some(sky) = &scene.sky_bind_group {
                             pass.set_pipeline(&pp.sky_pipeline);
                             pass.set_bind_group(1, sky, &[]);
                             pass.set_vertex_buffer(0, self.sky_mesh.0.slice(..));
                             pass.set_index_buffer(self.sky_mesh.1.slice(..), wgpu::IndexFormat::Uint32);
                             pass.draw_indexed(0..self.sky_mesh.2, 0, 0..1);
+                            }
                         }
                     }
                     pass.execute_bundles(main_bundles[g * per_part..((g + 1) * per_part).min(main_bundles.len())].iter());
@@ -8685,12 +8691,14 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
-            if let Some(sky) = scene.sky_bind_group.as_ref().filter(|_| parts == 1) {
+            if !cfg!(target_os = "android") {
+                if let Some(sky) = scene.sky_bind_group.as_ref().filter(|_| parts == 1) {
                 pass.set_pipeline(&pp.sky_pipeline);
                 pass.set_bind_group(1, sky, &[]);
                 pass.set_vertex_buffer(0, self.sky_mesh.0.slice(..));
                 pass.set_index_buffer(self.sky_mesh.1.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.sky_mesh.2, 0, 0..1);
+                }
             }
             if main_bundles.is_empty() {
                 pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
