@@ -739,6 +739,7 @@ impl ApplicationHandler for App {
                 }
                 if let Some(p) = self.player.as_mut() {
                     p.axes.linear = self.settings.steering_linear;
+                    p.axes.dynamic_wheel_speed = self.settings.dynamic_wheel_speed;
                     p.axes.old_steering = self.settings.old_steering;
                     p.axes.pedal_hold = self.settings.brake_hold;
                     p.analog = analog;

@@ -505,6 +505,7 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
     let mut c = Col::new(ui, cols[0], "Keyboard & mouse");
     sel_setting(ui, s, dirty, "s-keys", c.row(), "Driving keys", "drive_keys", &[("omsi", "Custom controls (Controls page)"), ("simple", "W A S D + arrows"), ("wasd", "W A S D only"), ("arrows", "Arrow keys only")]);
     toggle_setting(ui, s, dirty, c.row(), "Steering linearity (keys at OMSI's steady pace)", "steering_linear");
+    toggle_setting(ui, s, dirty, c.row(), "Dynamic Wheel Speed (slower keyboard steering at speed)", "dynamic_wheel_speed");
     toggle_setting(ui, s, dirty, c.row(), "Old Steering (the wheel stays, turn it back yourself)", "old_steering");
     let mut ms = get(s, "mouse_sens").as_f64().unwrap_or(1.0) as f32;
     if ui.slider("s-mouse", c.row(), &mut ms, 0.1, 3.0, 0.05, "Mouse steering sensitivity (O)", &|v| if (v - 1.0).abs() < 0.01 { "OMSI".to_string() } else { format!("{:.0}%", v * 100.0) }) {
@@ -1910,7 +1911,7 @@ mod settings_tests {
             graphics.push("s-api");
         }
         let driving = vec![
-            "s-keys", "set-steering_linear", "set-old_steering", "s-mouse", "set-brake_hold", "set-auto_clutch", "s-go-keys",
+            "s-keys", "set-steering_linear", "set-dynamic_wheel_speed", "set-old_steering", "s-mouse", "set-brake_hold", "set-auto_clutch", "s-go-keys",
             "s-wrange", "s-wlock", "s-pedt", "s-pedb", "set-ff_enabled", "set-ff_invert", "s-wreset", "s-go-pads",
         ];
         let mut camera = vec![
