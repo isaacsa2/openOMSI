@@ -1782,6 +1782,7 @@ impl ApplicationHandler for App {
                             stops,
                             delay: self.duty.as_ref().map(|_| p.vehicle.host.tt_delay as f64),
                             passengers: self.humans.as_ref().map(|h| h.riding()),
+                            stop_requested: navigator::stop_requested(&p.vehicle),
                             time: self.clock.time,
                             weekday: self.clock.weekday(),
                             language: &self.settings.language,
