@@ -9142,6 +9142,23 @@ pub fn sync_vehicle_part(
     }
 }
 
+/// Resolve a vehicle `[matl_freetex]` name. OMSI add-ons often write paths such as
+/// `..\\Texture\\mb_pmon\\warning.bmp`: if the normal lookup misses, retry the part
+/// below the `Texture` component against the vehicle's texture search directories.
+fn find_vehicle_freetex(name: &str, dirs: &[&Path]) -> Option<PathBuf> {
+    if let Some(path) = omsi_texture::find_texture(name, dirs) {
+        return Some(path);
+    }
+    let normalized = name.trim().replace('\\\\', "/");
+    let parts: Vec<&str> = normalized.split('/').filter(|p| !p.is_empty()).collect();
+    let texture = parts.iter().position(|p| p.eq_ignore_ascii_case("Texture"))?;
+    let rel = parts.get(texture + 1..)?.join("/");
+    if rel.is_empty() {
+        return None;
+    }
+    omsi_texture::find_texture(&rel, dirs)
+}
+
 fn sync_materials(
     renderer: &Renderer,
     scene: &mut Scene,
@@ -9163,7 +9180,15 @@ fn sync_materials(
                         let found = if name.is_empty() {
                             None
                         } else {
-                            omsi_texture::find_texture(&name, &dirs).and_then(|path| {
+                            let resolved = find_vehicle_freetex(&name, &dirs);
+                            if resolved.is_none() {
+                                log::warn!(
+                                    "vehicle [matl_freetex] '{}' = {:?}: texture not found",
+                                    f.var,
+                                    name
+                                );
+                            }
+                            resolved.and_then(|path| {
                                 let mut shared = f.shared.lock();
                                 if let Some(e) = shared.get_mut(&path) {
                                     e.1 += 1;
@@ -11984,6 +12009,22 @@ pub(crate) fn resolve_scenery_freetex_name<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vehicle_freetex_retries_paths_below_texture_component() {
+        let root = std::env::temp_dir().join("openomsi-freetex-path-test");
+        let vehicle_texture = root.join("Vehicles/TestBus/Texture");
+        let wanted = vehicle_texture.join("mb_pmon/alerta_FalhaCambio.bmp");
+        std::fs::create_dir_all(wanted.parent().unwrap()).unwrap();
+        std::fs::write(&wanted, b"x").unwrap();
+        let dirs = [vehicle_texture.as_path()];
+        let found = find_vehicle_freetex(
+            r"..\Texture\mb_pmon\alerta_FalhaCambio.bmp",
+            &dirs,
+        );
+        assert_eq!(found.as_deref(), Some(wanted.as_path()));
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     fn freetex_test_look() -> Look {
         Look {
