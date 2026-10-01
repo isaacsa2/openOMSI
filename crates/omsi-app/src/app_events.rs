@@ -1605,6 +1605,7 @@ impl ApplicationHandler for App {
                                             doppler: true,
                                             range: 3.0,
                                             lowpass_hz: 0.0,
+                                            important: false,
                                         },
                                     );
                                 }
