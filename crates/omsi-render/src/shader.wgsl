@@ -1609,3 +1609,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     a = a * in.params.x;
     return vec4<f32>(rgb, a);
 }
+
+
+@fragment
+fn fs_motorola_debug(in: VsOut) -> @location(0) vec4<f32> {
+    let n = safe_normal(in.normal);
+    return vec4<f32>(0.15 + abs(n.x) * 0.35, 0.65 + abs(n.z) * 0.35, 0.10 + abs(n.y) * 0.25, 1.0);
+}
