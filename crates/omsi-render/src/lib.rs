@@ -7475,6 +7475,130 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
+        if cfg!(target_os = "android") && with_overlays {
+            // A/B diagnostic after the full camera-layout test crashed on Motorola:
+            // keep the real CameraUniform buffer/data, but expose only binding 0 through
+            // a tiny bind-group layout. If this draws, the data and buffer are good and
+            // the failure is in the large real camera resource layout.
+            let smoke_layout = self.device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("android minimal camera layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                },
+            );
+            let smoke_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("android minimal camera group"),
+                layout: &smoke_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.camera_buf.as_entire_binding(),
+                }],
+            });
+            let smoke = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("android minimal real camera smoke"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
+struct CameraHead {
+    view_proj: mat4x4<f32>,
+    cam_pos: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> camera: CameraHead;
+
+struct O {
+    @builtin(position) pos: vec4<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) i: u32) -> O {
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-0.60, -0.50),
+        vec2<f32>( 0.60, -0.50),
+        vec2<f32>( 0.00,  0.60)
+    );
+    let shift = clamp(camera.cam_pos.x * 0.000001, -0.08, 0.08);
+    var o: O;
+    o.pos = vec4<f32>(p[i] + vec2<f32>(shift, 0.0), 0.0, 1.0);
+    return o;
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.05, 1.0, 0.18, 1.0);
+}
+"#.into(),
+                ),
+            });
+            let pl = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("android minimal real camera smoke"),
+                bind_group_layouts: &[Some(&smoke_layout)],
+                immediate_size: 0,
+            });
+            let pipe = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("android minimal real camera smoke"),
+                layout: Some(&pl),
+                vertex: wgpu::VertexState {
+                    module: &smoke,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &smoke,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("android minimal real camera smoke"),
+            });
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("android minimal real camera smoke"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 1.0,
+                                g: 0.0,
+                                b: 1.0,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&pipe);
+                pass.set_bind_group(0, &smoke_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            self.queue.submit([encoder.finish()]);
+            return;
+        }
         // (a mirror takes the window's light - its own call would move the exposure on -
         // unless it comes before the window's first frame)
         let probe_redraw = enhanced
