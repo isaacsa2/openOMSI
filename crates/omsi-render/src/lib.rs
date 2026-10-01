@@ -1147,6 +1147,10 @@ pub struct Renderer {
     overlay_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     camera_buf: wgpu::Buffer,
+    /// Android diagnostic: cached once, never recreated per frame. Uses the real
+    /// CameraUniform view-projection/basis to draw geometry in front of the camera.
+    android_viewproj_smoke_pipeline: Option<wgpu::RenderPipeline>,
+    android_viewproj_smoke_group: Option<wgpu::BindGroup>,
     white_texture: GpuTexture,
     black_texture: GpuTexture,
     /// A tangent-space normal pointing straight out (the PBR normal map's stand-in).
@@ -2447,6 +2451,125 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let (android_viewproj_smoke_pipeline, android_viewproj_smoke_group) =
+            if cfg!(target_os = "android") {
+                let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("android view-projection smoke"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
+                let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("android view-projection smoke"),
+                    layout: &layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: camera_buf.as_entire_binding(),
+                    }],
+                });
+                let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("android view-projection smoke"),
+                    source: wgpu::ShaderSource::Wgsl(
+                        r#"
+struct Camera {
+    view_proj: mat4x4<f32>,
+    cam_pos: vec4<f32>,
+    world_origin: vec4<f32>,
+    sun_dir: vec4<f32>,
+    ambient: vec4<f32>,
+    fog: vec4<f32>,
+    sun_color: vec4<f32>,
+    sky_color: vec4<f32>,
+    light_grid: vec4<f32>,
+    sky: vec4<f32>,
+    cam_right: vec4<f32>,
+    cam_up: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> camera: Camera;
+
+struct Out {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) @interpolate(flat) col: vec4<f32>,
+};
+
+@vertex
+fn vs_main(
+    @builtin(vertex_index) i: u32,
+    @builtin(instance_index) inst: u32
+) -> Out {
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-2.5, -1.8),
+        vec2<f32>( 2.5, -1.8),
+        vec2<f32>( 0.0,  2.2)
+    );
+    let right = normalize(camera.cam_right.xyz);
+    let up = normalize(camera.cam_up.xyz);
+    let forward = normalize(cross(up, right));
+    let sign = select(-1.0, 1.0, inst == 0u);
+    let centre = camera.cam_pos.xyz + forward * (10.0 * sign);
+    let world = centre + right * p[i].x + up * p[i].y;
+
+    var o: Out;
+    o.pos = camera.view_proj * vec4<f32>(world, 1.0);
+    o.col = select(
+        vec4<f32>(0.05, 0.85, 1.0, 1.0),
+        vec4<f32>(0.05, 1.0, 0.18, 1.0),
+        inst == 0u
+    );
+    return o;
+}
+
+@fragment
+fn fs_main(i: Out) -> @location(0) vec4<f32> {
+    return i.col;
+}
+"#.into(),
+                    ),
+                });
+                let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("android view-projection smoke"),
+                    bind_group_layouts: &[Some(&layout)],
+                    immediate_size: 0,
+                });
+                let pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("android view-projection smoke"),
+                    layout: Some(&pl),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: Some("vs_main"),
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: None,
+                        ..Default::default()
+                    },
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: Some("fs_main"),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                });
+                (Some(pipe), Some(group))
+            } else {
+                (None, None)
+            };
         let white = omsi_texture::Image::solid([255, 255, 255, 255]);
         let white_texture = upload_texture(&device, &queue, &white, false);
         let black_texture = upload_texture(
@@ -3779,6 +3902,8 @@ impl Renderer {
             overlay_layout,
             sampler,
             camera_buf,
+            android_viewproj_smoke_pipeline,
+            android_viewproj_smoke_group,
             white_texture,
             black_texture,
             flat_normal_texture,
@@ -7478,6 +7603,46 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
+        if cfg!(target_os = "android") && with_overlays {
+            if let (Some(pipe), Some(group)) = (
+                self.android_viewproj_smoke_pipeline.as_ref(),
+                self.android_viewproj_smoke_group.as_ref(),
+            ) {
+                let mut encoder = self.device.create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("android view-projection smoke"),
+                    },
+                );
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("android view-projection smoke"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: target,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: 1.0,
+                                    g: 0.0,
+                                    b: 1.0,
+                                    a: 1.0,
+                                }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    pass.set_pipeline(pipe);
+                    pass.set_bind_group(0, group, &[]);
+                    pass.draw(0..3, 0..2);
+                }
+                self.queue.submit([encoder.finish()]);
+                return;
+            }
+        }
         // (a mirror takes the window's light - its own call would move the exposure on -
         // unless it comes before the window's first frame)
         let probe_redraw = enhanced
