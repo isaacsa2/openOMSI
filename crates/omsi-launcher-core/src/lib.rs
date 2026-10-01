@@ -1634,7 +1634,8 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
             "vr_scale" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.5, 1.0)).unwrap_or(0.65)),
             "vr_head_smoothing_ms" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 30.0) as i64).unwrap_or(0)),
             "vr_mirror_rate" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 60.0) as i64).unwrap_or(16)),
-            "mirror_size" | "max_fps" => v[&k] = json!(val.parse::<f64>().map(|x| x as i64).unwrap_or(0)),
+            "mirror_size" => v[&k] = json!(val.parse::<i64>().map(|x| if x == 0 { 0 } else { x.clamp(64, 2048) }).unwrap_or(256)),
+            "max_fps" => v[&k] = json!(val.parse::<f64>().map(|x| x as i64).unwrap_or(0)),
             "max_obj_dist" => v[&k] = if val.eq_ignore_ascii_case("auto") { json!("auto") } else { json!(val.parse::<f64>().map(|m| (m.round() as i64).to_string()).unwrap_or_else(|_| "auto".into())) },
             "ssao" | "shadows" | "navigator" | "enhanced" | "vr" | "vr_desktop_mirror" | "fullscreen" | "vsync" | "exact_fare" | "detail_textures" | "texture_compression" | "chat" | "tooltips" | "name_tags" | "show_fps" | "clouds" | "doppler" | "driver" | "use_real_time" | "use_real_date" | "use_real_year" | "collision_vehicles" | "collision_objects" | "collision_pedestrians" | "head_movement" | "driverview_smooth" | "hands_in_cab" => v[&k] = json!(b(val)),
             "maintenance" | "ai_unsched_factor" | "ai_max_scheduled" | "ai_max_parked" => v[&k] = json!(val.trim_end_matches('%').parse::<f64>().map(|x| x.max(0.0) as i64).unwrap_or(0)),
@@ -1818,7 +1819,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         f("pax_density", 1.0),
         f("vol_ai", 1.0),
         f("vol_scenery", 1.0),
-        n("mirror_size", 256).clamp(64, 2048),
+        match n("mirror_size", 256) { 0 => 0, x => x.clamp(64, 2048) },
         b("doppler", true),
         b("driver", true),
         n("max_fps", 0).max(0),
@@ -2362,6 +2363,14 @@ mod tests {
         assert_eq!(language_iso("PTB"), "pt");
         assert_eq!(language_code("pt-PT"), "PTP");
         assert_eq!(language_iso("PTP"), "pt-pt");
+    }
+
+    #[test]
+    fn mirror_rendering_can_be_disabled() {
+        let v = settings_from_text(Some("mirror_size=0\n"));
+        assert_eq!(v["mirror_size"], 0);
+        let text = settings_to_text(&v, None);
+        assert!(text.lines().any(|l| l == "mirror_size=0"), "{text}");
     }
 
     #[test]
