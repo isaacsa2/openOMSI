@@ -22,6 +22,23 @@ pub(crate) fn take_preopened(map: &Path, date: i32) -> Option<World> {
     }
 }
 
+/// Distance from a point on one of the route lanes to the first stop, following the
+/// route rather than cutting across it in a straight line. `lengths` ends with the stop
+/// lane; `start_s` and `stop_s` are distances along their respective lanes.
+fn route_distance_to_stop(lengths: &[f64], start: usize, start_s: f64, stop_s: f64) -> f64 {
+    if start >= lengths.len() {
+        return f64::INFINITY;
+    }
+    if start + 1 == lengths.len() {
+        return (stop_s - start_s).max(0.0);
+    }
+    let mut d = (lengths[start] - start_s).max(0.0);
+    if start + 1 < lengths.len() - 1 {
+        d += lengths[start + 1..lengths.len() - 1].iter().sum::<f64>();
+    }
+    d + stop_s.max(0.0)
+}
+
 /// With a duty (`--schedule --line`): the trip it starts with and the stop of it (`args.
 /// duty_trip`, `args.duty_first_stop`), and with `--auto-entry` the entry point nearest to
 /// that stop by road (`args.entry`).
@@ -82,20 +99,33 @@ pub(crate) fn place_on_duty(args: &mut Args) {
             let Some(p) = stop.position else { continue };
             let Some(li) = route.iter().position(|&l| net.lanes[l].nearest_point(p).map(|q| q.1 < 25.0).unwrap_or(false)) else { continue };
             let targets: Vec<usize> = route[li.saturating_sub(60)..=li].to_vec();
+            let target_lengths: Vec<f64> = targets.iter().map(|&l| net.lanes[l].length() as f64).collect();
             let stop_s = net.lanes[route[li]].nearest_point(p).map(|q| q.0).unwrap_or(0.0);
             let cost = |from: DVec3, heading: f64| -> Option<f64> {
-                // an entry point on the route itself, before the stop (the terminus in
-                // front of a bus put down at its entry): there already. The way round the
-                // network to the start of the lane it stands on was all that was looked
-                // for, and the first stop counted as out of reach.
-                let before = targets.iter().any(|&l| {
-                    net.lanes[l].nearest_point(from).is_some_and(|(s, d)| d < 6.0 && (l != route[li] || s <= stop_s + 1.0))
-                });
-                if before {
-                    return Some((p - from).truncate().length());
+                // If an entry point already lies on the route, count the distance still to
+                // drive along the route to the stop. Using the straight-line distance made a
+                // winding approach look much shorter than it really is.
+                let on_route = targets
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(k, &l)| {
+                        net.lanes[l].nearest_point(from).and_then(|(s, d)| {
+                            (d < 6.0 && (k + 1 != targets.len() || s <= stop_s + 1.0))
+                                .then_some((k, s, d))
+                        })
+                    })
+                    .min_by(|a, b| a.2.total_cmp(&b.2));
+                if let Some((k, s, _)) = on_route {
+                    return Some(route_distance_to_stop(&target_lengths, k, s as f64, stop_s as f64));
                 }
-                let (path, _) = navigator::way_back(&net, from, heading, &targets, 40_000.0)?;
-                Some(path.iter().map(|&l| net.lanes[l].length() as f64).sum())
+
+                // navigator::way_back returns the lanes up to the route and where it joins
+                // targets. The old cost stopped there, so an entry point could win merely
+                // because it joined the route early, even if many kilometres still remained
+                // before the first stop.
+                let (path, join) = navigator::way_back(&net, from, heading, &targets, 40_000.0)?;
+                let to_route: f64 = path.iter().map(|&l| net.lanes[l].length() as f64).sum();
+                Some(to_route + route_distance_to_stop(&target_lengths, join, 0.0, stop_s as f64))
             };
             let pick = if args.auto_entry {
                 entries.iter().filter_map(|e| cost(e.2, e.3).map(|c| (e, c))).min_by(|a, b| a.1.total_cmp(&b.1))
@@ -138,4 +168,21 @@ pub(crate) fn place_on_duty(args: &mut Args) {
         }
     }
     log::info!("duty start: no stop of the next trips can be reached from the entry points; the timetable decides, {:.1} s", t0.elapsed().as_secs_f64());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::route_distance_to_stop;
+
+    #[test]
+    fn automatic_entry_cost_includes_the_route_left_to_the_stop() {
+        let lanes = [100.0, 200.0, 80.0];
+
+        // Joined the route 20 m into its first lane: 80 + 200 + 30 remain.
+        assert_eq!(route_distance_to_stop(&lanes, 0, 20.0, 30.0), 310.0);
+        // Joined later: only the rest of that lane and the stop lane remain.
+        assert_eq!(route_distance_to_stop(&lanes, 1, 50.0, 30.0), 180.0);
+        // Already on the stop lane before the stop.
+        assert_eq!(route_distance_to_stop(&lanes, 2, 10.0, 30.0), 20.0);
+    }
 }
