@@ -9149,7 +9149,7 @@ fn find_vehicle_freetex(name: &str, dirs: &[&Path]) -> Option<PathBuf> {
     if let Some(path) = omsi_texture::find_texture(name, dirs) {
         return Some(path);
     }
-    let normalized = name.trim().replace('\\\\', "/");
+    let normalized = name.trim().replace('\\', "/");
     let parts: Vec<&str> = normalized.split('/').filter(|p| !p.is_empty()).collect();
     let texture = parts.iter().position(|p| p.eq_ignore_ascii_case("Texture"))?;
     let rel = parts.get(texture + 1..)?.join("/");
