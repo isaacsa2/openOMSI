@@ -1578,9 +1578,52 @@ impl App {
         }
     }
 
-    /// Change the weather in force by hand: `f` changes a copy of it, which takes the place of
-    /// the weather at once (a change on its way and the weather cycle stop: this is the
-    /// weather now). The sky's clouds are made again when their type changed.
+    /// Apply the portable custom-weather state used by the launcher and the World page.
+    pub(crate) fn set_custom_weather(&mut self, mut custom: crate::weather_setup::CustomWeather, share: bool) {
+        if self.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client) && share {
+            self.service_msg = Some(("In a LAN session the host sets the weather".into(), 3.0));
+            return;
+        }
+        if self.metar_locked() {
+            self.service_msg = Some(("The weather cannot be changed while the METAR sync is on".into(), 3.0));
+            return;
+        }
+        custom.normalize();
+        let spec = custom.encode();
+        let to = custom.to_weather();
+        let clouds_changed = self.weather.as_ref().is_none_or(|w| w.clouds.0.trim() != to.clouds.0.trim());
+        self.args.weather = Some(spec.clone());
+        self.weather_cycle = None;
+        self.weather_blend = None;
+        self.wetness = custom.road_wetness;
+        crate::scene::SNOW_WEATHER.store(to.snow, std::sync::atomic::Ordering::Relaxed);
+        omsi_sim::host::set_ambient_weather(to.temp.0, to.temp.1);
+        self.weather = Some(to);
+        if clouds_changed {
+            if let (Some(r), Some(scene)) = (self.renderer.as_ref(), self.scene.as_mut()) {
+                crate::weather_setup::setup_sky(&self.args, r, scene, self.envir.as_ref(), self.weather.as_ref());
+            }
+        }
+        self.follow_date();
+        if share {
+            if let Some(l) = self.lan.as_mut().filter(|l| l.role == omsi_net::Role::Host) {
+                l.set_weather(&spec);
+            }
+        }
+    }
+
+    pub(crate) fn edit_custom_weather(&mut self, f: impl FnOnce(&mut crate::weather_setup::CustomWeather)) {
+        let brightness = crate::weather_setup::custom_weather(self.args.weather.as_deref()).map(|c| c.brightness).unwrap_or(1.0);
+        let base = self.weather.clone().unwrap_or_default();
+        let mut custom = crate::weather_setup::custom_weather(self.args.weather.as_deref())
+            .unwrap_or_else(|| crate::weather_setup::CustomWeather::from_weather(&base, brightness, self.wetness));
+        custom.road_wetness = self.wetness;
+        f(&mut custom);
+        self.set_custom_weather(custom, true);
+    }
+
+    /// Change the weather in force by hand. The new menu works directly on Weather, then
+    /// this converts it to the same portable custom state the launcher uses.
     pub(crate) fn edit_weather(&mut self, f: impl FnOnce(&mut omsi_content::weather::Weather)) {
         if self.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client) {
             self.service_msg = Some(("In a LAN session the host sets the weather".into(), 3.0));
@@ -1594,19 +1637,10 @@ impl App {
         if w.precip.len() < 5 {
             w.precip.resize(5, 0.0);
         }
-        let before = w.clouds.0.trim().to_string();
         f(&mut w);
-        w.name = crate::game_lists::CUSTOM_WEATHER.to_string();
-        let clouds_changed = w.clouds.0.trim() != before;
-        omsi_sim::host::set_ambient_weather(w.temp.0, w.temp.1);
-        self.weather_blend = None;
-        self.weather_cycle = None;
-        self.weather = Some(w);
-        if clouds_changed {
-            if let (Some(r), Some(scene)) = (self.renderer.as_ref(), self.scene.as_mut()) {
-                crate::weather_setup::setup_sky(&self.args, r, scene, self.envir.as_ref(), self.weather.as_ref());
-            }
-        }
+        let brightness = crate::weather_setup::custom_weather(self.args.weather.as_deref()).map(|c| c.brightness).unwrap_or(1.0);
+        let custom = crate::weather_setup::CustomWeather::from_weather(&w, brightness, self.wetness);
+        self.set_custom_weather(custom, true);
     }
 
     /// A settings window (options, vehicle, world) is open.
@@ -2475,6 +2509,10 @@ impl App {
     /// The player's own choice comes at once, as in Omsi.exe (the weather dialog loads the
     /// .owt and applies it straight away, 0x6828e0 -> 0x754c80); the cycle blends it in.
     pub(crate) fn change_weather(&mut self, file: Option<String>, share: bool, secs: f32) {
+        if let Some(custom) = crate::weather_setup::custom_weather(file.as_deref()) {
+            self.set_custom_weather(custom, share);
+            return;
+        }
         if self.metar_locked() {
             self.service_msg = Some(("The weather cannot be changed while the METAR sync is on".into(), 3.0));
             return;

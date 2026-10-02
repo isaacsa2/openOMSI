@@ -727,7 +727,8 @@ fn steps_of(verb: &str) -> Option<Vec<f32>> {
             v.dedup();
             v
         }
-        "rain_amt" | "wet" => (0..=100).map(|v| v as f32 / 100.0).collect(),
+        "rain_amt" | "wet" | "humidity" => (0..=100).map(|v| v as f32 / 100.0).collect(),
+        "brightness" => (0..=150).map(|v| v as f32 / 100.0).collect(),
         "temp" => (-20..=45).map(|v| v as f32).collect(),
         "wind_speed" => (0..=25).map(|v| v as f32).collect(),
         "wind_dir" => (0..360).map(|v| v as f32).collect(),
@@ -813,6 +814,11 @@ fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "hour" => ((app.clock.time / 3600.0) as i64).rem_euclid(24) as f32,
         "minute" => (((app.clock.time / 60.0) as i64) % 60) as f32,
         "visibility" => app.weather.as_ref()?.fog.0,
+        "brightness" => crate::weather_setup::custom_weather(app.args.weather.as_deref()).map(|c| c.brightness).unwrap_or(1.0),
+        "humidity" => {
+            let w = app.weather.as_ref()?;
+            crate::weather_setup::relative_humidity(w.temp.0, w.temp.1) / 100.0
+        }
         "rain_amt" => {
             let w = app.weather.as_ref()?;
             if w.precip.first().copied().unwrap_or(0.0) < 0.5 { 0.0 } else { (w.precip.get(1).copied().unwrap_or(0.0) / 255.0).clamp(0.0, 1.0) }
@@ -936,7 +942,15 @@ fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option<(&'static 
             None
         }
         "wet" => {
-            app.wetness = v;
+            app.edit_custom_weather(|c| c.road_wetness = v);
+            None
+        }
+        "brightness" => {
+            app.edit_custom_weather(|c| c.brightness = v);
+            None
+        }
+        "humidity" => {
+            app.edit_weather(|w| w.temp.1 = crate::weather_setup::absolute_humidity(w.temp.0, v * 100.0));
             None
         }
         "temp" => {
@@ -959,6 +973,8 @@ fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option<(&'static 
 fn toggle_now(app: &App, id: &str) -> Option<bool> {
     let s = &app.settings;
     Some(match id {
+        "snow_cover" => app.weather.as_ref().is_some_and(|w| w.snow),
+        "snow_road" => app.weather.as_ref().is_some_and(|w| w.snow_on_road),
         "navigator" => app.navigator.as_ref().is_some_and(|n| n.enabled),
         "nav_ai" => app.navigator.as_ref().map_or(s.nav_ai, |n| n.show_ai),
         "shadows" => s.shadows,
@@ -1014,6 +1030,14 @@ fn toggle_now(app: &App, id: &str) -> Option<bool> {
 fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static str, String)> {
     let bit = (on as u8).to_string();
     match id {
+        "snow_cover" => {
+            app.edit_custom_weather(|c| c.snow_cover = on);
+            None
+        }
+        "snow_road" => {
+            app.edit_custom_weather(|c| c.snow_on_road = on);
+            None
+        }
         "navigator" => {
             if let Some(n) = app.navigator.as_mut() {
                 n.enabled = on;
@@ -1843,11 +1867,15 @@ fn world_pages(app: &App) -> Vec<Page> {
         let cloud = app.weather.as_ref().and_then(|w| cloud_index(&w.clouds.0)).map(|i| CLOUD_TYPES[i].1.to_string()).or_else(|| app.weather.as_ref().map(|w| w.clouds.0.trim().to_string())).unwrap_or_default();
         weather.push((row("Clouds", 'o', &cloud, "The kind of clouds in the sky.", None), "cloudkind".to_string()));
         weather.extend(slider_row(app, "visibility", "Visibility", "How far one can see; less is fog.", &|v| if v >= 1000.0 { format!("{:.1} km", v / 1000.0) } else { format!("{} m", v as i64) }));
+        weather.extend(slider_row(app, "brightness", "Brightness", "Overall custom-weather light level.", &pct));
         let kind = app.weather.as_ref().map(|w| (w.precip.first().copied().unwrap_or(0.0).max(0.0) as usize).min(PRECIP_KINDS.len() - 1)).unwrap_or(0);
         weather.push((row("Precipitation", 'o', PRECIP_KINDS[kind], "Rain or snow.", None), "precipkind".to_string()));
         weather.extend(slider_row(app, "rain_amt", "Precipitation strength", "How hard it rains or snows.", &pct));
         weather.extend(slider_row(app, "wet", "Wet roads", "How wet the roads are now (they dry in the sun, wet in the rain).", &pct));
+        weather.extend(switch_row(app, "snow_cover", "Snow cover", "Snow on the world and scenery."));
+        weather.extend(switch_row(app, "snow_road", "Snow on road", "The road surface is covered in snow."));
         climate.extend(slider_row(app, "temp", "Temperature", "The air temperature.", &|v| format!("{} °C", v as i64)));
+        climate.extend(slider_row(app, "humidity", "Humidity", "Relative humidity of the air.", &pct));
         climate.extend(slider_row(app, "wind_speed", "Wind speed", "How fast the wind blows; it drives the clouds.", &|v| format!("{} m/s", v as i64)));
         climate.extend(slider_row(app, "wind_dir", "Wind direction", "The direction of the wind in degrees (0 is north).", &|v| format!("{}°", v as i64)));
         // the METAR sync on: only its own rows stay (the weather is the report's)
