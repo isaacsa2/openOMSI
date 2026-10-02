@@ -1525,7 +1525,7 @@ impl App {
         self.refresh_list();
     }
 
-    fn finish_metar_edit(&mut self, accept: bool) {
+    pub(crate) fn finish_metar_edit(&mut self, accept: bool) {
         let edit = self.menu_edit.take().unwrap_or_default();
         self.menu_icao_edit = false;
         if let Some(w) = self.window.as_ref() {
