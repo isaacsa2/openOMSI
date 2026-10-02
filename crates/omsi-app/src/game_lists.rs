@@ -467,14 +467,25 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
                 "weather" | "cloudkind" | "precipkind" | "metar_src" | "sel" | "preset" | "gfxprofile" | "reset" => {}
                 // the exact time: Enter starts typing it, and sets it when typed
                 "time_edit" if step => {
-                    if app.menu_edit.is_some() {
+                    if app.menu_edit.is_some() && !app.menu_edit_icao {
                         app.apply_time_edit();
                     } else if app.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client) {
                         app.service_msg = Some(("In a LAN session the host sets the clock".into(), 3.0));
                     } else if app.real_time_locked() {
                         app.service_msg = Some(("The time cannot be changed while the real-time sync is on".into(), 3.0));
                     } else {
+                        app.menu_edit_icao = false;
                         app.menu_edit = Some(String::new());
+                    }
+                }
+                "metar_edit" if step => {
+                    if app.menu_edit.is_some() && app.menu_edit_icao {
+                        app.apply_metar_edit();
+                    } else if app.metar_locked() {
+                        app.menu_edit = Some(String::new());
+                        app.menu_edit_icao = true;
+                        if let Some(w) = app.window.as_ref() { w.set_ime_allowed(true); }
+                        app.service_msg = Some(("Type a 4-letter ICAO, then press Enter".into(), 4.0));
                     }
                 }
                 "seat_reset" if step => {
@@ -727,7 +738,8 @@ fn steps_of(verb: &str) -> Option<Vec<f32>> {
             v.dedup();
             v
         }
-        "rain_amt" | "wet" => (0..=100).map(|v| v as f32 / 100.0).collect(),
+        "rain_amt" | "wet" | "brightness" => (0..=100).map(|v| v as f32 / 100.0).collect(),
+        "humidity" => (0..=100).map(|v| v as f32).collect(),
         "temp" => (-20..=45).map(|v| v as f32).collect(),
         "wind_speed" => (0..=25).map(|v| v as f32).collect(),
         "wind_dir" => (0..360).map(|v| v as f32).collect(),
@@ -818,6 +830,11 @@ fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
             if w.precip.first().copied().unwrap_or(0.0) < 0.5 { 0.0 } else { (w.precip.get(1).copied().unwrap_or(0.0) / 255.0).clamp(0.0, 1.0) }
         }
         "wet" => app.wetness,
+        "brightness" => crate::weather_setup::custom_weather(app.args.weather.as_deref()).map(|c| c.brightness).unwrap_or(1.0),
+        "humidity" => {
+            let w = app.weather.as_ref()?;
+            crate::weather_setup::relative_humidity(w.temp.0, w.temp.1)
+        }
         "temp" => app.weather.as_ref()?.temp.0,
         "wind_speed" => app.weather.as_ref()?.wind.1,
         "wind_dir" => app.weather.as_ref()?.wind.0.rem_euclid(360.0),
@@ -936,7 +953,22 @@ fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option<(&'static 
             None
         }
         "wet" => {
-            app.wetness = v;
+            if app.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client) {
+                app.service_msg = Some(("In a LAN session the host sets the weather".into(), 3.0));
+            } else if app.metar_locked() {
+                app.service_msg = Some(("The weather cannot be changed while the METAR sync is on".into(), 3.0));
+            } else {
+                app.wetness = v;
+                app.commit_custom_weather();
+            }
+            None
+        }
+        "brightness" => {
+            app.edit_weather_brightness(v);
+            None
+        }
+        "humidity" => {
+            app.edit_weather(|w| w.temp.1 = crate::weather_setup::absolute_humidity(w.temp.0, v));
             None
         }
         "temp" => {
@@ -971,6 +1003,8 @@ fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "get_up" => s.get_up,
         "time_sync" => s.time_sync,
         "metar_sync" => s.metar_sync,
+        "snow_cover" => app.weather.as_ref()?.snow,
+        "snow_road" => app.weather.as_ref()?.snow_on_road,
         "camcoll" => s.camera_collision,
         "steer_look" => s.steer_look,
         "hands_in_cab" => s.hands_in_cab,
@@ -1082,6 +1116,14 @@ fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static str, String
         }
         // the METAR sync: the weather goes over to the report of the nearest airport and
         // cannot be changed while it is on (the cycle and a hand-made weather end with it)
+        "snow_cover" => {
+            app.edit_weather(|w| w.snow = on);
+            None
+        }
+        "snow_road" => {
+            app.edit_weather(|w| w.snow_on_road = on);
+            None
+        }
         "metar_sync" => {
             app.settings.metar_sync = on;
             app.metar_rx = None;
@@ -1806,7 +1848,7 @@ fn world_pages(app: &App) -> Vec<Page> {
             time.push((row("Date and time", 'i', &text, "Synchronized with the real time", None), "noop".to_string()));
         } else {
             // the exact time: typed as hours, minutes and seconds
-            match app.menu_edit.as_ref() {
+            match app.menu_edit.as_ref().filter(|_| !app.menu_edit_icao) {
                 Some(d) => {
                     let mut c: Vec<char> = d.chars().collect();
                     c.resize(6, '_');
@@ -1837,7 +1879,15 @@ fn world_pages(app: &App) -> Vec<Page> {
         weather.extend(switch_row(app, "metar_sync", "METAR sync", "The weather follows the real METAR report"));
         if app.metar_locked() {
             let src = if app.settings.metar_station.is_empty() { format!("{} ({})", app.metar_station(), omsi_ui::tr("automatic")) } else { app.metar_station() };
-            weather.push((row("METAR source", 'o', &src, "The airport whose METAR report the weather follows.", None), "metar_src".to_string()));
+            if app.menu_edit_icao {
+                let mut chars: Vec<char> = app.menu_edit.as_deref().unwrap_or("").chars().collect();
+                chars.resize(4, '_');
+                let typed: String = chars.into_iter().take(4).collect();
+                weather.push((row("METAR station", 'E', &typed, "Type any 4-letter ICAO; Enter confirms, Esc cancels.", None), "metar_edit".to_string()));
+            } else {
+                weather.push((row("METAR station", 'e', &src, "Type any 4-letter ICAO (Press Enter to edit).", None), "metar_edit".to_string()));
+            }
+            weather.push((row("Known airports", 'o', &src, "Choose one of the stations from Weather/ICAO.txt.", None), "metar_src".to_string()));
         }
         weather.push((row("Preset", 'o', &weather_name(app), "A ready-made weather", None), "weather".to_string()));
         let cloud = app.weather.as_ref().and_then(|w| cloud_index(&w.clouds.0)).map(|i| CLOUD_TYPES[i].1.to_string()).or_else(|| app.weather.as_ref().map(|w| w.clouds.0.trim().to_string())).unwrap_or_default();
@@ -1847,12 +1897,19 @@ fn world_pages(app: &App) -> Vec<Page> {
         weather.push((row("Precipitation", 'o', PRECIP_KINDS[kind], "Rain or snow.", None), "precipkind".to_string()));
         weather.extend(slider_row(app, "rain_amt", "Precipitation strength", "How hard it rains or snows.", &pct));
         weather.extend(slider_row(app, "wet", "Wet roads", "How wet the roads are now (they dry in the sun, wet in the rain).", &pct));
+        weather.extend(slider_row(app, "brightness", "Brightness", "Brightness of the weather lighting.", &pct));
+        weather.extend(switch_row(app, "snow_cover", "Snow cover", "Snow on the world and scenery."));
+        weather.extend(switch_row(app, "snow_road", "Snow on road", "Treat the road as snow-covered."));
         climate.extend(slider_row(app, "temp", "Temperature", "The air temperature.", &|v| format!("{} °C", v as i64)));
+        climate.extend(slider_row(app, "humidity", "Humidity", "Relative humidity of the air.", &|v| {
+            let t = app.weather.as_ref().map(|w| w.temp.0).unwrap_or(15.0);
+            format!("{v:.0} % · dew {:.0} °C", crate::weather_setup::dew_point_c(t, v))
+        }));
         climate.extend(slider_row(app, "wind_speed", "Wind speed", "How fast the wind blows; it drives the clouds.", &|v| format!("{} m/s", v as i64)));
         climate.extend(slider_row(app, "wind_dir", "Wind direction", "The direction of the wind in degrees (0 is north).", &|v| format!("{}°", v as i64)));
         // the METAR sync on: only its own rows stay (the weather is the report's)
         if app.metar_locked() {
-            weather.retain(|r| r.1 == "metar_sync" || r.1 == "metar_src");
+            weather.retain(|r| r.1 == "metar_sync" || r.1 == "metar_src" || r.1 == "metar_edit");
             climate.clear();
         }
         tools.push(button("Object editor", "Open", "Place and move objects in the world.", "editor"));

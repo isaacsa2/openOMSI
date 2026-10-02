@@ -99,6 +99,13 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                // Free ICAO entry in World > Weather. `event.text` also receives Android's
+                // on-screen keyboard input, unlike physical key codes alone.
+                if event.state == ElementState::Pressed && self.menu_edit_icao {
+                    if let Some(text) = event.text.as_deref() {
+                        self.metar_edit_text(text);
+                    }
+                }
                 // '/' opens the chat's input box wherever the keyboard has it (the key
                 // itself is then swallowed by the chat) - but not Numpad ÷, OMSI's stock
                 // front door key (keyboard.cfg `bus_doorfront0 181`)
@@ -106,6 +113,7 @@ impl ApplicationHandler for App {
                     && event.text.as_deref() == Some("/")
                     && event.physical_key != PhysicalKey::Code(KeyCode::NumpadDivide)
                     && self.lan.is_some()
+                    && !self.menu_edit_icao
                     && !lan::chat_open(&self.remotes)
                 {
                     self.remotes.chat.open();

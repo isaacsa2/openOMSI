@@ -1462,6 +1462,11 @@ impl App {
     }
 
     pub(crate) fn close_game_menu(&mut self) {
+        if self.menu_edit_icao {
+            if let Some(w) = self.window.as_ref() { w.set_ime_allowed(false); }
+            self.menu_edit_icao = false;
+            self.menu_edit = None;
+        }
         self.game_menu = None;
         self.menu_top = None;
         self.paused = self.menu_prev_pause;
@@ -1521,7 +1526,10 @@ impl App {
             _ => None,
         };
         match code {
-            KeyCode::Escape => self.menu_edit = None,
+            KeyCode::Escape => {
+                self.menu_edit = None;
+                self.menu_edit_icao = false;
+            },
             KeyCode::Backspace | KeyCode::Delete => {
                 if let Some(d) = self.menu_edit.as_mut() {
                     d.pop();
@@ -1542,9 +1550,56 @@ impl App {
         self.refresh_list();
     }
 
+    pub(crate) fn metar_edit_text(&mut self, text: &str) {
+        if !self.menu_edit_icao { return; }
+        let Some(edit) = self.menu_edit.as_mut() else { return };
+        for c in text.chars().filter(|c| c.is_ascii_alphabetic()) {
+            if edit.len() >= 4 { break; }
+            edit.push(c.to_ascii_uppercase());
+        }
+        self.refresh_list();
+    }
+
+    fn metar_edit_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Escape => {
+                self.menu_edit = None;
+                self.menu_edit_icao = false;
+                if let Some(w) = self.window.as_ref() { w.set_ime_allowed(false); }
+            }
+            KeyCode::Backspace | KeyCode::Delete => {
+                if let Some(d) = self.menu_edit.as_mut() { d.pop(); }
+            }
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                self.apply_metar_edit();
+                return;
+            }
+            _ => return,
+        }
+        self.refresh_list();
+    }
+
+    pub(crate) fn apply_metar_edit(&mut self) {
+        let Some(edit) = self.menu_edit.take() else { return };
+        self.menu_edit_icao = false;
+        if let Some(w) = self.window.as_ref() { w.set_ime_allowed(false); }
+        let code: String = edit.chars().filter(|c| c.is_ascii_alphabetic()).take(4).collect::<String>().to_ascii_uppercase();
+        if code.is_empty() || code.len() == 4 {
+            self.settings.metar_station = code.clone();
+            crate::game_lists::remember_setting("metar_station", &code);
+            self.metar_rx = None;
+            self.metar_next = 0.0;
+            self.service_msg = Some((if code.is_empty() { "METAR station: automatic".into() } else { format!("METAR station: {code}") }, 3.0));
+        } else {
+            self.service_msg = Some(("ICAO must be exactly 4 letters".into(), 3.0));
+        }
+        self.refresh_list();
+    }
+
     /// Set the clock to the time typed (digits: hh, hhmm or hhmmss; what is missing is 0).
     pub(crate) fn apply_time_edit(&mut self) {
         let Some(d) = self.menu_edit.take() else { return };
+        self.menu_edit_icao = false;
         if !d.is_empty() {
             let mut c = d.clone();
             while c.len() < 6 {
@@ -1590,6 +1645,7 @@ impl App {
             self.service_msg = Some(("The weather cannot be changed while the METAR sync is on".into(), 3.0));
             return;
         }
+        let brightness = crate::weather_setup::custom_weather(self.args.weather.as_deref()).map(|c| c.brightness).unwrap_or(1.0);
         let mut w = self.weather.clone().unwrap_or_default();
         if w.precip.len() < 5 {
             w.precip.resize(5, 0.0);
@@ -1598,15 +1654,51 @@ impl App {
         f(&mut w);
         w.name = crate::game_lists::CUSTOM_WEATHER.to_string();
         let clouds_changed = w.clouds.0.trim() != before;
+        crate::scene::SNOW_WEATHER.store(w.snow, std::sync::atomic::Ordering::Relaxed);
         omsi_sim::host::set_ambient_weather(w.temp.0, w.temp.1);
         self.weather_blend = None;
         self.weather_cycle = None;
         self.weather = Some(w);
+        self.commit_custom_weather_with_brightness(brightness);
         if clouds_changed {
             if let (Some(r), Some(scene)) = (self.renderer.as_ref(), self.scene.as_mut()) {
                 crate::weather_setup::setup_sky(&self.args, r, scene, self.envir.as_ref(), self.weather.as_ref());
             }
         }
+    }
+
+    fn commit_custom_weather_with_brightness(&mut self, brightness: f32) {
+        let spec = {
+            let Some(w) = self.weather.as_mut() else { return };
+            let custom = crate::weather_setup::CustomWeather::from_weather(w, brightness, self.wetness);
+            let spec = custom.encode();
+            w.path = std::path::PathBuf::from(&spec);
+            w.name = crate::game_lists::CUSTOM_WEATHER.to_string();
+            spec
+        };
+        self.args.weather = Some(spec.clone());
+        if let Some(l) = self.lan.as_mut().filter(|l| l.role == omsi_net::Role::Host) {
+            l.set_weather(&spec);
+        }
+    }
+
+    pub(crate) fn commit_custom_weather(&mut self) {
+        let brightness = crate::weather_setup::custom_weather(self.args.weather.as_deref()).map(|c| c.brightness).unwrap_or(1.0);
+        self.commit_custom_weather_with_brightness(brightness);
+    }
+
+    pub(crate) fn edit_weather_brightness(&mut self, brightness: f32) {
+        if self.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client) {
+            self.service_msg = Some(("In a LAN session the host sets the weather".into(), 3.0));
+            return;
+        }
+        if self.metar_locked() {
+            self.service_msg = Some(("The weather cannot be changed while the METAR sync is on".into(), 3.0));
+            return;
+        }
+        self.weather_blend = None;
+        self.weather_cycle = None;
+        self.commit_custom_weather_with_brightness(brightness.clamp(0.0, 1.0));
     }
 
     /// A settings window (options, vehicle, world) is open.
@@ -1618,7 +1710,11 @@ impl App {
     /// The open list is closed: back to the game menu.
     pub(crate) fn close_list(&mut self) {
         self.dropdown = None;
+        if self.menu_edit_icao {
+            if let Some(w) = self.window.as_ref() { w.set_ime_allowed(false); }
+        }
         self.menu_edit = None;
+        self.menu_edit_icao = false;
         self.chooser = None;
         self.admin_list = None;
         self.list_kind = None;
@@ -1706,7 +1802,7 @@ impl App {
             return;
         }
         if self.menu_edit.is_some() {
-            self.time_edit_key(code);
+            if self.menu_edit_icao { self.metar_edit_key(code); } else { self.time_edit_key(code); }
             return;
         }
         let n = self.admin_list.as_ref().unwrap_or(&self.vehicle_list).len().max(1);
