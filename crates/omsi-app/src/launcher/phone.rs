@@ -162,6 +162,7 @@ fn time_text(l: &Launcher) -> String {
     let (y, m, d) = super::ui::parse_date(&l.state.choice.date);
     let weather = match l.state.choice.weather.strip_prefix("metar:") {
         Some(c) => format!("live {c}"),
+        None if crate::weather_setup::custom_weather(Some(&l.state.choice.weather)).is_some() => "custom weather".into(),
         None if l.state.choice.weather == "cycle" => "weather cycle".into(),
         None => l.state.weathers.iter().find(|w| w.file == l.state.choice.weather).map(|w| w.name.clone()).unwrap_or_else(|| "map weather".into()),
     };
@@ -526,22 +527,149 @@ fn time_sheet(l: &mut Launcher, r: Rect) -> bool {
         l.state.touched();
     }
     let done = l.ui.button("p-time-done", Rect::new(left.x, left.bottom() - 52.0, left.w, 52.0), "Done", Some("check"), ButtonKind::Primary);
-    // the weather: the map's, or one of the weather files
     let right = Rect::new(left.right() + 16.0, r.y, r.right() - left.right() - 16.0, r.h);
-    let items: Vec<(String, String, String)> = [(String::new(), "The map's weather".to_string(), "As the map sets it".to_string()), ("cycle".to_string(), "Weather cycle".to_string(), "Changes every 25-60 minutes, as the month allows".to_string())].into_iter().chain(l.state.weathers.iter().map(|w| (w.file.clone(), w.name.clone(), format!("{:.0} °C · {} · {}", w.temp, if w.clouds.is_empty() { "clear" } else { w.clouds.as_str() }, if w.precip.is_empty() { "dry" } else { w.precip.as_str() })))).collect();
+    if right.w <= 120.0 {
+        return done;
+    }
+
+    if let Some(mut custom) = crate::weather_setup::custom_weather(Some(&l.state.choice.weather)) {
+        let mut changed = false;
+        let mut back = false;
+        l.ui.scroll_area("ps-custom-weather", right, &mut |ui, v| {
+            let mut yy = v.y + 4.0;
+            if ui.button("ps-weather-back", Rect::new(v.x, yy, v.w - 8.0, 42.0), "Choose another weather", Some("arrow_back"), ButtonKind::Normal) {
+                back = true;
+            }
+            yy += 52.0;
+            changed |= ui.slider("ps-custom-vis", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.visibility_m, 50.0, 50_000.0, 50.0, "Visibility", &|x| if x >= 49_950.0 { "unlimited".into() } else if x >= 1000.0 { format!("{:.1} km", x / 1000.0) } else { format!("{x:.0} m") });
+            yy += 46.0;
+            changed |= ui.slider("ps-custom-bright", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.brightness, 0.0, 1.0, 0.05, "Brightness", &|x| format!("{:.0} %", x * 100.0));
+            yy += 46.0;
+            changed |= ui.slider("ps-custom-wdir", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.wind_dir, 0.0, 355.0, 5.0, "Wind direction", &|x| format!("{x:.0}°"));
+            yy += 46.0;
+            changed |= ui.slider("ps-custom-wspeed", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.wind_speed, 0.0, 40.0, 0.5, "Wind speed", &|x| format!("{x:.1} m/s"));
+            yy += 46.0;
+            changed |= ui.slider("ps-custom-temp", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.temp_c, -30.0, 45.0, 1.0, "Temperature", &|x| format!("{x:.0} °C"));
+            yy += 46.0;
+            let temp = custom.temp_c;
+            changed |= ui.slider("ps-custom-hum", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.humidity, 0.0, 100.0, 1.0, "Humidity", &|x| format!("{x:.0} % · dew {:.0} °C", crate::weather_setup::dew_point_c(temp, x)));
+            yy += 50.0;
+
+            ui.label(Rect::new(v.x, yy, 120.0, 38.0), "Cloud type");
+            let clouds: Vec<String> = crate::weather_setup::CUSTOM_CLOUDS.iter().map(|x| (*x).to_string()).collect();
+            let mut cloud = custom.cloud;
+            if ui.select("ps-custom-cloud", Rect::new(v.x + 122.0, yy, v.w - 130.0, 38.0), &mut cloud, &clouds) {
+                custom.cloud = cloud;
+                changed = true;
+            }
+            yy += 48.0;
+
+            ui.label(Rect::new(v.x, yy, 120.0, 38.0), "Precipitation");
+            let precip: Vec<String> = crate::weather_setup::CUSTOM_PRECIP.iter().map(|x| (*x).to_string()).collect();
+            let mut pk = custom.precip.clamp(0, 2) as usize;
+            if ui.select("ps-custom-precip", Rect::new(v.x + 122.0, yy, v.w - 130.0, 38.0), &mut pk, &precip) {
+                custom.precip = pk as i32;
+                changed = true;
+            }
+            yy += 48.0;
+
+            changed |= ui.slider("ps-custom-intensity", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.precip_intensity, 0.0, 255.0, 1.0, "Precipitation intensity", &|x| format!("{x:.0} / 255"));
+            yy += 46.0;
+            changed |= ui.slider("ps-custom-wet", Rect::new(v.x, yy, v.w - 8.0, 40.0), &mut custom.road_wetness, 0.0, 1.0, 0.05, "Road wetness", &|x| format!("{:.0} %", x * 100.0));
+            yy += 46.0;
+
+            let mut snow = custom.snow_cover;
+            if ui.toggle("ps-custom-snow", Rect::new(v.x, yy, v.w - 8.0, 38.0), &mut snow, "Snow cover") {
+                custom.snow_cover = snow;
+                changed = true;
+            }
+            yy += 44.0;
+            let mut snow_road = custom.snow_on_road;
+            if ui.toggle("ps-custom-snowroad", Rect::new(v.x, yy, v.w - 8.0, 38.0), &mut snow_road, "Snow on road") {
+                custom.snow_on_road = snow_road;
+                changed = true;
+            }
+            yy += 48.0;
+            yy - v.y
+        });
+        if back {
+            l.state.choice.weather.clear();
+            l.state.touched();
+        } else if changed {
+            custom.normalize();
+            l.state.choice.weather = custom.encode();
+            l.state.touched();
+        }
+        return done;
+    }
+
+    if let Some(code) = l.state.choice.weather.strip_prefix("metar:").map(str::to_string) {
+        let mut airport = code.to_ascii_uppercase().chars().filter(|c| c.is_ascii_alphabetic()).take(4).collect::<String>();
+        let airports = crate::weather_setup::metar_airports(std::path::Path::new(&l.state.config.root));
+        let mut changed = false;
+        let mut back = false;
+        l.ui.scroll_area("ps-real-weather", right, &mut |ui, v| {
+            let mut yy = v.y + 4.0;
+            if ui.button("ps-real-back", Rect::new(v.x, yy, v.w - 8.0, 42.0), "Choose another weather", Some("arrow_back"), ButtonKind::Normal) {
+                back = true;
+            }
+            yy += 56.0;
+            ui.heading(Rect::new(v.x, yy, v.w - 8.0, 28.0), "Current weather (METAR)", Some("public"));
+            yy += 38.0;
+            ui.label(Rect::new(v.x, yy, 90.0, 42.0), "ICAO");
+            if ui.text_input("ps-metar-icao", Rect::new(v.x + 92.0, yy, v.w - 100.0, 42.0), &mut airport, "ICAO", None) {
+                airport = airport.chars().filter(|c| c.is_ascii_alphabetic()).take(4).collect::<String>().to_ascii_uppercase();
+                changed = true;
+            }
+            yy += 52.0;
+            let labels: Vec<String> = airports.iter().map(|a| a.1.clone()).collect();
+            if !labels.is_empty() {
+                let mut sel = airports.iter().position(|a| a.0.eq_ignore_ascii_case(&airport)).unwrap_or(0);
+                if ui.select("ps-metar-list", Rect::new(v.x, yy, v.w - 8.0, 42.0), &mut sel, &labels) {
+                    if let Some(a) = airports.get(sel) {
+                        airport = a.0.clone();
+                        changed = true;
+                    }
+                }
+                yy += 52.0;
+            }
+            ui.paragraph("The METAR is fetched when the game starts.", Vec2::new(v.x, yy), v.w - 8.0, 12.0, Weight::Regular, TEXT_DIM);
+            yy += 48.0;
+            yy - v.y
+        });
+        if back {
+            l.state.choice.weather.clear();
+            l.state.touched();
+        } else if changed {
+            l.state.choice.weather = format!("metar:{airport}");
+            l.state.touched();
+        }
+        return done;
+    }
+
+    let home = super::drive::nearest_airport(&l.state.config.root, &l.state.choice.map);
+    let custom = crate::weather_setup::CustomWeather::default().encode();
+    let items: Vec<(String, String, String)> = [
+        (String::new(), "The map's weather".to_string(), "As the map sets it".to_string()),
+        (custom, "Custom weather".to_string(), "Visibility, wind, temperature, humidity, rain, snow and road state".to_string()),
+        (format!("metar:{home}"), "Current weather".to_string(), format!("Real weather from {home} (ICAO can be changed)")),
+        ("cycle".to_string(), "Weather cycle".to_string(), "Changes every 25-60 minutes, as the month allows".to_string()),
+    ]
+    .into_iter()
+    .chain(l.state.weathers.iter().map(|w| (w.file.clone(), w.name.clone(), format!("{:.0} °C · {} · {}", w.temp, if w.clouds.is_empty() { "clear" } else { w.clouds.as_str() }, if w.precip.is_empty() { "dry" } else { w.precip.as_str() }))))
+    .collect();
+
     let chosen = l.state.choice.weather.clone();
     let mut pick = None;
-    if right.w > 120.0 {
-        l.ui.scroll_area("ps-weather", right, &mut |ui, v| {
-            for (k, (file, name, sub)) in items.iter().enumerate() {
-                let rr = Rect::new(v.x, v.y + k as f32 * (ROW_H + 6.0), v.w - 8.0, ROW_H);
-                if big_row(ui, &format!("pw-{k}"), rr, name, sub, *file == chosen, None) {
-                    pick = Some(file.clone());
-                }
+    l.ui.scroll_area("ps-weather", right, &mut |ui, v| {
+        for (k, (file, name, sub)) in items.iter().enumerate() {
+            let rr = Rect::new(v.x, v.y + k as f32 * (ROW_H + 6.0), v.w - 8.0, ROW_H);
+            if big_row(ui, &format!("pw-{k}"), rr, name, sub, *file == chosen, None) {
+                pick = Some(file.clone());
             }
-            items.len() as f32 * (ROW_H + 6.0)
-        });
-    }
+        }
+        items.len() as f32 * (ROW_H + 6.0)
+    });
     if let Some(f) = pick {
         l.state.choice.weather = f;
         l.state.touched();
