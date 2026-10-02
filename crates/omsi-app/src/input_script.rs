@@ -1506,6 +1506,58 @@ impl App {
         self.chooser_pick(k);
     }
 
+    pub(crate) fn start_metar_edit(&mut self) {
+        self.menu_edit = Some(String::new());
+        self.menu_icao_edit = true;
+        if let Some(w) = self.window.as_ref() {
+            w.set_ime_allowed(true);
+        }
+        self.refresh_list();
+    }
+
+    pub(crate) fn metar_edit_type(&mut self, text: &str) {
+        if !self.menu_icao_edit { return; }
+        let Some(edit) = self.menu_edit.as_mut() else { return };
+        for c in text.chars().filter(|c| c.is_ascii_alphabetic()) {
+            if edit.len() >= 4 { break; }
+            edit.push(c.to_ascii_uppercase());
+        }
+        self.refresh_list();
+    }
+
+    fn finish_metar_edit(&mut self, accept: bool) {
+        let edit = self.menu_edit.take().unwrap_or_default();
+        self.menu_icao_edit = false;
+        if let Some(w) = self.window.as_ref() {
+            w.set_ime_allowed(false);
+        }
+        if accept {
+            let code = edit.trim().to_ascii_uppercase();
+            if code.len() == 4 && code.chars().all(|c| c.is_ascii_alphabetic()) {
+                self.settings.metar_station = code.clone();
+                crate::game_lists::remember_setting("metar_station", &code);
+                self.metar_rx = None;
+                self.metar_next = 0.0;
+                self.service_msg = Some((format!("METAR station: {code}"), 3.0));
+            } else {
+                self.service_msg = Some(("ICAO must be exactly 4 letters".into(), 3.0));
+            }
+        }
+        self.refresh_list();
+    }
+
+    fn metar_edit_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Escape => self.finish_metar_edit(false),
+            KeyCode::Backspace | KeyCode::Delete => {
+                if let Some(d) = self.menu_edit.as_mut() { d.pop(); }
+                self.refresh_list();
+            }
+            KeyCode::Enter | KeyCode::NumpadEnter => self.finish_metar_edit(true),
+            _ => {}
+        }
+    }
+
     fn time_edit_key(&mut self, code: KeyCode) {
         let digit = match code {
             KeyCode::Digit0 | KeyCode::Numpad0 => Some('0'),
@@ -1652,6 +1704,12 @@ impl App {
     /// The open list is closed: back to the game menu.
     pub(crate) fn close_list(&mut self) {
         self.dropdown = None;
+        if self.menu_icao_edit {
+            self.menu_icao_edit = false;
+            if let Some(w) = self.window.as_ref() {
+                w.set_ime_allowed(false);
+            }
+        }
         self.menu_edit = None;
         self.chooser = None;
         self.admin_list = None;
@@ -1740,7 +1798,11 @@ impl App {
             return;
         }
         if self.menu_edit.is_some() {
-            self.time_edit_key(code);
+            if self.menu_icao_edit {
+                self.metar_edit_key(code);
+            } else {
+                self.time_edit_key(code);
+            }
             return;
         }
         let n = self.admin_list.as_ref().unwrap_or(&self.vehicle_list).len().max(1);

@@ -123,8 +123,10 @@ pub(crate) struct App {
     /// The timetable beside the tours scrolled with the wheel: (the tour's line in the list,
     /// the first stop shown).
     pub(crate) pane_scroll: Option<(usize, usize)>,
-    /// The digits of a time being typed in the world page of the game menu (None: not typing).
+    /// Text being typed in the World page (exact time, or an ICAO station).
     pub(crate) menu_edit: Option<String>,
+    /// The current text edit is a four-letter ICAO rather than the exact time.
+    pub(crate) menu_icao_edit: bool,
     /// The line of the open list whose slider the mouse button holds (it follows the cursor).
     pub(crate) menu_drag: Option<usize>,
     /// The keyboard chose the line of the menu last (the mouse moved since: false), so the
