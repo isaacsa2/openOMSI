@@ -104,7 +104,9 @@ pub use wire::{
 /// sound variables alone filled the 31 there was room for).
 /// 7: vehicle identity, paint identity, fleet number and registration in INFO. The identity
 /// lets another game find the same locally installed bus even when its folder was renamed.
-pub const PROTOCOL: u32 = 7;
+/// 8: rear-section pitch/bank and a larger visible runtime variable set for articulated and
+/// interactive buses.
+pub const PROTOCOL: u32 = 8;
 pub const DEFAULT_PORT: u16 = 27015;
 /// Ports a host tries after the default one when that is taken (a second session on the
 /// same machine).
@@ -824,6 +826,8 @@ pub struct PartPose {
     pub y: f64,
     pub z: f64,
     pub heading: f32,
+    pub pitch: f32,
+    pub bank: f32,
 }
 
 /// What a player says about its vehicle: who and what (`INFO`, every two seconds), and

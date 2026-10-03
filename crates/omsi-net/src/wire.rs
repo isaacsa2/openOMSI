@@ -25,11 +25,11 @@
 //!   throttle 5, brake 5             /31
 //!   passengers 8
 //!   doors 3 + 4 each                opening /15
-//!   wheels 4 + 7 each               suspension travel, 5 mm (±0.32 m)
-//!   rear sections 2 + 60 each       dx, dy 16 (cm from the front origin), dz 12 (cm), heading 16
+//!   wheels 5 + 7 each               suspension travel, 5 mm (±0.32 m)
+//!   rear sections 2 + 84 each       dx, dy 16, dz 12, heading 16, pitch/bank 12 each
 //!   lamps 7 + 2 each                /3 (the vehicle's lamp variables, see the game's sync table)
 //!   switches 5 + 4 each             small integers −8 … 7 (`[visible]` variables)
-//!   values 6 + 16 each              IEEE half floats (sound and moving-part variables)
+//!   values 7 + 16 each              IEEE half floats (sound, controls and moving-part variables)
 //! ```
 
 use crate::{Aboard, PartPose, Pose, Walker};
@@ -58,11 +58,11 @@ pub const FLAG_STOP_BRAKE: u32 = 512;
 const FLAG_BITS: u32 = 10;
 
 pub const MAX_DOORS: usize = 7;
-pub const MAX_WHEELS: usize = 15;
+pub const MAX_WHEELS: usize = 31;
 pub const MAX_REAR: usize = 3;
 pub const MAX_LAMPS: usize = 127;
 pub const MAX_SWITCHES: usize = 31;
-pub const MAX_VALUES: usize = 63;
+pub const MAX_VALUES: usize = 127;
 /// The longest state a sender may put together (and a receiver accepts).
 pub const MAX_STATE_BYTES: usize = 512;
 
@@ -280,7 +280,7 @@ pub fn encode_state(pose: &Pose, protocol: u8, seq: u16) -> Vec<u8> {
         w.put_unit(*d, 4);
     }
     let wheels = &pose.suspension[..pose.suspension.len().min(MAX_WHEELS)];
-    w.put(wheels.len() as u64, 4);
+    w.put(wheels.len() as u64, 5);
     for s in wheels {
         w.put_fixed(*s as f64, 0.005, 7);
     }
@@ -304,6 +304,8 @@ pub fn encode_state(pose: &Pose, protocol: u8, seq: u16) -> Vec<u8> {
             0.0
         };
         w.put((h as f64 / 360.0 * 65536.0).round() as u64 % 65536, 16);
+        w.put_fixed(r.pitch as f64, 0.01, 12);
+        w.put_fixed(r.bank as f64, 0.01, 12);
     }
     let lamps = &pose.lamps[..pose.lamps.len().min(MAX_LAMPS)];
     w.put(lamps.len() as u64, 7);
@@ -316,7 +318,7 @@ pub fn encode_state(pose: &Pose, protocol: u8, seq: u16) -> Vec<u8> {
         w.put_fixed(*s as f64, 1.0, 4);
     }
     let values = &pose.values[..pose.values.len().min(MAX_VALUES)];
-    w.put(values.len() as u64, 6);
+    w.put(values.len() as u64, 7);
     for v in values {
         w.put(f16_from(*v) as u64, 16);
     }
@@ -366,7 +368,7 @@ pub fn decode_state(data: &[u8], protocol: u8) -> Option<(u32, u16, Pose)> {
     p.passengers = r.get(8)? as u32;
     let n = r.get(3)? as usize;
     p.doors = (0..n).map(|_| r.get_unit(4)).collect::<Option<_>>()?;
-    let n = r.get(4)? as usize;
+    let n = r.get(5)? as usize;
     p.suspension = (0..n)
         .map(|_| r.get_fixed(0.005, 7).map(|v| v as f32))
         .collect::<Option<_>>()?;
@@ -376,11 +378,15 @@ pub fn decode_state(data: &[u8], protocol: u8) -> Option<(u32, u16, Pose)> {
         let dy = r.get_fixed(0.01, 16)?;
         let dz = r.get_fixed(0.01, 12)?;
         let h = (r.get(16)? as f64 * 360.0 / 65536.0) as f32;
+        let pitch = r.get_fixed(0.01, 12)? as f32;
+        let bank = r.get_fixed(0.01, 12)? as f32;
         p.rear.push(PartPose {
             x: p.x + dx,
             y: p.y + dy,
             z: p.z + dz,
             heading: h,
+            pitch,
+            bank,
         });
     }
     let n = r.get(7)? as usize;
@@ -389,7 +395,7 @@ pub fn decode_state(data: &[u8], protocol: u8) -> Option<(u32, u16, Pose)> {
     p.switches = (0..n)
         .map(|_| r.get_signed(4).map(|v| v as f32))
         .collect::<Option<_>>()?;
-    let n = r.get(6)? as usize;
+    let n = r.get(7)? as usize;
     p.values = (0..n)
         .map(|_| r.get(16).map(|v| f16_to(v as u16)))
         .collect::<Option<_>>()?;
@@ -587,6 +593,8 @@ mod tests {
                 y: 4_196_461.5,
                 z: 33.3,
                 heading: 268.0,
+                pitch: 2.25,
+                bank: -1.75,
             }],
             lamps: vec![1.0, 0.0, 1.0, 2.0 / 3.0],
             switches: vec![1.0, 0.0, -1.0, 3.0],
@@ -639,6 +647,8 @@ mod tests {
             (q.rear[0].x - 892_240.0).abs() < 0.006
                 && (q.rear[0].y - 4_196_461.5).abs() < 0.006
                 && (q.rear[0].heading - 268.0).abs() < 0.01
+                && (q.rear[0].pitch - 2.25).abs() < 0.006
+                && (q.rear[0].bank + 1.75).abs() < 0.006
         );
         assert_eq!(q.lamps, p.lamps);
         assert_eq!(q.switches, p.switches);
@@ -682,21 +692,26 @@ mod tests {
         assert_eq!(q.values, vec![0.0, 65504.0]);
     }
 
-    /// Every list at its longest - 63 values among them - still makes a state a receiver
-    /// takes, and the values come back in order.
+    /// Every list at its longest still makes a state a receiver takes, and the expanded
+    /// runtime and suspension values come back in order.
     #[test]
     fn a_state_with_every_list_full_fits() {
         let mut p = bus();
         p.doors = vec![0.5; MAX_DOORS];
         p.lamps = vec![0.5; MAX_LAMPS];
         p.switches = vec![3.0; MAX_SWITCHES];
+        p.suspension = (0..MAX_WHEELS).map(|k| k as f32 * -0.005).collect();
         p.values = (0..MAX_VALUES).map(|k| k as f32).collect();
-        p.rear = vec![PartPose { x: 1.0, y: -12.0, z: 0.0, heading: 5.0 }; MAX_REAR];
+        p.rear = vec![PartPose { x: 1.0, y: -12.0, z: 0.0, heading: 5.0, pitch: 3.0, bank: -2.0 }; MAX_REAR];
         p.walker = Some(Walker { x: 1.0, y: 2.0, z: 3.0, heading: 10.0, speed: 1.4, course: 100.0, seated: false, aboard: None });
         let data = encode_state(&p, 6, 0);
         assert!(data.len() <= MAX_STATE_BYTES, "{} bytes", data.len());
         let (_, _, q) = decode_state(&data, 6).unwrap();
         assert_eq!(q.values, p.values);
+        assert_eq!(q.suspension.len(), MAX_WHEELS);
+        for (received, sent) in q.suspension.iter().zip(&p.suspension) {
+            assert!((received - sent).abs() <= 0.0025, "{received} vs {sent}");
+        }
         assert_eq!(q.lamps.len(), MAX_LAMPS);
         assert!(q.walker.is_some());
     }

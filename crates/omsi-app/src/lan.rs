@@ -73,6 +73,8 @@ pub struct SyncTable {
     pub values: Vec<(String, VarId)>,
     /// `door_0`, `door_1` … as far as the scripts have them.
     pub doors: Vec<VarId>,
+    /// Wheel suspension variables for the whole train, front to rear, left then right.
+    pub suspension: Vec<VarId>,
     pub hash: u32,
     /// Variables of the horn: its switch and the volume its sound follows.
     horn: Vec<VarId>,
@@ -265,9 +267,9 @@ impl SyncTable {
             v.truncate(cap);
             v
         };
-        let paint_vars: Vec<String> = ty
-            .paint_schemes
+        let paint_vars: Vec<String> = types
             .iter()
+            .flat_map(|t| t.paint_schemes.iter())
             .flat_map(|s| s.set_vars.iter().map(|(n, _)| n.to_ascii_lowercase()))
             .collect();
         let lamp_names = types
@@ -400,13 +402,17 @@ impl SyncTable {
                 value_names.extend(m.animations.iter().map(|a| a.variable.clone()));
             }
         }
-        // the water on the windows (the sender's wipers wipe it: another player's bus stood
-        // dry in the rain, its window films left out as engine-fed `rain_` variables)
+        // Every animation that can alter the visible bus is state worth copying. This also
+        // covers hatches, windows, kneeling mechanisms, dashboard switches and rear-section
+        // animations whose names a particular mod does not call "door" or "ramp".
+        for m in types.iter().flat_map(|t| t.model.meshes.iter()) {
+            value_names.extend(m.animations.iter().map(|a| a.variable.clone()));
+        }
+        // Material opacity and scrolling texture variables are visible state too (roller
+        // blinds, LCD layers, rain films and mod-specific panels).
         let rain_film = |n: &str| n.trim().to_ascii_lowercase().starts_with("rain_window");
         for m in types.iter().flat_map(|t| t.model.meshes.iter()) {
-            value_names.extend(m.materials.iter().filter_map(|mat| mat.alphascale.clone()).filter(|n| rain_film(n)));
-            // what scrolls a texture along its slot: a roller blind turning to the next
-            // number (its pictures come in the pose, see `freetex_names`)
+            value_names.extend(m.materials.iter().filter_map(|mat| mat.alphascale.clone()));
             value_names.extend(m.materials.iter().flat_map(|mat| mat.texcoord_trans_x.iter().chain(mat.texcoord_trans_y.iter()).cloned()));
         }
         let taken: Vec<VarId> = lamps.iter().chain(&switches).map(|l| l.1).collect();
@@ -426,6 +432,11 @@ impl SyncTable {
         }
         let doors: Vec<VarId> = (0..omsi_net::wire::MAX_DOORS)
             .map_while(|i| program.var(&format!("door_{i}")))
+            .collect();
+        let total_axles = ty.def.axles.len() + parts.iter().map(|p| p.def.axles.len()).sum::<usize>();
+        let suspension: Vec<VarId> = (0..total_axles)
+            .flat_map(|a| ["L", "R"].into_iter().filter_map(move |side| program.var(&format!("Axle_Suspension_{a}_{side}"))))
+            .take(omsi_net::wire::MAX_WHEELS)
             .collect();
         let horn_sound_vars: Vec<VarId> = sounds
             .iter()
@@ -460,13 +471,18 @@ impl SyncTable {
             }
             key.push(';');
         }
-        key.push_str(&format!("doors:{}", doors.len()));
+        key.push_str(&format!("doors:{};suspension:", doors.len()));
+        for id in &suspension {
+            key.push_str(&program.var_names[*id as usize].to_ascii_lowercase());
+            key.push(',');
+        }
         SyncTable {
             hash: fnv1a(key.as_bytes()).max(1),
             lamps,
             switches,
             values,
             doors,
+            suspension,
             horn,
             engine_n: var("engine_n"),
             ai_engine: var("AI_Engine"),
@@ -484,10 +500,11 @@ impl SyncTable {
         let names =
             |l: &[(String, VarId)]| l.iter().map(|x| x.0.as_str()).collect::<Vec<_>>().join(" ");
         format!(
-            "{} lamps, {} switches, {} doors, values [{}], {} sound set(s) and {} of rear sections, table {:08X}",
+            "{} lamps, {} switches, {} doors, {} suspension values, runtime [{}], {} sound set(s) and {} of rear sections, table {:08X}",
             self.lamps.len(),
             self.switches.len(),
             self.doors.len(),
+            self.suspension.len(),
             names(&self.values),
             self.sounds.len(),
             self.part_sounds.len(),
@@ -499,8 +516,13 @@ impl SyncTable {
 /// The sync table of a vehicle type (worked out once per type).
 fn sync_table(game: &mut LanGame, v: &omsi_sim::VehicleInstance) -> Arc<SyncTable> {
     let ty = &v.ty;
+    let key = std::iter::once(&ty.def.path)
+        .chain(v.trailers.iter().map(|t| &t.ty.def.path))
+        .map(|p| p.to_string_lossy().replace('\\', "/").to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("|");
     game.tables
-        .entry(ty.def.path.clone())
+        .entry(key)
         .or_insert_with(|| {
             let parts: Vec<Arc<omsi_sim::VehicleType>> = v.trailers.iter().map(|t| t.ty.clone()).collect();
             let t = Arc::new(SyncTable::new(ty, &parts));
@@ -531,7 +553,7 @@ pub struct RemoteVehicle {
     /// Where the latest pose puts the bus and its rear sections, for smoothing between
     /// network updates.
     target: (DVec3, f64),
-    rear: Vec<(DVec3, f64)>,
+    rear: Vec<(DVec3, f64, f32, f32)>,
     /// The latest pose's place and when it came (for carrying it on between updates).
     pose_seen: (DVec3, Instant),
     /// Door openings, suspension travel and the sync table's values as drawn (they glide
@@ -652,7 +674,7 @@ pub struct LanGame {
     pub chat: Chat,
     /// The shared world: the host's traffic and people (`lan_world`).
     pub world: crate::lan_world::LanWorld,
-    tables: hashbrown::HashMap<PathBuf, Arc<SyncTable>>,
+    tables: hashbrown::HashMap<String, Arc<SyncTable>>,
     /// The welcome whose world was taken over (`LanSession::welcomes`).
     adopted: u32,
     /// Host: the tours the other players drive, as last told the timetable.
@@ -1822,20 +1844,20 @@ pub fn my_pose(
         brake: v.physics.controls.brake,
         passengers: riders as u32,
         doors: table.doors.iter().map(|id| get(*id)).collect(),
-        suspension: v
-            .physics
-            .wheels
-            .iter()
-            .flat_map(|a| a.iter().map(|w| w.suspension))
-            .collect(),
+        suspension: table.suspension.iter().map(|id| get(*id)).collect(),
         rear: v
             .trailers
             .iter()
-            .map(|t| PartPose {
-                x: t.position.x,
-                y: t.position.y,
-                z: t.position.z,
-                heading: t.heading as f32,
+            .map(|t| {
+                let (pitch, bank) = t.body_angles();
+                PartPose {
+                    x: t.position.x,
+                    y: t.position.y,
+                    z: t.position.z,
+                    heading: t.heading as f32,
+                    pitch,
+                    bank,
+                }
             })
             .collect(),
         lamps: table.lamps.iter().map(|(_, id)| get(*id)).collect(),
@@ -2502,10 +2524,10 @@ fn new_remote(
     let table = sync_table(game, &vehicle);
     vehicle.position = DVec3::new(pose.x, pose.y, pose.z);
     vehicle.heading = pose.heading as f64;
-    let rear: Vec<(DVec3, f64)> = pose
+    let rear: Vec<(DVec3, f64, f32, f32)> = pose
         .rear
         .iter()
-        .map(|q| (DVec3::new(q.x, q.y, q.z), q.heading as f64))
+        .map(|q| (DVec3::new(q.x, q.y, q.z), q.heading as f64, q.pitch, q.bank))
         .collect();
     let matched = pose.table == table.hash;
     log::info!(
@@ -2691,6 +2713,8 @@ impl RemoteVehicle {
                 r.y = l(ra.y, rb.y);
                 r.z = l(ra.z, rb.z);
                 r.heading = lerp_angle(ra.heading as f64, rb.heading as f64, f) as f32;
+                r.pitch = lf(ra.pitch, rb.pitch);
+                r.bank = lf(ra.bank, rb.bank);
             }
         }
         if let (Some(wa), Some(wb)) = (a.walker, p.walker.as_mut()) {
@@ -2776,10 +2800,10 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
         rv.vehicle.heading = pose.heading as f64;
         rv.target = (rv.vehicle.position, rv.vehicle.heading);
         rv.pose_seen = (rv.vehicle.position, Instant::now());
-        rv.rear = pose.rear.iter().map(|q| (DVec3::new(q.x, q.y, q.z), q.heading as f64)).collect();
+        rv.rear = pose.rear.iter().map(|q| (DVec3::new(q.x, q.y, q.z), q.heading as f64, q.pitch, q.bank)).collect();
         for (i, cur) in rv.rear.iter().enumerate() {
             if let Some(t) = rv.vehicle.trailers.get_mut(i) {
-                t.set_pose(cur.0, cur.1);
+                t.set_network_pose(cur.0, cur.1, cur.2, cur.3);
             }
         }
         rv.doors = pose.doors.clone();
@@ -2804,15 +2828,17 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
         rv.vehicle.position += if d.length() > 25.0 { d } else { d * kd };
         rv.vehicle.heading = ease_heading(rv.vehicle.heading, rv.target.1, kd);
         // the rear sections where the other game has them
-        rv.rear.resize(pose.rear.len(), (DVec3::ZERO, 0.0));
+        rv.rear.resize(pose.rear.len(), (DVec3::ZERO, 0.0, 0.0, 0.0));
         for (i, (cur, q)) in rv.rear.iter_mut().zip(pose.rear.iter()).enumerate() {
             // (carried on with the bus: a rear section follows the same way)
-            let tgt = (DVec3::new(q.x, q.y, q.z) + ahead, q.heading as f64);
+            let tgt = (DVec3::new(q.x, q.y, q.z) + ahead, q.heading as f64, q.pitch, q.bank);
             let jump = cur.0 == DVec3::ZERO || (tgt.0 - cur.0).length() > 25.0;
             cur.0 = if jump { tgt.0 } else { cur.0 + (tgt.0 - cur.0) * kd };
             cur.1 = if jump { tgt.1 } else { ease_heading(cur.1, tgt.1, kd) };
+            cur.2 = if jump { tgt.2 } else { cur.2 + (tgt.2 - cur.2) * k };
+            cur.3 = if jump { tgt.3 } else { cur.3 + (tgt.3 - cur.3) * k };
             if let Some(t) = rv.vehicle.trailers.get_mut(i) {
-                t.set_pose(cur.0, cur.1);
+                t.set_network_pose(cur.0, cur.1, cur.2, cur.3);
             }
         }
         glide(&mut rv.doors, &pose.doors, k);
@@ -2869,11 +2895,14 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
     // what is pinned to their values: the engine speed, the doors, and - for the same
     // vehicle files - the lamps, switches and sound and moving-part values
     let mut pinned: Vec<(VarId, f32)> =
-        Vec::with_capacity(8 + t.lamps.len() + t.switches.len() + t.values.len());
+        Vec::with_capacity(8 + t.suspension.len() + t.lamps.len() + t.switches.len() + t.values.len());
     if !t.values.iter().any(|v| Some(v.1) == t.engine_n) {
         pinned.extend(t.engine_n.map(|id| (id, pose.rpm)));
     }
     pinned.extend(t.doors.iter().zip(&rv.doors).map(|(id, v)| (*id, *v)));
+    if matched && rv.suspension.len() == t.suspension.len() {
+        pinned.extend(t.suspension.iter().zip(&rv.suspension).map(|(id, v)| (*id, *v)));
+    }
     if matched
         && pose.lamps.len() == t.lamps.len()
         && pose.switches.len() == t.switches.len()
