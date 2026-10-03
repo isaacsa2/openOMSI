@@ -135,6 +135,98 @@ fn fnv1a(data: &[u8]) -> u32 {
     h
 }
 
+/// A path as part of a content fingerprint: relative to the vehicle folder where possible,
+/// slash-separated and case-insensitive. Moving the whole bus to another Vehicles folder
+/// therefore does not change its identity.
+fn identity_path(base: &Path, path: &Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// A fingerprint of the parts of a .bus/.ovh definition that identify the vehicle rather
+/// than its install location. This is deliberately not a hash of the raw file: comments,
+/// line endings and a renamed outer folder do not make the bus a different vehicle.
+fn vehicle_identity(def: &omsi_vehicle::Vehicle) -> String {
+    let base = def.dir();
+    let mut key = String::new();
+    let field = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
+    key.push_str(&format!(
+        "kind={:?};maker={};type={};model={};number={};regmode={};bbox={:?};axles={};",
+        def.kind,
+        field(&def.manufacturer),
+        field(&def.type_name),
+        field(def.model.as_deref().unwrap_or("")),
+        field(def.number_file.as_deref().unwrap_or("")),
+        def.registration_mode,
+        def.bounding_box,
+        def.axles.len(),
+    ));
+    for (tag, files) in [
+        ("v", &def.scripts.varlists),
+        ("sv", &def.scripts.stringvarlists),
+        ("s", &def.scripts.scripts),
+        ("c", &def.scripts.constfiles),
+    ] {
+        key.push_str(tag);
+        key.push('=');
+        for p in files {
+            key.push_str(&identity_path(base, p));
+            key.push(',');
+        }
+        key.push(';');
+    }
+    for (tag, coupled) in [("front", &def.couple_front), ("back", &def.couple_back)] {
+        key.push_str(tag);
+        key.push('=');
+        if let Some((path, reversed)) = coupled {
+            key.push_str(&field(path));
+            key.push(':');
+            key.push(if *reversed { '1' } else { '0' });
+        }
+        key.push(';');
+    }
+    format!("{:08X}", fnv1a(key.as_bytes()).max(1))
+}
+
+/// A repaint fingerprint based on what the scheme actually changes, not its display name.
+fn paint_scheme_identity(scheme: &omsi_sim::vehicle::PaintScheme) -> String {
+    let mut textures = scheme.textures.clone();
+    textures.sort_by_key(|(slot, file)| (slot.to_ascii_lowercase(), file.to_ascii_lowercase()));
+    let mut vars = scheme.set_vars.clone();
+    vars.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()).then_with(|| a.1.total_cmp(&b.1)));
+    let mut key = String::new();
+    for (slot, file) in textures {
+        key.push_str(&slot.trim().to_ascii_lowercase());
+        key.push('=');
+        key.push_str(&file.trim().replace('\\', "/").to_ascii_lowercase());
+        key.push(';');
+    }
+    for (name, value) in vars {
+        key.push_str(&name.trim().to_ascii_lowercase());
+        key.push('=');
+        key.push_str(&format!("{:08X}", value.to_bits()));
+        key.push(';');
+    }
+    format!("{:08X}", fnv1a(key.as_bytes()).max(1))
+}
+
+/// Fingerprint of the paint the local player selected.
+fn paint_identity(args: &Args, ty: &omsi_sim::VehicleType) -> String {
+    let name = paint_name(args, ty);
+    if name.is_empty() {
+        return String::new();
+    }
+    ty.paint_schemes
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case(&name))
+        .map(paint_scheme_identity)
+        .unwrap_or_default()
+}
+
 impl SyncTable {
     /// `parts`: the types of its rear sections, whose lamps, displays, moving parts and
     /// sounds follow the leading vehicle's variables as its own do (an articulated bus's
@@ -572,6 +664,9 @@ pub struct LanGame {
     /// tried: tried again only after a while (every frame, a server read a big add-on bus
     /// it could not load over and over and stood still for everybody).
     failed: hashbrown::HashMap<(u32, String), std::time::Instant>,
+    /// Bus identities already resolved on this installation. None means that the identity
+    /// was absent or ambiguous here, so repeated INFO messages do not rescan every vehicle.
+    identity_files: hashbrown::HashMap<String, Option<PathBuf>>,
 }
 
 /// What the frame knows that LAN play needs.
@@ -1684,6 +1779,10 @@ pub fn my_pose(
         name: String::new(),
         bus: content_relative(&v.ty.def.path, &args.root),
         paint: paint_name(args, &v.ty),
+        bus_identity: vehicle_identity(&v.ty.def),
+        paint_identity: paint_identity(args, &v.ty),
+        number: v.number(),
+        ident: v.ty.program.str_var("ident").and_then(|i| v.state.str_vars.get(i as usize)).cloned().unwrap_or_default(),
         line,
         destination,
         tour: String::new(),
