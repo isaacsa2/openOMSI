@@ -1476,7 +1476,7 @@ fn write_status(lan: &LanSession, game: &LanGame, player: Option<&Player>) {
         .peers()
         .map(|peer| {
             let d = player.filter(|_| peer.pose.has_vehicle()).map(|pl| relative_position(&pl.vehicle, &peer.pose));
-            serde_json::json!({ "id": peer.pose.id, "name": peer.pose.name, "bus": peer.pose.bus, "line": peer.pose.line, "destination": peer.pose.destination, "passengers": peer.pose.passengers, "where": d, "drawn": game.remotes.contains_key(&peer.pose.id) })
+            serde_json::json!({ "id": peer.pose.id, "name": peer.pose.name, "bus": peer.pose.bus, "number": peer.pose.number, "ident": peer.pose.ident, "line": peer.pose.line, "destination": peer.pose.destination, "passengers": peer.pose.passengers, "where": d, "drawn": game.remotes.contains_key(&peer.pose.id) })
         })
         .collect();
     let code = lan.code();
@@ -1590,6 +1590,9 @@ pub fn name_tags(game: &LanGame, cam: &omsi_render::Camera, width: f32, height: 
             (false, true) => format!("line {}", pose.line.trim()),
             _ => String::new(),
         };
+        if !pose.number.trim().is_empty() {
+            sub = if sub.is_empty() { pose.number.trim().to_string() } else { format!("{} · {sub}", pose.number.trim()) };
+        }
         if d > 25.0 {
             let dist = if d >= 1000.0 { format!("{:.1} km", d / 1000.0) } else { format!("{:.0} m", d) };
             sub = if sub.is_empty() { dist } else { format!("{sub} · {dist}") };
@@ -2311,19 +2314,87 @@ fn remote_bus_file(args: &Args, bus: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Find exactly one locally installed vehicle with the identity the other player sent.
+/// This is only a fallback after its path did not work. The result is cached because
+/// listing a large Vehicles folder for every INFO would be expensive.
+fn equivalent_bus_file(
+    game: &mut LanGame,
+    args: &Args,
+    identity: &str,
+    allowed: Option<&Vec<String>>,
+) -> Option<PathBuf> {
+    let identity = identity.trim().to_ascii_uppercase();
+    if identity.is_empty() {
+        return None;
+    }
+    if let Some(hit) = game.identity_files.get(&identity) {
+        return hit.clone();
+    }
+    let candidates: Vec<String> = match allowed {
+        Some(list) => list.clone(),
+        None => crate::menu::Menu::new(&args.root, "").vehicles.into_iter().map(|v| v.1).collect(),
+    };
+    let mut found: Option<PathBuf> = None;
+    let mut ambiguous = false;
+    for bus in candidates {
+        let Ok(path) = remote_bus_file(args, &bus) else { continue };
+        let Ok(def) = omsi_vehicle::Vehicle::load(&path) else { continue };
+        if vehicle_identity(&def) != identity {
+            continue;
+        }
+        if found.as_ref().is_some_and(|p| p != &path) {
+            ambiguous = true;
+            break;
+        }
+        found = Some(path);
+    }
+    let result = if ambiguous {
+        log::warn!("LAN: vehicle identity {identity} matches more than one installed bus; not guessing");
+        None
+    } else {
+        found
+    };
+    game.identity_files.insert(identity, result.clone());
+    result
+}
+
 /// Load the type a remote player drives, or a stand-in: ours, or on a server the first of
 /// the buses its `vehicles` list allows. A bus the list does not allow is not loaded at all
 /// (a player joining with another than the server offers).
 fn remote_type(
+    game: &mut LanGame,
     args: &Args,
     pose: &Pose,
     player: Option<&Player>,
 ) -> Option<(Arc<omsi_sim::VehicleType>, bool)> {
     let allowed = crate::server::SERVER_VEHICLES.get().filter(|l| !l.is_empty());
     let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
-    let listed = allowed.map(|l| l.iter().any(|v| norm(v) == norm(&pose.bus) || norm(&pose.bus).ends_with(&norm(v)))).unwrap_or(true);
-    let loaded = if listed {
-        remote_bus_file(args, &pose.bus).and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
+    let exact_allowed = allowed
+        .map(|l| l.iter().any(|v| norm(v) == norm(&pose.bus) || norm(&pose.bus).ends_with(&norm(v))))
+        .unwrap_or(true);
+    let equivalent = equivalent_bus_file(game, args, &pose.bus_identity, allowed);
+    let loaded = if exact_allowed {
+        remote_bus_file(args, &pose.bus)
+            .and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
+            .or_else(|original| {
+                let Some(path) = equivalent.clone() else { return Err(original) };
+                log::info!(
+                    "LAN: player {}'s {:?} is installed here as {} (vehicle identity {})",
+                    pose.id,
+                    pose.bus,
+                    path.display(),
+                    pose.bus_identity
+                );
+                omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
+            })
+    } else if let Some(path) = equivalent {
+        log::info!(
+            "LAN: player {}'s vehicle path differs from the server list; allowed equivalent {} matched identity {}",
+            pose.id,
+            path.display(),
+            pose.bus_identity
+        );
+        omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
     } else {
         Err("the server does not offer it".to_string())
     };
@@ -2352,7 +2423,7 @@ fn new_remote(
     scene: &mut Scene,
     clock: Option<&omsi_sim::SimClock>,
 ) -> Option<RemoteVehicle> {
-    let (ty, stand_in) = remote_type(args, pose, player)?;
+    let (ty, stand_in) = remote_type(game, args, pose, player)?;
     let mut host =
         omsi_sim::VehicleHost::new(clock.cloned().unwrap_or_else(|| crate::start_clock(args)));
     host.font_lib = Some(world.fonts.clone());
@@ -2364,8 +2435,17 @@ fn new_remote(
         ty.paint_schemes
             .iter()
             .position(|s| s.name.eq_ignore_ascii_case(&pose.paint))
+            .or_else(|| {
+                (!pose.paint_identity.is_empty()).then(|| {
+                    ty.paint_schemes.iter().position(|s| paint_scheme_identity(s) == pose.paint_identity)
+                }).flatten()
+            })
     };
     host.paint_scheme = Some(scheme);
+    if !stand_in {
+        host.initial_number = (!pose.number.is_empty()).then(|| pose.number.clone());
+        host.initial_ident = (!pose.ident.is_empty()).then(|| pose.ident.clone());
+    }
     let mut vehicle = omsi_sim::VehicleInstance::new(ty.clone(), host);
     vehicle.ground = None;
     if !ty.model.text_textures.is_empty() {
