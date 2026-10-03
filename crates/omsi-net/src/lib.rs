@@ -33,7 +33,7 @@
 //! DISCOVER|<proto>                               broadcast, client → any host
 //! HERE|<proto>|<host name>|<session>|<map>|<players>
 //!                                                host → client
-//! INFO|<id>|<name>|<bus>|<paint>|<line>|<destination>|length|width|box offset|<table>|<tour>|<display texts, hex, comma separated>|<figure .hum>
+//! INFO|<id>|<name>|<bus>|<paint>|<line>|<destination>|length|width|box offset|<table>|<tour>|<display texts, hex, comma separated>|<figure .hum>|<freetex>|<bus identity>|<paint identity>|<fleet number>|<registration>
 //!                                                every two seconds and on a change; relayed
 //! PLACE|<id>|x|y|z|heading|length|width          client → host, once its bus stands
 //! NEAR|<id>|<footprints>                         host → client
@@ -102,7 +102,9 @@ pub use wire::{
 /// passed on to the other players.
 /// 6: up to 63 sound and moving-part values in a state (a 6-bit count: the AA-FR Agora's
 /// sound variables alone filled the 31 there was room for).
-pub const PROTOCOL: u32 = 6;
+/// 7: vehicle identity, paint identity, fleet number and registration in INFO. The identity
+/// lets another game find the same locally installed bus even when its folder was renamed.
+pub const PROTOCOL: u32 = 7;
 pub const DEFAULT_PORT: u16 = 27015;
 /// Ports a host tries after the default one when that is taken (a second session on the
 /// same machine).
@@ -835,6 +837,13 @@ pub struct Pose {
     pub bus: String,
     /// Paint scheme name (empty for the default).
     pub paint: String,
+    /// Stable fingerprints of the parsed vehicle definition and selected paint scheme.
+    /// They identify equivalent local content without transferring any mod files.
+    pub bus_identity: String,
+    pub paint_identity: String,
+    /// Fleet number and registration as the scripts know them (`number` / `ident`).
+    pub number: String,
+    pub ident: String,
     /// Line and destination as the bus displays them.
     pub line: String,
     pub destination: String,
@@ -954,10 +963,21 @@ impl Pose {
         // the others never learnt which bus the player drove)
         let room = MAX_DATAGRAM.saturating_sub(head.len() + figure.len() + 1);
         let info = format!("{head}{}|{figure}", encode_texts(&self.texts, MAX_TEXTS, MAX_TEXT_LEN, room));
-        // the `[matl_freetex]` pictures last, in what room is left (an older game reads the
-        // fields it knows and passes this one by)
-        let room = MAX_DATAGRAM.saturating_sub(info.len() + 1);
-        format!("{info}|{}", encode_texts(&self.freetex, MAX_FREETEX, MAX_FREETEX_LEN, room))
+        // Vehicle identity metadata comes after the old INFO fields. Keep room for it before
+        // filling the variable-length freetex field so the datagram still fits.
+        let tail = format!(
+            "|{}|{}|{}|{}",
+            clean_text(&self.bus_identity, 16),
+            clean_text(&self.paint_identity, 16),
+            clean_text(&self.number, MAX_FIELD),
+            clean_text(&self.ident, MAX_FIELD),
+        );
+        let room = MAX_DATAGRAM.saturating_sub(info.len() + 1 + tail.len());
+        format!(
+            "{info}|{}{}",
+            encode_texts(&self.freetex, MAX_FREETEX, MAX_FREETEX_LEN, room),
+            tail
+        )
     }
 
     /// The info fields of an `INFO` message (checked and cleaned), or None.
@@ -987,6 +1007,10 @@ impl Pose {
             texts: parts.get(12).map(|t| decode_texts(t, MAX_TEXTS, MAX_TEXT_LEN)).unwrap_or_default(),
             figure: parts.get(13).and_then(|f| human_path(f)).unwrap_or_default(),
             freetex: parts.get(14).map(|t| decode_texts(t, MAX_FREETEX, MAX_FREETEX_LEN)).unwrap_or_default(),
+            bus_identity: parts.get(15).map(|t| clean_text(t, 16)).unwrap_or_default(),
+            paint_identity: parts.get(16).map(|t| clean_text(t, 16)).unwrap_or_default(),
+            number: parts.get(17).map(|t| clean_text(t, MAX_FIELD)).unwrap_or_default(),
+            ident: parts.get(18).map(|t| clean_text(t, MAX_FIELD)).unwrap_or_default(),
             ..Default::default()
         })
     }
@@ -996,6 +1020,10 @@ impl Pose {
         self.name = info.name.clone();
         self.bus = info.bus.clone();
         self.paint = info.paint.clone();
+        self.bus_identity = info.bus_identity.clone();
+        self.paint_identity = info.paint_identity.clone();
+        self.number = info.number.clone();
+        self.ident = info.ident.clone();
         self.line = info.line.clone();
         self.destination = info.destination.clone();
         self.tour = info.tour.clone();
@@ -1016,6 +1044,10 @@ impl Pose {
             name: keep.name,
             bus: keep.bus,
             paint: keep.paint,
+            bus_identity: keep.bus_identity,
+            paint_identity: keep.paint_identity,
+            number: keep.number,
+            ident: keep.ident,
             line: keep.line,
             destination: keep.destination,
             tour: keep.tour,
