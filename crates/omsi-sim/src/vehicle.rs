@@ -3068,6 +3068,9 @@ pub struct TrailerPart {
     /// it travels (not turned round for a reversed part), and the eased height of its axle.
     pitch: f32,
     bank: f32,
+    /// Exact pose supplied by LAN for the next visual update. A remote articulated section
+    /// must not be re-solved against this computer's ground after its sender already solved it.
+    network_pose: Option<(DVec3, f64, f32, f32)>,
     axle_z: Option<f64>,
     /// How fast the axle's height moves (m/s), for the road part's springs (see `follow`).
     axle_vz: f64,
@@ -3251,6 +3254,7 @@ impl TrailerPart {
             ground_lift: 0.0,
             pitch: 0.0,
             bank: 0.0,
+            network_pose: None,
             axle_z: None,
             axle_vz: 0.0,
             track: None,
@@ -3380,10 +3384,22 @@ impl TrailerPart {
         self.position = position;
     }
 
+    /// Put this section at the exact 3D pose another simulation produced. The next visual
+    /// update consumes it instead of solving the articulation again from local ground.
+    pub fn set_network_pose(&mut self, position: DVec3, heading: f64, pitch: f32, bank: f32) {
+        self.network_pose = Some((position, heading, pitch, bank));
+    }
+
+    /// Pitch and bank as this section is currently drawn.
+    pub fn body_angles(&self) -> (f32, f32) {
+        (self.pitch, self.bank)
+    }
+
     /// Forget where this part was: the next step puts it straight behind the leading part
     /// (after the vehicle was moved somewhere else).
     pub fn realign(&mut self) {
         self.pivot = None;
+        self.network_pose = None;
         self.axle_z = None;
         self.track = None;
     }
@@ -3418,6 +3434,24 @@ impl TrailerPart {
         // coupling point in the world: on the leading part (the vehicle or the previous trailer)
         let (lead_pos, lead_rot, lead_heading) =
             lead.unwrap_or((main.position, main.body_rotation(), main.heading));
+        if let Some((position, heading, pitch, bank)) = self.network_pose.take() {
+            let old = self.position;
+            self.position = position;
+            self.heading = heading;
+            self.pitch = pitch.clamp(-20.0, 20.0);
+            self.bank = bank.clamp(-20.0, 20.0);
+            let rot = self.body_rotation();
+            let c = position + rot.transform_point3(self.coupling_front).as_dvec3();
+            let h = heading.to_radians();
+            self.pivot = Some(c - DVec3::new(h.sin(), h.cos(), 0.0) * self.length as f64);
+            let ds = (position - old).truncate().length() as f32;
+            if old != DVec3::ZERO && ds < 50.0 {
+                self.odometer += ds * (main.physics.velocity_kmh().signum().max(0.0) * 2.0 - 1.0).max(-1.0);
+            }
+            self.set_articulation(main, lead_rot, lead_heading);
+            self.update_runtime_visuals(main, dt);
+            return;
+        }
         let c = lead_pos + lead_rot.transform_point3(self.coupling_back).as_dvec3();
         // the height its axle had (the new one eases from it; nothing after a move)
         let prev_z = self.pivot.and(self.axle_z);
@@ -3578,27 +3612,29 @@ impl TrailerPart {
         if !ai && on_track.is_none() && dt > 0.0 && shows {
             self.spring_wheels(main, rot);
         }
-        // The joint's angles (degrees) for its plates and bellows and for the scripts: alpha
-        // about the vertical axis - the stock articulation.osc's jackknife protection brakes
-        // at |alpha| > 47° - and beta about the transverse axis. (The horizontal angle went
-        // to beta: the protection never engaged, the bellows turned in the wrong plane.)
-        // The part in front is drawn pitched, this one level: beta is that difference, the
-        // part in front's pitch less this one's. (Taken the other way round, the Agora L's
-        // joint arch and bellows - `anim_rot articulation_0_beta` - tilted away from the rear
-        // section instead of towards it, twice the angle apart at the far ring.)
-        // (the pitch of the part in front as it travels, read off its rotation: forward along
-        // its heading, whichever way its model is turned)
-        let lead_pitch = {
-            let f = lead_rot.transform_vector3(Vec3::Y);
-            let h = lead_heading.to_radians();
-            let along = f.x as f64 * h.sin() + f.y as f64 * h.cos();
-            (f.z as f64).atan2(along.abs().max(1e-6) * along.signum()).to_degrees()
-        };
-        let lead_pitch = if lead_pitch.abs() > 90.0 { lead_pitch - 180.0 * lead_pitch.signum() } else { lead_pitch };
+        self.set_articulation(main, lead_rot, lead_heading);
+        self.update_runtime_visuals(main, dt);
+        if omsi_cfg::env::var_os("OMSI_DEBUG_TRAILER").is_some() {
+            log::info!(
+                "trailer: rest {:?} sag {:?} lift {lift:.3} ground {ground_z:?} z {:.3}",
+                self.rest,
+                sag,
+                self.position.z
+            );
+        }
+    }
+}
+
+impl TrailerPart {
+    fn set_articulation(&mut self, main: &mut VehicleInstance, lead_rot: Mat4, lead_heading: f64) {
+        let f = lead_rot.transform_vector3(Vec3::Y);
+        let h = lead_heading.to_radians();
+        let along = f.x as f64 * h.sin() + f.y as f64 * h.cos();
+        let mut lead_pitch = (f.z as f64).atan2(along.abs().max(1e-6) * along.signum()).to_degrees();
+        if lead_pitch.abs() > 90.0 {
+            lead_pitch -= 180.0 * lead_pitch.signum();
+        }
         let alpha = ((lead_heading - self.heading + 540.0) % 360.0) - 180.0;
-        // (the part in front's pitch less this one's, as Omsi.exe's beta runs (0x7de798: it
-        // grows as the rear axle sinks): taken the other way round the bellows bent away
-        // from the rear section on any grade, their folds sheared and a gap opened at one end)
         let beta = lead_pitch - self.pitch as f64;
         if let Some(id) = self.v_alpha {
             main.state.vars[id as usize] = (alpha * ARTICULATION_SIGN) as f32;
@@ -3606,12 +3642,11 @@ impl TrailerPart {
         if let Some(id) = self.v_beta {
             main.state.vars[id as usize] = beta as f32;
         }
-        // wheels of this part
-        let rpm =
-            main.physics.velocity_kmh() / 3.6 / (2.0 * std::f32::consts::PI * self.wheel_radius)
-                * 60.0;
-        // radians, like every `Wheel_Rotation_*` (the degrees written here before spun the
-        // rear section's wheels 57 times too fast: a flicker instead of a rolling wheel)
+    }
+
+    fn update_runtime_visuals(&mut self, main: &mut VehicleInstance, dt: f32) {
+        let rpm = main.physics.velocity_kmh() / 3.6
+            / (2.0 * std::f32::consts::PI * self.wheel_radius) * 60.0;
         let rot = (self.odometer / self.wheel_radius).rem_euclid(std::f32::consts::TAU);
         for a in 0..self.axle_count {
             for side in ["L", "R"] {
@@ -3619,11 +3654,7 @@ impl TrailerPart {
                 if let Some(id) = main.ty.program.var(&format!("Wheel_Rotation_{k}_{side}")) {
                     main.state.vars[id as usize] = rot;
                 }
-                if let Some(id) = main
-                    .ty
-                    .program
-                    .var(&format!("Wheel_RotationSpeed_{k}_{side}"))
-                {
+                if let Some(id) = main.ty.program.var(&format!("Wheel_RotationSpeed_{k}_{side}")) {
                     main.state.vars[id as usize] = rpm;
                 }
             }
@@ -3632,32 +3663,11 @@ impl TrailerPart {
             self.mesh_transforms[i] = a.update(dt, &main.state.vars);
         }
         crate::anim::apply_parents(&self.animators, &mut self.mesh_transforms);
-        if omsi_cfg::env::var_os("OMSI_DEBUG_TRAILER").is_some() {
-            log::info!(
-                "trailer: rest {:?} sag {:?} lift {lift:.3} ground {ground_z:?} z {:.3}",
-                self.rest,
-                sag,
-                self.position.z
-            );
-            for (i, m) in self.ty.meshes.iter().enumerate() {
-                let file = &self.ty.model.meshes[m.def_index].file;
-                if file.to_ascii_lowercase().contains("rad") {
-                    log::info!(
-                        "  {file}: pivot w {:?} transform w {:?}",
-                        m.pivot.w_axis.truncate(),
-                        self.mesh_transforms[i].w_axis.truncate()
-                    );
-                }
-            }
-        }
         self.props_plan.refresh(&self.ty, &main.var_index);
-        self.props_plan
-            .apply(&main.state.vars, &mut self.mesh_props);
+        self.props_plan.apply(&main.state.vars, &mut self.mesh_props);
         let _ = self.axle_long;
     }
-}
 
-impl TrailerPart {
     /// `Axle_Suspension_*` of the part's sprung axles from the ground under each wheel, the
     /// body standing at `self.position` turned by `rot` (see `update`).
     fn spring_wheels(&self, main: &mut VehicleInstance, rot: Mat4) {
