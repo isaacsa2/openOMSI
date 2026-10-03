@@ -46,6 +46,10 @@ fn an_info_with_everything_at_its_longest_fits_one_datagram() {
     p.line = "Щ".repeat(20);
     p.destination = "Weiden (Oberpfalz) Bahnhof/ZOB – über Stockerhut ".repeat(3);
     p.tour = "ä".repeat(70);
+    p.bus_identity = "DEADBEEF".into();
+    p.paint_identity = "ABCD1234".into();
+    p.number = "4711".into();
+    p.ident = "B-V 4711".into();
     p.figure = format!("Humans/{}/{}.hum", "é".repeat(60), "f".repeat(120));
     p.texts = (0..MAX_TEXTS).map(|k| format!("{k}ß{}", "ñ".repeat(40))).collect();
     let text = p.encode_info();
@@ -54,6 +58,7 @@ fn an_info_with_everything_at_its_longest_fits_one_datagram() {
     let q = Pose::decode_info(&parts).unwrap();
     assert_eq!(q.bus, p.bus);
     assert_eq!(q.figure, p.figure);
+    assert_eq!((q.bus_identity.as_str(), q.paint_identity.as_str(), q.number.as_str(), q.ident.as_str()), ("DEADBEEF", "ABCD1234", "4711", "B-V 4711"));
     assert!(q.texts.len() < MAX_TEXTS);
     // and an ordinary one keeps all its texts
     let mut o = pose(1.5);
@@ -76,9 +81,16 @@ fn info_carries_the_freetex_pictures_and_an_older_info_has_none() {
     let q = Pose::decode_info(&text.split('|').collect::<Vec<_>>()).unwrap();
     assert_eq!(q.freetex, p.freetex);
     assert_eq!(q.texts, p.texts);
-    // an older game's INFO ends with the figure: no pictures, everything else as before
-    let older = text.rsplit_once('|').unwrap().0;
+    // Protocol 6 ended after freetex: it has no identity/fleet metadata.
+    let fields: Vec<&str> = text.split('|').collect();
+    let older = fields[..15].join("|");
     let q = Pose::decode_info(&older.split('|').collect::<Vec<_>>()).unwrap();
+    assert_eq!(q.freetex, p.freetex);
+    assert!(q.bus_identity.is_empty() && q.paint_identity.is_empty() && q.number.is_empty() && q.ident.is_empty());
+    assert_eq!(q.texts, p.texts);
+    // Older still: INFO ended with the figure and therefore has no freetex either.
+    let oldest = fields[..14].join("|");
+    let q = Pose::decode_info(&oldest.split('|').collect::<Vec<_>>()).unwrap();
     assert!(q.freetex.is_empty());
     assert_eq!(q.texts, p.texts);
     // and with everything else at its longest the INFO still fits one datagram
@@ -94,6 +106,10 @@ fn info_round_trip_and_cleaning() {
     p.id = 7;
     p.table = 0xDEAD_BEEF;
     p.tour = "37/5".into();
+    p.bus_identity = "A1B2C3D4".into();
+    p.paint_identity = "10203040".into();
+    p.number = "285".into();
+    p.ident = "RZR0D16".into();
     let text = p.encode_info();
     let parts: Vec<&str> = text.split('|').collect();
     let q = Pose::decode_info(&parts).unwrap();
@@ -119,6 +135,7 @@ fn info_round_trip_and_cleaning() {
     );
     assert_eq!((q.length, q.width, q.box_offset), (11.5, 2.5, -0.75));
     assert_eq!(q.tour, "37/5");
+    assert_eq!((q.bus_identity.as_str(), q.paint_identity.as_str(), q.number.as_str(), q.ident.as_str()), ("A1B2C3D4", "10203040", "285", "RZR0D16"));
     // what a hostile or broken game might send
     let long = "x".repeat(500);
     let evil = format!("INFO|7|a\u{7}b{long}|../../etc/passwd.bus|p|l|d|11|2.5|0|0");

@@ -135,6 +135,107 @@ fn fnv1a(data: &[u8]) -> u32 {
     h
 }
 
+fn fnv1a64(data: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in data {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// A path as part of a content fingerprint: relative to the vehicle folder where possible,
+/// slash-separated and case-insensitive. Moving the whole bus to another Vehicles folder
+/// therefore does not change its identity.
+fn identity_path(base: &Path, path: &Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// A fingerprint of the parts of a .bus/.ovh definition that identify the vehicle rather
+/// than its install location. This is deliberately not a hash of the raw file: comments,
+/// line endings and a renamed outer folder do not make the bus a different vehicle.
+fn vehicle_identity(def: &omsi_vehicle::Vehicle) -> String {
+    let base = def.dir();
+    let mut key = String::new();
+    let field = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
+    key.push_str(&format!(
+        "kind={:?};maker={};type={};model={};number={};regmode={};bbox={:?};axles={};",
+        def.kind,
+        field(&def.manufacturer),
+        field(&def.type_name),
+        field(def.model.as_deref().unwrap_or("")),
+        field(def.number_file.as_deref().unwrap_or("")),
+        def.registration_mode,
+        def.bounding_box,
+        def.axles.len(),
+    ));
+    for (tag, files) in [
+        ("v", &def.scripts.varlists),
+        ("sv", &def.scripts.stringvarlists),
+        ("s", &def.scripts.scripts),
+        ("c", &def.scripts.constfiles),
+    ] {
+        key.push_str(tag);
+        key.push('=');
+        for p in files {
+            key.push_str(&identity_path(base, p));
+            key.push(',');
+        }
+        key.push(';');
+    }
+    for (tag, coupled) in [("front", &def.couple_front), ("back", &def.couple_back)] {
+        key.push_str(tag);
+        key.push('=');
+        if let Some((path, reversed)) = coupled {
+            key.push_str(&field(path));
+            key.push(':');
+            key.push(if *reversed { '1' } else { '0' });
+        }
+        key.push(';');
+    }
+    format!("{:016X}", fnv1a64(key.as_bytes()).max(1))
+}
+
+/// A repaint fingerprint based on what the scheme actually changes, not its display name.
+fn paint_scheme_identity(scheme: &omsi_sim::vehicle::PaintScheme) -> String {
+    let mut textures = scheme.textures.clone();
+    textures.sort_by_key(|(slot, file)| (slot.to_ascii_lowercase(), file.to_ascii_lowercase()));
+    let mut vars = scheme.set_vars.clone();
+    vars.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()).then_with(|| a.1.total_cmp(&b.1)));
+    let mut key = String::new();
+    for (slot, file) in textures {
+        key.push_str(&slot.trim().to_ascii_lowercase());
+        key.push('=');
+        key.push_str(&file.trim().replace('\\', "/").to_ascii_lowercase());
+        key.push(';');
+    }
+    for (name, value) in vars {
+        key.push_str(&name.trim().to_ascii_lowercase());
+        key.push('=');
+        key.push_str(&format!("{:08X}", value.to_bits()));
+        key.push(';');
+    }
+    format!("{:016X}", fnv1a64(key.as_bytes()).max(1))
+}
+
+/// Fingerprint of the paint the local player selected.
+fn paint_identity(args: &Args, ty: &omsi_sim::VehicleType) -> String {
+    let name = paint_name(args, ty);
+    if name.is_empty() {
+        return String::new();
+    }
+    ty.paint_schemes
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case(&name))
+        .map(paint_scheme_identity)
+        .unwrap_or_default()
+}
+
 impl SyncTable {
     /// `parts`: the types of its rear sections, whose lamps, displays, moving parts and
     /// sounds follow the leading vehicle's variables as its own do (an articulated bus's
@@ -572,6 +673,9 @@ pub struct LanGame {
     /// tried: tried again only after a while (every frame, a server read a big add-on bus
     /// it could not load over and over and stood still for everybody).
     failed: hashbrown::HashMap<(u32, String), std::time::Instant>,
+    /// Bus identities already resolved on this installation. None means that the identity
+    /// was absent or ambiguous here, so repeated INFO messages do not rescan every vehicle.
+    identity_files: hashbrown::HashMap<String, Option<PathBuf>>,
 }
 
 /// What the frame knows that LAN play needs.
@@ -1381,7 +1485,7 @@ fn write_status(lan: &LanSession, game: &LanGame, player: Option<&Player>) {
         .peers()
         .map(|peer| {
             let d = player.filter(|_| peer.pose.has_vehicle()).map(|pl| relative_position(&pl.vehicle, &peer.pose));
-            serde_json::json!({ "id": peer.pose.id, "name": peer.pose.name, "bus": peer.pose.bus, "line": peer.pose.line, "destination": peer.pose.destination, "passengers": peer.pose.passengers, "where": d, "drawn": game.remotes.contains_key(&peer.pose.id) })
+            serde_json::json!({ "id": peer.pose.id, "name": peer.pose.name, "bus": peer.pose.bus, "number": peer.pose.number, "ident": peer.pose.ident, "line": peer.pose.line, "destination": peer.pose.destination, "passengers": peer.pose.passengers, "where": d, "drawn": game.remotes.contains_key(&peer.pose.id) })
         })
         .collect();
     let code = lan.code();
@@ -1495,6 +1599,9 @@ pub fn name_tags(game: &LanGame, cam: &omsi_render::Camera, width: f32, height: 
             (false, true) => format!("line {}", pose.line.trim()),
             _ => String::new(),
         };
+        if !pose.number.trim().is_empty() {
+            sub = if sub.is_empty() { pose.number.trim().to_string() } else { format!("{} · {sub}", pose.number.trim()) };
+        }
         if d > 25.0 {
             let dist = if d >= 1000.0 { format!("{:.1} km", d / 1000.0) } else { format!("{:.0} m", d) };
             sub = if sub.is_empty() { dist } else { format!("{sub} · {dist}") };
@@ -1684,6 +1791,10 @@ pub fn my_pose(
         name: String::new(),
         bus: content_relative(&v.ty.def.path, &args.root),
         paint: paint_name(args, &v.ty),
+        bus_identity: vehicle_identity(&v.ty.def),
+        paint_identity: paint_identity(args, &v.ty),
+        number: v.number(),
+        ident: v.ty.program.str_var("ident").and_then(|i| v.state.str_vars.get(i as usize)).cloned().unwrap_or_default(),
         line,
         destination,
         tour: String::new(),
@@ -2212,19 +2323,91 @@ fn remote_bus_file(args: &Args, bus: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Find exactly one locally installed vehicle with the identity the other player sent.
+/// This is only a fallback after its path did not work. The result is cached because
+/// listing a large Vehicles folder for every INFO would be expensive.
+fn equivalent_bus_file(
+    game: &mut LanGame,
+    args: &Args,
+    identity: &str,
+    allowed: Option<&Vec<String>>,
+) -> Option<PathBuf> {
+    let identity = identity.trim().to_ascii_uppercase();
+    if identity.is_empty() {
+        return None;
+    }
+    if let Some(hit) = game.identity_files.get(&identity) {
+        return hit.clone();
+    }
+    let candidates: Vec<String> = match allowed {
+        Some(list) => list.clone(),
+        None => crate::menu::Menu::new(&args.root, "").vehicles.into_iter().map(|v| v.1).collect(),
+    };
+    let mut found: Option<PathBuf> = None;
+    let mut ambiguous = false;
+    for bus in candidates {
+        let Ok(path) = remote_bus_file(args, &bus) else { continue };
+        let Ok(def) = omsi_vehicle::Vehicle::load(&path) else { continue };
+        if vehicle_identity(&def) != identity {
+            continue;
+        }
+        if found.as_ref().is_some_and(|p| p != &path) {
+            ambiguous = true;
+            break;
+        }
+        found = Some(path);
+    }
+    let result = if ambiguous {
+        log::warn!("LAN: vehicle identity {identity} matches more than one installed bus; not guessing");
+        None
+    } else {
+        found
+    };
+    game.identity_files.insert(identity, result.clone());
+    result
+}
+
 /// Load the type a remote player drives, or a stand-in: ours, or on a server the first of
 /// the buses its `vehicles` list allows. A bus the list does not allow is not loaded at all
 /// (a player joining with another than the server offers).
 fn remote_type(
+    game: &mut LanGame,
     args: &Args,
     pose: &Pose,
     player: Option<&Player>,
 ) -> Option<(Arc<omsi_sim::VehicleType>, bool)> {
     let allowed = crate::server::SERVER_VEHICLES.get().filter(|l| !l.is_empty());
     let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
-    let listed = allowed.map(|l| l.iter().any(|v| norm(v) == norm(&pose.bus) || norm(&pose.bus).ends_with(&norm(v)))).unwrap_or(true);
-    let loaded = if listed {
-        remote_bus_file(args, &pose.bus).and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
+    let exact_allowed = allowed
+        .map(|l| l.iter().any(|v| norm(v) == norm(&pose.bus) || norm(&pose.bus).ends_with(&norm(v))))
+        .unwrap_or(true);
+    let loaded = if exact_allowed {
+        match remote_bus_file(args, &pose.bus)
+            .and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
+        {
+            Ok(t) => Ok(t),
+            Err(original) => match equivalent_bus_file(game, args, &pose.bus_identity, allowed) {
+                Some(path) => {
+                    log::info!(
+                        "LAN: player {}'s {:?} is installed here as {} (vehicle identity {})",
+                        pose.id,
+                        pose.bus,
+                        path.display(),
+                        pose.bus_identity
+                    );
+                    omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
+                }
+                None => Err(original),
+            },
+        }
+    } else if let Some(path) = equivalent_bus_file(game, args, &pose.bus_identity, allowed) {
+        log::info!(
+            "LAN: player {}'s vehicle path differs from the server list; allowed equivalent {} matched identity {}",
+            pose.id,
+            path.display(),
+            pose.bus_identity
+        );
+        omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
     } else {
         Err("the server does not offer it".to_string())
     };
@@ -2253,7 +2436,7 @@ fn new_remote(
     scene: &mut Scene,
     clock: Option<&omsi_sim::SimClock>,
 ) -> Option<RemoteVehicle> {
-    let (ty, stand_in) = remote_type(args, pose, player)?;
+    let (ty, stand_in) = remote_type(game, args, pose, player)?;
     let mut host =
         omsi_sim::VehicleHost::new(clock.cloned().unwrap_or_else(|| crate::start_clock(args)));
     host.font_lib = Some(world.fonts.clone());
@@ -2265,8 +2448,17 @@ fn new_remote(
         ty.paint_schemes
             .iter()
             .position(|s| s.name.eq_ignore_ascii_case(&pose.paint))
+            .or_else(|| {
+                (!pose.paint_identity.is_empty()).then(|| {
+                    ty.paint_schemes.iter().position(|s| paint_scheme_identity(s).eq_ignore_ascii_case(&pose.paint_identity))
+                }).flatten()
+            })
     };
     host.paint_scheme = Some(scheme);
+    if !stand_in {
+        host.initial_number = (!pose.number.is_empty()).then(|| pose.number.clone());
+        host.initial_ident = (!pose.ident.is_empty()).then(|| pose.ident.clone());
+    }
     let mut vehicle = omsi_sim::VehicleInstance::new(ty.clone(), host);
     vehicle.ground = None;
     if !ty.model.text_textures.is_empty() {
@@ -2639,6 +2831,17 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
     if horn != rv.horn {
         rv.horn = horn;
         rv.vehicle.trigger(if horn { "horn" } else { "horn_off" });
+    }
+    if !rv.stand_in {
+        for (name, value) in [("number", &pose.number), ("ident", &pose.ident)] {
+            if let Some(i) = rv.vehicle.ty.program.str_var(name) {
+                if let Some(dst) = rv.vehicle.state.str_vars.get_mut(i as usize) {
+                    if dst != value {
+                        *dst = value.clone();
+                    }
+                }
+            }
+        }
     }
     let t = rv.table.clone();
     let matched = pose.table == t.hash && !rv.stand_in;
