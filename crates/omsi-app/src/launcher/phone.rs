@@ -844,6 +844,12 @@ fn time_sheet(l: &mut Launcher, r: Rect) -> bool {
     let mut t = l.state.choice.time;
     if l.ui.time_field("p-time", Rect::new(left.x, left.y + 22.0, left.w, 48.0), &mut t) {
         l.state.choice.time = t;
+        // A manual edit must stop the launcher from replacing this value with
+        // the device clock again on the next frame.
+        if l.state.settings.get("use_real_time").and_then(|v| v.as_bool()).unwrap_or(false) {
+            l.state.settings["use_real_time"] = serde_json::Value::Bool(false);
+            l.state.settings_dirty = 0.4;
+        }
         l.state.touched();
     }
     l.ui.text_in("Date", Rect::new(left.x, left.y + 84.0, left.w, 18.0), 12.0, Weight::Medium, TEXT_DIM, Align::Left);
