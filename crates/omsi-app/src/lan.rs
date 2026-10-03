@@ -2386,28 +2386,19 @@ fn remote_type(
             .and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
         {
             Ok(t) => Ok(t),
-            Err(original) => {
-                let Some(path) = equivalent_bus_file(game, args, &pose.bus_identity, allowed) else { return match player {
-                    Some(p) => {
-                        log::warn!("LAN: player {} drives {:?}, which cannot be loaded here ({original}); showing a stand-in", pose.id, pose.bus);
-                        Some((p.vehicle.ty.clone(), true))
-                    }
-                    None => {
-                        log::warn!("LAN: player {} drives {:?}, which cannot be loaded here ({original}); showing a stand-in", pose.id, pose.bus);
-                        let first = allowed.and_then(|l| l.first())?;
-                        let path = remote_bus_file(args, first).ok()?;
-                        omsi_sim::VehicleType::load(&args.root, &path).ok().map(|t| (Arc::new(t), true))
-                    }
-                } };
-                log::info!(
-                    "LAN: player {}'s {:?} is installed here as {} (vehicle identity {})",
-                    pose.id,
-                    pose.bus,
-                    path.display(),
-                    pose.bus_identity
-                );
-                omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
-            }
+            Err(original) => match equivalent_bus_file(game, args, &pose.bus_identity, allowed) {
+                Some(path) => {
+                    log::info!(
+                        "LAN: player {}'s {:?} is installed here as {} (vehicle identity {})",
+                        pose.id,
+                        pose.bus,
+                        path.display(),
+                        pose.bus_identity
+                    );
+                    omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
+                }
+                None => Err(original),
+            },
         }
     } else if let Some(path) = equivalent_bus_file(game, args, &pose.bus_identity, allowed) {
         log::info!(
