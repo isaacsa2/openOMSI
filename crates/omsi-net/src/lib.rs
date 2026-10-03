@@ -958,13 +958,6 @@ impl Pose {
             clean_text(&self.tour, MAX_FIELD),
         );
         let figure = human_path(&self.figure).unwrap_or_default();
-        // the display texts get what room is left in one datagram (long vehicle and figure
-        // paths and a destination in another alphabet made an INFO too long to be taken in:
-        // the others never learnt which bus the player drove)
-        let room = MAX_DATAGRAM.saturating_sub(head.len() + figure.len() + 1);
-        let info = format!("{head}{}|{figure}", encode_texts(&self.texts, MAX_TEXTS, MAX_TEXT_LEN, room));
-        // Vehicle identity metadata comes after the old INFO fields. Keep room for it before
-        // filling the variable-length freetex field so the datagram still fits.
         let tail = format!(
             "|{}|{}|{}|{}",
             clean_text(&self.bus_identity, 16),
@@ -972,6 +965,11 @@ impl Pose {
             clean_text(&self.number, MAX_FIELD),
             clean_text(&self.ident, MAX_FIELD),
         );
+        // The display texts get what room is left after all fixed fields, including the new
+        // identity/fleet tail. A long path must never make INFO grow past one datagram.
+        let room = MAX_DATAGRAM.saturating_sub(head.len() + figure.len() + tail.len() + 2);
+        let info = format!("{head}{}|{figure}", encode_texts(&self.texts, MAX_TEXTS, MAX_TEXT_LEN, room));
+        // Freetex gets the remaining room immediately before the fixed tail.
         let room = MAX_DATAGRAM.saturating_sub(info.len() + 1 + tail.len());
         format!(
             "{info}|{}{}",
