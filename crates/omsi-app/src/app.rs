@@ -355,10 +355,16 @@ impl App {
             })
             .unwrap_or((1600, 900));
         let (fit, at) = crate::startup::fit_window(event_loop, lw as f64, lh as f64);
+        let icon = crate::startup::window_icon();
         let mut attrs = Window::default_attributes()
             .with_title("openOMSI")
             .with_inner_size(fit)
-            .with_window_icon(crate::startup::window_icon());
+            .with_window_icon(icon.clone());
+        #[cfg(windows)]
+        {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs = attrs.with_taskbar_icon(icon);
+        }
         if let Some(at) = at {
             attrs = attrs.with_position(at);
         }
@@ -390,6 +396,8 @@ impl App {
             Some(w) => w,
             None => Arc::new(event_loop.create_window(attrs).expect("window")),
         };
+        #[cfg(windows)]
+        crate::startup::reinforce_windows_icons(&window);
         let mut renderer = match window_renderer(&mut self.instance, &window, self.settings.render_options()) {
             Ok(r) => r,
             Err(e) => {
