@@ -27,6 +27,55 @@ fn kept_indicator(cancel: bool, before: Option<f32>, after: Option<f32>) -> Opti
     (!cancel && (before == 1.0 || before == 2.0) && after == 0.0).then_some(before)
 }
 
+/// Some OMSI buses use the standard relay sounds `ev_lights_blinker_on/off` but do not
+/// explicitly fire those sound triggers from their scripts on every lamp pulse. Omsi.exe
+/// still makes the relay follow the indicator lamps. Mirror that behaviour from the actual
+/// left/right lamp variables, without duplicating a trigger a script already fired.
+fn blinker_relay_fallback(
+    previous: &mut Option<bool>,
+    left: Option<f32>,
+    right: Option<f32>,
+    fired: &[String],
+) -> Option<&'static str> {
+    if left.is_none() && right.is_none() {
+        return None;
+    }
+    let phase = left.is_some_and(|v| v > 0.5) || right.is_some_and(|v| v > 0.5);
+    let before = previous.replace(phase)?;
+    if before == phase {
+        return None;
+    }
+    let trigger = if phase { "ev_lights_blinker_on" } else { "ev_lights_blinker_off" };
+    (!fired.iter().any(|t| t.eq_ignore_ascii_case(trigger))).then_some(trigger)
+}
+
+#[cfg(test)]
+mod blinker_relay_tests {
+    use super::blinker_relay_fallback;
+
+    #[test]
+    fn lamp_edges_make_the_standard_relay_triggers() {
+        let mut phase = None;
+        assert_eq!(blinker_relay_fallback(&mut phase, Some(0.0), Some(0.0), &[]), None);
+        assert_eq!(blinker_relay_fallback(&mut phase, Some(1.0), Some(0.0), &[]), Some("ev_lights_blinker_on"));
+        assert_eq!(blinker_relay_fallback(&mut phase, Some(0.0), Some(0.0), &[]), Some("ev_lights_blinker_off"));
+    }
+
+    #[test]
+    fn a_script_trigger_is_not_duplicated() {
+        let mut phase = Some(false);
+        let fired = vec!["EV_LIGHTS_BLINKER_ON".to_string()];
+        assert_eq!(blinker_relay_fallback(&mut phase, Some(1.0), Some(0.0), &fired), None);
+    }
+
+    #[test]
+    fn buses_without_standard_lamp_variables_are_left_alone() {
+        let mut phase = None;
+        assert_eq!(blinker_relay_fallback(&mut phase, None, None, &[]), None);
+        assert_eq!(phase, None);
+    }
+}
+
 pub(crate) fn steering_view_yaw(current: f32, steering: f32, dt: f32, enabled: bool, angle: f32, response: f32) -> f32 {
     let target = if enabled { steering.clamp(-1.0, 1.0) * angle.clamp(0.0, 60.0) } else { 0.0 };
     current + (target - current) * (1.0 - (-dt.max(0.0) / response.clamp(0.05, 1.0)).exp())
@@ -154,6 +203,9 @@ pub(crate) struct Player {
     /// The settings' "Indicators cancel themselves" (`blinker_cancel`): off, the script's
     /// own cancelling after a turn is undone (#451).
     pub(crate) blinker_cancel: bool,
+    /// Last visible phase of the left/right indicator lamps, for OMSI's standard relay
+    /// sound fallback (`ev_lights_blinker_on/off`).
+    pub(crate) blinker_sound_phase: Option<bool>,
 }
 
 // Putting a bus into service (Shift+U, `--autostart`) is `omsi_sim::startup`: it presses
@@ -1491,7 +1543,15 @@ impl Player {
                 }
             }
         }
-        let fired: Vec<String> = std::mem::take(&mut self.vehicle.host.fired_triggers);
+        let mut fired: Vec<String> = std::mem::take(&mut self.vehicle.host.fired_triggers);
+        if let Some(trigger) = blinker_relay_fallback(
+            &mut self.blinker_sound_phase,
+            self.vehicle.var("lights_blinker_l"),
+            self.vehicle.var("lights_blinker_r"),
+            &fired,
+        ) {
+            fired.push(trigger.to_string());
+        }
         let fired_vars: Vec<(String, Vec<f32>)> = std::mem::take(&mut self.vehicle.host.fired_trigger_vars);
         let fired_files: Vec<(String, String)> =
             std::mem::take(&mut self.vehicle.host.fired_file_triggers);
