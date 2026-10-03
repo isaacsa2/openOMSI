@@ -11174,6 +11174,147 @@ fn snap_rect(r: [f32; 4]) -> [f32; 4] {
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "requires a graphics adapter; compares missing and constant transmap coverage"]
+    fn missing_transmap_keeps_constant_coverage_without_diffuse_alpha() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let mut renderer = pollster::block_on(Renderer::new_with(
+            &instance,
+            None,
+            Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            RenderOptions {
+                msaa: 1,
+                ssao: false,
+                fxaa: false,
+                shadow_size: 512,
+                ..Default::default()
+            },
+        ))
+        .expect("test renderer");
+        let mut scene = renderer.new_scene();
+        let diffuse = renderer.add_texture(
+            &mut scene,
+            &omsi_texture::Image {
+                width: 1,
+                height: 1,
+                rgba: vec![180, 100, 40, 0],
+                has_alpha: true,
+            },
+            false,
+        );
+        let constant = renderer.add_texture(
+            &mut scene,
+            &omsi_texture::Image {
+                width: 1,
+                height: 1,
+                rgba: vec![0, 0, 0, 255],
+                has_alpha: false,
+            },
+            false,
+        );
+        let cutout = renderer.add_texture(
+            &mut scene,
+            &omsi_texture::Image {
+                width: 1,
+                height: 1,
+                rgba: vec![0, 0, 0, 0],
+                has_alpha: true,
+            },
+            false,
+        );
+        let mesh = renderer.add_mesh(
+            &mut scene,
+            &MeshData {
+                positions: vec![
+                    Vec3::new(-5.0, -5.0, 0.0),
+                    Vec3::new(5.0, -5.0, 0.0),
+                    Vec3::new(5.0, 5.0, 0.0),
+                    Vec3::new(-5.0, 5.0, 0.0),
+                ],
+                normals: vec![Vec3::Z; 4],
+                uvs: vec![glam::Vec2::splat(0.5); 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                ranges: vec![(0, 6, 0)],
+                one_sided: false,
+            },
+        );
+        let instance = renderer.add_instance(&mut scene, mesh, DVec3::ZERO, Mat4::IDENTITY, vec![0]);
+        let camera = Camera {
+            position: DVec3::new(0.0, -0.105, 6.0),
+            yaw: 0.0,
+            pitch: -89.0,
+            roll: 0.0,
+            fov_deg: 90.0,
+            near: 0.1,
+            far: 100.0,
+        };
+        for enhanced in [false, true] {
+            let lighting = Lighting {
+                enhanced,
+                shadows: false,
+                fog_density: 0.0,
+                ..Default::default()
+            };
+            for alpha in [AlphaMode::Opaque, AlphaMode::Test, AlphaMode::Blend] {
+                let mut pictures = Vec::new();
+                for (transmap, sample_reference) in [
+                    (None, false),
+                    (None, true),
+                    (Some((constant, false)), false),
+                    (Some((constant, true)), false),
+                    (Some((cutout, true)), false),
+                ] {
+                    let material = renderer.add_material_extra(
+                        &mut scene,
+                        Some(diffuse),
+                        alpha,
+                        [1.0; 4],
+                        true,
+                        transmap,
+                        None,
+                        None,
+                        None,
+                        [0.0; 3],
+                        MaterialExtra {
+                            transmap_declared: true,
+                            ..Default::default()
+                        },
+                    );
+                    assert_eq!(scene.materials[material].alpha, alpha);
+                    assert_eq!(scene.materials[material].transmap, transmap);
+                    // Reference the old fallback sampling with the same pipeline and
+                    // depth-pass eligibility: only the shader's alpha-channel flag changes.
+                    if sample_reference {
+                        let m = &mut scene.materials[material];
+                        m.uniform.params[3] = 1.0;
+                        renderer.queue.write_buffer(&m.buf, 0, bytemuck::bytes_of(&m.uniform));
+                    }
+                    renderer.set_material(&mut scene, instance, 0, material);
+                    pictures.push(
+                        renderer
+                            .render_to_image(&mut scene, 32, 32, &camera, &lighting)
+                            .unwrap(),
+                    );
+                }
+                let centre =
+                    |pic: &Vec<u8>| pic[(16 * 32 + 16) * 4..(16 * 32 + 16) * 4 + 3].to_vec();
+                assert_eq!(centre(&pictures[0]), centre(&pictures[1]),
+                    "constant vs sampled fallback: {alpha:?}/{enhanced}");
+                if !enhanced {
+                    assert_eq!(centre(&pictures[0]), centre(&pictures[2]), "missing vs no alpha: {alpha:?}");
+                    assert_eq!(centre(&pictures[0]), centre(&pictures[3]), "missing vs alpha 1: {alpha:?}");
+                }
+                if alpha != AlphaMode::Opaque {
+                    assert_ne!(
+                        centre(&pictures[0]),
+                        centre(&pictures[4]),
+                        "valid holes must remain: {alpha:?}/{enhanced}"
+                    );
+                }
+            }
+        }
+    }
+
     /// Overlays drawn texel for pixel: onto whole pixels, their size kept.
     #[test]
     fn overlays_land_on_whole_pixels() {
