@@ -535,6 +535,8 @@ fn host_and_two_clients_exchange_states() {
         y: 2.5,
         z: 3.0,
         heading: 88.0,
+        pitch: 1.5,
+        bank: -0.8,
     }];
     pa.lamps = vec![1.0, 0.0, 1.0 / 3.0];
     pa.values = vec![1850.0, 0.25];
