@@ -2450,7 +2450,7 @@ fn new_remote(
             .position(|s| s.name.eq_ignore_ascii_case(&pose.paint))
             .or_else(|| {
                 (!pose.paint_identity.is_empty()).then(|| {
-                    ty.paint_schemes.iter().position(|s| paint_scheme_identity(s) == pose.paint_identity)
+                    ty.paint_schemes.iter().position(|s| paint_scheme_identity(s).eq_ignore_ascii_case(&pose.paint_identity))
                 }).flatten()
             })
     };
