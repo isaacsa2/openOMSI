@@ -348,7 +348,16 @@ impl ApplicationHandler for Launcher {
             Some((iw, ih)) => (winit::dpi::LogicalSize::new(iw, ih), None),
             None => crate::startup::fit_window(event_loop, 1440.0, 880.0),
         };
-        let mut attrs = Window::default_attributes().with_title("openOMSI").with_window_icon(crate::startup::window_icon()).with_inner_size(fit);
+        let icon = crate::startup::window_icon();
+        let mut attrs = Window::default_attributes()
+            .with_title("openOMSI")
+            .with_window_icon(icon.clone())
+            .with_inner_size(fit);
+        #[cfg(windows)]
+        {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs = attrs.with_taskbar_icon(icon);
+        }
         if !mobile::mobile() {
             // (no bigger than the window fitted to the screen: a small one at 150 % has less)
             attrs = attrs.with_min_inner_size(winit::dpi::LogicalSize::new(1080.0f64.min(fit.width), 680.0f64.min(fit.height)));
@@ -367,6 +376,8 @@ impl ApplicationHandler for Launcher {
                 return;
             }
         };
+        #[cfg(windows)]
+        crate::startup::reinforce_windows_icons(&window);
         let settings = crate::settings::Settings::load();
         let renderer = match crate::startup::window_renderer(&mut self.instance, &window, showroom_options(&settings)) {
             Ok(r) => r,
