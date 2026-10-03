@@ -135,6 +135,15 @@ fn fnv1a(data: &[u8]) -> u32 {
     h
 }
 
+fn fnv1a64(data: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in data {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
 /// A path as part of a content fingerprint: relative to the vehicle folder where possible,
 /// slash-separated and case-insensitive. Moving the whole bus to another Vehicles folder
 /// therefore does not change its identity.
@@ -189,7 +198,7 @@ fn vehicle_identity(def: &omsi_vehicle::Vehicle) -> String {
         }
         key.push(';');
     }
-    format!("{:08X}", fnv1a(key.as_bytes()).max(1))
+    format!("{:016X}", fnv1a64(key.as_bytes()).max(1))
 }
 
 /// A repaint fingerprint based on what the scheme actually changes, not its display name.
@@ -211,7 +220,7 @@ fn paint_scheme_identity(scheme: &omsi_sim::vehicle::PaintScheme) -> String {
         key.push_str(&format!("{:08X}", value.to_bits()));
         key.push(';');
     }
-    format!("{:08X}", fnv1a(key.as_bytes()).max(1))
+    format!("{:016X}", fnv1a64(key.as_bytes()).max(1))
 }
 
 /// Fingerprint of the paint the local player selected.
@@ -2372,12 +2381,24 @@ fn remote_type(
     let exact_allowed = allowed
         .map(|l| l.iter().any(|v| norm(v) == norm(&pose.bus) || norm(&pose.bus).ends_with(&norm(v))))
         .unwrap_or(true);
-    let equivalent = equivalent_bus_file(game, args, &pose.bus_identity, allowed);
     let loaded = if exact_allowed {
-        remote_bus_file(args, &pose.bus)
+        match remote_bus_file(args, &pose.bus)
             .and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
-            .or_else(|original| {
-                let Some(path) = equivalent.clone() else { return Err(original) };
+        {
+            Ok(t) => Ok(t),
+            Err(original) => {
+                let Some(path) = equivalent_bus_file(game, args, &pose.bus_identity, allowed) else { return match player {
+                    Some(p) => {
+                        log::warn!("LAN: player {} drives {:?}, which cannot be loaded here ({original}); showing a stand-in", pose.id, pose.bus);
+                        Some((p.vehicle.ty.clone(), true))
+                    }
+                    None => {
+                        log::warn!("LAN: player {} drives {:?}, which cannot be loaded here ({original}); showing a stand-in", pose.id, pose.bus);
+                        let first = allowed.and_then(|l| l.first())?;
+                        let path = remote_bus_file(args, first).ok()?;
+                        omsi_sim::VehicleType::load(&args.root, &path).ok().map(|t| (Arc::new(t), true))
+                    }
+                } };
                 log::info!(
                     "LAN: player {}'s {:?} is installed here as {} (vehicle identity {})",
                     pose.id,
@@ -2386,8 +2407,9 @@ fn remote_type(
                     pose.bus_identity
                 );
                 omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
-            })
-    } else if let Some(path) = equivalent {
+            }
+        }
+    } else if let Some(path) = equivalent_bus_file(game, args, &pose.bus_identity, allowed) {
         log::info!(
             "LAN: player {}'s vehicle path differs from the server list; allowed equivalent {} matched identity {}",
             pose.id,
@@ -2818,6 +2840,17 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
     if horn != rv.horn {
         rv.horn = horn;
         rv.vehicle.trigger(if horn { "horn" } else { "horn_off" });
+    }
+    if !rv.stand_in {
+        for (name, value) in [("number", &pose.number), ("ident", &pose.ident)] {
+            if let Some(i) = rv.vehicle.ty.program.str_var(name) {
+                if let Some(dst) = rv.vehicle.state.str_vars.get_mut(i as usize) {
+                    if dst != value {
+                        *dst = value.clone();
+                    }
+                }
+            }
+        }
     }
     let t = rv.table.clone();
     let matched = pose.table == t.hash && !rv.stand_in;
