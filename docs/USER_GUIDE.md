@@ -155,6 +155,10 @@ again only when something changes; drag on it to turn the bus, scroll to zoom. I
   It is enabled by default and can be turned off under Settings → General; the switch
   affects the launcher immediately and the game on its next start. Discord must be running
   on the same computer.
+  **Voice chat through GreenTeaSpeak** (on by default): in multiplayer, the other players
+  are heard from where they are, when GreenTeaSpeak 2 runs with the openOMSI plugin and the
+  server names a voice channel (see [SERVER.md](SERVER.md) and
+  `tools/greenteaspeak-plugin/README.md`).
 * **Controls** - `Inputs/keyboard.cfg`: click a key, press the new one; clashes are red. The
   keys are the game's with *Driving keys: Custom controls* (Settings → Driving); with a ready-made
   layout (W A S D, arrows) those keys drive and win over the list - the page says so, and
@@ -368,6 +372,57 @@ only in winter, no cold presets in summer.
 Weather presets (`Weather/*.owt`) change the light: overcast takes the sun away, rain and
 fog thicken the air, a snow preset puts any map into its winter textures with snow cover.
 
+## Radio
+
+OMSI plays no music itself: a bus's radio only sets variables that radio plugins turn into
+sound. openOMSI plays internet radio for them, with no plugin needed.
+
+**Which buses.** Every bus whose radio sets `Snd_Radio` (the cassette player of the stock
+SD200/SD202/NL and of many mods: it plays the first station) or `SndExt_Radio` (the radios
+made for the Sound Extension plugin: station button *n* plays the *n*-th station, the volume
+knob `SndVol_Radio` sets how loud). Switch the radio on in the cockpit as in OMSI; the
+screen says which station plays and the song when the stream names it.
+
+**Your stations.** `~/.openomsi/radio.cfg` (on Windows `C:\Users\<you>\.openomsi\radio.cfg`)
+is written with a few stations the first time the game starts. One station a line, the
+first line on the first button:
+
+```
+volume = 0.7
+Radiozurnal = https://rozhlas.stream/radiozurnal.mp3
+Evropa 2 = https://ice.actve.net/fm-evropa2-128
+My playlist = https://example.org/station.m3u
+```
+
+A station is an MP3, AAC or Ogg stream, or an `.m3u` / `.pls` playlist that points to one.
+The address is the one a media player opens - on the station's website, or in a directory
+such as radio-browser.info. Streams in HE-AAC with a program config element (some `.aacp`
+stations) cannot be played. `volume` (0..1) is the radio's loudness on top of the knob.
+The file is read when the game starts.
+
+**Stations of a radio plugin.** Stations already set up for an OMSI radio plugin (SuperRadio
+and the like) are taken over: every line with an http(s) address in the text files under
+`plugins` is a station, after those of `radio.cfg`.
+
+**Shift+R** moves the whole list one station on, so that the buttons reach the stations
+behind the first ones.
+
+**A map's stations.** A map may bring a `radio.cfg` of its own beside its `global.cfg`: its
+stations come first on the buttons while you drive on that map, yours after them. It may
+also name the frequency each station is on at places of the map - see
+[Modding: Radio](MODDING.md#radio-a-maps-stations-and-a-buss-display).
+
+**The radio's display.** A radio with a text display shows the station and the song,
+running through its line where they do not fit (ten characters on Dmitrij's "Magnitola" of
+P3ta's SOR buses and its kin, whose first line then shows the map's frequency for the
+place, e.g. `94.6 MHz`). Without stations, or with the radio off, a display shows its own texts.
+
+**When nothing plays.** `~/.openomsi/game.log` says what happened:
+`radio: 23 stations` (the list), `radio: station 1 Radiozurnal (https://…)` (a button
+pressed), then `Radio 1: Radiozurnal - buffering …` and the song, or `no signal (…)` with
+the reason - mostly an address that is not a stream or a station that is down. No `radio:
+station` line at all means the bus's radio sets neither variable.
+
 ## Performance
 
 `OMSI_PROFILE=1 … --exit-after N` prints the frame split (render, mirrors, traffic, people,
@@ -452,6 +507,7 @@ Environment variables, all off unless set. The useful ones:
 | `OMSI_NO_LAN_MODS=1` | a LAN host serves no mods and a joining game fetches none |
 | `OMSI_BACKEND=vulkan\|dx12\|gl` | the graphics interface to ask first (the log lists every adapter each one offers) |
 | `OMSI_GPU_LIMITS=default\|downlevel` | pretend the graphics card can only do this much (tests of old cards) |
+| `OMSI_GPU_ARRAYS=textures\|nostorage` | read the scene's arrays from textures, as on OpenGL chips without storage buffers in the vertex shader (or without any: no per-pixel lamp light) - tests of old cards |
 | `OMSI_RENDER_OCCLUDED=1` | draw even while the window is hidden (tests) |
 | `OMSI_CHECK_OBSTACLES=1` | offscreen: drive every lane as a bus and list the objects that would stop it |
 | `OMSI_DEBUG_REPEATERS=1` | list the spline object rows whose start the map and the spline chain disagree about |

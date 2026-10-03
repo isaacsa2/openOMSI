@@ -272,8 +272,8 @@ impl Launcher {
             _ => {}
         }
         if let Some(step) = p.split(':').nth(1).and_then(|s| s.parse::<usize>().ok()) {
-            // (the Drive page's second part is which of its two tabs: drive:1 the map)
-            app.drive.tab = step.min(1);
+            // (the Drive page's second part is which of its three steps: drive:2 the map)
+            app.drive.tab = step.min(2);
             // (the Controls and Settings pages' second part is their tab: controls:1 the game
             // controllers, settings:3 Sound)
             app.pages.controls_tab = step;
@@ -283,16 +283,30 @@ impl Launcher {
     app
     }
 
+    /// Everything made on the graphics device goes with it: the interface's textures and every
+    /// number kept for one of them - the bus preview, the map picture (and the map's own
+    /// drawing), the servers' icons. A number kept over a device made anew pointed past the
+    /// new device's textures, and the map was drawn with the font atlas instead: the Drive
+    /// page's map full of the interface's words after a game (the launcher gives its device
+    /// up while one runs) or a lost device.
+    fn drop_gpu(&mut self) {
+        self.gpu = None;
+        self.preview_tex = None;
+        self.showroom = showroom::Showroom::new();
+        self.preview_gen = 0;
+        self.map_tex = None;
+        self.map_gen = 0;
+        self.mapview.drop_gpu();
+        self.icons.clear();
+    }
+
     /// The window, its surface and the renderer, given up for the game (a phone plays in the
     /// launcher's window).
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     pub fn release_window(&mut self) -> Option<Arc<Window>> {
         self.pages.pads.cancel_feedback_test();
         self.surface = None;
-        self.gpu = None;
-        self.preview_tex = None;
-        self.showroom = showroom::Showroom::new();
-        self.preview_gen = 0;
+        self.drop_gpu();
         self.renderer = None;
         self.ime = false;
         self.window.take()
@@ -625,10 +639,7 @@ impl Launcher {
             self.state.settings_dirty = 0.3;
         }
         self.surface = None;
-        self.gpu = None;
-        self.preview_tex = None;
-        self.showroom = showroom::Showroom::new();
-        self.preview_gen = 0;
+        self.drop_gpu();
         self.renderer = None;
         self.make_surface();
         true
@@ -753,10 +764,7 @@ impl Launcher {
         {
             log::info!("launcher: a game starts or runs, the graphics device is given up until it ends");
             self.surface = None;
-            self.gpu = None;
-            self.preview_tex = None;
-            self.showroom = showroom::Showroom::new();
-            self.preview_gen = 0;
+            self.drop_gpu();
             self.renderer = None;
         }
         if let Some(d) = presence_released.then(|| self.state.queued_launch.take()).flatten() {
@@ -1131,10 +1139,10 @@ impl Launcher {
         self.map_rect = Some(r);
         let status = self.mapview.status();
         match (self.map_tex, status.is_empty()) {
-            (Some(tex), true) => self.ui.image(r, tex, 0.0),
+            (Some(tex), true) => self.ui.image(r, tex, RADIUS),
             _ => {
                 self.ui.solid(r);
-                self.ui.p().rect(r, omsi_ui::Color::rgba(13, 13, 13, 1.0));
+                self.ui.p().rounded(r, RADIUS, omsi_ui::Color::rgba(13, 13, 13, 1.0));
                 let t = if status.is_empty() { "Loading…" } else { status };
                 self.ui.text_in(t, Rect::new(r.x, r.y + r.h * 0.5 - 12.0, r.w, 24.0), 13.5, Weight::Regular, TEXT_FAINT, Align::Center);
             }
@@ -1174,9 +1182,10 @@ impl Launcher {
         self.preview_rect = Some(r);
         self.showroom.focus_x = focus.clamp(0.2, 0.95);
         match (self.preview_tex, self.showroom.has_picture()) {
-            (Some(tex), true) => self.ui.image(r, tex, 0.0),
+            (Some(tex), true) => self.ui.image(r, tex, RADIUS),
             _ => {
                 self.ui.solid(r);
+                self.ui.p().rounded(r, RADIUS, FIELD);
                 let t = if self.showroom.error.is_some() { "No preview" } else { "Loading…" };
                 self.ui.text_in(t, Rect::new(r.x, r.y + r.h * 0.5 - 12.0, r.w, 24.0), 13.0, Weight::Regular, TEXT_FAINT, Align::Center);
             }
