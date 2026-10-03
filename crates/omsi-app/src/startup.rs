@@ -330,6 +330,20 @@ pub(crate) fn window_icon() -> Option<winit::window::Icon> {
     winit::window::Icon::from_rgba(img.into_raw(), w, h).ok()
 }
 
+/// Reapply both Windows icon sizes after the HWND exists.
+///
+/// with_window_icon sets ICON_SMALL and with_taskbar_icon sets ICON_BIG while the
+/// window is being created. Windows 10/11 Explorer can occasionally miss the initial
+/// taskbar icon, so applying them once more after creation is a harmless fallback.
+#[cfg(windows)]
+pub(crate) fn reinforce_windows_icons(window: &winit::window::Window) {
+    use winit::platform::windows::WindowExtWindows;
+
+    let icon = window_icon();
+    window.set_window_icon(icon.clone());
+    window.set_taskbar_icon(icon);
+}
+
 /// Enhanced graphics wanted (from the settings, `--enhanced`, or OMSI_ENHANCED=1).
 pub(crate) static ENHANCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Vanilla graphics: the picture as OMSI 2 draws it (no Vanilla+ extras, see
