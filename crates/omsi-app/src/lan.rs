@@ -516,8 +516,13 @@ impl SyncTable {
 /// The sync table of a vehicle type (worked out once per type).
 fn sync_table(game: &mut LanGame, v: &omsi_sim::VehicleInstance) -> Arc<SyncTable> {
     let ty = &v.ty;
+    let key = std::iter::once(&ty.def.path)
+        .chain(v.trailers.iter().map(|t| &t.ty.def.path))
+        .map(|p| p.to_string_lossy().replace('\\', "/").to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("|");
     game.tables
-        .entry(ty.def.path.clone())
+        .entry(key)
         .or_insert_with(|| {
             let parts: Vec<Arc<omsi_sim::VehicleType>> = v.trailers.iter().map(|t| t.ty.clone()).collect();
             let t = Arc::new(SyncTable::new(ty, &parts));
@@ -669,7 +674,7 @@ pub struct LanGame {
     pub chat: Chat,
     /// The shared world: the host's traffic and people (`lan_world`).
     pub world: crate::lan_world::LanWorld,
-    tables: hashbrown::HashMap<PathBuf, Arc<SyncTable>>,
+    tables: hashbrown::HashMap<String, Arc<SyncTable>>,
     /// The welcome whose world was taken over (`LanSession::welcomes`).
     adopted: u32,
     /// Host: the tours the other players drive, as last told the timetable.
