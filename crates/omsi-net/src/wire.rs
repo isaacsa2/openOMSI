@@ -593,6 +593,8 @@ mod tests {
                 y: 4_196_461.5,
                 z: 33.3,
                 heading: 268.0,
+                pitch: 2.25,
+                bank: -1.75,
             }],
             lamps: vec![1.0, 0.0, 1.0, 2.0 / 3.0],
             switches: vec![1.0, 0.0, -1.0, 3.0],
@@ -697,7 +699,7 @@ mod tests {
         p.lamps = vec![0.5; MAX_LAMPS];
         p.switches = vec![3.0; MAX_SWITCHES];
         p.values = (0..MAX_VALUES).map(|k| k as f32).collect();
-        p.rear = vec![PartPose { x: 1.0, y: -12.0, z: 0.0, heading: 5.0 }; MAX_REAR];
+        p.rear = vec![PartPose { x: 1.0, y: -12.0, z: 0.0, heading: 5.0, pitch: 3.0, bank: -2.0 }; MAX_REAR];
         p.walker = Some(Walker { x: 1.0, y: 2.0, z: 3.0, heading: 10.0, speed: 1.4, course: 100.0, seated: false, aboard: None });
         let data = encode_state(&p, 6, 0);
         assert!(data.len() <= MAX_STATE_BYTES, "{} bytes", data.len());
