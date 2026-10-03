@@ -30,6 +30,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use sha2::{Digest, Sha256};
 use winit::keyboard::KeyCode;
 
 /// How long a joining player's game waits for the host's welcome (its world) before the
@@ -201,17 +202,63 @@ fn vehicle_identity(def: &omsi_vehicle::Vehicle) -> String {
     format!("{:016X}", fnv1a64(key.as_bytes()).max(1))
 }
 
-/// A repaint fingerprint based on what the scheme actually changes, not its display name.
-fn paint_scheme_identity(scheme: &omsi_sim::vehicle::PaintScheme) -> String {
+/// Texture contents are read once per content generation, never on every frame.
+#[derive(Default)]
+struct PaintIdentities {
+    generation: u64,
+    schemes: hashbrown::HashMap<(PathBuf, usize), String>,
+    textures: hashbrown::HashMap<PathBuf, Option<String>>,
+}
+
+impl PaintIdentities {
+    fn refresh(&mut self) {
+        let generation = omsi_cfg::content_generation();
+        if generation != self.generation {
+            self.generation = generation;
+            self.schemes.clear();
+            self.textures.clear();
+        }
+    }
+
+    fn texture(&mut self, path: &Path) -> Option<String> {
+        self.textures.entry(path.to_path_buf()).or_insert_with(|| {
+            omsi_cfg::vfs::read(path).ok().map(|data| format!("{:x}", Sha256::digest(data)))
+        }).clone()
+    }
+
+    fn scheme(&mut self, root: &Path, ty: &omsi_sim::VehicleType, i: usize) -> String {
+        self.refresh();
+        let key = (ty.def.path.clone(), i);
+        if let Some(identity) = self.schemes.get(&key) { return identity.clone(); }
+        let identity = ty.paint_schemes.get(i)
+            .map(|scheme| paint_scheme_identity(scheme, &ty.texture_dirs(root), self))
+            .unwrap_or_default();
+        self.schemes.insert(key, identity.clone());
+        identity
+    }
+}
+
+/// Content-based repaint identity: renamed image files can still match, while different
+/// images with the same filename cannot. Missing images do not prove equivalence.
+fn paint_scheme_identity(
+    scheme: &omsi_sim::vehicle::PaintScheme,
+    texture_dirs: &[PathBuf],
+    cache: &mut PaintIdentities,
+) -> String {
+    cache.refresh();
     let mut textures = scheme.textures.clone();
     textures.sort_by_key(|(slot, file)| (slot.to_ascii_lowercase(), file.to_ascii_lowercase()));
     let mut vars = scheme.set_vars.clone();
     vars.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()).then_with(|| a.1.total_cmp(&b.1)));
-    let mut key = String::new();
+    let mut key = String::from("paint-content-v2;");
+    let dirs: Vec<&Path> = std::iter::once(scheme.dir.as_path())
+        .chain(texture_dirs.iter().map(PathBuf::as_path)).collect();
     for (slot, file) in textures {
+        let Some(path) = omsi_texture::find_texture(&file, &dirs) else { return String::new() };
+        let Some(content) = cache.texture(&path) else { return String::new() };
         key.push_str(&slot.trim().to_ascii_lowercase());
         key.push('=');
-        key.push_str(&file.trim().replace('\\', "/").to_ascii_lowercase());
+        key.push_str(&content);
         key.push(';');
     }
     for (name, value) in vars {
@@ -237,15 +284,23 @@ fn current_paint_name(
 }
 
 /// Fingerprint the same scheme whose name is sent in INFO, including runtime repaints.
-fn paint_identity(schemes: &[omsi_sim::vehicle::PaintScheme], name: &str) -> String {
+fn paint_identity(game: &mut LanGame, root: &Path, ty: &omsi_sim::VehicleType, name: &str) -> String {
     if name.is_empty() {
         return String::new();
     }
-    schemes
+    ty.paint_schemes
         .iter()
-        .find(|s| s.name.eq_ignore_ascii_case(name))
-        .map(paint_scheme_identity)
+        .position(|s| s.name.eq_ignore_ascii_case(name))
+        .map(|i| game.paint_identities.scheme(root, ty, i))
         .unwrap_or_default()
+}
+
+fn unique_paint_match(identities: impl IntoIterator<Item = String>, wanted: &str) -> Option<usize> {
+    if wanted.is_empty() { return None; }
+    let mut hits = identities.into_iter().enumerate()
+        .filter(|(_, identity)| !identity.is_empty() && identity.eq_ignore_ascii_case(wanted));
+    let first = hits.next()?.0;
+    hits.next().is_none().then_some(first)
 }
 
 impl SyncTable {
@@ -408,7 +463,8 @@ impl SyncTable {
                 || m.mesh_ident.as_deref().is_some_and(|x| doorish(x))
                 || m.mouse_event.as_deref().is_some_and(|x| doorish(x))
                 || m.animations.iter().any(|a| doorish(&a.variable));
-            if wiper || door {
+            let passenger_control = m.mouse_event.as_deref().is_some_and(crate::passenger::passenger_event);
+            if wiper || door || passenger_control {
                 value_names.extend(m.animations.iter().map(|a| a.variable.clone()));
             }
         }
@@ -583,6 +639,17 @@ impl RemoteVehicle {
     pub fn vehicle(&self) -> &omsi_sim::VehicleInstance {
         &self.vehicle
     }
+
+    /// Only the vehicle owner's command reaches this queue. Play a configured sound
+    /// without executing a second copy of the door/window script on the remote AI.
+    pub(crate) fn passenger_sound(&mut self, event: &str) {
+        if self.stand_in { return; }
+        let known = self.table.sounds.iter().map(|(cfg, _)| cfg)
+            .chain(self.table.interior.iter().map(|(cfg, _)| cfg))
+            .chain(self.table.part_sounds.iter().map(|(_, cfg, _)| cfg))
+            .any(|cfg| cfg.sounds.iter().any(|s| s.triggers.iter().any(|t| t.eq_ignore_ascii_case(event))));
+        if known { self.vehicle.host.fired_triggers.push(event.to_string()); }
+    }
 }
 
 // The chat's keys are `chat_toggle` and `chat_open` of keyboard.cfg's [game]
@@ -691,6 +758,8 @@ pub struct LanGame {
     /// Bus identities already resolved on this installation. None means that the identity
     /// was absent or ambiguous here, so repeated INFO messages do not rescan every vehicle.
     identity_files: hashbrown::HashMap<String, Option<PathBuf>>,
+    paint_identities: PaintIdentities,
+    pub(crate) passenger_actions: hashbrown::HashMap<u32, Instant>,
 }
 
 /// What the frame knows that LAN play needs.
@@ -1853,7 +1922,7 @@ pub fn my_pose(
         v.host.paint_scheme,
         &paint_name(args, &v.ty),
     );
-    let paint_identity = paint_identity(&v.ty.paint_schemes, &paint);
+    let paint_identity = paint_identity(game, &args.root, &v.ty, &paint);
     Pose {
         id: 0,
         name: String::new(),
@@ -2518,7 +2587,10 @@ fn new_remote(
             .position(|s| s.name.eq_ignore_ascii_case(&pose.paint))
             .or_else(|| {
                 (!pose.paint_identity.is_empty()).then(|| {
-                    ty.paint_schemes.iter().position(|s| paint_scheme_identity(s).eq_ignore_ascii_case(&pose.paint_identity))
+                    unique_paint_match(
+                        (0..ty.paint_schemes.len()).map(|i| game.paint_identities.scheme(&args.root, &ty, i)),
+                        &pose.paint_identity,
+                    )
                 }).flatten()
             })
     };
@@ -2638,6 +2710,25 @@ fn lan_now() -> f64 {
 /// How far in the past the others' buses are drawn (s): two states at 20 a second, and
 /// room for one late one.
 const INTERP_DELAY: f64 = 0.12;
+
+/// STATE samples contain movement only; metadata comes from the newest INFO even while
+/// the vehicle is drawn at an older interpolated point. Empty fleet strings clear it too.
+fn current_remote_info(sample: &mut Pose, info: &Pose) {
+    sample.name.clone_from(&info.name);
+    sample.bus.clone_from(&info.bus);
+    sample.paint.clone_from(&info.paint);
+    sample.bus_identity.clone_from(&info.bus_identity);
+    sample.paint_identity.clone_from(&info.paint_identity);
+    sample.number.clone_from(&info.number);
+    sample.ident.clone_from(&info.ident);
+    sample.table = info.table;
+    sample.line.clone_from(&info.line);
+    sample.destination.clone_from(&info.destination);
+    sample.texts.clone_from(&info.texts);
+    sample.freetex.clone_from(&info.freetex);
+    sample.figure.clone_from(&info.figure);
+    sample.tour.clone_from(&info.tour);
+}
 
 impl RemoteVehicle {
     /// Take in the states that came (with when they arrived).
@@ -3320,13 +3411,7 @@ pub fn tick(
         match rv.interpolated() {
             Some(mut ip) => {
                 // (who they are, what their bus shows: the newest state's)
-                ip.name = pose.name.clone();
-                ip.bus = pose.bus.clone();
-                ip.table = pose.table;
-                ip.line = pose.line.clone();
-                ip.destination = pose.destination.clone();
-                ip.texts = pose.texts.clone();
-                ip.freetex = pose.freetex.clone();
+                current_remote_info(&mut ip, &pose);
                 drive_remote(rv, &ip, dt, true);
             }
             None => drive_remote(rv, &pose, dt, false),
@@ -3659,17 +3744,82 @@ thread_local! {
 mod tests {
     use super::*;
 
+    struct PaintFixture(PathBuf);
+    impl PaintFixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let dir = std::env::temp_dir().join(format!("openomsi-lan-paints-{}-{}",
+                std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+        fn scheme(&self, folder: &str, file: &str, contents: &[u8]) -> omsi_sim::vehicle::PaintScheme {
+            let dir = self.0.join(folder);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(file), contents).unwrap();
+            omsi_sim::vehicle::PaintScheme {
+                name: folder.to_string(), dir,
+                textures: vec![("body".to_string(), file.to_string())],
+                set_vars: vec![],
+            }
+        }
+    }
+    impl Drop for PaintFixture {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+
+    #[test]
+    fn interpolated_states_keep_current_fleet_metadata_and_allow_it_to_be_cleared() {
+        let mut info = Pose {
+            flags: omsi_net::FLAG_VEHICLE, sent_ms: 1234,
+            bus: "Vehicles/test.bus".into(), number: "285".into(), ident: "RZR0D16".into(),
+            bus_identity: "0123456789ABCDEF".into(), paint_identity: "FEDCBA9876543210".into(),
+            ..Default::default()
+        };
+        let data = omsi_net::wire::encode_state(&info, omsi_net::PROTOCOL as u8, 1);
+        let (_, _, mut sample) = omsi_net::wire::decode_state(&data, omsi_net::PROTOCOL as u8).unwrap();
+        assert!(sample.number.is_empty() && sample.ident.is_empty());
+        current_remote_info(&mut sample, &info);
+        assert_eq!((&sample.number, &sample.ident), (&info.number, &info.ident));
+        assert_eq!(sample.bus_identity, info.bus_identity);
+        info.number = "286".into();
+        info.ident.clear();
+        current_remote_info(&mut sample, &info);
+        assert_eq!(sample.number, "286");
+        assert!(sample.ident.is_empty());
+        assert_eq!(sample.sent_ms, 1234);
+    }
+
+    #[test]
+    fn repaint_identity_uses_image_content_and_rejects_ambiguous_or_missing_images() {
+        let fixture = PaintFixture::new();
+        let a = fixture.scheme("a", "body.dds", b"paint A");
+        let b = fixture.scheme("b", "body.dds", b"paint B");
+        let renamed = fixture.scheme("renamed", "renamed.dds", b"paint A");
+        let mut cache = PaintIdentities::default();
+        let aid = paint_scheme_identity(&a, &[], &mut cache);
+        let bid = paint_scheme_identity(&b, &[], &mut cache);
+        let rid = paint_scheme_identity(&renamed, &[], &mut cache);
+        assert!(!aid.is_empty());
+        assert_ne!(aid, bid);
+        assert_eq!(aid, rid);
+        assert_eq!(unique_paint_match([bid.clone(), aid.clone()], &aid.to_lowercase()), Some(1));
+        assert_eq!(unique_paint_match([aid.clone(), rid], &aid), None);
+        let mut missing = a.clone();
+        missing.textures[0].1 = "missing.dds".into();
+        assert!(paint_scheme_identity(&missing, &[], &mut cache).is_empty());
+        assert_eq!(unique_paint_match([String::new()], ""), None);
+        let mut changed_vars = a.clone();
+        changed_vars.set_vars.push(("window".into(), 1.0));
+        assert_ne!(paint_scheme_identity(&changed_vars, &[], &mut cache), aid);
+    }
+
     #[test]
     fn runtime_repaint_name_and_identity_follow_the_same_selection() {
-        let schemes: Vec<_> = ["Startup", "Runtime"]
-            .into_iter()
-            .map(|name| omsi_sim::vehicle::PaintScheme {
-                name: name.to_string(),
-                dir: PathBuf::new(),
-                textures: vec![("body".to_string(), format!("{name}.dds"))],
-                set_vars: vec![],
-            })
-            .collect();
+        let fixture = PaintFixture::new();
+        let schemes = vec![fixture.scheme("Startup", "body.dds", b"startup"),
+            fixture.scheme("Runtime", "body.dds", b"runtime")];
+        let mut cache = PaintIdentities::default();
         for (selection, expected) in [
             (None, "Startup"),
             (Some(Some(1)), "Runtime"),
@@ -3678,17 +3828,16 @@ mod tests {
         ] {
             let name = current_paint_name(&schemes, selection, "Startup");
             assert_eq!(name, expected);
-            let identity = paint_identity(&schemes, &name);
             if expected.is_empty() {
-                assert!(identity.is_empty());
+                assert!(name.is_empty());
             } else {
                 let scheme = schemes.iter().find(|s| s.name == expected).unwrap();
-                assert_eq!(identity, paint_scheme_identity(scheme));
+                assert!(!paint_scheme_identity(scheme, &[], &mut cache).is_empty());
             }
         }
         assert_ne!(
-            paint_scheme_identity(&schemes[0]),
-            paint_scheme_identity(&schemes[1])
+            paint_scheme_identity(&schemes[0], &[], &mut cache),
+            paint_scheme_identity(&schemes[1], &[], &mut cache)
         );
     }
 

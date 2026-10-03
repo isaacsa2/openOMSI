@@ -69,6 +69,32 @@ fn an_info_with_everything_at_its_longest_fits_one_datagram() {
 }
 
 #[test]
+fn unicode_info_fixed_fields_fit_without_losing_paths_or_fleet_metadata() {
+    for letter in ["界", "🚌"] {
+        let mut p = pose(1.0);
+        p.id = u32::MAX;
+        p.name = letter.repeat(MAX_NAME);
+        p.bus = format!("Vehicles/{}.bus", "a".repeat(247));
+        p.figure = format!("Humans/{}.hum", "b".repeat(249));
+        p.paint = letter.repeat(MAX_FIELD);
+        p.line = letter.repeat(16);
+        p.destination = letter.repeat(MAX_FIELD);
+        p.tour = letter.repeat(MAX_FIELD);
+        p.bus_identity = letter.repeat(16);
+        p.paint_identity = letter.repeat(16);
+        p.number = letter.repeat(MAX_FIELD);
+        p.ident = letter.repeat(MAX_FIELD);
+        p.texts = vec![letter.repeat(MAX_TEXT_LEN); MAX_TEXTS];
+        p.freetex = vec![letter.repeat(MAX_FREETEX_LEN); MAX_FREETEX];
+        let text = p.encode_info();
+        assert!(text.len() <= MAX_DATAGRAM, "{} bytes", text.len());
+        let q = Pose::decode_info(&text.split('|').collect::<Vec<_>>()).unwrap();
+        assert_eq!((q.bus, q.figure, q.number, q.ident), (p.bus, p.figure, p.number, p.ident));
+        assert_eq!((q.bus_identity, q.paint_identity), (p.bus_identity, p.paint_identity));
+    }
+}
+
+#[test]
 fn info_carries_the_freetex_pictures_and_an_older_info_has_none() {
     let mut p = pose(1.5);
     p.texts = vec!["17".into()];
@@ -507,6 +533,36 @@ fn pump(
 fn find(s: &LanSession, x: f64) -> Option<&Peer> {
     s.peers()
         .find(|p| p.has_pose && p.has_info && (p.pose.x - x).abs() < 0.01)
+}
+
+#[test]
+fn passenger_requests_reach_the_owner_and_its_sound_reaches_every_other_game() {
+    let mut host = LanSession::host(27803, "host", world("m"), true).unwrap();
+    let port = host.local_addr().unwrap().port().to_string();
+    let mut a = LanSession::join(&port, "passenger", world("m"), Duration::from_secs(1)).unwrap();
+    let mut b = LanSession::join(&port, "driver", world("m"), Duration::from_secs(1)).unwrap();
+    let poses = [pose(100.0), pose(200.0), pose(300.0)];
+    pump(&mut [&mut host, &mut a, &mut b], &poses, 150, |s| {
+        s[1].connected && s[2].connected && find(s[1], 300.0).is_some()
+    });
+    assert!(a.connected && b.connected);
+    a.command(b.my_id, "passenger stop");
+    pump(&mut [&mut host, &mut a, &mut b], &poses, 100, |s| !s[2].commands.is_empty());
+    assert_eq!(b.take_commands(), vec![(a.my_id, "passenger stop".into())]);
+    assert!(host.take_commands().is_empty() && a.take_commands().is_empty());
+    b.command(0, "passenger-sound haltewunsch");
+    pump(&mut [&mut host, &mut a, &mut b], &poses, 100, |s| !s[0].commands.is_empty() && !s[1].commands.is_empty());
+    let expected = vec![(b.my_id, "passenger-sound haltewunsch".into())];
+    assert_eq!(host.take_commands(), expected);
+    assert_eq!(a.take_commands(), expected);
+    assert!(b.take_commands().is_empty(), "the owner's sound is already played locally");
+    a.command(0, "admin pause");
+    pump(&mut [&mut host, &mut a, &mut b], &poses, 10, |_| false);
+    assert!(host.take_commands().is_empty() && b.take_commands().is_empty());
+    host.command(0, "passenger-sound haltewunsch");
+    pump(&mut [&mut host, &mut a, &mut b], &poses, 100, |s| !s[1].commands.is_empty() && !s[2].commands.is_empty());
+    assert_eq!(a.take_commands(), vec![(host.my_id, "passenger-sound haltewunsch".into())]);
+    assert_eq!(b.take_commands(), vec![(host.my_id, "passenger-sound haltewunsch".into())]);
 }
 
 #[test]

@@ -746,6 +746,10 @@ impl App {
                 }
                 true
             }
+            KeyCode::KeyB if !ctrl && !shift => {
+                if pressed && !repeat { self.passenger_stop(); }
+                true
+            }
             KeyCode::Space => {
                 if let (true, false, Some(f)) = (pressed, repeat, self.on_foot.as_mut()) {
                     if f.seat.is_none() && f.grounded() {

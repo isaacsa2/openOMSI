@@ -659,19 +659,11 @@ impl App {
 
     /// A command another player's game sent ours (`LanSession::command`).
     pub(crate) fn lan_command(&mut self, from: u32, text: &str) {
+        if self.passenger_command(from, text) { return; }
         let Some(lan) = self.lan.as_ref() else { return };
-        let my_id = lan.my_id;
-        if let Some(ev) = text.strip_prefix("trigger ") {
-            // a switch worked by a passenger of ours: only by one who is in our bus
-            let aboard = lan.peers().find(|p| p.pose.id == from).and_then(|p| p.pose.walker).and_then(|w| w.aboard).map(|a| a.owner == my_id).unwrap_or(false);
-            if !aboard {
-                log::info!("LAN: player {from} asked for switch {ev} of our bus from outside it: ignored");
-                return;
-            }
-            if let Some(p) = self.player.as_mut() {
-                log::info!("LAN: player {from} works {ev} in our bus");
-                p.vehicle.trigger(ev.trim());
-            }
+        // Passenger controls use the checked semantic commands; the old raw trigger
+        // command could operate any driver's switch and had no physical reach check.
+        if text.starts_with("trigger ") {
             return;
         }
         // the voice server of the session (`voice`): asked of the host, told by it
@@ -1277,9 +1269,9 @@ impl App {
             // a click anywhere else leaves the line and goes on to the game
             self.remotes.chat.blur();
         }
-        // in another player's bus: a passenger, whose clicks work nothing of it (they
-        // went to the driver's game, which worked its switches for them)
+        // In another player's bus only nearby passenger controls go to its owner.
         if self.view == "foot" && self.inside_remote.is_some() {
+            self.passenger_click(pressed);
             return;
         }
         // a page (`[htmltexture]`) on a scenery object: pressed and released like the bus's own
@@ -1372,7 +1364,7 @@ impl App {
     }
 
     /// The ray under the cursor now (see [`Self::cockpit_cursor_ray`]).
-    fn cursor_ray_now(&self) -> Option<(glam::DVec3, glam::Vec3, f32)> {
+    pub(crate) fn cursor_ray_now(&self) -> Option<(glam::DVec3, glam::Vec3, f32)> {
         let (cam, s) = self.camera.as_ref().zip(self.surface.as_ref())?;
         Some(self.cockpit_cursor_ray(cam, (s.config.width, s.config.height)))
     }
@@ -3908,7 +3900,12 @@ impl App {
         if let Some(p) = self.player.as_mut() {
             p.occlude_controls = outside;
         }
-        let found = match (
+        let found = if self.view == "foot" && self.inside_remote.is_some() {
+            match self.passenger_hover() {
+                Some(event) => (Some((event, true)), true),
+                None => (None, false),
+            }
+        } else { match (
             self.player.as_ref(),
             self.camera.as_ref(),
             self.surface.as_ref(),
@@ -3920,9 +3917,8 @@ impl App {
                 let (o, d, spread) = self.cockpit_cursor_ray(cam, (s.config.width, s.config.height));
                 p.hovered_part(o, d, spread)
             }
-            // (in another player's bus nothing is offered: its switches are the driver's)
             _ => (None, false),
-        };
+        }};
         let (found, hand) = found;
         self.hover_hand = hand;
         match found {

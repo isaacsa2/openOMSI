@@ -518,6 +518,18 @@ listed where they are read (`grep -r OMSI_ crates`).
 
 ## LAN play
 
+As a passenger in another player's bus, press **B** to request a stop and ring the
+bus's own bell when its scripts provide one. You can also click nearby passenger
+buttons (stop request, door request, and supported passenger window handles). The
+driver's game executes the control, so the bus's door interlocks still apply. A short
+message confirms acceptance or explains why the control is unavailable. These actions
+require being aboard the bus; driving controls remain with its driver. Bell sounds
+are relayed from the bus owner to the other players, without running the bus script twice.
+
+This test branch uses LAN protocol 7. Use the same test build on host and clients for
+passenger interactions and the content-based repaint identity. Repaints with different
+names match only when their texture contents and setvars agree and the match is unique.
+
 `--lan-host [port]` hosts a session (UDP, port 27015 by default), `--lan-join <where>`
 joins one and `--lan-name` is your name. The launcher's Drive page has the same as *LAN
 play: host / join*.

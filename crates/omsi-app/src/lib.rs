@@ -84,6 +84,7 @@ mod memory;
 mod offscreen;
 mod ground_gap;
 mod on_foot;
+mod passenger;
 mod route_arrows;
 mod server;
 mod player;

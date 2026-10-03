@@ -943,39 +943,44 @@ impl Pose {
     }
 
     fn encode_info(&self) -> String {
-        let head = format!(
-            "INFO|{}|{}|{}|{}|{}|{}|{:.2}|{:.2}|{:.2}|{:08X}|{}|",
-            self.id,
+        let mut fields = vec![
+            "INFO".to_string(),
+            self.id.to_string(),
             clean_text(&self.name, MAX_NAME),
             vehicle_path(&self.bus).unwrap_or_default(),
             clean_text(&self.paint, MAX_FIELD),
             clean_text(&self.line, 16),
             clean_text(&self.destination, MAX_FIELD),
-            finite_or(self.length, 0.0).clamp(0.0, 60.0),
-            finite_or(self.width, 0.0).clamp(0.0, 8.0),
-            finite_or(self.box_offset, 0.0).clamp(-40.0, 40.0),
-            self.table,
+            format!("{:.2}", finite_or(self.length, 0.0).clamp(0.0, 60.0)),
+            format!("{:.2}", finite_or(self.width, 0.0).clamp(0.0, 8.0)),
+            format!("{:.2}", finite_or(self.box_offset, 0.0).clamp(-40.0, 40.0)),
+            format!("{:08X}", self.table),
             clean_text(&self.tour, MAX_FIELD),
-        );
-        let figure = human_path(&self.figure).unwrap_or_default();
-        let tail = format!(
-            "|{}|{}|{}|{}",
+            String::new(), // display texts
+            human_path(&self.figure).unwrap_or_default(),
+            String::new(), // freetex
             clean_text(&self.bus_identity, 16),
             clean_text(&self.paint_identity, 16),
             clean_text(&self.number, MAX_FIELD),
             clean_text(&self.ident, MAX_FIELD),
-        );
-        // The display texts get what room is left after all fixed fields, including the new
-        // identity/fleet tail. A long path must never make INFO grow past one datagram.
-        let room = MAX_DATAGRAM.saturating_sub(head.len() + figure.len() + tail.len() + 2);
-        let info = format!("{head}{}|{figure}", encode_texts(&self.texts, MAX_TEXTS, MAX_TEXT_LEN, room));
-        // Freetex gets the remaining room immediately before the fixed tail.
-        let room = MAX_DATAGRAM.saturating_sub(info.len() + 1 + tail.len());
-        format!(
-            "{info}|{}{}",
-            encode_texts(&self.freetex, MAX_FREETEX, MAX_FREETEX_LEN, room),
-            tail
-        )
+        ];
+        let mut used = fields.iter().map(String::len).sum::<usize>() + fields.len() - 1;
+        // Character limits are not byte limits. Preserve paths and fleet identities;
+        // shorten optional labels only when the fixed fields alone exceed the UDP budget.
+        for i in [11, 6, 4, 2, 5] {
+            let excess = used.saturating_sub(MAX_DATAGRAM);
+            if excess == 0 { break; }
+            let old = fields[i].len();
+            let mut end = old.saturating_sub(excess);
+            while !fields[i].is_char_boundary(end) { end -= 1; }
+            fields[i].truncate(end);
+            used -= old - end;
+        }
+        debug_assert!(used <= MAX_DATAGRAM);
+        fields[12] = encode_texts(&self.texts, MAX_TEXTS, MAX_TEXT_LEN, MAX_DATAGRAM - used);
+        used += fields[12].len();
+        fields[14] = encode_texts(&self.freetex, MAX_FREETEX, MAX_FREETEX_LEN, MAX_DATAGRAM - used);
+        fields.join("|")
     }
 
     /// The info fields of an `INFO` message (checked and cleaned), or None.
@@ -1827,7 +1832,8 @@ impl LanSession {
     }
 
     /// A command for player `to` (1 the host): the host passes it on. Used for switches
-    /// worked in another player's bus and for the host's administration.
+    /// worked in another player's bus and for the host's administration. Target 0 is
+    /// reserved for a bus owner's passenger sounds, relayed once to the other games.
     pub fn command(&mut self, to: u32, text: &str) {
         let text = clean_text(text, MAX_CHAT);
         if text.is_empty() || to == self.my_id {
@@ -1836,6 +1842,10 @@ impl LanSession {
         let msg = format!("CMD|{}|{to}|{text}", self.my_id);
         match self.role {
             Role::Host => {
+                if to == 0 && text.starts_with("passenger-sound ") {
+                    self.broadcast(msg.as_bytes(), None);
+                    return;
+                }
                 if let Some(a) = self.peers.get(&to).and_then(|p| p.addr) {
                     self.send(msg.as_bytes(), a);
                 }
@@ -1867,14 +1877,19 @@ impl LanSession {
                 if self.checked_peer(sender, from, MESSAGE_RATE, false).is_none() {
                     return;
                 }
-                if to == self.my_id {
+                if to == 0 && text.starts_with("passenger-sound ") {
+                    if self.commands.len() < 64 { self.commands.push((sender, text.clone())); }
+                    self.broadcast(format!("CMD|{sender}|0|{text}").as_bytes(), Some(sender));
+                } else if to == self.my_id {
                     self.commands.push((sender, text));
                 } else if let Some(a) = self.peers.get(&to).and_then(|p| p.addr) {
                     self.send(format!("CMD|{sender}|{to}|{text}").as_bytes(), a);
                 }
             }
             Role::Client => {
-                if Some(from) == self.host && to == self.my_id && self.commands.len() < 64 {
+                if Some(from) == self.host
+                    && (to == self.my_id || (to == 0 && text.starts_with("passenger-sound ") && sender != self.my_id))
+                    && self.commands.len() < 64 {
                     self.commands.push((sender, text));
                 }
             }
