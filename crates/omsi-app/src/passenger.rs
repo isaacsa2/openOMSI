@@ -43,6 +43,18 @@ fn stop_event(program: &omsi_script::Program) -> Option<&'static str> {
         .into_iter().find(|event| program.trigger(event).is_some())
 }
 
+/// Some bells use `[conditionSingle] haltewunsch` instead of a sound trigger.
+/// Carry every condition of those entries, including the mod's permission switch.
+pub(crate) fn sound_variables(cfg: &omsi_vehicle::SoundCfg) -> Vec<String> {
+    cfg.sounds.iter()
+        .filter(|e| e.conditions.iter().any(|c| passenger_event(&c.variable))
+            || e.triggers.iter().any(|t| passenger_event(t)))
+        .flat_map(|e| e.conditions.iter().map(|c| c.variable.clone())
+            .chain(e.vol_curves.iter().map(|c| c.variable.clone()))
+            .chain((!e.pitch_variable.is_empty()).then(|| e.pitch_variable.clone())))
+        .collect()
+}
+
 fn passenger_aboard(pose: &omsi_net::Pose, owner: u32) -> Option<omsi_net::Aboard> {
     pose.walker?.aboard.filter(|a| a.owner == owner && a.local.iter().all(|v| v.is_finite()))
 }
@@ -207,7 +219,7 @@ mod tests {
         let path = dir.join("passenger.osc");
         std::fs::write(&path, "{trigger:int_haltewunsch}\n1 (S.L.haltewunsch) 1 (S.L.button) (T.L.stop_bell)\n{end}\n{trigger:int_haltewunsch_off}\n0 (S.L.button)\n{end}\n").unwrap();
         let program = omsi_script::compile(&omsi_script::CompileInput {
-            builtin_vars: vec!["haltewunsch".into(), "button".into(), "window_open".into()], scripts: vec![path], ..Default::default()
+            builtin_vars: vec!["haltewunsch".into(), "button".into(), "window_open".into(), "door_handsteuerung".into()], scripts: vec![path], ..Default::default()
         });
         assert!(program.errors.is_empty(), "{:?}", program.errors);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -254,6 +266,21 @@ mod tests {
         let vehicle = test_vehicle();
         let table = crate::lan::SyncTable::new(&vehicle.ty, &[]);
         assert!(table.values.iter().any(|(name, _)| name == "window_open"));
+    }
+
+    #[test]
+    fn a_condition_based_interior_bell_and_its_permission_are_synchronized() {
+        let mut vehicle = test_vehicle();
+        let dir = std::env::temp_dir().join(format!("openomsi-passenger-sound-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("passenger.cfg");
+        std::fs::write(&path, "[sound]\ncampainha.wav\n1\n[noloop]\n[conditionSingle]\nhaltewunsch\n1\n1\n[conditionSingle]\ndoor_handsteuerung\n0\n1\n").unwrap();
+        std::sync::Arc::get_mut(&mut vehicle.ty).unwrap().def.sound = Some(path.to_string_lossy().into_owned());
+        let table = crate::lan::SyncTable::new(&vehicle.ty, &[]);
+        for name in ["haltewunsch", "door_handsteuerung"] {
+            assert!(table.values.iter().any(|(n, _)| n == name), "{name}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

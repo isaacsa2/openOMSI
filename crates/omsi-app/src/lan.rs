@@ -442,6 +442,9 @@ impl SyncTable {
         };
         let sound_names = sound_vars(&mut sounds.iter().map(|s| &s.0));
         let part_sound_names = sound_vars(&mut part_sounds.iter().map(|s| &s.1));
+        let passenger_sound_names = interior.as_ref()
+            .map(|(cfg, _)| crate::passenger::sound_variables(cfg))
+            .unwrap_or_default();
         // what moves where it can be seen
         let mut value_names: Vec<String> = Vec::new();
         // the parts that move where they can be seen (not the cockpit's switches)
@@ -481,9 +484,13 @@ impl SyncTable {
         // What is seen first, then the leading vehicle's sounds, then the rear sections',
         // each sorted by name: the list is capped, and taken as one list in name order the
         // rear sections' sound variables pushed what is seen out of it.
-        let skip = |n: &str| (engine_fed(n) && !rain_film(n)) || var(n).map(|id| taken.contains(&id)).unwrap_or(true);
+        // A mod's door_handsteuerung is script state, despite the generic door_ prefix.
+        // Interior bell conditions must follow the owner too, not only exterior audio.
+        let skip = |n: &str| (engine_fed(n) && !rain_film(n)
+            && !passenger_sound_names.iter().any(|s| s.eq_ignore_ascii_case(n)))
+            || var(n).map(|id| taken.contains(&id)).unwrap_or(true);
         let mut values = collect(&mut value_names.into_iter(), &skip, omsi_net::wire::MAX_VALUES);
-        for names in [sound_names, part_sound_names] {
+        for names in [passenger_sound_names.clone(), sound_names, part_sound_names] {
             let had: Vec<VarId> = values.iter().map(|v| v.1).collect();
             let more = collect(
                 &mut names.into_iter(),
