@@ -25,7 +25,7 @@
 //!   throttle 5, brake 5             /31
 //!   passengers 8
 //!   doors 3 + 4 each                opening /15
-//!   wheels 4 + 7 each               suspension travel, 5 mm (±0.32 m)
+//!   wheels 5 + 7 each               suspension travel, 5 mm (±0.32 m)
 //!   rear sections 2 + 84 each       dx, dy 16, dz 12, heading 16, pitch/bank 12 each
 //!   lamps 7 + 2 each                /3 (the vehicle's lamp variables, see the game's sync table)
 //!   switches 5 + 4 each             small integers −8 … 7 (`[visible]` variables)
@@ -58,7 +58,7 @@ pub const FLAG_STOP_BRAKE: u32 = 512;
 const FLAG_BITS: u32 = 10;
 
 pub const MAX_DOORS: usize = 7;
-pub const MAX_WHEELS: usize = 15;
+pub const MAX_WHEELS: usize = 31;
 pub const MAX_REAR: usize = 3;
 pub const MAX_LAMPS: usize = 127;
 pub const MAX_SWITCHES: usize = 31;
@@ -280,7 +280,7 @@ pub fn encode_state(pose: &Pose, protocol: u8, seq: u16) -> Vec<u8> {
         w.put_unit(*d, 4);
     }
     let wheels = &pose.suspension[..pose.suspension.len().min(MAX_WHEELS)];
-    w.put(wheels.len() as u64, 4);
+    w.put(wheels.len() as u64, 5);
     for s in wheels {
         w.put_fixed(*s as f64, 0.005, 7);
     }
@@ -368,7 +368,7 @@ pub fn decode_state(data: &[u8], protocol: u8) -> Option<(u32, u16, Pose)> {
     p.passengers = r.get(8)? as u32;
     let n = r.get(3)? as usize;
     p.doors = (0..n).map(|_| r.get_unit(4)).collect::<Option<_>>()?;
-    let n = r.get(4)? as usize;
+    let n = r.get(5)? as usize;
     p.suspension = (0..n)
         .map(|_| r.get_fixed(0.005, 7).map(|v| v as f32))
         .collect::<Option<_>>()?;
