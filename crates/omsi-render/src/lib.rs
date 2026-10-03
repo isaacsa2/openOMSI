@@ -8302,6 +8302,8 @@ impl Renderer {
         let mut cab_batches: Vec<Batch> = Vec::new();
         let mut cab_items: Vec<DrawItem> = Vec::new();
         let mut main_draws = [0usize; 2];
+        let mut blend_sort_secs = 0.0;
+        let mut blend_sort_instances = 0usize;
         // Keep mesh/material order here: an excavation's floor is drawn before its
         // invisible cover writes depth. Sorting its blended cover after the terrain
         // leaves the terrain's colour in place even though the cover writes depth.
@@ -8409,6 +8411,7 @@ impl Renderer {
                 // its blended body failed the depth test and only the opaque wheels
                 // were left, dark behind the tinted glass, exactly while the car was
                 // half out of the picture.
+                let blend_sort_start = self.profiling.then(std::time::Instant::now);
                 let mut holders: Vec<DVec3> = Vec::new();
                 for &(i, _, inside) in visible {
                     let inst = &scene.instances[i];
@@ -8499,6 +8502,10 @@ impl Renderer {
                 // partial_cmp's "equal" for it broke the sort's order, and since Rust 1.81 the
                 // sort panics on that, which ended the game)
                 keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)).then(a.2.cmp(&b.2)));
+                if let Some(start) = blend_sort_start {
+                    blend_sort_secs += start.elapsed().as_secs_f64();
+                    blend_sort_instances += keyed.len();
+                }
                 items.clear();
                 for (rank, _, i) in keyed {
                     let inst = &scene.instances[i];
@@ -8587,50 +8594,114 @@ impl Renderer {
         if debug_draws {
             log::info!("  main pass: {} opaque/alpha-tested and {} blended draws in {} batches; prepass {} batches; draw list {} entries", main_draws[0], main_draws[1], main_batches.len(), prepass_batches.len(), list.len());
         }
-        if self.profiling && !with_overlays {
+        if self.profiling {
+            // Count the actual selected pipeline, including ordered opaque/cutout slots
+            // and the cab. The ordering bucket is not the material's blend state.
+            let pipes = pipeline_counts(main_batches.iter().chain(&cab_batches));
             let mut c = self.counts.borrow_mut();
-            *c.entry("mirror pictures").or_default() += 1.0;
-            *c.entry("mirror visible instances").or_default() += visible.len() as f64;
-        }
-        if self.profiling && with_overlays {
-            let mut c = self.counts.borrow_mut();
-            *c.entry("scene instances").or_default() += scene.instances.len() as f64;
-            *c.entry("visible instances").or_default() += visible.len() as f64;
-            *c.entry("main draws").or_default() += (main_draws[0] + main_draws[1]) as f64;
-            *c.entry("opaque draws").or_default() += main_draws[0] as f64;
-            *c.entry("blended draws").or_default() += main_draws[1] as f64;
-            *c.entry("main batches").or_default() += main_batches.len() as f64;
-            *c.entry("prepass batches").or_default() += prepass_batches.len() as f64;
-            *c.entry("shadow batches").or_default() +=
-                (shadow_batches[0].len() + shadow_batches[1].len()) as f64;
-            // triangles each pass draws (thousands), the geometry the GPU goes through
-            let tris = |bs: &[Batch]| bs.iter().map(|b| b.count as f64 / 3.0 * b.instances.len() as f64).sum::<f64>() / 1000.0;
-            *c.entry("ktris main").or_default() += tris(&main_batches);
-            *c.entry("ktris prepass").or_default() += tris(&prepass_batches);
-            *c.entry("ktris shadow near").or_default() += tris(&shadow_batches[0]);
-            *c.entry("ktris shadow far").or_default() += tris(&shadow_batches[1]);
-            *c.entry("ktris shadow close").or_default() += tris(&shadow_batches[2]);
+            let keys = if with_overlays {
+                PIPE_COUNT_KEYS
+            } else {
+                MIRROR_PIPE_COUNT_KEYS
+            };
+            for (cost, keys) in pipes.iter().zip(keys) {
+                *c.entry(keys[0]).or_default() += cost.batches as f64;
+                *c.entry(keys[1]).or_default() += cost.draws as f64;
+                *c.entry(keys[2]).or_default() += cost.triangles as f64 / 1000.0;
+            }
+            let stats_key = if with_overlays {
+                "blend sort"
+            } else {
+                "mirror.blend sort"
+            };
+            *self.stats.borrow_mut().entry(stats_key).or_default() += blend_sort_secs;
+            *c.entry(if with_overlays {
+                "blend sort instances"
+            } else {
+                "mirror blend sort instances"
+            })
+            .or_default() += blend_sort_instances as f64;
+            if !with_overlays {
+                *c.entry("mirror pictures").or_default() += 1.0;
+                *c.entry("mirror visible instances").or_default() += visible.len() as f64;
+            } else {
+                *c.entry("scene instances").or_default() += scene.instances.len() as f64;
+                *c.entry("visible instances").or_default() += visible.len() as f64;
+                *c.entry("main draws").or_default() +=
+                    pipes.iter().map(|p| p.draws).sum::<u64>() as f64;
+                *c.entry("opaque draws").or_default() += pipes[PIPE_OPAQUE as usize].draws as f64;
+                *c.entry("blended draws").or_default() += (pipes[PIPE_BLEND as usize].draws
+                    + pipes[PIPE_BLEND_NO_WRITE as usize].draws)
+                    as f64;
+                *c.entry("main batches").or_default() +=
+                    (main_batches.len() + cab_batches.len()) as f64;
+                *c.entry("prepass batches").or_default() += prepass_batches.len() as f64;
+                *c.entry("shadow batches").or_default() +=
+                    shadow_batches.iter().map(Vec::len).sum::<usize>() as f64;
+                let tris = |bs: &[Batch]| {
+                    bs.iter()
+                        .map(|b| b.count as f64 / 3.0 * b.instances.len() as f64)
+                        .sum::<f64>()
+                        / 1000.0
+                };
+                *c.entry("ktris main").or_default() +=
+                    pipes.iter().map(|p| p.triangles).sum::<u64>() as f64 / 1000.0;
+                *c.entry("ktris prepass").or_default() += tris(&prepass_batches);
+                *c.entry("ktris shadow near").or_default() += tris(&shadow_batches[0]);
+                *c.entry("ktris shadow far").or_default() += tris(&shadow_batches[1]);
+                *c.entry("ktris shadow close").or_default() += tris(&shadow_batches[2]);
+            }
         }
         if self.profiling && with_overlays && self.draw_audit_at.elapsed().as_secs() >= 10 {
             self.draw_audit_at = std::time::Instant::now();
             // (batches, draws, triangles) per asset: what the CPU encodes and what the GPU
             // goes through
             let mut assets: HashMap<&str, (usize, usize, u64)> = HashMap::new();
-            for b in &main_batches {
-                let source = scene.meshes[b.mesh as usize].source.as_deref().unwrap_or("procedural / vehicle");
+            for b in main_batches.iter().chain(&cab_batches) {
+                let source = scene.meshes[b.mesh as usize]
+                    .source
+                    .as_deref()
+                    .unwrap_or("procedural / vehicle");
                 let cost = assets.entry(source).or_default();
                 cost.0 += 1;
                 cost.1 += b.instances.len();
                 cost.2 += b.count as u64 / 3 * b.instances.len() as u64;
             }
             let mut assets: Vec<_> = assets.into_iter().collect();
-            assets.sort_unstable_by(|a, b| b.1.0.cmp(&a.1.0).then(a.0.cmp(b.0)));
+            assets.sort_unstable_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(b.0)));
             for (source, (batches, draws, tris)) in assets.iter().take(12) {
-                log::info!("draw audit: {batches} batches, {draws} draws, {tris} triangles: {source}");
+                log::info!(
+                    "draw audit: {batches} batches, {draws} draws, {tris} triangles: {source}"
+                );
             }
-            assets.sort_unstable_by(|a, b| b.1.2.cmp(&a.1.2).then(a.0.cmp(b.0)));
+            assets.sort_unstable_by(|a, b| b.1 .2.cmp(&a.1 .2).then(a.0.cmp(b.0)));
             for (source, (batches, draws, tris)) in assets.iter().take(12) {
                 log::info!("triangle audit: {tris} triangles in {draws} draws ({batches} batches): {source}");
+            }
+            let mut materials: HashMap<(&str, u32), PipelineCount> = HashMap::new();
+            for b in main_batches.iter().chain(&cab_batches) {
+                if !matches!(b.pipe / 4, PIPE_BLEND | PIPE_BLEND_NO_WRITE) {
+                    continue;
+                }
+                let source = scene.meshes[b.mesh as usize]
+                    .source
+                    .as_deref()
+                    .unwrap_or("procedural / vehicle");
+                materials.entry((source, b.material)).or_default().add(b);
+            }
+            let mut materials: Vec<_> = materials.into_iter().collect();
+            materials.sort_unstable_by(|a, b| {
+                b.1.draws
+                    .cmp(&a.1.draws)
+                    .then(b.1.triangles.cmp(&a.1.triangles))
+                    .then(a.0.cmp(&b.0))
+            });
+            for ((source, id), cost) in materials.iter().take(12) {
+                let m = &scene.materials[*id as usize];
+                let declared = (m.uniform.params2[3] as u32 & 2) != 0;
+                log::info!("blend audit: {} batches, {} draws, {} triangles: {source}, material {id}, diffuse={:?}, alpha={:?}, transmap declared={declared} loaded={:?}, noZwrite={} noZcheck={} glass={} rain={} color alpha={}",
+                    cost.batches, cost.draws, cost.triangles, m.texture, m.alpha, m.transmap,
+                    m.no_z_write, m.no_z_check, m.uniform.emissive[3] == 1.0, m.uniform.emissive[3] == 2.0, m.color[3]);
             }
         }
         stage(self, "items", "mirror.items");
@@ -10424,6 +10495,81 @@ struct Batch {
     instances: std::ops::Range<u32>,
 }
 
+// One instanced draw call per batch; draws count the mesh-range instances in it.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+struct PipelineCount {
+    batches: u64,
+    draws: u64,
+    triangles: u64,
+}
+
+impl PipelineCount {
+    fn add(&mut self, batch: &Batch) {
+        self.batches += 1;
+        self.draws += batch.instances.len() as u64;
+        self.triangles += batch.count as u64 / 3 * batch.instances.len() as u64;
+    }
+}
+
+fn pipeline_counts<'a>(batches: impl Iterator<Item = &'a Batch>) -> [PipelineCount; 5] {
+    let mut out = [PipelineCount::default(); 5];
+    for batch in batches {
+        out[(batch.pipe / 4) as usize].add(batch);
+    }
+    out
+}
+
+const PIPE_COUNT_KEYS: [[&str; 3]; 5] = [
+    [
+        "pipe opaque batches",
+        "pipe opaque draws",
+        "pipe opaque ktris",
+    ],
+    [
+        "pipe alpha-test batches",
+        "pipe alpha-test draws",
+        "pipe alpha-test ktris",
+    ],
+    ["pipe blend batches", "pipe blend draws", "pipe blend ktris"],
+    [
+        "pipe blend-no-write batches",
+        "pipe blend-no-write draws",
+        "pipe blend-no-write ktris",
+    ],
+    [
+        "pipe surface-depth batches",
+        "pipe surface-depth draws",
+        "pipe surface-depth ktris",
+    ],
+];
+const MIRROR_PIPE_COUNT_KEYS: [[&str; 3]; 5] = [
+    [
+        "mirror pipe opaque batches",
+        "mirror pipe opaque draws",
+        "mirror pipe opaque ktris",
+    ],
+    [
+        "mirror pipe alpha-test batches",
+        "mirror pipe alpha-test draws",
+        "mirror pipe alpha-test ktris",
+    ],
+    [
+        "mirror pipe blend batches",
+        "mirror pipe blend draws",
+        "mirror pipe blend ktris",
+    ],
+    [
+        "mirror pipe blend-no-write batches",
+        "mirror pipe blend-no-write draws",
+        "mirror pipe blend-no-write ktris",
+    ],
+    [
+        "mirror pipe surface-depth batches",
+        "mirror pipe surface-depth draws",
+        "mirror pipe surface-depth ktris",
+    ],
+];
+
 /// Turn draw items into batches, appending their entries to `list`. `sort`: the order does
 /// not matter (depth-tested opaque and alpha-tested draws), so equal draws are gathered;
 /// otherwise only neighbours are merged (the blended pass keeps its far-to-near order).
@@ -11173,6 +11319,73 @@ fn snap_rect(r: [f32; 4]) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipeline_counts_include_cab_and_raster_variants() {
+        let batch = |kind, cull, bias, count, instances| Batch {
+            pipe: pipe_code(kind, cull, bias),
+            mesh: 0,
+            first: 0,
+            count,
+            material: 0,
+            instances,
+        };
+        let main = [
+            batch(PIPE_OPAQUE, true, false, 6, 0..3),
+            batch(PIPE_ALPHA_TEST, false, true, 9, 3..5),
+            batch(PIPE_BLEND, true, true, 6, 5..6),
+        ];
+        let cab = [
+            batch(PIPE_OPAQUE, false, true, 3, 6..7),
+            batch(PIPE_BLEND_NO_WRITE, false, false, 12, 7..9),
+            batch(PIPE_SURFACE_DEPTH, true, false, 6, 9..10),
+        ];
+        let counts = pipeline_counts(main.iter().chain(&cab));
+        assert_eq!(
+            counts[0],
+            PipelineCount {
+                batches: 2,
+                draws: 4,
+                triangles: 7
+            }
+        );
+        assert_eq!(
+            counts[1],
+            PipelineCount {
+                batches: 1,
+                draws: 2,
+                triangles: 6
+            }
+        );
+        assert_eq!(
+            counts[2],
+            PipelineCount {
+                batches: 1,
+                draws: 1,
+                triangles: 2
+            }
+        );
+        assert_eq!(
+            counts[3],
+            PipelineCount {
+                batches: 1,
+                draws: 2,
+                triangles: 8
+            }
+        );
+        assert_eq!(
+            counts[4],
+            PipelineCount {
+                batches: 1,
+                draws: 1,
+                triangles: 2
+            }
+        );
+        assert_eq!(
+            pipeline_counts(std::iter::empty()),
+            [PipelineCount::default(); 5]
+        );
+    }
 
     /// Overlays drawn texel for pixel: onto whole pixels, their size kept.
     #[test]
