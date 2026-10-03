@@ -26,10 +26,10 @@
 //!   passengers 8
 //!   doors 3 + 4 each                opening /15
 //!   wheels 4 + 7 each               suspension travel, 5 mm (±0.32 m)
-//!   rear sections 2 + 60 each       dx, dy 16 (cm from the front origin), dz 12 (cm), heading 16
+//!   rear sections 2 + 84 each       dx, dy 16, dz 12, heading 16, pitch/bank 12 each
 //!   lamps 7 + 2 each                /3 (the vehicle's lamp variables, see the game's sync table)
 //!   switches 5 + 4 each             small integers −8 … 7 (`[visible]` variables)
-//!   values 6 + 16 each              IEEE half floats (sound and moving-part variables)
+//!   values 7 + 16 each              IEEE half floats (sound, controls and moving-part variables)
 //! ```
 
 use crate::{Aboard, PartPose, Pose, Walker};
@@ -62,7 +62,7 @@ pub const MAX_WHEELS: usize = 15;
 pub const MAX_REAR: usize = 3;
 pub const MAX_LAMPS: usize = 127;
 pub const MAX_SWITCHES: usize = 31;
-pub const MAX_VALUES: usize = 63;
+pub const MAX_VALUES: usize = 127;
 /// The longest state a sender may put together (and a receiver accepts).
 pub const MAX_STATE_BYTES: usize = 512;
 
@@ -304,6 +304,8 @@ pub fn encode_state(pose: &Pose, protocol: u8, seq: u16) -> Vec<u8> {
             0.0
         };
         w.put((h as f64 / 360.0 * 65536.0).round() as u64 % 65536, 16);
+        w.put_fixed(r.pitch as f64, 0.01, 12);
+        w.put_fixed(r.bank as f64, 0.01, 12);
     }
     let lamps = &pose.lamps[..pose.lamps.len().min(MAX_LAMPS)];
     w.put(lamps.len() as u64, 7);
@@ -316,7 +318,7 @@ pub fn encode_state(pose: &Pose, protocol: u8, seq: u16) -> Vec<u8> {
         w.put_fixed(*s as f64, 1.0, 4);
     }
     let values = &pose.values[..pose.values.len().min(MAX_VALUES)];
-    w.put(values.len() as u64, 6);
+    w.put(values.len() as u64, 7);
     for v in values {
         w.put(f16_from(*v) as u64, 16);
     }
@@ -376,11 +378,15 @@ pub fn decode_state(data: &[u8], protocol: u8) -> Option<(u32, u16, Pose)> {
         let dy = r.get_fixed(0.01, 16)?;
         let dz = r.get_fixed(0.01, 12)?;
         let h = (r.get(16)? as f64 * 360.0 / 65536.0) as f32;
+        let pitch = r.get_fixed(0.01, 12)? as f32;
+        let bank = r.get_fixed(0.01, 12)? as f32;
         p.rear.push(PartPose {
             x: p.x + dx,
             y: p.y + dy,
             z: p.z + dz,
             heading: h,
+            pitch,
+            bank,
         });
     }
     let n = r.get(7)? as usize;
@@ -389,7 +395,7 @@ pub fn decode_state(data: &[u8], protocol: u8) -> Option<(u32, u16, Pose)> {
     p.switches = (0..n)
         .map(|_| r.get_signed(4).map(|v| v as f32))
         .collect::<Option<_>>()?;
-    let n = r.get(6)? as usize;
+    let n = r.get(7)? as usize;
     p.values = (0..n)
         .map(|_| r.get(16).map(|v| f16_to(v as u16)))
         .collect::<Option<_>>()?;
