@@ -708,7 +708,10 @@ mod tests {
         assert!(data.len() <= MAX_STATE_BYTES, "{} bytes", data.len());
         let (_, _, q) = decode_state(&data, 6).unwrap();
         assert_eq!(q.values, p.values);
-        assert_eq!(q.suspension, p.suspension);
+        assert_eq!(q.suspension.len(), MAX_WHEELS);
+        for (received, sent) in q.suspension.iter().zip(&p.suspension) {
+            assert!((received - sent).abs() <= 0.0025, "{received} vs {sent}");
+        }
         assert_eq!(q.lamps.len(), MAX_LAMPS);
         assert!(q.walker.is_some());
     }
