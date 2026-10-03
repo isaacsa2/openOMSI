@@ -647,6 +647,8 @@ mod tests {
             (q.rear[0].x - 892_240.0).abs() < 0.006
                 && (q.rear[0].y - 4_196_461.5).abs() < 0.006
                 && (q.rear[0].heading - 268.0).abs() < 0.01
+                && (q.rear[0].pitch - 2.25).abs() < 0.006
+                && (q.rear[0].bank + 1.75).abs() < 0.006
         );
         assert_eq!(q.lamps, p.lamps);
         assert_eq!(q.switches, p.switches);
@@ -690,14 +692,15 @@ mod tests {
         assert_eq!(q.values, vec![0.0, 65504.0]);
     }
 
-    /// Every list at its longest - 63 values among them - still makes a state a receiver
-    /// takes, and the values come back in order.
+    /// Every list at its longest still makes a state a receiver takes, and the expanded
+    /// runtime and suspension values come back in order.
     #[test]
     fn a_state_with_every_list_full_fits() {
         let mut p = bus();
         p.doors = vec![0.5; MAX_DOORS];
         p.lamps = vec![0.5; MAX_LAMPS];
         p.switches = vec![3.0; MAX_SWITCHES];
+        p.suspension = (0..MAX_WHEELS).map(|k| k as f32 * -0.005).collect();
         p.values = (0..MAX_VALUES).map(|k| k as f32).collect();
         p.rear = vec![PartPose { x: 1.0, y: -12.0, z: 0.0, heading: 5.0, pitch: 3.0, bank: -2.0 }; MAX_REAR];
         p.walker = Some(Walker { x: 1.0, y: 2.0, z: 3.0, heading: 10.0, speed: 1.4, course: 100.0, seated: false, aboard: None });
@@ -705,6 +708,7 @@ mod tests {
         assert!(data.len() <= MAX_STATE_BYTES, "{} bytes", data.len());
         let (_, _, q) = decode_state(&data, 6).unwrap();
         assert_eq!(q.values, p.values);
+        assert_eq!(q.suspension, p.suspension);
         assert_eq!(q.lamps.len(), MAX_LAMPS);
         assert!(q.walker.is_some());
     }
