@@ -13,6 +13,10 @@ the reported maps and a hardware graphics adapter are unavailable. Shader valida
 and software rasterization are correctness checks, not hardware FPS measurements.
 The transmap change is a candidate, not a confirmed explanation of the full drop.
 
+The refreshed branches use official main `2ec1b9e`. Earlier builds based on
+`1ef9649` do not include the subsequent triple-screen and LAN changes and must not
+be mixed with these builds in the same A/B comparison.
+
 ## Profiling
 
 Use a real window, the same executable settings, map, bus, spawn, camera, date,
@@ -38,6 +42,11 @@ The pipeline counts describe the submitted main mesh batches, including the cab:
 - Mirror counts are summed across mirror pictures per window frame in the app's
   shutdown report, not divided by the number of mirror pictures.
 - Shadow totals include all three cascades. Main asset audits include the cab.
+- Triple-screen main counters sum submissions across all three panels. Visible
+  instances are per-view submissions, not distinct objects across the panels.
+  The periodic asset audit samples one panel, not the whole triple-screen frame.
+  XR pipeline counters belong to main views, not mirror pictures; the existing
+  CPU/GPU timer labels still group XR eyes with the offscreen path.
 - `blend sort` covers key preparation and sorting. It is a subset of `items` CPU
   time; do not add it to that stage total. Ordered opaque slots participate too.
 
