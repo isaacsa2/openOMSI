@@ -11238,7 +11238,8 @@ mod tests {
                 one_sided: false,
             },
         );
-        let instance = renderer.add_instance(&mut scene, mesh, DVec3::ZERO, Mat4::IDENTITY, vec![0]);
+        let instance =
+            renderer.add_instance(&mut scene, mesh, DVec3::ZERO, Mat4::IDENTITY, vec![0]);
         let camera = Camera {
             position: DVec3::new(0.0, -0.105, 6.0),
             yaw: 0.0,
@@ -11287,7 +11288,9 @@ mod tests {
                     if sample_reference {
                         let m = &mut scene.materials[material];
                         m.uniform.params[3] = 1.0;
-                        renderer.queue.write_buffer(&m.buf, 0, bytemuck::bytes_of(&m.uniform));
+                        renderer
+                            .queue
+                            .write_buffer(&m.buf, 0, bytemuck::bytes_of(&m.uniform));
                     }
                     renderer.set_material(&mut scene, instance, 0, material);
                     pictures.push(
@@ -11298,11 +11301,22 @@ mod tests {
                 }
                 let centre =
                     |pic: &Vec<u8>| pic[(16 * 32 + 16) * 4..(16 * 32 + 16) * 4 + 3].to_vec();
-                assert_eq!(centre(&pictures[0]), centre(&pictures[1]),
-                    "constant vs sampled fallback: {alpha:?}/{enhanced}");
+                assert_eq!(
+                    centre(&pictures[0]),
+                    centre(&pictures[1]),
+                    "constant vs sampled fallback: {alpha:?}/{enhanced}"
+                );
                 if !enhanced {
-                    assert_eq!(centre(&pictures[0]), centre(&pictures[2]), "missing vs no alpha: {alpha:?}");
-                    assert_eq!(centre(&pictures[0]), centre(&pictures[3]), "missing vs alpha 1: {alpha:?}");
+                    assert_eq!(
+                        centre(&pictures[0]),
+                        centre(&pictures[2]),
+                        "missing vs no alpha: {alpha:?}"
+                    );
+                    assert_eq!(
+                        centre(&pictures[0]),
+                        centre(&pictures[3]),
+                        "missing vs alpha 1: {alpha:?}"
+                    );
                 }
                 if alpha != AlphaMode::Opaque {
                     assert_ne!(
