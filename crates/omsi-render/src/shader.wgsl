@@ -322,6 +322,16 @@ fn sample_transmap(uv: vec2<f32>) -> vec4<f32> {
     return textureSample(t_trans, s_diffuse, uv);
 }
 
+// A missing [matl_transmap], or a loaded map without an alpha channel, supplies
+// constant coverage 1. Keep the transmap stage (and reflection semantics) without
+// sampling its fallback texture for every fragment.
+fn transmap_alpha(uv: vec2<f32>) -> f32 {
+    if (material.params.w < 0.5) {
+        return 1.0;
+    }
+    return sample_transmap(uv).a;
+}
+
 fn sample_nightmap(uv: vec2<f32>) -> vec4<f32> {
     if (material.extra.x > 0.5) {
         return textureSample(t_night, s_tile, uv);
@@ -629,8 +639,7 @@ fn fs_puddle_glass_depth(in: FsIn) {
     }
     var a = diffuse_border(textureSample(t_diffuse, s_diffuse, tex_address(in.uv)), in.uv).a;
     if (material.params.z > 0.5) {
-        let tm = sample_transmap(tex_address(in.uv - in.params.zw));
-        a = select(1.0, tm.a, material.params.w > 0.5);
+        a = transmap_alpha(tex_address(in.uv - in.params.zw));
     }
     if (a * material.color.a * in.params.x < 0.002) {
         discard;
@@ -653,8 +662,7 @@ fn fs_shadow_test(in: FsIn) {
     var a = select(diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv).a, 1.0, material.params.x > 1.5 && material.params.z < 0.5);
     if (material.params.z > 0.5) {
         // (the transmap stays where it is: [texcoordtransX/Y] only moves the diffuse stage)
-        let tm = sample_transmap(tex_address(in.uv - in.params.zw));
-        a = select(1.0, tm.a, material.params.w > 0.5);
+        a = transmap_alpha(tex_address(in.uv - in.params.zw));
     }
     if (a < 0.5) {
         discard;
@@ -686,8 +694,7 @@ fn fs_transmap_depth(in: FsIn) {
     if (material.params.z < 0.5) {
         discard;
     }
-    let tm = sample_transmap(tex_address(in.uv - in.params.zw));
-    let a = select(1.0, tm.a, material.params.w > 0.5) * in.params.x;
+    let a = transmap_alpha(tex_address(in.uv - in.params.zw)) * in.params.x;
     // Only what the colour pass will cover completely may hide what lies behind it: a
     // texel that is merely more opaque than not (the dimmer and anti-aliased dots of a
     // display's text layer, whose transmap is its script texture) wrote depth here, the
@@ -1471,8 +1478,7 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
         // is opaque, as D3D samples it: the WH UK AI cars' paint layer has a black 24-bit
         // `transmap_null.tga`, read as luminance the paint was invisible);
         // for terrain the map is the per-tile surface mask in tile space
-        let tm = sample_transmap(buv);
-        tex.a = select(1.0, tm.a, material.params.w > 0.5);
+        tex.a = transmap_alpha(buv);
         if (material.extra.x > 0.5 && material.params.x > 1.5) {
             // A painted ground layer. The brush mask is coarse (0.6-3 m per texel) and
             // binary; the loader smooths it into a soft ramp around a smooth curve
