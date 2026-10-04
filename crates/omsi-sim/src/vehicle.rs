@@ -67,6 +67,13 @@ impl WindingVotes {
     }
 }
 
+/// Entries and exits of a vehicle with variables of their own (`PAX_Entry<n>_Open` …
+/// `PAX_Exit<n>_Req`): Omsi.exe's eight, and eight more for buses with more doors than
+/// that (#719). A cabin's entries and exits past the eighth that the scripts give no
+/// variables of their own open with the eighth, as in Omsi.exe, and ask through the eighth's
+/// `_Req` (openOMSI's choice: Omsi.exe's request arrays have eight slots and lose them).
+pub const PAX_DOORS: usize = 16;
+
 /// Built-in variables every road vehicle has (`program/varlist_roadvehicle.txt` + generated).
 pub fn builtin_vars(root: &Path) -> Vec<String> {
     let mut v: Vec<String> =
@@ -105,6 +112,19 @@ pub fn builtin_vars(root: &Path) -> Vec<String> {
         for n in ["alpha", "beta", "gamma"] {
             v.push(format!("articulation_{i}_{n}"));
         }
+    }
+    // the doors past Omsi.exe's eight (#719), after all of its own variables
+    for a in 8..PAX_DOORS {
+        v.push(format!("PAX_Entry{a}_Open"));
+        v.push(format!("PAX_Entry{a}_Req"));
+        v.push(format!("PAX_Exit{a}_Open"));
+        v.push(format!("PAX_Exit{a}_Req"));
+    }
+    // somebody standing in the doorway (openOMSI's, #720: what a door's light barrier
+    // sees), after those
+    for a in 0..PAX_DOORS {
+        v.push(format!("PAX_Entry{a}_Busy"));
+        v.push(format!("PAX_Exit{a}_Busy"));
     }
     v
 }
@@ -1006,8 +1026,9 @@ pub struct VehicleInstance {
     /// wheels besides each wheel's own `Axle_Brakeforce_*`.
     v_brakeforce: Option<omsi_script::VarId>,
     v_clutch: Option<omsi_script::VarId>,
-    /// `PAX_Entry0..7_Req` and `PAX_Exit0..7_Req`: set by the passengers every frame and
-    /// cleared after the scripts' frame (see `clear_pax_requests`).
+    /// `PAX_Entry<n>_Req` and `PAX_Exit<n>_Req` ([`PAX_DOORS`]), and their `_Busy`: set by
+    /// the passengers every frame and cleared after the scripts' frame (see
+    /// `clear_pax_requests`).
     v_pax_req: Vec<omsi_script::VarId>,
     v_accel: [Option<omsi_script::VarId>; 3],
     v_wheels: Vec<[[Option<omsi_script::VarId>; 5]; 2]>,
@@ -1221,7 +1242,10 @@ impl VehicleInstance {
             v_brake: v("Brake").or_else(|| v("brake_pedal")),
             v_brakeforce: v("Brakeforce"),
             v_clutch: v("Clutch").or_else(|| v("clutch_pedal")),
-            v_pax_req: (0..8).flat_map(|i| [format!("PAX_Entry{i}_Req"), format!("PAX_Exit{i}_Req")]).filter_map(|n| v(&n)).collect(),
+            v_pax_req: (0..PAX_DOORS)
+                .flat_map(|i| [format!("PAX_Entry{i}_Req"), format!("PAX_Exit{i}_Req"), format!("PAX_Entry{i}_Busy"), format!("PAX_Exit{i}_Busy")])
+                .filter_map(|n| v(&n))
+                .collect(),
             v_accel: [v("A_Trans_X"), v("A_Trans_Y"), v("A_Trans_Z")],
             v_wheels,
             ty,
@@ -1501,10 +1525,14 @@ impl VehicleInstance {
         self.heading = (self.heading + dheading as f64).rem_euclid(360.0);
         // collisions: back out of obstacles and stop
         if let (Some(cw), Some(bb)) = (&self.collision, self.ty.def.bounding_box) {
-            let obb = crate::collision::Obb::from_box(bb, self.position, self.heading);
+            let obb = crate::collision::Obb::from_box(bb, self.position, self.body_heading());
             // an obstacle we were already inside before this step (spawned on it, pushed into
             // it) never blocks: only entering an obstacle does
-            let prev_obb = crate::collision::Obb::from_box(bb, prev.0, prev.1);
+            let prev_obb = crate::collision::Obb::from_box(
+                bb,
+                prev.0,
+                body_heading(&self.ty.def, prev.1, false),
+            );
             let hit = cw
                 .obstacles_near(&obb)
                 .into_iter()
@@ -1519,7 +1547,8 @@ impl VehicleInstance {
                 if v.abs() > crate::rigid::CRASH_SPEED {
                     let e = 0.5 * self.physics.mass_kg * v * v;
                     let rel = hit.center - self.position.truncate();
-                    let (sh, ch) = (h.sin(), h.cos());
+                    let body_h = body_heading(&self.ty.def, prev.1, false).to_radians();
+                    let (sh, ch) = (body_h.sin(), body_h.cos());
                     self.host.coll_pos = [
                         (rel.x * ch - rel.y * sh) as f32,
                         (rel.x * sh + rel.y * ch) as f32,
@@ -1900,13 +1929,12 @@ impl VehicleInstance {
 
     /// Where variable `name` sits among the script's variables (`State::vars`).
     pub fn var_slot(&self, name: &str) -> Option<usize> {
-        self.var_index.get(&name.to_ascii_lowercase()).map(|&i| i as usize)
+        omsi_script::compile::with_lower(name, |k| self.var_index.get(k).map(|&i| i as usize))
     }
 
     pub fn var(&self, name: &str) -> Option<f32> {
-        self.var_index
-            .get(&name.to_ascii_lowercase())
-            .map(|&i| self.state.vars[i as usize])
+        omsi_script::compile::with_lower(name, |k| self.var_index.get(k).copied())
+            .map(|i| self.state.vars[i as usize])
     }
 
     /// Whether variable `name` was declared in the vehicle's script set (as opposed to built-in host variables).
@@ -1923,8 +1951,8 @@ impl VehicleInstance {
     }
 
     pub fn set_var(&mut self, name: &str, v: f32) -> bool {
-        match self.var_index.get(&name.to_ascii_lowercase()) {
-            Some(&i) => {
+        match omsi_script::compile::with_lower(name, |k| self.var_index.get(k).copied()) {
+            Some(i) => {
                 self.state.vars[i as usize] = v;
                 true
             }
@@ -2258,9 +2286,9 @@ impl VehicleInstance {
     }
 
     /// The passengers' door requests are pulses: Omsi.exe clears all eight of each kind
-    /// after the vehicle's scripts ran (0x7d6214) and the passengers set them again every
-    /// frame. Kept, a timetable bus that drove out of the passengers' reach kept its last
-    /// request, and its automatic door never shut.
+    /// (here all [`PAX_DOORS`]) after the vehicle's scripts ran (0x7d6214) and the
+    /// passengers set them again every frame. Kept, a timetable bus that drove out of the
+    /// passengers' reach kept its last request, and its automatic door never shut.
     fn clear_pax_requests(&mut self) {
         for &id in &self.v_pax_req {
             self.state.vars[id as usize] = 0.0;
@@ -2679,10 +2707,12 @@ impl VehicleInstance {
             let mut ps = std::mem::take(&mut self.particles);
             let mut parts: Vec<ParticleSet> = self.trailers.iter_mut().map(|t| std::mem::take(&mut t.particles)).collect();
             {
+                // (each puff keeps the height of the road under it - the plane the wheels
+                // stand on - for the renderer to fade it out into, see `particles`)
                 let value = |n: &str| self.var(n).unwrap_or(0.0);
-                ps.update(dt, self.position, self.body_rotation(), &value);
+                ps.update_over(dt, self.position, self.body_rotation(), &|| self.particle_ground(), &value);
                 for (t, set) in self.trailers.iter().zip(parts.iter_mut()) {
-                    set.update(dt, t.position, t.body_rotation(), &value);
+                    set.update_over(dt, t.position, t.body_rotation(), &|| [-t.ground_lift(), 0.0, 0.0], &value);
                 }
             }
             self.particles = ps;
@@ -3306,25 +3336,61 @@ fn scripts_acceleration(accel_body: Vec3, orientation: Quat) -> Vec3 {
     accel_body - orientation.inverse().mul_vec3(Vec3::new(0.0, 0.0, 9.81))
 }
 
-/// Where the two parts of a consist meet, in the frame of the part in front and in the
-/// frame of the part behind: `(lead's rear, car's front)` along the longitudinal axis, or
-/// `None` when the declared coupling points are the right ones.
-///
-/// The two coupled parts of an articulated bus share one joint: the front section's
-/// `[coupling_back]` and the rear section's `[coupling_front]` name the same point of the
-/// world, and the bellows hang between the two bodies (the rear section's body ends short
-/// of the joint). A train is built the other way about: every car is a vehicle with scripts
-/// of its own and stands end to end with the next - and there the declared coupling points
-/// need not be the cars' ends at all. The CR200J's head car names a rear coupling 2.6 m
-/// inside its body (hand-tuned in Omsi.exe, where the cars are put together by their
-/// bodies, so the value costs nothing); taken as the car's end, the second car was pulled
-/// 2.6 m into the first, its nose pressed through the head car's tail.
-///
-/// So a rail car butts its model to the leading car's model; any other part - a trailer,
-/// an articulated-bus rear section - keeps the declared joint. The values are in the body
-/// frame, so that a caller that turns a reversed part around (`TrailerPart::body_rotation`)
-/// needs no more than this; a caller that does not (`Traffic::blocked`, which lays the cars
-/// straight along the heading) must turn them itself - see [`coupling_placement`].
+/// A negative `[boogies]` swaps the rail body's ends relative to its path frame. This is
+/// independent of the consist's coupling flags.
+/// Keep `heading` in the direction of travel and turn the whole body,
+/// including its lights and sound sources, rather than just its meshes.
+pub fn body_reversed(def: &Vehicle, reversed: bool) -> bool {
+    reversed ^ def.boogies.is_some_and(|b| b < 0.0)
+}
+
+/// Model heading in the world, from the path heading and the absolute consist flag.
+pub fn body_heading(def: &Vehicle, heading: f64, reversed: bool) -> f64 {
+    if body_reversed(def, reversed) {
+        heading + 180.0
+    } else {
+        heading
+    }
+}
+
+fn body_rotation(heading: f64, pitch: f32, bank: f32, reversed: bool) -> Mat4 {
+    let (h, p, b) = if reversed {
+        (heading + 180.0, -pitch, -bank)
+    } else {
+        (heading, pitch, bank)
+    };
+    Mat4::from_quat(
+        Quat::from_rotation_z((-h).to_radians() as f32)
+            * Quat::from_rotation_x(p.to_radians())
+            * Quat::from_rotation_y(b.to_radians()),
+    )
+}
+
+fn declared_coupling(def: &Vehicle, front: bool) -> Vec3 {
+    let coupling = if front {
+        &def.coupling_front
+    } else {
+        &def.coupling_back
+    };
+    let p = coupling
+        .as_ref()
+        .map(|c| Vec3::from(c.pos))
+        .unwrap_or(Vec3::new(0.0, if front { 4.0 } else { -4.0 }, 0.3));
+    // Rail couplings are declared in the path frame. Express them in the model frame
+    // so body_rotation can turn a negative-bogie body without moving its joints.
+    if body_reversed(def, false) {
+        Vec3::new(-p.x, -p.y, p.z)
+    } else {
+        p
+    }
+}
+
+/// Where the two parts meet, in their respective model frames. Bogie-defined trains
+/// use declared couplings, as Omsi.exe does, even when a mod's
+/// joints do not match its bodies: the CR200J's inset rear coupling causes overlap
+/// in vanilla too.
+/// Other rail definitions retain body-end placement; road vehicles retain their
+/// declared joint.
 pub fn coupling_offsets(
     lead: &VehicleType,
     lead_reversed: bool,
@@ -3334,20 +3400,49 @@ pub fn coupling_offsets(
     if !car.def.is_rail() {
         return None;
     }
-    // the leading car's rear end (its front end when it runs turned round), the car's own
-    // front end (its rear end when the car runs turned round)
-    let lead_rear = lead.model_box().map(|(lo, hi)| if lead_reversed { hi.y } else { lo.y })?;
-    let car_front = car.model_box().map(|(lo, hi)| if car_reversed { lo.y } else { hi.y })?;
+    let lead_rear = if lead.def.boogies.is_some() {
+        declared_coupling(&lead.def, lead_reversed).y
+    } else {
+        lead.model_box()
+            .map(|(lo, hi)| if lead_reversed { hi.y } else { lo.y })?
+    };
+    let car_front = if car.def.boogies.is_some() {
+        declared_coupling(&car.def, !car_reversed).y
+    } else {
+        car.model_box()
+            .map(|(lo, hi)| if car_reversed { lo.y } else { hi.y })?
+    };
     Some((lead_rear, car_front))
+}
+
+/// `(lead's rear, car's front)` in each body's model frame, including default joints.
+pub fn coupling_points(
+    lead: &VehicleType,
+    lead_reversed: bool,
+    car: &VehicleType,
+    car_reversed: bool,
+) -> (Vec3, Vec3) {
+    let mut back = declared_coupling(&lead.def, lead_reversed);
+    let mut front = declared_coupling(&car.def, !car_reversed);
+    if let Some((b, f)) = coupling_offsets(lead, lead_reversed, car, car_reversed) {
+        back.y = b;
+        front.y = f;
+    }
+    // Between bogie-defined cars only distance along the track joins them;
+    // lateral position and height come from the track, not a road joint.
+    if lead.def.boogies.is_some() && car.def.boogies.is_some() {
+        back = Vec3::new(0.0, back.y, 0.0);
+        front = Vec3::new(0.0, front.y, 0.0);
+    }
+    (back, front)
 }
 
 /// Where a car of a consist stands, for a caller that lays the cars along one heading with
 /// no turn of its own (`Traffic::blocked`): the world position and heading of the car whose
 /// body front sits at the joint [`coupling_offsets`] named.
 ///
-/// Both `lead_reversed` and `reversed` are absolute orientations (a car's own, as
-/// `Traffic::trailer_chain` carries them - `next_coupled` already folds the flag of each
-/// coupling into the value it returns), and `heading` is the consist's own - the head car's.
+/// Both `lead_reversed` and `reversed` are absolute body orientations, including the
+/// intrinsic turn of negative bogies, and `heading` is the consist's path heading.
 /// A car's body sits along the consist's heading turned round when it is itself turned
 /// round, so its heading is derived from `reversed` alone and never from the car in front
 /// of it: two cars turned round in a row would otherwise come out turned twice and lie on
@@ -3383,6 +3478,12 @@ impl TrailerPart {
         (self.pitch, self.axle_z, self.track)
     }
 
+    /// How far the part's origin stands above the plane its wheels touch (m): the road is
+    /// at z = -this in its own frame (where its shadow blob lies, and the tyre spray starts).
+    pub fn ground_lift(&self) -> f32 {
+        self.ground_lift
+    }
+
     pub fn new(
         ty: Arc<VehicleType>,
         main: &VehicleType,
@@ -3414,35 +3515,7 @@ impl TrailerPart {
                 .map(|m| &ty.model.meshes[m.def_index])
                 .collect::<Vec<_>>(),
         );
-        // Couplings stay in the body frame: `body_rotation` already turns a reversed part
-        // around, so its rear coupling faces the leading vehicle and its front axle trails.
-        // See [`coupling_offsets`] for where the two parts of a consist meet.
-        let own_front = if reversed {
-            ty.def.coupling_back.as_ref().map(|c| Vec3::from(c.pos))
-        } else {
-            ty.def.coupling_front.as_ref().map(|c| Vec3::from(c.pos))
-        };
-        let mut coupling_front = own_front.unwrap_or(if reversed {
-            Vec3::new(0.0, -4.0, 0.3)
-        } else {
-            Vec3::new(0.0, 4.0, 0.3)
-        });
-        let lead_back = if main_reversed {
-            main.def.coupling_front.as_ref().map(|c| Vec3::from(c.pos))
-        } else {
-            main.def.coupling_back.as_ref().map(|c| Vec3::from(c.pos))
-        };
-        let mut coupling_back = lead_back.unwrap_or(if main_reversed {
-            Vec3::new(0.0, 4.0, 0.3)
-        } else {
-            Vec3::new(0.0, -4.0, 0.3)
-        });
-        // A train stands its cars end to end by their bodies; the heights stay the declared
-        // couplings', which the pitch of the part hangs on.
-        if let Some((lead_rear, car_front)) = coupling_offsets(main, main_reversed, &ty, reversed) {
-            coupling_back.y = lead_rear;
-            coupling_front.y = car_front;
-        }
+        let (coupling_back, coupling_front) = coupling_points(main, main_reversed, &ty, reversed);
         // the line the part turns about: its own `[rot_pnt_long]` where a road part names
         // one (Omsi.exe runs every section as a body of its own on the same wheel physics,
         // each axle steered towards the turning centre on that line), else the axle
@@ -3453,7 +3526,7 @@ impl TrailerPart {
         let turning_line = (ty.def.rot_pnt_long != 0.0 && !ty.def.axles.is_empty()).then_some(ty.def.rot_pnt_long);
         let axle_long = if let Some(r) = turning_line {
             r
-        } else if reversed {
+        } else if body_reversed(&ty.def, reversed) {
             let a = ty.def.axles.iter().map(|a| a.long).fold(f32::MIN, f32::max);
             if a == f32::MIN {
                 0.5
@@ -3585,12 +3658,11 @@ impl TrailerPart {
     /// A trailer follows its tractor's heading; it pitches between the coupling and the
     /// ground under its axle, and leans as the vehicle does.
     pub fn body_rotation(&self) -> Mat4 {
-        let (h, p, b) = if self.reversed {
-            (self.heading + 180.0, -self.pitch, -self.bank)
-        } else {
-            (self.heading, self.pitch, self.bank)
-        };
-        Mat4::from_quat(Quat::from_rotation_z((-h).to_radians() as f32) * Quat::from_rotation_x(p.to_radians()) * Quat::from_rotation_y(b.to_radians()))
+        body_rotation(self.heading, self.pitch, self.bank, body_reversed(&self.ty.def, self.reversed))
+    }
+
+    pub fn body_heading(&self) -> f64 {
+        body_heading(&self.ty.def, self.heading, self.reversed)
     }
 
     /// World transform of the part's body (f32, for sound positions).
@@ -3957,10 +4029,11 @@ impl TrailerPart {
 impl VehicleInstance {
     /// Rotation of the vehicle body (model frame → world, without translation).
     pub fn body_rotation(&self) -> Mat4 {
-        let q = Quat::from_rotation_z((-self.heading).to_radians() as f32)
-            * Quat::from_rotation_x(self.pitch.to_radians())
-            * Quat::from_rotation_y(self.bank.to_radians());
-        Mat4::from_quat(q)
+        body_rotation(self.heading, self.pitch, self.bank, body_reversed(&self.ty.def, false))
+    }
+
+    pub fn body_heading(&self) -> f64 {
+        body_heading(&self.ty.def, self.heading, false)
     }
 
     /// World transform of the vehicle body (f32; for local computations such as sound
@@ -4017,11 +4090,23 @@ impl VehicleInstance {
         fit_plane(&points)
     }
 
+    /// The ground its `[smoke]` puffs are set off over, as a plane of the body frame (see
+    /// `contact_plane`): the driven one's where its tyres touch the road; an AI copy's the
+    /// plane it is placed `ai_rest_offset` over (the road its axles were set on), without
+    /// asking the ground under every wheel again for the exhaust of every car on the map.
+    fn particle_ground(&self) -> [f32; 3] {
+        if self.rigid.is_some() {
+            self.contact_plane()
+        } else {
+            [-self.ai_rest_offset().0, 0.0, 0.0]
+        }
+    }
+
     /// Position/direction of a `.bus` camera in world space: (eye, yaw, pitch).
     pub fn camera_world(&self, cam: &omsi_vehicle::Camera) -> (DVec3, f32, f32) {
         let local = Vec3::new(cam.pos[0], cam.pos[1], cam.pos[2]);
         let eye = self.position + self.body_rotation().transform_point3(local).as_dvec3();
-        (eye, self.heading as f32 + cam.yaw, cam.pitch)
+        (eye, self.body_heading() as f32 + cam.yaw, cam.pitch)
     }
 
     /// A camera fixed to the body as OMSI keeps one (`[add_camera_reflexion]`: Omsi.exe
@@ -4159,6 +4244,513 @@ pub fn skin_vertices(
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    fn coupling_test_type(boogies: Option<f32>) -> Arc<VehicleType> {
+        Arc::new(VehicleType {
+            def: Vehicle {
+                boogies,
+                coupling_front: Some(omsi_vehicle::vehicle::Coupling {
+                    pos: [0.0, 5.0, 0.3],
+                }),
+                coupling_back: Some(omsi_vehicle::vehicle::Coupling {
+                    pos: [0.0, -5.0, 0.3],
+                }),
+                axles: [-3.0, 3.0]
+                    .map(|long| omsi_vehicle::Axle {
+                        long,
+                        ..Default::default()
+                    })
+                    .to_vec(),
+                ..Default::default()
+            },
+            model: Model::default(),
+            model_dir: PathBuf::new(),
+            program: Arc::new(Program::default()),
+            meshes: Vec::new(),
+            paint_schemes: Vec::new(),
+            texchanges: Vec::new(),
+            wheel_meshes: Vec::new(),
+            suspension_axles: Vec::new(),
+            missing_packs: Vec::new(),
+            mesh_bounds: Vec::new(),
+            // Deliberately includes a protruding coupler beyond the declared joint.
+            mesh_boxes: vec![(Vec3::new(-1.0, -6.2, 0.0), Vec3::new(1.0, 6.2, 3.0))],
+        })
+    }
+
+    #[test]
+    fn bogie_orientation_is_independent_of_consist_flags() {
+        for bogies in [None, Some(5.0), Some(-5.0), Some(0.0)] {
+            let ty = coupling_test_type(bogies);
+            let intrinsic = bogies.is_some_and(|b| b < 0.0);
+            let mut v = VehicleInstance::new(ty.clone(), VehicleHost::new(Default::default()));
+            v.heading = 37.0;
+            v.pitch = 5.0;
+            v.bank = 2.0;
+            let expected = body_rotation(37.0, 5.0, 2.0, false);
+            let forward = expected.transform_vector3(Vec3::Y);
+            assert!(
+                (v.body_rotation().transform_vector3(Vec3::Y).dot(forward)
+                    - if intrinsic { -1.0 } else { 1.0 })
+                .abs()
+                    < 1e-5
+            );
+            for reversed in [false, true] {
+                let mut t =
+                    TrailerPart::new_ex(ty.clone(), &ty, false, reversed, &ty.program, 2, 0);
+                t.heading = v.heading;
+                t.pitch = v.pitch;
+                t.bank = v.bank;
+                let sign = if intrinsic ^ reversed { -1.0 } else { 1.0 };
+                assert!(
+                    (t.body_rotation().transform_vector3(Vec3::Y).dot(forward) - sign).abs() < 1e-5
+                );
+                assert!(
+                    (t.body_rotation().transform_vector3(Vec3::Z)
+                        - expected.transform_vector3(Vec3::Z))
+                    .length()
+                        < 1e-5
+                );
+                assert!(
+                    (t.body_heading() - (37.0 + if sign < 0.0 { 180.0 } else { 0.0 })).abs() < 1e-5
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn simple_collision_uses_the_body_frame_for_current_and_previous_pose() {
+        for bogies in [None, Some(5.0), Some(-5.0)] {
+            for already_inside in [false, true] {
+                let mut ty = coupling_test_type(bogies);
+                let def = &mut Arc::get_mut(&mut ty).unwrap().def;
+                def.bounding_box = Some([2.0, 2.0, 2.0, 0.0, 3.0, 1.0]);
+                def.rolling_resistance = 0.0;
+                let mut v = VehicleInstance::new(ty, VehicleHost::new(Default::default()));
+                v.collision = Some(Arc::new(crate::collision::CollisionWorld::default()));
+                let center = if bogies == Some(-5.0) { -3.0 } else { 3.0 };
+                let y = center + if already_inside { 0.0 } else { 1.15 };
+                v.dynamic_boxes.push(crate::collision::Obb::point(
+                    DVec3::new(0.0, y, 1.0),
+                    0.025,
+                ));
+                v.set_speed(2.0);
+                v.step_physics(0.1);
+                if already_inside {
+                    assert!((v.position.y - 0.2).abs() < 1e-6);
+                    assert_eq!(v.physics.speed, 2.0);
+                } else {
+                    assert_eq!(v.position, DVec3::ZERO, "{bogies:?}");
+                    assert_eq!(v.physics.speed, 0.0);
+                    let sign = if bogies == Some(-5.0) { -1.0 } else { 1.0 };
+                    assert!((v.host.coll_pos[1] as f64 - sign * (y - 0.2)).abs() < 1e-5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn non_bogie_rail_markers_keep_asymmetric_body_end_placement() {
+        for marker in 0..2 {
+            let mut ty = coupling_test_type(None);
+            let ty_mut = Arc::get_mut(&mut ty).unwrap();
+            if marker == 0 {
+                ty_mut.def.rail_body_osc = Some([0.0; 7]);
+            } else {
+                ty_mut.def.contact_shoes.push([0.0; 6]);
+            }
+            ty_mut.mesh_boxes = vec![(
+                Vec3::new(-1.0, -7.0, 0.0),
+                Vec3::new(1.0, 5.0, 3.0),
+            )];
+            // The declared joint is inset from the body's rear end.
+            ty_mut.def.coupling_back.as_mut().unwrap().pos[1] = -4.4;
+            for lead_reversed in [false, true] {
+                for reversed in [false, true] {
+                    let (back, front) = coupling_points(&ty, lead_reversed, &ty, reversed);
+                    assert_eq!(back.y, if lead_reversed { 5.0 } else { -7.0 });
+                    assert_eq!(front.y, if reversed { -7.0 } else { 5.0 });
+                    let (position, heading) = coupling_placement(
+                        DVec3::ZERO,
+                        0.0,
+                        lead_reversed,
+                        back.y,
+                        reversed,
+                        front.y,
+                    );
+                    let expected_distance = if lead_reversed { 5.0 } else { 7.0 }
+                        + if reversed { 7.0 } else { 5.0 };
+                    assert!((position.y + expected_distance).abs() < 1e-6);
+                    assert_eq!(heading, if reversed { 180.0 } else { 0.0 });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn consecutive_reversed_parts_keep_absolute_orientation() {
+        for bogies in [None, Some(5.0), Some(-5.0)] {
+            let ty = coupling_test_type(bogies);
+            let mut v = VehicleInstance::new(ty.clone(), VehicleHost::new(Default::default()));
+            v.heading = 23.0;
+            for reversed in [true, true, false] {
+                v.attach_trailer_ex(ty.clone(), reversed);
+            }
+            for _ in 0..30 {
+                v.update_trailers(0.0);
+            }
+            let h = v.heading.to_radians();
+            let forward = DVec3::new(h.sin(), h.cos(), 0.0);
+            for (i, t) in v.trailers.iter().enumerate() {
+                assert!(
+                    (t.position + forward * (10.0 * (i + 1) as f64)).length() < 1e-4
+                );
+                let reversed = (i < 2) ^ (bogies == Some(-5.0));
+                assert!(
+                    (t.body_heading() - (v.heading + if reversed { 180.0 } else { 0.0 })).abs()
+                        < 1e-4
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bogie_couplings_agree_with_spawn_placement_and_following() {
+        for lead_bogies in [None, Some(5.0), Some(-5.0)] {
+            for car_bogies in [None, Some(5.0), Some(-5.0)] {
+                for lead_reversed in [false, true] {
+                    for reversed in [false, true] {
+                        let lead = coupling_test_type(lead_bogies);
+                        let car = coupling_test_type(car_bogies);
+                        let (back, front) = coupling_points(&lead, lead_reversed, &car, reversed);
+                        let heading = 23.0;
+                        let (position, model_heading) = coupling_placement(
+                            DVec3::ZERO,
+                            heading,
+                            body_reversed(&lead.def, lead_reversed),
+                            back.y,
+                            body_reversed(&car.def, reversed),
+                            front.y,
+                        );
+                        let mut v = VehicleInstance::new(
+                            lead.clone(),
+                            VehicleHost::new(Default::default()),
+                        );
+                        v.heading = heading;
+                        let lead_rot = body_rotation(
+                            heading,
+                            0.0,
+                            0.0,
+                            body_reversed(&lead.def, lead_reversed),
+                        );
+                        let mut t = TrailerPart::new_ex(
+                            car.clone(),
+                            &lead,
+                            lead_reversed,
+                            reversed,
+                            &lead.program,
+                            2,
+                            0,
+                        );
+                        for _ in 0..30 {
+                            t.update(&mut v, 0.0, Some((DVec3::ZERO, lead_rot, heading)));
+                        }
+                        assert!(
+                            (t.position - position).length() < 1e-4,
+                            "{lead_bogies:?}/{car_bogies:?}, {lead_reversed}/{reversed}"
+                        );
+                        assert!((t.body_heading() - model_heading).abs() < 1e-4);
+                        if lead_bogies.is_some() && car_bogies.is_some() {
+                            assert!((position.length() - 10.0).abs() < 1e-4);
+                        }
+                        let joint = lead_rot.transform_point3(back).as_dvec3();
+                        assert!(
+                            (joint
+                                - t.position
+                                - t.body_rotation().transform_point3(front).as_dvec3())
+                            .length()
+                                < 1e-4
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn coupling_defaults_and_non_bogie_rail_bounds_are_preserved() {
+        for bogies in [None, Some(5.0), Some(-5.0)] {
+            let mut ty = coupling_test_type(bogies);
+            let def = &mut Arc::get_mut(&mut ty).unwrap().def;
+            def.coupling_front = None;
+            def.coupling_back = None;
+            let (back, front) = coupling_points(&ty, false, &ty, false);
+            let sign = if bogies == Some(-5.0) { -1.0 } else { 1.0 };
+            let z = if bogies.is_some() { 0.0 } else { 0.3 };
+            assert_eq!(back, Vec3::new(0.0, -4.0 * sign, z));
+            assert_eq!(front, Vec3::new(0.0, 4.0 * sign, z));
+        }
+        let mut ty = coupling_test_type(None);
+        Arc::get_mut(&mut ty).unwrap().def.rail_body_osc = Some([0.0; 7]);
+        let (back, front) = coupling_points(&ty, false, &ty, false);
+        assert_eq!((back.y, front.y), (-6.2, 6.2));
+    }
+
+    #[test]
+    fn inset_rail_joints_and_unit_couplers_keep_their_declared_distances() {
+        // Two three-part units: the outer ends have longer couplers than the
+        // internal joints. Mesh bounds extending past a joint must not stretch it.
+        for bogies in [5.0, -5.0] {
+            for half_length in [6.6, 7.8] {
+                let part = |front: f32, back: f32| {
+                    let mut ty = coupling_test_type(Some(bogies));
+                    let ty_mut = Arc::get_mut(&mut ty).unwrap();
+                    ty_mut.def.coupling_front.as_mut().unwrap().pos[1] = front;
+                    ty_mut.def.coupling_back.as_mut().unwrap().pos[1] = back;
+                    ty_mut.mesh_boxes = vec![(
+                        Vec3::new(-1.0, -half_length, 0.0),
+                        Vec3::new(1.0, half_length, 3.0),
+                    )];
+                    ty
+                };
+                let lead = part(6.3, -5.7);
+                let middle = part(5.7, -5.7);
+                let tail = part(5.7, -6.3);
+                let mut v = VehicleInstance::new(
+                    lead.clone(),
+                    VehicleHost::new(Default::default()),
+                );
+                for ty in [&middle, &tail, &lead, &middle, &tail] {
+                    v.attach_trailer_ex(ty.clone(), false);
+                }
+                for heading in [0.0_f64, 180.0] {
+                    v.heading = heading;
+                    for t in &mut v.trailers {
+                        t.realign();
+                    }
+                    for _ in 0..30 {
+                        v.update_trailers(0.0);
+                    }
+                    let h = heading.to_radians();
+                    let forward = DVec3::new(h.sin(), h.cos(), 0.0);
+                    let mut previous = v.position;
+                    for (t, distance) in v.trailers.iter().zip([11.4, 11.4, 12.6, 11.4, 11.4]) {
+                        assert!((previous - t.position - forward * distance).length() < 1e-4);
+                        previous = t.position;
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn asymmetric_rail_ends_distinguish_declared_joints_from_body_bounds() {
+        for bogies in [None, Some(5.0), Some(-5.0)] {
+            let part = |front: f32, back: f32, min_y: f32, max_y: f32| {
+                let mut ty = coupling_test_type(bogies);
+                let ty_mut = Arc::get_mut(&mut ty).unwrap();
+                ty_mut.def.rail_body_osc = Some([0.0; 7]);
+                ty_mut.def.coupling_front.as_mut().unwrap().pos[1] = front;
+                ty_mut.def.coupling_back.as_mut().unwrap().pos[1] = back;
+                ty_mut.mesh_boxes = vec![(
+                    Vec3::new(-1.0, min_y, 0.0),
+                    Vec3::new(1.0, max_y, 3.0),
+                )];
+                ty
+            };
+            // The first joint is inside the lead body; the tail's joints extend
+            // beyond its body. Bogie-defined cars must retain these declared
+            // distances even when they produce an overlap or a visible gap.
+            let lead = part(15.0, -9.0, -12.0, 15.0);
+            let middle = part(13.0, -13.0, -13.0, 13.0);
+            let tail = part(14.0, -16.0, -15.0, 12.0);
+            for middle_reversed in [false, true] {
+                for tail_reversed in [false, true] {
+                    let mut v = VehicleInstance::new(
+                        lead.clone(),
+                        VehicleHost::new(Default::default()),
+                    );
+                    v.attach_trailer_ex(middle.clone(), middle_reversed);
+                    v.attach_trailer_ex(tail.clone(), tail_reversed);
+                    // Without bogies, rail cars still meet at their mesh bounds.
+                    let distances = if bogies.is_some() {
+                        [22.0, if tail_reversed { 29.0 } else { 27.0 }]
+                    } else {
+                        [25.0, if tail_reversed { 28.0 } else { 25.0 }]
+                    };
+                    for heading in [37.0_f64, 180.0] {
+                        v.heading = heading;
+                        for t in &mut v.trailers {
+                            t.realign();
+                        }
+                        let h = heading.to_radians();
+                        let forward = DVec3::new(h.sin(), h.cos(), 0.0);
+                        for _ in 0..30 {
+                            v.update_trailers(0.0);
+                            let mut previous = v.position;
+                            for (i, (previous_ty, previous_reversed, ty, reversed)) in [
+                                (&lead, false, &middle, middle_reversed),
+                                (&middle, middle_reversed, &tail, tail_reversed),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            {
+                                let expected = previous - forward * distances[i];
+                                let (back, front) = coupling_points(
+                                    previous_ty,
+                                    previous_reversed,
+                                    ty,
+                                    reversed,
+                                );
+                                let (spawn_position, spawn_heading) = coupling_placement(
+                                    previous,
+                                    heading,
+                                    body_reversed(&previous_ty.def, previous_reversed),
+                                    back.y,
+                                    body_reversed(&ty.def, reversed),
+                                    front.y,
+                                );
+                                let t = &v.trailers[i];
+                                assert!((spawn_position - expected).length() < 1e-4);
+                                assert!((t.position - expected).length() < 1e-4);
+                                assert!((t.body_heading() - spawn_heading).abs() < 1e-4);
+                                previous = expected;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rail_coupling_distance_does_not_displace_cars_off_track() {
+        for bogies in [None, Some(5.0), Some(-5.0)] {
+            let mut lead = coupling_test_type(bogies);
+            let mut car = coupling_test_type(bogies);
+            Arc::get_mut(&mut lead)
+                .unwrap()
+                .def
+                .coupling_back
+                .as_mut()
+                .unwrap()
+                .pos = [0.6, -5.0, 0.8];
+            Arc::get_mut(&mut car)
+                .unwrap()
+                .def
+                .coupling_front
+                .as_mut()
+                .unwrap()
+                .pos = [-0.2, 5.0, 3.6];
+            let mut v = VehicleInstance::new(lead, VehicleHost::new(Default::default()));
+            v.position.z = 2.0;
+            v.attach_trailer_ex(car, false);
+            for _ in 0..30 {
+                v.update_trailers(0.0);
+            }
+            let offset = v.trailers[0].position - v.position;
+            assert!((offset.y + 10.0).abs() < 1e-5);
+            if bogies.is_some() {
+                assert!(offset.x.abs() < 1e-5 && offset.z.abs() < 1e-5);
+            } else {
+                // Road sections still meet at their full three-dimensional joint.
+                assert!((offset.x - 0.8).abs() < 1e-5);
+                assert!((offset.z + 2.8).abs() < 1e-5);
+            }
+        }
+    }
+
+    fn synthetic_rail_consist() -> VehicleInstance {
+        let ty = coupling_test_type(Some(-5.0));
+        let mut v = VehicleInstance::new(ty.clone(), VehicleHost::new(Default::default()));
+        for reversed in [false, true, true] {
+            v.attach_trailer_ex(ty.clone(), reversed);
+        }
+        v
+    }
+
+    #[test]
+    fn negative_bogie_consist_has_outward_cabs_and_declared_spacing() {
+        let mut v = synthetic_rail_consist();
+        for heading in [0.0_f64, 180.0] {
+            v.heading = heading;
+            for t in &mut v.trailers {
+                t.realign();
+            }
+            for _ in 0..30 {
+                v.update_trailers(0.0);
+            }
+            let h = heading.to_radians();
+            let forward = Vec3::new(h.sin() as f32, h.cos() as f32, 0.0);
+            // Model the cab pointing towards the body's negative longitudinal end.
+            let front_cab = v.body_rotation().transform_vector3(Vec3::NEG_Y);
+            let rear_cab = v
+                .trailers
+                .last()
+                .unwrap()
+                .body_rotation()
+                .transform_vector3(Vec3::NEG_Y);
+            assert!(
+                front_cab.dot(forward) > 0.99,
+                "front cab faces inward: {front_cab:?}"
+            );
+            assert!(
+                rear_cab.dot(forward) < -0.99,
+                "rear cab faces inward: {rear_cab:?}"
+            );
+            let mut previous = v.position;
+            for t in &v.trailers {
+                let offset = previous - t.position;
+                assert!(
+                    (offset.dot(forward.as_dvec3()) - 10.0).abs() < 1e-4,
+                    "car spacing {offset:?}"
+                );
+                assert!(
+                    offset.cross(forward.as_dvec3()).length() < 1e-4,
+                    "car off track: {offset:?}"
+                );
+                previous = t.position;
+            }
+        }
+    }
+
+    #[test]
+    fn rail_joints_stay_closed_on_curved_graded_track() {
+        let mut v = synthetic_rail_consist();
+        for direction in [1.0_f64, -1.0] {
+            v.heading = if direction > 0.0 { 0.0 } else { 180.0 };
+            v.pitch = 0.03_f32.atan().to_degrees();
+            for t in &mut v.trailers {
+                t.realign();
+            }
+            let track = |d: f64| {
+                let a = d / 150.0;
+                Some(DVec3::new(
+                    150.0 * (1.0 - a.cos()) * direction,
+                    -150.0 * a.sin() * direction,
+                    -d * 0.03,
+                ))
+            };
+            for _ in 0..60 {
+                v.retrail(1.0 / 30.0, &track);
+                v.update_trailers(0.0);
+                let (mut origin, mut rotation) = (v.position, v.body_rotation());
+                for t in &v.trailers {
+                    let (back, front) = t.couplings();
+                    let lead_joint = origin + rotation.transform_point3(back).as_dvec3();
+                    let own_joint =
+                        t.position + t.body_rotation().transform_point3(front).as_dvec3();
+                    assert!((lead_joint - own_joint).length() < 1e-4);
+                    assert!(t.position.is_finite() && t.body_rotation().is_finite());
+                    let rail = t.track.expect("rail contact");
+                    assert!(rail.z < 0.0, "contact left the descending track");
+                    assert!((t.axle_z.unwrap() - rail.z).abs() < 1e-4);
+                    origin = t.position;
+                    rotation = t.body_rotation();
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_borrowed_part_is_judged_with_its_own_pack() {

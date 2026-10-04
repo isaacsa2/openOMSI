@@ -14,6 +14,7 @@ mod discord;
 #[cfg(steam)]
 mod steam;
 mod voice;
+mod head_idle;
 mod headtrack;
 #[cfg(windows)]
 mod openxr;
@@ -26,6 +27,8 @@ mod touch;
 mod placing;
 mod mt;
 mod updater;
+mod update_watch;
+mod presence;
 mod ambience;
 mod camera_arm;
 mod career;
@@ -37,6 +40,7 @@ mod driver;
 mod export;
 mod hud;
 mod humans;
+mod journey;
 mod keys;
 mod lan;
 mod lan_world;
@@ -72,6 +76,8 @@ mod controllers;
 mod ffb_calibration;
 #[cfg(windows)]
 mod dinput;
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+mod evdev_buttons;
 #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
 mod evdev_ff;
 mod cli;
@@ -419,6 +425,9 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     let view = args.view.clone();
     let args_root_for_keys = args.root.clone();
     let clock_note = args.clock_moved.clone();
+    // (as the last session left it, #1164)
+    let info_bar = settings.info_bar;
+    let is_server = args.server.is_some();
     let mut app = App {
         args,
         instance: graphics_instance(),
@@ -452,7 +461,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         ui: ui::Ui::new(),
         fps: 0.0,
         rain: rain::Rain::new(),
-        splashes: puddles::Splashes::new(),
+        spray: puddles::Spray::new(),
         lamps_on: None,
         menu: None,
         populate_t: 0.0,
@@ -487,11 +496,14 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         speed: 30.0,
         mouse_look: false,
         buttons_held: (false, false),
+        mmb_held: false,
         both_drag: None,
+        f1_reset: None,
         vr_zoom_active: false,
         hover: None,
         hover_part: None,
         hover_hand: false,
+        head_idle_hold: Default::default(),
         input_script: parse_input_script(),
         shot: None,
         paused: false,
@@ -544,7 +556,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         own_keys: crate::startup::own_keys(&args_root_for_keys),
         own_shift: crate::startup::own_bindings(&args_root_for_keys, omsi_content::input::KEY_SHIFT),
         menu_prev_pause: false,
-        info_bar: false,
+        info_bar,
         pending_time: None,
         world_day: None,
         autosave_t: 0.0,
@@ -554,6 +566,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         html_object_pressed: None,
         drag_delta: (0.0, 0.0),
         look: (0.0, 0.0),
+        look_smooth: (0.0, 0.0),
         view_looks: Default::default(),
         look_view: String::new(),
         cam_blend: Default::default(),
@@ -563,9 +576,13 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         fps_t: Instant::now(),
         service_msg: clock_note.map(|m| (m, 10.0)),
         notices: Vec::new(),
+        update_watch: crate::update_watch::UpdateWatch::new(),
+        // (a server counts its players by their own games, not itself)
+        presence: if is_server { None } else { crate::presence::Presence::start() },
         log_state: Default::default(),
         plugins: None,
         career: Default::default(),
+        journey: None,
         wetness: 0.0,
         cloud_drift: [0.0; 2],
         menu_edit: None,
