@@ -2390,6 +2390,11 @@ mod save_slot_tests {
 /// The command line a duty becomes.
 pub fn duty_args(d: &Duty) -> Result<Vec<String>> {
     let root = root()?;
+    duty_args_with_sources(d, &root, || get_settings().unwrap_or_default(), || load_config().profile)
+}
+
+// The argument builder can be checked without a player's installation or settings.
+fn duty_args_with_sources(d: &Duty, root: &Path, settings: impl FnOnce() -> Value, default_profile: impl FnOnce() -> String) -> Result<Vec<String>> {
     if let Some(t) = d.tutorial {
         return Ok(vec!["--root".into(), root.to_string_lossy().to_string(), "--no-menu".into(), "--tutorial".into(), t.to_string()]);
     }
@@ -2436,7 +2441,7 @@ pub fn duty_args(d: &Duty) -> Result<Vec<String>> {
     // OMSI's [useActTime] / [useActDate] / [useActYear]: the machine's clock and calendar
     // instead of the duty's (the year only on its own switch - a map's timetable is for
     // its years)
-    let st = get_settings().unwrap_or_default();
+    let st = settings();
     let on = |k: &str| st.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
     let now = local_now();
     if let (true, Some((_, _, _, h, m))) = (on("use_real_time"), now) {
@@ -2481,7 +2486,7 @@ pub fn duty_args(d: &Duty) -> Result<Vec<String>> {
     if d.on_foot.unwrap_or(false) {
         a.push("--on-foot".into());
     }
-    let profile = d.profile.clone().filter(|p| !p.trim().is_empty()).unwrap_or_else(|| load_config().profile);
+    let profile = d.profile.clone().filter(|p| !p.trim().is_empty()).unwrap_or_else(default_profile);
     if let Some(season) = d.season.as_deref().map(str::trim).filter(|x| !x.is_empty() && !x.eq_ignore_ascii_case("auto")) {
         a.extend(["--season".into(), season.to_ascii_lowercase()]);
     }
@@ -2785,15 +2790,19 @@ mod tests {
 
     use super::*;
 
+    fn synthetic_duty_args(d: &Duty) -> Result<Vec<String>> {
+        duty_args_with_sources(d, Path::new("content"), || settings_from_text(None), || "Driver".into())
+    }
+
     /// A duty file written before the number plate field (or one that leaves it out) loads
     /// with no plate, and a plate the player typed is kept as it stands.
     #[test]
     fn a_picked_trip_starts_the_rest_of_the_tour() {
         let d = Duty { map: "maps/x/global.cfg".into(), bus: "Vehicles/x.bus".into(), time: "09:43".into(), line: Some("14".into()), tour: Some("1".into()), trip: Some("5".into()), whole_tour: true, ..Default::default() };
-        let a = duty_args(&d).unwrap();
+        let a = synthetic_duty_args(&d).unwrap();
         let k = a.iter().position(|x| x == "--trip").unwrap();
         assert_eq!((a[k + 1].as_str(), a[k + 2].as_str()), ("5", "--whole-tour"));
-        let alone = duty_args(&Duty { whole_tour: false, ..d }).unwrap();
+        let alone = synthetic_duty_args(&Duty { whole_tour: false, ..d }).unwrap();
         assert!(!alone.iter().any(|x| x == "--whole-tour"));
     }
 
@@ -2809,7 +2818,7 @@ mod tests {
     #[test]
     fn a_duty_passes_its_fleet_number() {
         let d: Duty = serde_json::from_str(r#"{"map":"maps/x/global.cfg","bus":"Vehicles/x.bus","time":"09:00","number":"4711"}"#).unwrap();
-        let a = duty_args(&d).unwrap();
+        let a = synthetic_duty_args(&d).unwrap();
         assert!(a.windows(2).any(|w| w[0] == "--number" && w[1] == "4711"), "{a:?}");
     }
 
