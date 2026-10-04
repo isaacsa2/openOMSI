@@ -3267,14 +3267,24 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
     // and every other variable of theirs, as their scripts have it (`omsi_net::vars`)
     pinned.extend(rv.synced.iter().filter(|(id, _)| !rv.smooth.contains(*id)).map(|(id, v)| (*id as VarId, *v)));
     rv.vehicle.update_ai_with(dt, &frame, &inputs, &pinned);
-    for (id, text) in &rv.synced_strings {
-        if let Some(s) = rv.vehicle.state.str_vars.get_mut(*id as usize) {
+    apply_remote_strings(&mut rv.vehicle, &rv.synced_strings);
+    rv.last = pose.clone();
+}
+
+fn apply_remote_strings(vehicle: &mut omsi_sim::VehicleInstance, strings: &hashbrown::HashMap<u16, String>) {
+    // INFO is the authoritative fleet metadata: VARS strings are cut to 255 bytes,
+    // less than INFO's 64 four-byte characters, and may arrive after a newer INFO.
+    let fleet = [vehicle.ty.program.str_var("number"), vehicle.ty.program.str_var("ident")];
+    for (id, text) in strings {
+        if fleet.iter().flatten().any(|fleet_id| *fleet_id as usize == *id as usize) {
+            continue;
+        }
+        if let Some(s) = vehicle.state.str_vars.get_mut(*id as usize) {
             if s != text {
                 s.clone_from(text);
             }
         }
     }
-    rv.last = pose.clone();
 }
 
 /// Our vehicle's variables to the others, and theirs taken into the copies drawn here.
@@ -4005,6 +4015,32 @@ thread_local! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variable_strings_cannot_replace_complete_unicode_fleet_metadata() {
+        let mut vehicle = crate::schedule::tests::script_test_vehicle(
+            "{frame}\n{end}\n", "", "ident\nnumber\nIBIS_Display\n");
+        let fleet = "🚌".repeat(64);
+        for name in ["ident", "number"] {
+            let id = vehicle.ty.program.str_var(name).unwrap();
+            vehicle.state.str_vars[id as usize] = fleet.clone();
+        }
+        let table = var_table(&vehicle.ty.program);
+        let mut tx = omsi_net::vars::VarSender::default();
+        let messages = tx.tick(omsi_net::PROTOCOL as u8, 2, table.hash,
+            &[], &[], &table.strings, &[fleet.clone(), fleet.clone(), "Centro".into()], 0.1);
+        let strings: hashbrown::HashMap<_, _> = messages.iter()
+            .flat_map(|m| omsi_net::vars::decode(m, omsi_net::PROTOCOL as u8).unwrap().strings)
+            .collect();
+        assert!(strings.get(&0).unwrap().len() < fleet.len());
+        apply_remote_strings(&mut vehicle, &strings);
+        for name in ["ident", "number"] {
+            let id = vehicle.ty.program.str_var(name).unwrap();
+            assert_eq!(vehicle.state.str_vars[id as usize], fleet);
+        }
+        let display = vehicle.ty.program.str_var("IBIS_Display").unwrap();
+        assert_eq!(vehicle.state.str_vars[display as usize], "Centro");
+    }
 
     #[test]
     fn wide_variable_sync_carries_stop_state_and_fleet_strings_beside_pose_state() {
