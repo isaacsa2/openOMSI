@@ -2,6 +2,9 @@ name: Controls and CI integration validation
 on:
   push:
     branches: [ci/pr1382-integration-validation]
+concurrency:
+  group: pr1382-integration-validation
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -26,7 +29,7 @@ jobs:
           $rows = @()
           function Measure-Cargo([string] $label, [string[]] $cargoArgs) {
             $watch = [Diagnostics.Stopwatch]::StartNew()
-            & cargo @cargoArgs
+            & cargo @cargoArgs | Out-Host
             $code = $LASTEXITCODE
             $watch.Stop()
             if ($code -ne 0) { throw "Cargo failed ($label): $code" }
