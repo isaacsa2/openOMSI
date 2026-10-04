@@ -1,0 +1,74 @@
+name: Controls and CI integration validation
+on:
+  push:
+    branches: [ci/pr1382-integration-validation]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+      - name: Source under test
+        shell: pwsh
+        run: |
+          git rev-parse HEAD
+          Write-Output 'Controls: b11637a0e1affa2474f33ebde1b6b06cffad3322; CI: c5df76f438fbc70b72e4cbc4ab32a50835e0836e'
+      - name: Existing texture regression step
+        run: cargo test --locked -p omsi-texture --lib
+      - name: Compare previous Windows step with full workspace
+        shell: pwsh
+        run: |
+          $rows = @()
+          function Measure-Cargo([string] $label, [string[]] $cargoArgs) {
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            & cargo @cargoArgs
+            $code = $LASTEXITCODE
+            $watch.Stop()
+            if ($code -ne 0) { throw "Cargo failed ($label): $code" }
+            [pscustomobject]@{ label = $label; seconds = [Math]::Round($watch.Elapsed.TotalSeconds, 3) }
+          }
+          $old = @('test', '--locked', '-p', 'omsi-app', '--lib', 'scripted_lamp_channels_override_stock_phases_and_switch_led_materials')
+          $full = @('test', '--locked', '--workspace', '--no-fail-fast')
+          $rows += Measure-Cargo 'previous-step-first' $old
+          $rows += Measure-Cargo 'workspace-after-previous-step' $full
+          $rows += Measure-Cargo 'previous-step-warm' $old
+          $rows += Measure-Cargo 'workspace-warm' $full
+          $rows | ConvertTo-Json | Tee-Object -FilePath windows-test-timings.json
+          'Measured on the same checkout, toolchain and target directory, after the existing texture step and Rust cache restoration.' >> $env:GITHUB_STEP_SUMMARY
+          '| Command | Seconds |' >> $env:GITHUB_STEP_SUMMARY
+          '| --- | ---: |' >> $env:GITHUB_STEP_SUMMARY
+          foreach ($row in $rows) { "| $($row.label) | $($row.seconds) |" >> $env:GITHUB_STEP_SUMMARY }
+      - name: Complete release workspace build
+        run: cargo build --locked --release --workspace --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-timings
+          path: windows-test-timings.json
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      RUSTFLAGS: '-C linker=clang -C link-arg=-fuse-ld=lld'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libgtk-3-dev libxkbcommon-dev libwayland-dev libssl-dev clang lld
+      - name: Source under test
+        run: |
+          git rev-parse HEAD
+          echo 'Controls: b11637a0e1affa2474f33ebde1b6b06cffad3322; CI: c5df76f438fbc70b72e4cbc4ab32a50835e0836e'
+      - name: Repeat the three Linux regressions
+        run: |
+          for attempt in 1 2 3 4 5; do
+            cargo test --locked -p omsi-launcher-core --lib install::tests::cancel_removes_partial_files -- --exact
+            cargo test --locked -p omsi-launcher-core --lib instances::tests::stop_never_signals_another_program -- --exact
+            cargo test --locked -p omsi-texture --lib tests::dds_precedes_exact_names_but_preserves_folder_priority -- --exact
+          done
+      - name: Full workspace regression suite
+        run: cargo test --locked --workspace --no-fail-fast
