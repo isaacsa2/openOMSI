@@ -360,11 +360,10 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     if (material.params.z > 0.5) {
         // (an LED panel's `\S:n` mask is taken the same way: the dots stay dots when the
         // panel is small, without the full-resolution shimmer)
-        var tm = sample_transmap(buv);
-        if (material.emissive.w < -1.5 && enh.led.y < msk_lod) {
-            tm = textureSampleLevel(t_trans, s_diffuse, buv, enh.led.y);
+        tex.a = transmap_alpha(buv);
+        if (material.params.w > 0.5 && material.emissive.w < -1.5 && enh.led.y < msk_lod) {
+            tex.a = textureSampleLevel(t_trans, s_diffuse, buv, enh.led.y).a;
         }
-        tex.a = select(1.0, tm.a, material.params.w > 0.5);
         if (terrain && material.params.x > 1.5) {
             // Coverage belongs to the brush mask, not the angle-dependent diffuse mip.
             tex.a = smoothstep(0.32, 0.68, tex.a);
