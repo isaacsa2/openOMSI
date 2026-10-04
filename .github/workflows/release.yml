@@ -176,7 +176,7 @@ jobs:
         run: |
           for i in 1 2 3; do
             sudo apt-get update && sudo apt-get install -y build-essential pkg-config libasound2-dev \
-              libudev-dev libgtk-3-dev libxkbcommon-dev libwayland-dev libssl-dev zip clang lld && break
+              libudev-dev libgtk-3-dev libxkbcommon-dev libwayland-dev libssl-dev zip clang lld mesa-vulkan-drivers && break
             sleep 20
           done
       - name: Build the game
@@ -187,11 +187,26 @@ jobs:
         env:
           RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=lld"
         run: scripts/build-server.sh
-      - name: Validate shaders
+      - name: Renderer regression tests
         if: matrix.arch == 'x64'
         env:
           RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=lld"
-        run: cargo test --locked --release -p omsi-render shaders_validate_and_match_the_uniforms
+        run: cargo test --locked --release -p omsi-render --lib
+      - name: Transmap coverage regression test
+        if: matrix.arch == 'x64'
+        env:
+          RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=lld"
+          XDG_RUNTIME_DIR: ${{ runner.temp }}/openomsi-render-test
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          for icd in /usr/share/vulkan/icd.d/*lvp*.json; do
+            [ -f "$icd" ] || continue
+            export VK_ICD_FILENAMES="$icd"
+            break
+          done
+          test -n "${VK_ICD_FILENAMES:-}"
+          cargo test --locked --release -p omsi-render --lib missing_transmap_keeps_constant_coverage_without_diffuse_alpha -- --ignored
       - name: Package
         run: |
           mkdir -p out
