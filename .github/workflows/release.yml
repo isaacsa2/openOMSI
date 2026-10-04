@@ -56,21 +56,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: Texture lookup regression tests
-        if: matrix.arch == 'x64'
-        run: cargo test --locked -p omsi-texture --lib
-      - name: Scripted traffic lamp regression test
-        if: matrix.arch == 'x64'
-        run: cargo test --locked -p omsi-app --lib scripted_lamp_channels_override_stock_phases_and_switch_led_materials
-      - name: LAN protocol regression tests
-        if: matrix.arch == 'x64'
-        run: cargo test --locked -p omsi-net --lib
-      - name: LAN vehicle identity regression tests
-        if: matrix.arch == 'x64'
-        run: cargo test --locked -p omsi-app --lib lan::tests
-      - name: Passenger interaction regression tests
-        if: matrix.arch == 'x64'
-        run: cargo test --locked -p omsi-app --lib passenger::tests
+      # Includes LAN, passenger, texture and traffic-lamp regressions in one build.
       - name: Workspace regression tests
         if: matrix.arch == 'x64'
         run: cargo test --locked --workspace
