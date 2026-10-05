@@ -62,6 +62,12 @@ jobs:
       - name: Workspace regression tests
         if: matrix.arch == 'x64'
         run: cargo test --locked --workspace --no-fail-fast
+      - name: Format changed controller modules
+        if: matrix.arch == 'x64'
+        run: rustfmt --edition 2021 --check crates/omsi-app/src/dinput.rs crates/omsi-app/src/hpattern.rs
+      - name: Complete workspace release build
+        if: matrix.arch == 'x64'
+        run: cargo build --locked --release --workspace --target x86_64-pc-windows-msvc
       - name: Build
         shell: cmd
         run: scripts\build-windows.cmd ${{ matrix.target }}

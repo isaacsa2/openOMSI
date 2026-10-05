@@ -2598,6 +2598,49 @@ mod hot_reload_tests {
     }
 
     #[test]
+    fn hpattern_disconnect_reconnect_and_reload_release_original_script_gate() {
+        let mut wheel = wheel();
+        wheel.name = "G27 wheel and shifter".into();
+        wheel.buttons = vec![("horn".into(), "0".into()), ("kw_s_1_fest".into(), "0".into())];
+        wheel.latching.clear();
+        let mut box_cfg = wheel.clone();
+        box_cfg.name = "Button box".into();
+        let mut c = Controllers::with_devices(no_hardware(), vec![wheel, box_cfg]);
+        let mut v = crate::hpattern::tests::vehicle(true, false, true);
+        let apply = |c: &mut Controllers, v: &mut omsi_sim::VehicleInstance| {
+            for (name, down) in c.actions.drain(..) { crate::hpattern::action(v, &name, down, true); }
+        };
+        c.held.event(&c.cfg, "Button box", 0, true, &mut c.actions);
+        c.held.event(&c.cfg, "G27 wheel and shifter", 1, true, &mut c.actions);
+        apply(&mut c, &mut v);
+        assert_eq!(v.var("gear"), Some(1.0));
+        // DirectInput's synthetic disconnect release must not release the other device.
+        c.held.event(&c.cfg, "G27 wheel and shifter", 1, false, &mut c.actions);
+        apply(&mut c, &mut v);
+        assert_eq!(v.var("gear"), Some(0.0));
+        assert_eq!(v.var("gate_held"), Some(0.0));
+        assert_eq!(c.held.0.len(), 1);
+        c.held.event(&c.cfg, "G27 wheel and shifter", 1, true, &mut c.actions);
+        apply(&mut c, &mut v);
+        assert_eq!(v.var("gear"), Some(1.0));
+        let devices = std::ptr::addr_of!(c.devices);
+        c.ff_vib.amp = 0.4;
+        let mut cfg = c.configuration();
+        cfg[0].buttons[1].0 = "kw_s_2_fest".into();
+        c.install_cfg(cfg);
+        apply(&mut c, &mut v);
+        assert_eq!(v.var("gear"), Some(0.0));
+        assert_eq!(v.var("gate_held"), Some(0.0));
+        assert_eq!(std::ptr::addr_of!(c.devices), devices);
+        assert_eq!(c.ff_vib.amp, 0.4);
+        c.held.event(&c.cfg, "G27 wheel and shifter", 1, false, &mut c.actions);
+        assert!(c.actions.is_empty());
+        c.held.event(&c.cfg, "G27 wheel and shifter", 1, true, &mut c.actions);
+        apply(&mut c, &mut v);
+        assert_eq!(v.var("gear"), Some(2.0));
+    }
+
+    #[test]
     fn hot_reload_keeps_device_owner_and_ffb_runtime_state() {
         let mut c = Controllers::with_devices(no_hardware(), vec![wheel()]);
         c.ff_t = 12.0;
