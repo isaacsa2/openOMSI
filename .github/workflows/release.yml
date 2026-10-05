@@ -43,9 +43,26 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             arch: x64
+            runtime_arch: x64
+            dx11_angle: false
+            rustflags: ""
+            dx11_build: ""
+          # Separate compatibility build: wgpu GL is compiled through ANGLE/EGL, whose
+          # Windows renderer is D3D11. Keep it x64-only: wgpu's Windows ANGLE path is not
+          # supported on ARM64.
+          - target: x86_64-pc-windows-msvc
+            arch: x64-dx11
+            runtime_arch: x64
+            dx11_angle: true
+            rustflags: "--cfg windows_angle"
+            dx11_build: "1"
           # ARM64 (Snapdragon laptops): built on the x64 runner with its ARM64 tools
           - target: aarch64-pc-windows-msvc
             arch: arm64
+            runtime_arch: arm64
+            dx11_angle: false
+            rustflags: ""
+            dx11_build: ""
     env:
       OPENOMSI_VERSION: ${{ needs.version.outputs.version }}
     steps:
@@ -55,7 +72,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-${{ matrix.arch }}
       - name: Texture lookup regression tests
         if: matrix.arch == 'x64'
         run: cargo test --locked -p omsi-texture --lib
@@ -64,7 +81,21 @@ jobs:
         run: cargo test --locked -p omsi-app --lib scripted_lamp_channels_override_stock_phases_and_switch_led_materials
       - name: Build
         shell: cmd
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+          OPENOMSI_DX11_BUILD: ${{ matrix.dx11_build }}
         run: scripts\build-windows.cmd ${{ matrix.target }}
+      # wgpu's Windows ANGLE path loads EGL dynamically. vcpkg builds Google's ANGLE from
+      # source and supplies the two runtime DLLs beside the game; ANGLE uses D3D11 on Windows.
+      - name: ANGLE runtime for DirectX 11 build
+        if: matrix.dx11_angle
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "openomsi-angle"
+          vcpkg install angle:x64-windows --x-install-root="$root" --clean-after-build
+          $bin = Join-Path $root "x64-windows\bin"
+          Copy-Item (Join-Path $bin "libEGL.dll"), (Join-Path $bin "libGLESv2.dll") dist/windows/
+          Get-ChildItem dist/windows/libEGL.dll, dist/windows/libGLESv2.dll
       # Microsoft's shader compiler for DirectX 12 (dxcompiler.dll, dxil.dll beside the
       # program): without it wgpu falls back to the old FXC, which is slow and refuses
       # some of the game's shaders. DirectX 12 is the way round a Vulkan driver that fails.
@@ -88,8 +119,8 @@ jobs:
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
-          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\${{ matrix.arch }}\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
-          $dir = if ($crt) { $crt.FullName } elseif ("${{ matrix.arch }}" -eq "x64") { "$env:SystemRoot\System32" } else { throw "no ARM64 Visual C++ runtime in $vs" }
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\${{ matrix.runtime_arch }}\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
+          $dir = if ($crt) { $crt.FullName } elseif ("${{ matrix.runtime_arch }}" -eq "x64") { "$env:SystemRoot\System32" } else { throw "no ARM64 Visual C++ runtime in $vs" }
           foreach ($dll in "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll") {
             Copy-Item (Join-Path $dir $dll) dist/windows/
           }
@@ -101,15 +132,18 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item README.md, LICENSE dist/windows/
           Compress-Archive -Path dist/windows/* -DestinationPath "out/$name.zip"
-          # the dedicated server for Windows (Server 2016 and later): the same program
-          # started with --server, and start.cmd
-          New-Item -ItemType Directory -Force dist/server | Out-Null
-          Copy-Item dist/windows/openomsi.exe, dist/windows/vcruntime140.dll, dist/windows/vcruntime140_1.dll, dist/windows/msvcp140.dll, scripts/server/start.cmd, LICENSE dist/server/
-          # (Steam's library: the x64 program does not start without it beside it)
-          if (Test-Path dist/windows/steam_api64.dll) { Copy-Item dist/windows/steam_api64.dll dist/server/ }
-          Copy-Item docs/SERVER.md dist/server/README.md
-          New-Item -ItemType File -Force dist/server/.openomsi-content | Out-Null
-          Compress-Archive -Path dist/server/* -DestinationPath "out/openOMSI-$env:OPENOMSI_VERSION-server-windows-${{ matrix.arch }}.zip"
+          # The DX11 artifact is a client compatibility build, not a second server build.
+          if ("${{ matrix.dx11_angle }}" -ne "true") {
+            # the dedicated server for Windows (Server 2016 and later): the same program
+            # started with --server, and start.cmd
+            New-Item -ItemType Directory -Force dist/server | Out-Null
+            Copy-Item dist/windows/openomsi.exe, dist/windows/vcruntime140.dll, dist/windows/vcruntime140_1.dll, dist/windows/msvcp140.dll, scripts/server/start.cmd, LICENSE dist/server/
+            # (Steam's library: the x64 program does not start without it beside it)
+            if (Test-Path dist/windows/steam_api64.dll) { Copy-Item dist/windows/steam_api64.dll dist/server/ }
+            Copy-Item docs/SERVER.md dist/server/README.md
+            New-Item -ItemType File -Force dist/server/.openomsi-content | Out-Null
+            Compress-Archive -Path dist/server/* -DestinationPath "out/openOMSI-$env:OPENOMSI_VERSION-server-windows-${{ matrix.arch }}.zip"
+          }
       - uses: actions/upload-artifact@v4
         with:
           # (a release keeps its files; a pull request's test builds are fetched within days)
