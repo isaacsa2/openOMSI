@@ -213,8 +213,9 @@ pub fn run() -> Result<()> {
 /// The showroom is drawn the way the game will be.
 pub(crate) fn launcher_statics() {
     let s = settings::Settings::load();
-    ENHANCED.store(s.enhanced || omsi_cfg::env::var_os("OMSI_ENHANCED").is_some(), std::sync::atomic::Ordering::Relaxed);
-    CLASSIC.store(s.classic(), std::sync::atomic::Ordering::Relaxed);
+    let dx11 = startup::dx11_angle_build();
+    ENHANCED.store(!dx11 && (s.enhanced || omsi_cfg::env::var_os("OMSI_ENHANCED").is_some()), std::sync::atomic::Ordering::Relaxed);
+    CLASSIC.store(dx11 || s.classic(), std::sync::atomic::Ordering::Relaxed);
     CLOUDS.store(s.clouds && omsi_cfg::env::var_os("OMSI_NO_CLOUDS").is_none(), std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -354,10 +355,11 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     {
         args.drive_keys = settings.drive_keys.clone();
     }
-    let plus = args.enhanced_plus || omsi_cfg::env::var_os("OMSI_ENHANCED_PLUS").is_some();
+    let dx11 = startup::dx11_angle_build();
+    let plus = !dx11 && (args.enhanced_plus || omsi_cfg::env::var_os("OMSI_ENHANCED_PLUS").is_some());
     ENHANCED_PLUS.store(plus, std::sync::atomic::Ordering::Relaxed);
     ENHANCED.store(
-        settings.enhanced || args.enhanced || plus || omsi_cfg::env::var_os("OMSI_ENHANCED").is_some(),
+        !dx11 && (settings.enhanced || args.enhanced || plus || omsi_cfg::env::var_os("OMSI_ENHANCED").is_some()),
         std::sync::atomic::Ordering::Relaxed,
     );
     CLOUDS.store(settings.clouds && omsi_cfg::env::var_os("OMSI_NO_CLOUDS").is_none(), std::sync::atomic::Ordering::Relaxed);
@@ -366,7 +368,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     MIRROR_SIZE.store(settings.mirror_size, std::sync::atomic::Ordering::Relaxed);
     omsi_audio::DOPPLER.store(settings.doppler, std::sync::atomic::Ordering::Relaxed);
     CLASSIC.store(
-        settings.classic() && !ENHANCED.load(std::sync::atomic::Ordering::Relaxed),
+        dx11 || (settings.classic() && !ENHANCED.load(std::sync::atomic::Ordering::Relaxed)),
         std::sync::atomic::Ordering::Relaxed,
     );
     // the LAN session (offscreen too, so that one game's view of another can be rendered);
