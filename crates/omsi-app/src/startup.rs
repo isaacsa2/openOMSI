@@ -180,15 +180,31 @@ pub(crate) fn graphics_instance() -> wgpu::Instance {
     software.or(last).unwrap_or_else(|| wgpu::Instance::new(descriptor))
 }
 
+/// This binary was built with wgpu's Windows ANGLE path. The regular Windows build uses
+/// WGL for `Backends::GL`; the compatibility build is compiled with `cfg(windows_angle)`,
+/// so the same backend is EGL/OpenGL ES through ANGLE (D3D11 on Windows).
+pub(crate) const fn dx11_angle_build() -> bool {
+    cfg!(windows) && option_env!("OPENOMSI_DX11_BUILD").is_some()
+}
+
 /// The graphics interfaces in the order they are tried: Metal on a Mac; on Windows DirectX
 /// 12 first (the Windows drivers' best-kept path: on Vulkan they reset the device -
 /// "the graphics device was lost" - far more often), then Vulkan, then OpenGL for a card
 /// without either (a GeForce GT 530); elsewhere Vulkan, then OpenGL. Settings → Graphics API
 /// (`graphics_api`) or OMSI_BACKEND=vulkan|dx12|gl puts one first: a driver whose Vulkan
 /// misbehaves is got round.
+///
+/// The separately packaged Windows DX11 compatibility build is deliberately strict: it has
+/// wgpu compiled with `cfg(windows_angle)` and exposes only `Backends::GL`, which is
+/// ANGLE/EGL in that build. It must not silently fall back to DX12 or Vulkan, otherwise a
+/// successful launch would not prove that D3D11 actually rendered the game.
 pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(target_os = "macos") {
         return vec![wgpu::Backends::METAL];
+    }
+    if dx11_angle_build() {
+        log::info!("graphics: DirectX 11 compatibility build (ANGLE/EGL; GL backend locked)");
+        return vec![wgpu::Backends::GL];
     }
     let settings = crate::settings::Settings::load();
     let wanted = if settings.vr_requested() {
