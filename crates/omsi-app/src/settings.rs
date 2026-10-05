@@ -393,6 +393,16 @@ impl Settings {
         if let Some(n) = omsi_cfg::env::var("OMSI_SAFE_GPU").ok().and_then(|v| v.parse::<u32>().ok()).filter(|n| *n > 0) {
             s.apply_safe_gpu(n);
         }
+        // The ANGLE/D3D11 artifact is a compatibility build. Keep it on the original
+        // renderer even when the shared settings file (or OMSI_GRAPHICS) asks for
+        // Vanilla+, Enhanced or Enhanced+.
+        if crate::startup::dx11_angle_build() {
+            if s.graphics != "vanilla" || s.enhanced {
+                log::info!("graphics: DirectX 11 compatibility build forces Vanilla rendering");
+            }
+            s.graphics = "vanilla".into();
+            s.enhanced = false;
+        }
         log::info!("settings from {}: msaa {} af {} ssao {} shadows {} ({}) navigator {} graphics {} post aa {} vsync {} render scale {} boarding {} min object size {} max object distance {} max fps {}", p.display(), s.msaa, s.anisotropy, s.ssao, s.shadows, s.shadow_size, s.navigator, s.graphics, s.post_aa, s.vsync, s.render_scale_text(), s.boarding, s.min_obj_size, s.object_distance(), s.max_fps);
         s
     }
