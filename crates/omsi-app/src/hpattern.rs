@@ -188,6 +188,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn automatic_and_unrelated_actions_keep_their_existing_dispatch() {
+        let mut v = vehicle(false, false, true);
+        assert_eq!(action(&mut v, "horn", true, true), None);
+        let ty = Arc::get_mut(&mut v.ty).unwrap();
+        let gate = ty.program.trigger("kw_s_1").unwrap();
+        Arc::make_mut(&mut ty.program)
+            .triggers
+            .insert("automatic_d".into(), gate);
+        assert!(!v.ty.program.manual_gearbox());
+        assert_eq!(action(&mut v, "kw_s_1", false, true), None);
+    }
+
+    #[test]
+    fn gate_off_is_retained_when_the_bus_has_no_neutral_trigger() {
+        let mut v = vehicle(true, false, true);
+        let ty = Arc::get_mut(&mut v.ty).unwrap();
+        Arc::make_mut(&mut ty.program)
+            .triggers
+            .remove("kw_s_n_fest");
+        action(&mut v, "kw_s_1_fest", true, true);
+        action(&mut v, "kw_s_1_fest", false, true);
+        assert_eq!(v.var("gate_held"), Some(0.0));
+        assert_eq!(v.var("off_seen"), Some(1.0));
+    }
+
+    #[test]
     fn recommendations_require_held_gate_bindings() {
         let mut cfg = crate::controllers::DeviceCfg::default();
         cfg.buttons = vec![("horn_fest".into(), "0".into())];
