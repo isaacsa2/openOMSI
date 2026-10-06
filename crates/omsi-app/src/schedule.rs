@@ -313,12 +313,15 @@ fn bay_offset(lat: f32) -> f32 {
 /// vehicles, not to a kerb: the bus pulls into the bay whether or not a path leads there
 /// (#241). (openOMSI kept it on its path before - a map whose box stood behind the
 /// pavement had its buses on the pavement - but OMSI does the same there.)
-fn bay_for(lat: f32, ty: &omsi_sim::VehicleType, rail: bool, left_hand: bool) -> f32 {
+fn bay_for(lat: f32, ty: &omsi_sim::VehicleType, rail: bool, left_hand: bool, side: f32) -> f32 {
     if rail || !lat.is_finite() {
         return 0.0;
     }
     let hw = ty.def.bounding_box.map(|b| b[0] * 0.5).unwrap_or(1.25);
-    if left_hand {
+    // Platform side is independent of traffic hand. With boarding on both sides,
+    // align the flank facing this stop's box rather than assuming a right-hand kerb.
+    let left = if side == 2.0 { lat < 0.0 } else { left_hand != (side == 1.0) };
+    if left {
         lat + hw - 0.3
     } else {
         lat - hw + 0.3
@@ -329,7 +332,7 @@ fn bay_for(lat: f32, ty: &omsi_sim::VehicleType, rail: bool, left_hand: bool) ->
 /// stops moved to where its origin comes to rest (`shift_stops`).
 fn place_stops(net: &Network, route: &[usize], base: usize, stops: &mut [(usize, f32, f32, f64, i64, f32)], ty: &omsi_sim::VehicleType, rail: bool) {
     for st in stops.iter_mut() {
-        st.2 = bay_for(st.2, ty, rail, net.left_hand);
+        st.2 = bay_for(st.2, ty, rail, net.left_hand, st.5);
     }
     shift_stops(net, route, base, stops, crate::bus_service::stop_shift(ty, rail));
 }
@@ -345,8 +348,9 @@ fn project_stop(
     pos: glam::DVec3,
     reach: Option<f64>,
     from: usize,
+    side: f32,
 ) -> Option<(usize, f32, f32)> {
-    net.project_stop_on_route(route, pos, reach, from)
+    net.project_stop_on_route_side(route, pos, reach, from, side as u8)
 }
 
 pub struct Schedule {
@@ -1993,7 +1997,7 @@ impl Schedule {
                         continue;
                     };
                     if let Some((ri, ss, lat)) =
-                        project_stop(&traffic.net, &lanes, pos, Some(STOP_REACH), from)
+                        project_stop(&traffic.net, &lanes, pos, Some(STOP_REACH), from, world.stop_side(*sid))
                     {
                         from = ri;
                         stops.push((base + ri, ss, bay_offset(lat), *t_dep, *sid, world.stop_side(*sid)));
@@ -2184,7 +2188,7 @@ impl Schedule {
             }
             let found = world.object_positions.lock().get(sid).copied();
             match found {
-                Some((pos, _)) => match project_stop(net, &section, pos, reach, from) {
+                Some((pos, _)) => match project_stop(net, &section, pos, reach, from, world.stop_side(*sid)) {
                     Some((ri, ss, lat)) => {
                         from = ri;
                         served[si] = true;
@@ -4901,6 +4905,24 @@ impl PlayerDuty {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn bay_alignment_follows_the_platform_side_without_moving_rail_vehicles() {
+        let bus = script_test_vehicle("{frame}\n{end}\n", "", "");
+        let ty = &bus.ty;
+        assert!((bay_for(4.0, ty, false, false, 0.0) - 3.05).abs() < 1e-5);
+        assert!((bay_for(-4.0, ty, false, false, 1.0) + 3.05).abs() < 1e-5);
+        assert!((bay_for(-4.0, ty, false, true, 0.0) + 3.05).abs() < 1e-5);
+        assert!((bay_for(4.0, ty, false, true, 1.0) - 3.05).abs() < 1e-5);
+        for hand in [false, true] {
+            assert!((bay_for(-4.0, ty, false, hand, 2.0) + 3.05).abs() < 1e-5);
+            assert!((bay_for(4.0, ty, false, hand, 2.0) - 3.05).abs() < 1e-5);
+            for side in [0.0, 1.0, 2.0] {
+                assert_eq!(bay_for(-4.0, ty, true, hand, side), 0.0);
+                assert_eq!(bay_for(f32::NAN, ty, false, hand, side), 0.0);
+            }
+        }
+    }
+
     use super::*;
 
     /// The row OMSI's AI bus is given: the first whose ident is the destination, whatever
