@@ -73,9 +73,35 @@ pub struct PhoneView {
     pub server_name: String,
 }
 
-/// The whole launcher on a phone (instead of the rail and the desktop pages).
+/// Enter compact layout on the page selected by the desktop navigation.
+pub(super) fn select_page(l: &mut Launcher) {
+    l.phone.page = match l.page {
+        Page::Drive => {
+            l.phone.tab = Tab::Play;
+            None
+        }
+        Page::Multiplayer => {
+            l.phone.tab = Tab::Online;
+            None
+        }
+        Page::Mods => {
+            l.phone.tab = Tab::Mods;
+            None
+        }
+        other => {
+            l.phone.tab = Tab::More;
+            Some(other)
+        }
+    };
+    l.phone.sheet = None;
+    l.phone.filter.clear();
+}
+
+/// The whole launcher in compact layout (instead of the rail and the desktop pages).
 pub fn draw(l: &mut Launcher) {
     let size = l.ui.size;
+    // Only embedded pages scroll as a whole. Do not retain another page's scroll range.
+    l.page_max = 0.0;
     let full = Rect::new(0.0, 0.0, size.x, size.y);
     l.ui.p().rect(full, RAIL);
     if let Some(s) = l.phone.sheet {

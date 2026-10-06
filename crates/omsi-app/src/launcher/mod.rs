@@ -12,6 +12,7 @@ pub(crate) mod drive;
 pub(crate) mod mapview;
 pub mod mobile;
 pub mod phone;
+mod viewport;
 mod multiplayer;
 pub(crate) mod pages;
 mod showroom;
@@ -152,6 +153,7 @@ pub struct Launcher {
     pub browser: Option<mobile::Browser>,
     page_scroll: f32,
     page_max: f32,
+    compact_ui: bool,
     ime: bool,
     /// Updates from the GitHub releases (see `crate::updater`, `update.rs`).
     pub update: crate::updater::Updater,
@@ -226,6 +228,7 @@ impl Launcher {
         browser: None,
         page_scroll: 0.0,
         page_max: 0.0,
+        compact_ui: mobile::mobile(),
         ime: false,
         update: Default::default(),
         #[cfg(not(target_os = "android"))]
@@ -376,7 +379,7 @@ impl ApplicationHandler for Launcher {
         let mut attrs = Window::default_attributes().with_title("openOMSI").with_window_icon(crate::startup::window_icon()).with_inner_size(fit);
         if !mobile::mobile() {
             // (no bigger than the window fitted to the screen: a small one at 150 % has less)
-            attrs = attrs.with_min_inner_size(winit::dpi::LogicalSize::new(1080.0f64.min(fit.width), 680.0f64.min(fit.height)));
+            attrs = attrs.with_min_inner_size(winit::dpi::LogicalSize::new(640.0f64.min(fit.width), 400.0f64.min(fit.height)));
             if let Some(at) = at {
                 attrs = attrs.with_position(at);
             }
@@ -545,7 +548,7 @@ impl ApplicationHandler for Launcher {
             }
             WindowEvent::DroppedFile(path) => {
                 // a mod folder or supported archive dropped on the window is installed
-                self.page = Page::Mods;
+                self.go(Page::Mods);
                 self.state.install(path.to_string_lossy().to_string());
             }
             WindowEvent::HoveredFile(_) => self.pages.drop_hover = true,
@@ -599,24 +602,15 @@ impl ApplicationHandler for Launcher {
 }
 
 impl Launcher {
-    /// Physical pixels per interface pixel: the screen's scale, times a zoom that makes the
-    /// interface (laid out for a 1440 x 880 window) grow with a bigger window and shrink a
-    /// little with a smaller one, so that it fills the window the same way at any size.
+    /// Physical pixels per interface pixel. Compact desktop windows keep the system's
+    /// text size; larger windows and mobile devices retain their existing zoom.
     fn ui_scale(&self) -> f32 {
-        let Some(w) = self.window.as_ref() else { return 1.0 };
+        let Some(w) = self.window.as_ref() else {
+            return 1.0;
+        };
         let dpi = w.scale_factor() as f32;
         let s = w.inner_size();
-        let (lw, lh) = (s.width as f32 / dpi, s.height as f32 / dpi);
-        if mobile::mobile() {
-            // a phone held across: the text at least at the system's own size - smaller, it
-            // was hard to read and the buttons hard to hit (the pages scroll where the screen
-            // is lower than they are, and lay themselves out for its width), a tablet larger
-            return dpi * (lh / 400.0).clamp(1.0, 1.35);
-        }
-        // (the height counts a little less: on a wide, low screen - 2560 x 1080 - the text
-        // stayed the size of a 1440 x 880 window's, tiny across the width; the pages scroll or
-        // keep their width, see `draw_ui`)
-        dpi * (lw / 1440.0).min(lh / 820.0).clamp(0.8, 2.2)
+        viewport::viewport(s.width as f32, s.height as f32, dpi, mobile::mobile()).scale
     }
 
     /// The graphics device was lost (#274: an AMD Radeon's DX12 driver gave up while the
@@ -816,11 +810,13 @@ impl Launcher {
         self.map_rect = None;
         self.ui.begin(size, scale, dt);
         self.draw_ui();
-        if mobile::mobile() {
-            // what no list took of a finger's drag scrolls the page
+        if self.compact_ui {
+            // What no list took of a wheel or finger's drag scrolls the page.
             if !self.ui.wheel_taken() && self.browser.is_none() {
                 self.page_scroll = (self.page_scroll - self.ui.input.wheel.y * 42.0).clamp(0.0, self.page_max);
             }
+        }
+        if mobile::mobile() {
             // the on-screen keyboard while a text field has the focus
             let want = self.ui.focus.is_some();
             if want != self.ime {
@@ -1019,6 +1015,29 @@ impl Launcher {
         }
         let size = self.ui.size;
         let mobile = mobile::mobile();
+        let compact = self
+            .window
+            .as_ref()
+            .map(|w| {
+                let size = w.inner_size();
+                viewport::viewport(
+                    size.width as f32,
+                    size.height as f32,
+                    w.scale_factor() as f32,
+                    mobile,
+                )
+                .compact
+            })
+            .unwrap_or(mobile);
+        if compact != self.compact_ui {
+            self.compact_ui = compact;
+            self.page_scroll = 0.0;
+            self.page_max = 0.0;
+            self.ui.focus = None;
+            if compact {
+                phone::select_page(self);
+            }
+        }
         // the storage browser (or the update dialog) lies over the page: the page sees no
         // finger meanwhile
         let dialog = self.update_dialog_open();
@@ -1038,8 +1057,8 @@ impl Launcher {
             self.ui.input.text.clear();
             i
         });
-        // a phone: the launcher made for it, not the desktop's pages
-        if mobile {
+        // The existing compact pages also fit small desktop windows and high DPI.
+        if compact {
             if self.page == Page::Setup && !omsi_cfg::missing_original_essentials(std::path::Path::new(&self.state.config.root)).is_empty() && self.phone.page.is_none() {
                 self.phone.tab = phone::Tab::More;
                 self.phone.page = Some(Page::Setup);
