@@ -2030,6 +2030,26 @@ impl Schedule {
         self.running = keep;
     }
 
+    fn ai_timetable(&self, i: usize) -> crate::bus_service::AiTimetable {
+        let trip = &self.data.trips[self.departures[i].trip];
+        let ids = trip_stations(trip);
+        let names = self.trip_stop_names(self.departures[i].trip);
+        let times = &self.times_of(i).stations;
+        let departure = self.dep_time(i);
+        crate::bus_service::AiTimetable {
+            line: self.display_line(i),
+            terminus: trip.terminus.clone(),
+            stops: ids
+                .into_iter()
+                .zip(names)
+                .zip(times)
+                .map(|((id, name), &(arr, dep))| {
+                    (id, name, (departure + arr) as f32, (departure + dep) as f32)
+                })
+                .collect(),
+        }
+    }
+
     /// Put departure `i` on the road where its bus is at `day_time`: on the part of the route
     /// the loaded tiles have, which is carried on as more tiles come.
     ///
@@ -2298,6 +2318,12 @@ impl Schedule {
             }
             let hof = car.vehicle.host.hof.clone();
             let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            let timetable = self.ai_timetable(i);
+            timetable.install(&mut car.vehicle.host, car.bus.as_ref().and_then(|b| b.stops.front()));
+            car.vehicle.set_var("schedule_active", 1.0);
+            if let Some(b) = car.bus.as_mut() {
+                b.delay = 0.0;
+            }
             set_ai_destination(&mut car.vehicle, hof.as_deref(), &line, &terminus, &names);
             if let Some(b) = car.bus.as_mut() {
                 b.route_open = end < slots.len();
@@ -2468,6 +2494,7 @@ impl Schedule {
             number.clone(),
             hof.clone(),
             Some(scheme),
+            self.ai_timetable(i),
         ) else {
             return Placed::Drop;
         };
