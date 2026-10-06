@@ -1945,10 +1945,10 @@ impl Schedule {
         }
         // AI bus scripts use the same timetable host callbacks as a player's duty:
         // schedule_active and GetTT* must follow the trip and its current stop.
-        self.refresh_ai_timetable_hosts(traffic, day_time);
+        self.refresh_ai_timetable_hosts(traffic);
     }
 
-    fn refresh_ai_timetable_hosts(&self, traffic: &mut Traffic, day_time: f64) {
+    fn refresh_ai_timetable_hosts(&self, traffic: &mut Traffic) {
         struct Update {
             id: u64,
             line: String,
@@ -1987,7 +1987,7 @@ impl Schedule {
                 next,
                 // BusService tracks the lateness of the last/current stop. It is more stable
                 // than recomputing it from the wall clock while the bus is between stops.
-                delay: service.delay,
+                delay: service.delay as f32,
             });
         }
 
@@ -2007,8 +2007,6 @@ impl Schedule {
             // Make it visible immediately, including before the next engine-variable refresh.
             car.vehicle.set_var("schedule_active", 1.0);
         }
-
-        let _ = day_time; // kept in the signature for future exact between-stop delay tracking
     }
 
     /// Carry the routes of the running trips on over the lanes the network gained.
