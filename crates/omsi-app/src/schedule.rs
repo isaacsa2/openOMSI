@@ -3707,9 +3707,6 @@ impl Schedule {
     /// 5 m beside the player's own bus at the Bauernhof, where the passengers queued.
     /// Returns how many of today's departures that takes from the AI.
     pub fn reserve_tour(&mut self, line: &str, tour: &str) -> usize {
-        // Switching duties must give the previous one back first. Otherwise its future
-        // departures remain marked spawned and that tour silently loses its AI service.
-        self.release_player_tour();
         self.player_tour = Some((line.to_string(), tour.to_string()));
         let mine: Vec<bool> = (0..self.departures.len())
             .map(|i| self.is_player_tour(i))
@@ -3953,6 +3950,9 @@ impl Schedule {
         } else {
             (trips, trip_index, 0)
         };
+        // Give a previously selected duty back before reserving this one. Do this before
+        // setting player_departure: release_player_tour clears the old selection.
+        self.release_player_tour();
         // the AI leaves the player what the player drives: the tour, or just the one trip
         self.player_departure = (trips.len() == 1 && trip.is_some() && !whole_tour).then(|| trips[0].departure);
         let reserved = self.reserve_tour(&line_name, &tour_name);
