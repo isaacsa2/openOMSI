@@ -2062,7 +2062,10 @@ impl Traffic {
                 // with its passengers at the far end of a straight road for good)
                 self.hidden(world, p, r) || (c.stopped > 8.0 && from_eye > 180.0) || c.stopped > 150.0
             } else if !random {
-                false
+                // a timetable bus standing for minutes away from its stops and lights is in a
+                // jam that does not clear: it goes once nobody sees it, as one at the edge
+                // (kept for good, the jam behind it never cleared)
+                c.is_bus() && c.stopped > 240.0 && !c.at_station() && !c.light_hold && (from_eye > 40.0 || self.hidden(world, p, r))
             } else if at_end && (!c.is_bus() || self.hidden(world, p, r) || (c.stopped > 8.0 && from_eye > 180.0) || c.stopped > 150.0 || (c.stopped > 25.0 && queued.contains(&c.id) && from_eye > 25.0)) {
                 // (and in view too once others wait behind it: a fire engine at the end of a
                 // dead-end street held a queue of fourteen cars for two and a half minutes)
@@ -4459,6 +4462,9 @@ impl Traffic {
         // of a busy main road stood at the mouth of its side road for minutes.
         let wait = self.cars[i].state.yield_time;
         let patience = 1.0 - (wait / 40.0).min(1.0) / 3.0;
+        // somebody on, or coming to, a lane that crosses this car's way through the junction
+        // (see the gridlock squeeze below)
+        let mut contested = false;
         for &(l, dl) in &jn.lanes {
             for c in &self.net.crossings[l] {
                 let point = dl + c.at;
@@ -4499,6 +4505,9 @@ impl Traffic {
                     }
                     if dj + c.other_after < -o.state.rear - 0.3 {
                         continue; // it is through
+                    }
+                    if dj - c.other_before < 40.0 {
+                        contested = true;
                     }
                     let t_clear = time_to(point + c.after + st.rear + 0.3, v, a_me)
                         + if v < 0.5 { st.reaction } else { 0.0 };
@@ -4680,7 +4689,11 @@ impl Traffic {
             (hard && !cannot_stop) || ((ruled || !soft.is_empty()) && !cannot_stop_gently);
         // held only by a full exit for long: a ring of queues each waiting for the next
         // junction's exit (round a block) never clears by itself - squeeze in, as drivers do
-        if blocked && exit_full && !hard && !ruled_before_exit && soft.is_empty() && wait > GRIDLOCK_WAIT {
+        // (but only into a junction nobody else needs: stopped in it with its exit still full,
+        // a car stands across the crossing traffic's way - on a big junction behind a long
+        // queue the cars of every direction squeezed in after their 45 s, each standing in
+        // the others' way, and the junction was locked for good, timetable buses and all)
+        if blocked && exit_full && !hard && !ruled_before_exit && soft.is_empty() && wait > GRIDLOCK_WAIT && !contested {
             blocked = false;
             if omsi_cfg::env::var_os("OMSI_DEBUG_TRAFFIC").is_some() {
                 log::info!("t={:.1}: car {} squeezes into a full exit after {wait:.0} s (gridlock)", self.time, self.cars[i].id);
@@ -7089,6 +7102,25 @@ impl Traffic {
                             c.0.position = lamp.pos + xf.transform_point3(*local).as_dvec3();
                             if *dir != glam::Vec3::ZERO {
                                 c.0.direction = xf.transform_vector3(*dir).normalize_or_zero();
+                            }
+                        }
+                    }
+                }
+            }
+            if !lamp.texts.is_empty() {
+                if let Some(script) = lamp.script.as_ref() {
+                    let mut s = script.lock();
+                    let _ = s.take_refresh_strings();
+                    for (tex, st) in lamp.texts.iter_mut() {
+                        let text = s.str_var(st.def.variable.trim()).to_string();
+                        if st.update(&text) {
+                            if let Some(rgba) = st.pending.take() {
+                                let (w, h) = (st.def.width.max(1) as u32, st.def.height.max(1) as u32);
+                                renderer.update_texture_mips(
+                                    scene,
+                                    *tex,
+                                    &omsi_texture::Image { width: w, height: h, rgba, has_alpha: true },
+                                );
                             }
                         }
                     }
