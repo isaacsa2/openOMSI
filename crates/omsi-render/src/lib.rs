@@ -70,6 +70,9 @@ struct CameraUniform {
     /// and the light indices they belong to (-1: none).
     lamp_view_proj: [[[f32; 4]; 4]; 4],
     lamp_shadow: [f32; 4],
+    /// Windy trees: xy the weather's wind (m/s, world; 0 with the setting off), zw how far
+    /// the air has carried the gusts since the start (m, modulo the shaders' PATTERN_PERIOD).
+    tree_wind: [f32; 4],
 }
 
 /// The period the sky's cloud patterns repeat with (m): 5 x the cloud field (14 km), 8 x
@@ -117,6 +120,8 @@ struct EnhancedUniform {
     /// rgb the moonlight on a surface facing the moon (after the clouds), w 1 while the
     /// shadow maps are the moon's (`Lighting::casts_moon_shadows`)
     moon_light: [f32; 4],
+    /// `Lighting::condensation`
+    condensation: [f32; 4],
 }
 
 /// High-range colour targets of the enhanced path for one size: the multisampled one the
@@ -514,6 +519,9 @@ struct MaterialUniform {
     /// rgb: the D3D material's ambient colour, which takes the ambient light (C); w: 1 for
     /// a texture that is a season's snow picture (no snow laid over it), 2 the map's water
     ambient: [f32; 4],
+    /// `MaterialExtra::sway`: x 1 for foliage the wind moves, y its pivot's and z its top's
+    /// height (mesh units), w how much it gives to the wind
+    sway: [f32; 4],
 }
 
 /// The maps of a PBR set found beside a diffuse texture (`foo_n.png` and the rest, see
@@ -690,6 +698,10 @@ pub struct Lighting {
     pub snowfall: f32,
     /// The weather's wind (m/s, world): the snowfall drifts with it.
     pub wind: Vec3,
+    /// The condensation on the player's bus's panes as optical depths (the share of the
+    /// light they scatter is 1 - e^-depth): windscreen, side windows, rear window, and how
+    /// far the defroster has cleared the windscreen (0..1; enhanced path).
+    pub condensation: [f32; 4],
     pub fog_base: Option<f64>,
     pub envir_tint: [Vec3; 3],
     /// How bright an LED panel's dots burn (`MaterialExtra::led`; the settings' 16 levels
@@ -707,6 +719,9 @@ pub struct Lighting {
     /// The player's vehicle's velocity (m/s, world): at speed the airstream drives the drops
     /// on its glass up the windscreen and back along the side windows.
     pub glass_wind: Vec3,
+    /// Windy trees (the `windy_trees` setting): the foliage of trees bends and sways in
+    /// `wind` (see shader.wgsl `tree_sway`).
+    pub windy_trees: bool,
     /// Towards the moon (world space) and how much of its disc is lit (0 new .. 1 full):
     /// the enhanced night's moonlight and the moon in its sky.
     pub moon_dir: Vec3,
@@ -769,6 +784,7 @@ impl Default for Lighting {
             shadows: true,
             snowfall: 0.0,
             wind: Vec3::ZERO,
+            condensation: [0.0; 4],
             lamp_shadows: false,
             wetness: 0.0,
             snow: 0.0,
@@ -786,6 +802,7 @@ impl Default for Lighting {
             led_glow: 1.5,
             led_mips: 1.3,
             glass_wind: Vec3::ZERO,
+            windy_trees: false,
             moon_dir: Vec3::new(0.0, -0.5, -0.866),
             moon_illum: 0.0,
             day_of_year: 150.0,
@@ -874,7 +891,7 @@ impl GpuTexture {
 struct BindKey {
     textures: [(usize, u64); 7],
     address: TexAddressing,
-    uniform: [u32; 40],
+    uniform: [u32; 44],
 }
 
 /// Bytes of a texture of `format` with `levels` mip levels.
@@ -1025,6 +1042,10 @@ pub struct MaterialExtra {
     /// factor alone, as the vanilla one shows the sphere map on it - chrome read as a
     /// faint clear coat there. A body needs a mask of its own for that (a Golf's bonnet).
     pub metal_ok: bool,
+    /// Windy trees: foliage the wind moves - the height (mesh units) of the pivot where the
+    /// crown leaves the trunk (nothing below it moves), of the crown's top, and how much the
+    /// tree gives to the wind (1 a broadleaf). `None`: not foliage.
+    pub sway: Option<[f32; 3]>,
 }
 
 /// The textures a material's bind group samples.
@@ -1388,8 +1409,9 @@ struct PassPipelines {
     corona_pipeline: wgpu::RenderPipeline,
     /// Smoke particles (`[smoke]`): the corona sprite alpha-blended with the smoke texture.
     smoke_pipeline: wgpu::RenderPipeline,
-    /// The snowfall (snow.wgsl), opaque over the scene (premultiplied).
-    snow_pipeline: wgpu::RenderPipeline,
+    /// The snowfall (snow.wgsl), opaque over the scene (premultiplied); none with
+    /// `basic_pipelines`.
+    snow_pipeline: Option<wgpu::RenderPipeline>,
     sky_pipeline: wgpu::RenderPipeline,
 }
 
@@ -2028,8 +2050,9 @@ pub struct Renderer {
     shadow_view_far: wgpu::TextureView,
     shadow_sampler: wgpu::Sampler,
     shadow_layout: wgpu::BindGroupLayout,
-    /// [near opaque, near alpha-tested, far opaque, far alpha-tested]
-    shadow_pipelines: [wgpu::RenderPipeline; 14],
+    /// [near opaque, near alpha-tested, far opaque, far alpha-tested, close opaque, close
+    /// alpha-tested], then the street lamps' (6 + 2 k + kind; not with `basic_pipelines`)
+    shadow_pipelines: Vec<wgpu::RenderPipeline>,
     /// The settings this renderer was built with.
     pub options: RenderOptions,
     /// Enhanced path: the HDR targets per size, the post pipelines and their resources.
@@ -2078,6 +2101,8 @@ pub struct Renderer {
     overlay_pipeline_1x: wgpu::RenderPipeline,
     xr_ui_pipeline: wgpu::RenderPipeline,
     started: std::time::Instant,
+    /// Windy trees: how far the wind has carried its gusts (m, modulo 1000) and when.
+    tree_gust_drift: std::cell::Cell<(glam::DVec2, f64)>,
     /// `[matl_texadress_clamp]` (and border, mirror-once) and `[matl_texadress_mirror]`.
     clamp_sampler: wgpu::Sampler,
     mirror_sampler: wgpu::Sampler,
@@ -2300,6 +2325,16 @@ const GBUF_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const AUX_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
 /// The renderer is built for Enhanced+: its HDR pipelines and targets have the two above.
 static RT_GBUF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The renderer is built without the pipelines that are not needed to draw a picture (the
+/// snowfall, the lamps in the fog, the street lamps' shadow maps): a driver whose shader
+/// compiler fails on one of them (it answers "out of memory" or an unknown error - phones'
+/// drivers do) takes the whole device with it, and every frame after that came out black
+/// (see `Renderer::new_on`). Once set, it stays for the rest of the run. OMSI_BASIC_PIPELINES=1
+/// asks for it.
+static BASIC_PIPELINES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn basic_pipelines() -> bool {
+    BASIC_PIPELINES.load(std::sync::atomic::Ordering::Relaxed) || omsi_cfg::env::var_os("OMSI_BASIC_PIPELINES").is_some()
+}
 fn rt_gbuf() -> bool {
     RT_GBUF.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -2397,6 +2432,7 @@ impl Renderer {
         options: RenderOptions,
     ) -> Result<Renderer> {
         let info = adapter.get_info();
+        let (asked_format, asked_options) = (format, options);
         // test hooks for an adapter that cannot be opened: an error, or wgpu going down
         match omsi_cfg::env::var("OMSI_FAKE_GPU_ERROR").as_deref() {
             Ok("open") => return Err(anyhow!("test: {} refused (OMSI_FAKE_GPU_ERROR=open)", info.name)),
@@ -2654,38 +2690,74 @@ impl Renderer {
             bc && options.compress_textures && omsi_cfg::env::var_os("OMSI_NO_TEXCOMPRESS").is_none();
         omsi_texture::set_gpu_options(omsi_texture::GpuOptions { bc, compress });
         log::info!("renderer: {} ({:?}), {:?}, {}x MSAA{}, anisotropy {}, shadow map {}, SSAO {}, render scale {}, textures {}", info.name, info.backend, format, options.msaa, if adapter_table { " (adapter format table)" } else { "" }, options.anisotropy, options.shadow_size, options.ssao, if options.render_scale > 0.0 { format!("{:.2}", options.render_scale.clamp(0.5, 1.0)) } else { "auto".to_string() }, match (bc, compress) { (false, _) => "RGBA (no BC on this device)", (true, false) => "DXT as blocks, others RGBA", (true, true) => "DXT as blocks, others compressed where close" });
-        // Anything that still fails to validate with multisampling (a driver whose table
-        // promises more than it takes) is caught here, and the renderer is built again
-        // without it instead of the default handler's abort.
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let renderer = Self::build(
-            device.clone(),
-            queue.clone(),
-            format!("{} ({:?})", info.name, info.backend),
-            format,
-            options,
-        );
+        // Every pipeline is built under an error scope of every kind and the renderer built
+        // again with less where one fails: without multisampling (a driver whose table
+        // promises more than it takes), then without the pipelines a picture can do without
+        // (`basic_pipelines`), then both. A phone driver whose shader compiler gives up on a
+        // pipeline reports it as an *internal* error, not a validation error: caught as
+        // validation errors only, it went by, the pipeline stayed invalid and the first frame
+        // stopped on "RenderPipeline with 'omsi' label is invalid" (#1663, #1664 - Adreno
+        // 740/830 since 0.2.0), and the retry without multisampling was not checked at all.
         let mesh_pages = adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::BASE_VERTEX);
-        match scope.pop().await {
-            None => Ok(Renderer { mesh_pages, ..renderer }),
-            Some(e) if options.msaa > 1 => {
-                log::error!(
-                    "{}x MSAA failed on {}: {}; drawing without multisampling",
-                    options.msaa,
-                    info.name,
-                    gpu_error_text(&e)
-                );
-                drop(renderer);
-                Ok(Renderer { mesh_pages, ..Self::build(
-                    device,
-                    queue,
-                    format!("{} ({:?})", info.name, info.backend),
-                    format,
-                    RenderOptions { msaa: 1, ..options },
-                ) })
+        let name = format!("{} ({:?})", info.name, info.backend);
+        let mut attempts: Vec<(u32, bool)> = vec![(options.msaa, false), (1, false), (options.msaa, true), (1, true)];
+        attempts.dedup();
+        let mut made: Result<Renderer> = Err(anyhow!("renderer pipelines: not built"));
+        let mut tried: Vec<String> = Vec::new();
+        for (msaa, basic) in attempts {
+            if tried.iter().any(|t| t == &format!("{msaa}{basic}")) || (!basic && basic_pipelines()) {
+                continue;
             }
-            Some(e) => Err(anyhow!("renderer pipelines: {}", gpu_error_text(&e))),
+            tried.push(format!("{msaa}{basic}"));
+            if basic {
+                BASIC_PIPELINES.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+            let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let renderer = Self::build(device.clone(), queue.clone(), name.clone(), format, RenderOptions { msaa, ..options });
+            // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
+            if !basic && omsi_cfg::env::var("OMSI_FAKE_GPU_ERROR").as_deref() == Ok("pipeline") {
+                let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("test"), source: wgpu::ShaderSource::Wgsl("fn broken( {".into()) });
+            }
+            let errors = [validation.pop().await, memory.pop().await, internal.pop().await];
+            match errors.iter().flatten().next() {
+                None => {
+                    if msaa != options.msaa || basic {
+                        log::warn!("{}: drawing with {}x MSAA{}", info.name, msaa, if basic { ", without the snowfall, the lamps in the fog and the street lamps' shadows" } else { "" });
+                    }
+                    made = Ok(Renderer { mesh_pages, ..renderer });
+                    break;
+                }
+                Some(e) => {
+                    log::error!("{}: the renderer's pipelines failed ({}x MSAA{}): {}", info.name, msaa, if basic { ", basic pipelines" } else { "" }, gpu_error_text(e));
+                    made = Err(anyhow!("renderer pipelines: {}", gpu_error_text(e)));
+                    drop(renderer);
+                }
+            }
         }
+        // A driver whose shader compiler fails on a pipeline answers "out of memory" or an
+        // unknown error, and wgpu takes that as the device lost: on phones (Adreno, Mali)
+        // one of 0.2's new pipelines did so, the renderer was made all the same and every
+        // frame came out black. The device is opened again and the pipelines made without
+        // the ones a picture can do without (`basic_pipelines`); lost even so, the next
+        // graphics interface is tried.
+        // (test hook: OMSI_FAKE_GPU_ERROR=lost-build loses the first device so)
+        if let (Ok(r), Ok("lost-build")) = (made.as_ref(), omsi_cfg::env::var("OMSI_FAKE_GPU_ERROR").as_deref()) {
+            if !basic_pipelines() {
+                *r.device_lost.lock().unwrap_or_else(|e| e.into_inner()) = Some("test (OMSI_FAKE_GPU_ERROR=lost-build)".into());
+            }
+        }
+        if let Some(why) = made.as_ref().ok().and_then(|r| r.device_lost()) {
+            drop(made);
+            if basic_pipelines() {
+                return Err(anyhow!("the graphics device was lost while the pipelines were made: {why}"));
+            }
+            log::warn!("{}: the graphics device was lost while the pipelines were made ({why}); opening it again without the snowfall, the lamps in the fog and the street lamps' shadows", info.name);
+            BASIC_PIPELINES.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Box::pin(Self::new_on(adapter, surface, asked_format, asked_options)).await;
+        }
+        made
     }
 
     /// The pipelines, samplers and fixed textures of a renderer whose options are settled.
@@ -3078,23 +3150,22 @@ impl Renderer {
                 cache: None,
             })
         };
-        let shadow_pipelines = [
+        let mut shadow_pipelines = vec![
             make_shadow(PIPE_OPAQUE, 0),
             make_shadow(PIPE_ALPHA_TEST, 0),
             make_shadow(PIPE_OPAQUE, 1),
             make_shadow(PIPE_ALPHA_TEST, 1),
             make_shadow(PIPE_OPAQUE, 2),
             make_shadow(PIPE_ALPHA_TEST, 2),
-            // (the street lamps' tiles, 6 + 2 k + kind)
-            make_shadow(PIPE_OPAQUE, 3),
-            make_shadow(PIPE_ALPHA_TEST, 3),
-            make_shadow(PIPE_OPAQUE, 4),
-            make_shadow(PIPE_ALPHA_TEST, 4),
-            make_shadow(PIPE_OPAQUE, 5),
-            make_shadow(PIPE_ALPHA_TEST, 5),
-            make_shadow(PIPE_OPAQUE, 6),
-            make_shadow(PIPE_ALPHA_TEST, 6),
         ];
+        if !basic_pipelines() {
+            // (the street lamps' tiles, 6 + 2 k + kind)
+            log::info!("renderer: compiling the street lamps' shadow shaders");
+            for cascade in 3..=6 {
+                shadow_pipelines.push(make_shadow(PIPE_OPAQUE, cascade));
+                shadow_pipelines.push(make_shadow(PIPE_ALPHA_TEST, cascade));
+            }
+        }
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
@@ -3279,6 +3350,7 @@ impl Renderer {
             alpha: wgpu::BlendComponent::REPLACE,
         };
         let snow_pipeline_for = |f: wgpu::TextureFormat, fs: &str| {
+            log::info!("renderer: compiling the snowfall shader ({fs})");
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("snow"),
                 layout: Some(&snow_pl),
@@ -3484,7 +3556,7 @@ impl Renderer {
             rain_pipelines: scene_pipelines(format, "fs_main", 1),
             corona_pipeline: corona_pipeline_for(format, "fs_main", screen),
             smoke_pipeline: corona_pipeline_for(format, "fs_smoke", alpha_blend),
-            snow_pipeline: snow_pipeline_for(format, "fs_snow"),
+            snow_pipeline: (!basic_pipelines()).then(|| snow_pipeline_for(format, "fs_snow")),
             sky_pipeline: sky_pipeline_for(format, "fs_main"),
         };
         // the enhanced path: its own lighting in all three
@@ -3499,7 +3571,7 @@ impl Renderer {
             rain_pipelines: scene_pipelines(hdr_format, "fs_enhanced", 1),
             corona_pipeline: corona_pipeline_for(hdr_format, "fs_enhanced", additive),
             smoke_pipeline: corona_pipeline_for(hdr_format, "fs_smoke_enhanced", alpha_blend),
-            snow_pipeline: snow_pipeline_for(hdr_format, "fs_snow_enhanced"),
+            snow_pipeline: (!basic_pipelines()).then(|| snow_pipeline_for(hdr_format, "fs_snow_enhanced")),
             sky_pipeline: sky_pipeline_for(hdr_format, "fs_enhanced"),
         });
         let reflection_pass = (!leave_out_enhanced && !GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed)).then(|| PassPipelines {
@@ -3507,7 +3579,7 @@ impl Renderer {
             rain_pipelines: scene_pipelines(hdr_format, "fs_vanilla_reflections", 1),
             corona_pipeline: corona_pipeline_for(hdr_format, "fs_main", screen),
             smoke_pipeline: corona_pipeline_for(hdr_format, "fs_smoke", alpha_blend),
-            snow_pipeline: snow_pipeline_for(hdr_format, "fs_snow"),
+            snow_pipeline: (!basic_pipelines()).then(|| snow_pipeline_for(hdr_format, "fs_snow")),
             sky_pipeline: sky_pipeline_for(hdr_format, "fs_main"),
         });
         let sky_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -3763,7 +3835,8 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let fog_lamps_pipeline = (!gl && array_path() != ArrayPath::NoStorage).then(|| {
+        let fog_lamps_pipeline = (!gl && array_path() != ArrayPath::NoStorage && !basic_pipelines()).then(|| {
+            log::info!("renderer: compiling the lamps in the fog shaders");
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("fog lamps"),
                 source: wgpu::ShaderSource::Wgsl(fog_lamps_shader_source().into()),
@@ -3971,6 +4044,9 @@ impl Renderer {
                 },
                 float_tex(3),
                 float_tex(4),
+                // (the screen mask for the tone mapping: the condensation on the bus's
+                // panes, see post.wgsl `misted`)
+                float_tex(5),
             ],
         });
         let post_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -4079,6 +4155,10 @@ impl Renderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
+                        resource: wgpu::BindingResource::TextureView(&white_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
                         resource: wgpu::BindingResource::TextureView(&white_texture.view),
                     },
                 ],
@@ -4623,7 +4703,12 @@ impl Renderer {
             instant_exposure: false,
             overlay_pipeline_1x,
             xr_ui_pipeline,
-            started: std::time::Instant::now(),
+            // (OMSI_RENDER_CLOCK=<s>: the animations' clock starts that far on - offscreen
+            // stills of moving things, the windy trees, at different moments)
+            started: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs_f64(omsi_cfg::env::var("OMSI_RENDER_CLOCK").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|s| s.is_finite() && *s >= 0.0).unwrap_or(0.0)))
+                .unwrap_or_else(std::time::Instant::now),
+            tree_gust_drift: std::cell::Cell::new((glam::DVec2::ZERO, 0.0)),
             ao: None,
             ao_sampler,
             ao_layout,
@@ -5854,6 +5939,7 @@ impl Renderer {
                 let a = extra.ambient.unwrap_or([color[0], color[1], color[2]]);
                 [a[0], a[1], a[2], if extra.water { 2.0 } else { snow_texture_flag(scene, texture) }]
             },
+            sway: extra.sway.map_or([0.0; 4], |s| [1.0, s[0], s[1], s[2]]),
         };
         let slot = |t: Option<TextureId>| {
             t.and_then(|t| scene.textures.get(t).map(|g| (t, g.gen)))
@@ -6966,7 +7052,7 @@ impl Renderer {
             .map(|k| target("glow up", w >> k, h >> k, fmt, 1))
             .collect();
         let ldr = target("tone mapped", w, h, wgpu::TextureFormat::Rgba8Unorm, 1);
-        let bg = |src: &wgpu::TextureView, base: &wgpu::TextureView, adapt: &wgpu::TextureView| {
+        let bg_with = |src: &wgpu::TextureView, base: &wgpu::TextureView, adapt: &wgpu::TextureView, screen_mask: &wgpu::TextureView| {
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("post"),
                 layout: &self.post_layout,
@@ -6991,9 +7077,14 @@ impl Renderer {
                         binding: 4,
                         resource: wgpu::BindingResource::TextureView(adapt),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::TextureView(screen_mask),
+                    },
                 ],
             })
         };
+        let bg = |src: &wgpu::TextureView, base: &wgpu::TextureView, adapt: &wgpu::TextureView| bg_with(src, base, adapt, &self.black_texture.view);
         let none = &self.white_texture.view;
         // (the first level of the glow reads the screen mask as its `t_base`: no light from
         // the screens)
@@ -7015,8 +7106,8 @@ impl Renderer {
             .collect();
         let meter_bg = bg(&down[levels - 1], none, none);
         let tonemap_bg = [
-            bg(&view, &up[0], &self.adapt_views[0]),
-            bg(&view, &up[0], &self.adapt_views[1]),
+            bg_with(&view, &up[0], &self.adapt_views[0], &mask),
+            bg_with(&view, &up[0], &self.adapt_views[1], &mask),
         ];
         // (FXAA reads the screen mask as its `t_base` and leaves the screens as they are)
         let fxaa_bg = bg(&ldr, &mask, none);
@@ -7158,8 +7249,16 @@ impl Renderer {
         // (by night the eye adapts to the lamps' and headlights' light it sees, measured,
         // instead of a lit city's average: on a dark country road under a full moon it
         // takes to the moonlight, and the moon's shadows show)
+        // ... but never below the lit streets of the district the camera is in: the eye's
+        // adaptation to the dark takes minutes (the rods' some twenty), and among lamp-lit
+        // streets it stays with them while the view passes over a dark yard or a field -
+        // taken to the frame's darkness at once, every lamp's light in a lit village went
+        // white. The district's level is a lit street's (`ARTIFICIAL`) by how lit the
+        // place round the camera is (`city_glow`, its lamps within a few hundred metres);
+        // a country road with no lamps round it has none, and the moonlight still decides.
+        let district = atmosphere::ARTIFICIAL * st.input.city_glow.clamp(0.0, 1.0);
         let e_rest = match self.view_lamps {
-            Some(v) => (st.e_rest - st.e_artificial + v).max(1e-6),
+            Some(v) => (st.e_rest - st.e_artificial + v.max(district)).max(1e-6),
             None => st.e_rest,
         };
         let full = atmosphere::exposure_for(st.e_sun + e_rest).max(1e-6).ln();
@@ -7279,6 +7378,7 @@ impl Renderer {
                 c[1][3] = 1.0 - (-st.input.veil / st.input.sun_dir.z.max(0.03)).exp();
                 c
             },
+            condensation: lighting.condensation,
             moon_light: st.moon_light.extend(if lighting.casts_moon_shadows() { 1.0 } else { 0.0 }).to_array(),
             moon_disc: st.moon_disc.extend((1.0 - 0.18 * (st.input.haze - 1.0).max(0.0)).clamp(0.2, 1.0) * 0.55).to_array(),
         };
@@ -8614,7 +8714,7 @@ impl Renderer {
             && omsi_cfg::env::var_os("OMSI_NO_PUDDLE_REFLECTIONS").is_none();
         let reflection_frame = !enhanced && puddles_wanted && self.reflection_pass.is_some();
         let masked_frame = enhanced || reflection_frame;
-        let (grid, lamp_shadows) = self.prepare_lights(scene, cam_rel, enhanced_frame, lighting.lamp_shadows && with_overlays && projection.is_none());
+        let (grid, lamp_shadows) = self.prepare_lights(scene, cam_rel, enhanced_frame, lighting.lamp_shadows && with_overlays && projection.is_none() && self.shadow_pipelines.len() > 6);
         self.prepare_coronas(scene, lighting.night, lighting.inside.as_ref().filter(|v| point_in_vehicle_box(camera.position, v)));
         self.prepare_smoke(scene, camera.position);
         // ambient occlusion only for the real picture, not for the mirrors
@@ -8881,6 +8981,16 @@ impl Renderer {
             wind: [lighting.glass_wind.x, lighting.glass_wind.y, lighting.glass_wind.z, 1.0],
             lamp_view_proj: std::array::from_fn(|k| lamp_shadows.get(k).map_or(Mat4::IDENTITY, |l| l.view_proj()).to_cols_array_2d()),
             lamp_shadow: std::array::from_fn(|k| lamp_shadows.get(k).map_or(-1.0, |l| l.index as f32)),
+            tree_wind: {
+                // the gusts drift with the wind: summed over the frames (the wind changes
+                // with the weather), in f64 and modulo the shaders' pattern period
+                let now = self.started.elapsed().as_secs_f64();
+                let (drift, last) = self.tree_gust_drift.get();
+                let drift = (drift + lighting.wind.truncate().as_dvec2() * (now - last).clamp(0.0, 1.0)).rem_euclid(glam::DVec2::splat(1000.0));
+                self.tree_gust_drift.set((drift, now));
+                let wind = if lighting.windy_trees { lighting.wind.truncate() } else { glam::Vec2::ZERO };
+                [wind.x, wind.y, drift.x as f32, drift.y as f32]
+            },
         };
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
@@ -8892,7 +9002,8 @@ impl Renderer {
         // (a mirror takes the window's light - its own call would move the exposure on -
         // unless it comes before the window's first frame)
         if enhanced && lead_view {
-            self.view_lamps = Some(view_lamp_light(scene, cam_rel, camera.forward()));
+            let ground = lighting.fog_base.or(lighting.inside.map(|v| v.0.z)).map(|z| (z - scene.render_origin.z) as f32);
+            self.view_lamps = Some(view_lamp_light(&scene.lights, scene.render_origin, cam_rel, camera, aspect, ground));
             if omsi_cfg::env::var_os("OMSI_DEBUG_VIEW_LAMPS").is_some() {
                 log::info!("view lamps: {:.6}", self.view_lamps.unwrap_or(0.0));
             }
@@ -10376,14 +10487,14 @@ impl Renderer {
             }
             // the snowfall, every flake worked out on the GPU (snow.wgsl), over the world and
             // under the cab of the vehicle the camera is in
-            if lighting.snowfall > 0.01 && omsi_cfg::env::var_os("OMSI_NO_SNOWFALL").is_none() {
+            if let Some(snow) = pp.snow_pipeline.as_ref().filter(|_| lighting.snowfall > 0.01 && omsi_cfg::env::var_os("OMSI_NO_SNOWFALL").is_none()) {
                 let (counts, mean) = snowfall_flakes(lighting.snowfall);
                 let u = SnowUniform {
                     wind: lighting.wind.extend(self.started.elapsed().as_secs_f32() % 20000.0).to_array(),
                     fall: [lighting.snowfall, mean, counts[0] as f32, counts[1] as f32],
                 };
                 self.queue.write_buffer(&self.snow_buf, 0, bytemuck::bytes_of(&u));
-                pass.set_pipeline(&pp.snow_pipeline);
+                pass.set_pipeline(snow);
                 pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
                 pass.set_bind_group(1, &self.snow_bind_group, &[]);
                 pass.draw(0..6, 0..counts.iter().sum::<u32>());
@@ -10601,7 +10712,10 @@ impl Renderer {
             self.queue
                 .write_buffer(&self.post_buf, 0, bytemuck::bytes_of(&pu));
             // (a mirror's small picture goes without FXAA)
-            let fxaa = with_overlays && self.options.fxaa && omsi_cfg::env::var_os("OMSI_NO_FXAA").is_none();
+            let fxaa = with_overlays
+                && self.options.fxaa
+                && self.options.msaa <= 1
+                && omsi_cfg::env::var_os("OMSI_NO_FXAA").is_none();
             if let Some(h) = self.hdr_targets.get(&(width, height)) {
                 let puddles = h.puddles.as_ref().filter(|_| puddles_on);
                 let levels = h.down.len();
@@ -11597,23 +11711,53 @@ fn lamp_sky_glow(scene: &Scene, cam_rel: Vec3) -> f32 {
 }
 
 /// The light of the lamps and the headlights on the ground the camera looks at (irradiance,
-/// 1 = 10 000 lux): the mean over a dozen points from 5 to 30 m ahead and to either side,
-/// each lit as the enhanced pass lights it (a street lamp down and out, a headlamp ahead
-/// and under its cut-off). What the eye adapts to by night, rather than a fixed guess.
-fn view_lamp_light(scene: &Scene, cam_rel: Vec3, forward: Vec3) -> f32 {
-    let ro = scene.render_origin;
-    let f = Vec3::new(forward.x, forward.y, 0.0).normalize_or(Vec3::Y);
-    let ground = cam_rel.z - 1.6;
-    let mut points = Vec::with_capacity(12);
-    for d in [5.0f32, 10.0, 18.0, 30.0] {
-        for a in [-0.5f32, 0.0, 0.5] {
-            let (s, c) = a.sin_cos();
-            let dir = Vec3::new(f.x * c - f.y * s, f.x * s + f.y * c, 0.0);
-            points.push(Vec3::new(cam_rel.x, cam_rel.y, ground) + dir * d);
+/// 1 = 10 000 lux): the log-average over the points where a grid of rays through the
+/// picture meets the ground (`ground`: the street's height relative to the render origin,
+/// the player's vehicle's), each lit as the enhanced pass lights it (a street lamp down
+/// and out, a headlamp ahead and under its cut-off). What the eye adapts to by night,
+/// rather than a fixed guess.
+///
+/// The rays are the picture's own: a dozen points 5 to 30 m ahead on a ground taken 1.6 m
+/// under the camera missed the street the eye actually sees from any camera higher than a
+/// driver's (it lay in the air there, out of every lamp's reach) and the lamp-lit pools to
+/// the sides of a narrow view - the meter read a moonless night while the picture was full
+/// of lit streets, and the eye's adaptation to that dark lifted every lamp's light to
+/// white (the modded maps' lamps, spaced and placed differently from the stock ones, most).
+fn view_lamp_light(lights: &[PointLight], ro: DVec3, cam_rel: Vec3, camera: &Camera, aspect: f32, ground: Option<f32>) -> f32 {
+    let ground = ground.filter(|g| g.is_finite() && *g < cam_rel.z - 0.3).unwrap_or(cam_rel.z - 1.6);
+    let (f, r, u) = (camera.forward(), camera.right(), camera.up());
+    let ty = (camera.fov_deg.to_radians() * 0.5).tan();
+    let tx = ty * aspect.max(0.1);
+    let mut points = Vec::with_capacity(35);
+    for j in 0..5 {
+        for i in 0..7 {
+            let x = -0.9 + 1.8 * i as f32 / 6.0;
+            let y = -0.95 + 1.9 * j as f32 / 4.0;
+            let dir = (f + r * (x * tx) + u * (y * ty)).normalize();
+            if dir.z >= -0.01 {
+                continue;
+            }
+            // (as far as a lamp's light still shapes what the eye takes to: a pool 300 m
+            // off is a point of light, not the scene)
+            let t = (ground - cam_rel.z) / dir.z;
+            if t > 0.0 && t < 300.0 {
+                points.push(cam_rel + dir * t);
+            }
+        }
+    }
+    if points.is_empty() {
+        // (looking up: the ground round the camera, which the eye has just seen)
+        let f = Vec3::new(f.x, f.y, 0.0).normalize_or(Vec3::Y);
+        for d in [5.0f32, 10.0, 18.0, 30.0] {
+            for a in [-0.5f32, 0.0, 0.5] {
+                let (s, c) = a.sin_cos();
+                let dir = Vec3::new(f.x * c - f.y * s, f.x * s + f.y * c, 0.0);
+                points.push(Vec3::new(cam_rel.x, cam_rel.y, ground) + dir * d);
+            }
         }
     }
     let mut per_point = vec![0.0f32; points.len()];
-    for l in &scene.lights {
+    for l in lights {
         if l.intensity <= 0.0 || l.mode == LightMode::Vanilla {
             continue;
         }
@@ -11653,7 +11797,55 @@ fn view_lamp_light(scene: &Scene, cam_rel: Vec3, forward: Vec3) -> f32 {
     // floor is a moonless night's light, which every point has.
     let floor = 2e-6f32;
     let log_sum: f32 = per_point.iter().map(|v| (v + floor).ln()).sum();
-    (log_sum / per_point.len() as f32).exp() - floor
+    (log_sum / per_point.len() as f32).exp() - floor + glare_veil(lights, ro, cam_rel, camera.forward())
+}
+
+/// The lamps' and headlights' glare in view as the illuminance whose mid grey has the same
+/// luminance (1 = 10 000 lux): the light of every lamp the eye sees, scattered in the eye
+/// over the field of view, is a veil the eye adapts to as to any other light - the
+/// Stiles-Holladay disability glare, L = 10 x the illuminance at the eye (lux) / the angle
+/// off the line of sight squared (degrees), summed over the sources (CIE 146). Metered on
+/// the ground between the lamps alone, a village full of street lamps in view read as a
+/// moonless night, and the eye's adaptation to that dark lifted every lamp's light to white.
+fn glare_veil(lights: &[PointLight], ro: DVec3, cam_rel: Vec3, forward: Vec3) -> f32 {
+    let f = forward.normalize_or(Vec3::Y);
+    let mut veil = 0.0f32; // cd/m²
+    for l in lights {
+        if l.intensity <= 0.0 || l.mode == LightMode::Vanilla {
+            continue;
+        }
+        let to_lamp = (l.position - ro).as_vec3() - cam_rel;
+        let d2 = to_lamp.length_squared();
+        // (a lamp out past a few hundred metres is a point among the stars to the eye; one
+        // within a metre is the bus's own)
+        if !(1.0..300.0 * 300.0).contains(&d2) {
+            continue;
+        }
+        let dist = d2.sqrt();
+        let theta = f.dot(to_lamp / dist).clamp(-1.0, 1.0).acos().to_degrees();
+        if theta >= 90.0 {
+            continue;
+        }
+        let lum = 0.2126 * l.color[0] + 0.7152 * l.color[1] + 0.0722 * l.color[2];
+        let core = if l.core > 0.0 { l.core } else { l.radius * 0.125 };
+        // towards the eye: from the lamp
+        let t = -to_lamp / dist;
+        let k = if l.beam != 0.0 {
+            headlamp_profile(t, l.direction, l.beam > 0.0) / (core * core).max(1e-3)
+        } else if l.direction.length_squared() > 1e-6 {
+            atmosphere::smoothstep(l.cone[1], l.cone[0], t.dot(l.direction.normalize()))
+        } else if l.housed {
+            0.05 + 0.95 * atmosphere::smoothstep(-0.1, 0.3, -t.z)
+        } else {
+            1.0
+        };
+        // the lamp's illuminance at the eye (lux): its core's level, falling off with the
+        // square of the distance as on the street
+        let e_eye = LAMP_E * 1e4 * l.intensity * lum * k * core * core / d2;
+        veil += 10.0 * e_eye / theta.max(1.5).powi(2);
+    }
+    // (the luminance of a mid-grey surface, 18 %, under this illuminance)
+    veil * std::f32::consts::PI / 0.18 / 1e4
 }
 
 /// A headlamp's intensity towards `t` (unit, from the lamp): lamp_air.wgsl `headlamp`.
@@ -13172,6 +13364,40 @@ fn snap_rect(r: [f32; 4]) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The night meter takes the street the picture shows: from 30 m over a lot lit by a
+    /// grid of street lamps, looking down at it, the eye adapts to the lit lot - not, as
+    /// when it sampled a "ground" 1.6 m under the camera (in the air, out of every lamp's
+    /// reach), to a moonless night that lifted the lot's light to white.
+    #[test]
+    fn the_night_meter_sees_a_lamp_lit_lot_from_above() {
+        let mut lights = Vec::new();
+        for i in 0..4 {
+            for j in 0..4 {
+                lights.push(PointLight {
+                    position: DVec3::new(i as f64 * 12.0 - 18.0, j as f64 * 12.0 - 18.0, 8.0),
+                    radius: 24.0,
+                    color: [1.0, 0.8, 0.5],
+                    intensity: 1.0,
+                    core: 3.0,
+                    housed: true,
+                    mode: LightMode::Both,
+                    ..Default::default()
+                });
+            }
+        }
+        let cam = Camera { position: DVec3::new(0.0, -35.0, 30.0), yaw: 0.0, pitch: -40.0, roll: 0.0, fov_deg: 60.0, near: 0.1, far: 1000.0 };
+        let cam_rel = cam.position.as_vec3();
+        let seen = view_lamp_light(&lights, DVec3::ZERO, cam_rel, &cam, 16.0 / 9.0, Some(0.0));
+        let in_air = view_lamp_light(&lights, DVec3::ZERO, cam_rel, &cam, 16.0 / 9.0, None);
+        // (the lot's ground: some 10-30 lux under the lamps, 1e-3 .. 3e-3, less between and
+        // round them - a log-average of some 10 lux; a moonless night is 2e-6)
+        assert!(seen > 5e-5, "{seen}");
+        assert!(in_air < seen * 0.2, "{in_air} vs {seen}");
+        // and the lamps seen from beside the lot, at eye height, veil the eye as well
+        let eye = Camera { position: DVec3::new(0.0, -40.0, 1.7), pitch: 0.0, ..cam };
+        assert!(glare_veil(&lights, DVec3::ZERO, eye.position.as_vec3(), eye.forward()) > 1e-5);
+    }
 
     /// A textured material can have black diffuse but white ambient (depot interiors).
     /// Enhanced must not turn it into a black surface or silently replace its diffuse.
