@@ -2440,6 +2440,11 @@ impl VehicleInstance {
             // its lights on - the LiAZ's `lights_AI` switches both saloon circuits on it)
             ("AI_Interiorlight", ai.lights as i32 as f32),
             ("AI_Engine", 1.0),
+            // AI frames bypass the player's update_engine_vars path, so these engine-owned
+            // values must be copied explicitly or scheduled buses read schedule_active=0 and
+            // Humans_Count=0 forever.
+            ("schedule_active", self.host.schedule_active),
+            ("humans_count", self.host.humans_count),
             ("AI_Scheduled_AtStation", station),
             // Which side's doors: OMSI hands the stop's side to the script, and a vehicle
             // with doors on both sides opens only the platform's (the BRT stops in

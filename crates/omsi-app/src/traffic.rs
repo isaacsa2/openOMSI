@@ -2983,6 +2983,14 @@ impl Traffic {
         log::info!("traffic: {} vehicle/paint sets of the random traffic read and uploaded in {:.1} s", sets.len(), t0.elapsed().as_secs_f32());
     }
 
+    /// Whether another timetable vehicle may be put on the road. Lowering the setting never
+    /// removes one already driving; departures wait until a slot is free.
+    pub fn scheduled_room(&self) -> bool {
+        self.max_scheduled == 0
+            || self.cars.iter().filter(|c| c.is_bus() || !c.state.route.is_empty()).count()
+                < self.max_scheduled as usize
+    }
+
     /// Put a timetable bus on the road: an AI car like any other (`create_car`), on its
     /// trip's route at `s` metres into the first lane, with its service (stops).
     /// Returns the car index. `scheme`: the paint scheme to use (Some), or a random one.
@@ -3002,8 +3010,9 @@ impl Traffic {
     ) -> Option<usize> {
         let &lane = route.first()?;
         let kind = self.net.lanes.get(lane)?.kind;
-        // the options' [AIMaxCountScheduled]: no more timetable vehicles than that at once
-        if self.max_scheduled > 0 && self.cars.iter().filter(|c| c.is_bus() || !c.state.route.is_empty()).count() >= self.max_scheduled as usize {
+        // Keep the guard here too for callers added later; Schedule checks it first so a full
+        // timetable does not turn a temporary limit into a permanently dropped departure.
+        if !self.scheduled_room() {
             return None;
         }
         let seed = self.rand();
@@ -6152,6 +6161,31 @@ impl Traffic {
                     log::info!("doors t={:.1} car {} {} phase {:?} speed {:.1}: AtStation {st} door {} {} {} {} target {} {} {} halte {} timer {}", self.time, car.id, v.ty.def.type_name, car.bus.as_ref().map(|b| b.phase), car.state.speed, g("door_0"), g("door_1"), g("door_2"), g("door_3"), g("doorTarget_0"), g("doorTarget_1"), g("doorTarget_2"), g("bremse_halte_sw"), g("door_AI_timer"));
                 }
             }
+            // Scheduled AI buses run the same timetable-aware scripts as the player's bus.
+            // Keep their host callbacks current: the front service stop may be after one or
+            // more pass-through timetable stations, so match its object id from the current
+            // index forward instead of merely incrementing an integer.
+            if let Some((delay, next_stop, done)) = car.bus.as_ref().map(|b| {
+                (b.delay, b.stops.front().map(|s| s.id), b.trip_done())
+            }) {
+                let host = &mut car.vehicle.host;
+                host.schedule_active = if car.gone { 0.0 } else { 1.0 };
+                host.tt_delay = delay as f32;
+                if !car.gone && !host.tt_stop_ids.is_empty() {
+                    if let Some(id) = next_stop {
+                        let start = host.tt_busstop_index.max(0) as usize;
+                        let found = host.tt_stop_ids.iter().enumerate().skip(start).find(|(_, s)| **s == id)
+                            .or_else(|| host.tt_stop_ids.iter().enumerate().find(|(_, s)| **s == id))
+                            .map(|(k, _)| k);
+                        if let Some(k) = found {
+                            host.tt_busstop_index = k as i32;
+                        }
+                    } else if done {
+                        host.tt_busstop_index = host.tt_stop_ids.len().saturating_sub(1) as i32;
+                    }
+                }
+            }
+
             // An emergency vehicle (its script sets `TrafficPriority`, the stock ambulance)
             // is told `TrafficPriorityWarningNeeded` while something holds it up close ahead:
             // a car or the player's bus it catches up with or has to follow, a red light, a
@@ -6751,6 +6785,14 @@ impl Traffic {
         if let Some(b) = car.bus.as_mut() {
             b.restart(Vec::new(), false);
         }
+        car.vehicle.host.schedule_active = 0.0;
+        car.vehicle.host.tt_line.clear();
+        car.vehicle.host.tt_stops.clear();
+        car.vehicle.host.tt_stop_ids.clear();
+        car.vehicle.host.tt_busstop_index = -1;
+        car.vehicle.host.tt_terminus_index = -1;
+        car.vehicle.host.tt_delay = 0.0;
+        car.vehicle.set_var("schedule_active", 0.0);
         car.gone = true;
     }
 

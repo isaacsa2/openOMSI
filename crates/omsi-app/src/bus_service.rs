@@ -406,6 +406,7 @@ impl BusService {
                 self.stops.pop_front();
                 self.near_d = f32::INFINITY;
                 self.serve = None;
+                crate::traffic::ibis_to_next_stop(vehicle, self.stops.len());
                 continue;
             }
             let d = st.route_distance(ctx.net, stop.ri, stop.s);
@@ -465,6 +466,7 @@ impl BusService {
                 self.stops.pop_front();
                 self.near_d = f32::INFINITY;
                 self.serve = None;
+                crate::traffic::ibis_to_next_stop(vehicle, self.stops.len());
                 continue;
             }
             if d < STOP_REACH {

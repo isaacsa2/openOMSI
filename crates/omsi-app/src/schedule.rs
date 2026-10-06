@@ -2296,6 +2296,8 @@ impl Schedule {
             if let Some(k) = car.vehicle.ty.program.str_var("Linie") {
                 car.vehicle.state.str_vars[k as usize] = line.clone();
             }
+            let delay = car.bus.as_ref().map(|b| b.delay).unwrap_or(0.0);
+            self.feed_ai_timetable(i, &mut car.vehicle, 0, delay);
             let hof = car.vehicle.host.hof.clone();
             let names: Vec<&str> = names.iter().map(String::as_str).collect();
             set_ai_destination(&mut car.vehicle, hof.as_deref(), &line, &terminus, &names);
@@ -2457,6 +2459,10 @@ impl Schedule {
         };
         let tour = self.departures[i].tour.clone();
         let terminus = self.data.trips[self.departures[i].trip].terminus.clone();
+        if !traffic.scheduled_room() {
+            log::debug!("trip {trip_name}: timetable vehicle limit reached; trying again shortly");
+            return Placed::Busy;
+        }
         let Some(ci) = traffic.spawn_bus(
             world,
             renderer,
@@ -2499,7 +2505,17 @@ impl Schedule {
             b.always = always;
             b.serve_early = early;
         }
-        // the bus scripts read the line/terminus for their displays
+        // the bus scripts read the timetable, line and terminus just as a player duty does.
+        // If the bus starts part-way through a trip, the next station is the one after the
+        // leg it is already on.
+        let next_station = if track {
+            0
+        } else if frac > 1e-4 {
+            (leg + 1).min(stations.len().saturating_sub(1))
+        } else {
+            leg.min(stations.len().saturating_sub(1))
+        };
+        self.feed_ai_timetable(i, &mut car.vehicle, next_station, 0.0);
         if let Some(i) = ty.program.str_var("Linie") {
             car.vehicle.state.str_vars[i as usize] = line.clone();
         }
@@ -4188,6 +4204,34 @@ impl Schedule {
                     .flatten()
             })
             .unwrap_or_default()
+    }
+
+    /// Give a scheduled AI bus the timetable context its scripts' GetTT* callbacks read.
+    ///
+    /// Player duties get this from PlayerDuty::feed_host; AI buses run the same OMSI scripts,
+    /// so leaving the host empty made schedule_active false and every GetTT* callback blank.
+    fn feed_ai_timetable(&self, i: usize, vehicle: &mut omsi_sim::VehicleInstance, next_station: usize, delay: f64) {
+        let Some(d) = self.departures.get(i) else { return };
+        let Some(trip) = self.data.trips.get(d.trip) else { return };
+        let Some(times) = self.times.get(d.trip).and_then(|v| v.get(d.profile.min(v.len().saturating_sub(1)))) else { return };
+        let ids = trip_stations(trip);
+        let names = self.trip_stop_names(d.trip);
+        let n = ids.len().min(names.len()).min(times.stations.len());
+        let departure = self.dep_time(i);
+        let host = &mut vehicle.host;
+        host.tt_line = trip.line.trim().to_string();
+        host.tt_stops = (0..n)
+            .map(|k| {
+                let (arr, dep) = times.stations[k];
+                (names[k].clone(), (departure + arr) as f32, (departure + dep) as f32)
+            })
+            .collect();
+        host.tt_stop_ids = ids.into_iter().take(n).collect();
+        host.tt_busstop_index = if n == 0 { -1 } else { next_station.min(n - 1) as i32 };
+        host.tt_terminus_index = tt_terminus_index(host.hof.as_deref(), &trip.terminus);
+        host.tt_delay = delay as f32;
+        host.schedule_active = 1.0;
+        vehicle.set_var("schedule_active", 1.0);
     }
 
     /// The station names of trip `ti`, for picking its route in the depot file.
