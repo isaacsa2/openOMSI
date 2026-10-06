@@ -71,6 +71,8 @@ struct RunningTrip {
     /// already or has passed.
     stations: Vec<(i64, f64)>,
     served: Vec<bool>,
+    /// Authored track entry of each type-1 station, retained while tiles stream in.
+    station_steps: Vec<Option<usize>>,
 }
 
 /// When a trip's bus is at each of its stations, as OMSI's timetable has it: the profile
@@ -236,6 +238,38 @@ fn trip_stations(trip: &omsi_timetable::Trip) -> Vec<i64> {
         .collect()
 }
 
+/// A type-1 station names its entry in the trip's .ttr, not just a nearby pole.
+/// In Recife, paired boarding/alighting boxes sit on opposite sides of the same
+/// path; a platform-side search across the whole route can move one to another visit.
+fn trip_station_steps(trip: &omsi_timetable::Trip, track: bool, steps: usize) -> Vec<Option<usize>> {
+    if !track || !trip.stations.is_empty() {
+        return vec![None; trip_stations(trip).len()];
+    }
+    trip.stations_legacy
+        .iter()
+        .filter(|s| s.first().is_some_and(|id| id.trim().parse::<i64>().is_ok()))
+        .map(|s| s.get(1).and_then(|i| i.trim().parse::<usize>().ok()).filter(|&i| i < steps))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum StopRoute {
+    Nearest,
+    Track(usize),
+    Outside,
+}
+
+/// Map the authored entry into a streamed section after absent paths and inserted
+/// connectors. A station beyond this section waits for its own path to load.
+fn station_route(step: Option<usize>, first: usize, slots: &[Slot], index: &[usize]) -> StopRoute {
+    let Some(step) = step else { return StopRoute::Nearest };
+    let Some(at) = step.checked_sub(first).filter(|&i| matches!(slots.get(i), Some(Slot::Lane(_)))) else {
+        return StopRoute::Outside;
+    };
+    let ordinal = slots[..at].iter().filter(|s| matches!(s, Slot::Lane(_))).count();
+    index.get(ordinal).copied().map(StopRoute::Track).unwrap_or(StopRoute::Outside)
+}
+
 /// How far from a route a bus stop may stand when the route is only a part of the trip (a
 /// stop of the missing part would otherwise be put on the nearest point of this one).
 const STOP_REACH: f64 = 25.0;
@@ -342,15 +376,20 @@ fn place_stops(net: &Network, route: &[usize], base: usize, stops: &mut [(usize,
 /// Where the stop at `pos` lies on `route`, not before route index `from` (the stops come
 /// in the trip's order): on the side of the road it stands, see
 /// `Network::project_stop_on_route`.
-fn project_stop(
-    net: &Network,
-    route: &[usize],
-    pos: glam::DVec3,
-    reach: Option<f64>,
-    from: usize,
-    side: f32,
-) -> Option<(usize, f32, f32)> {
-    net.project_stop_on_route_side(route, pos, reach, from, side as u8)
+fn project_stop(net: &Network, route: &[usize], pos: glam::DVec3, reach: Option<f64>, from: usize, side: f32, on: StopRoute) -> Option<(usize, f32, f32)> {
+    match on {
+        StopRoute::Nearest => net.project_stop_on_route_side(route, pos, reach, from, side as u8),
+        StopRoute::Outside => None,
+        StopRoute::Track(ri) => {
+            let lane = *route.get(ri)?;
+            let (_, s, lat) = net.project_on_route_lateral(&[lane], pos)?;
+            let point = net.lanes[lane].at(s).0;
+            if reach.is_some_and(|r| (point - pos).truncate().length() > r) {
+                return None;
+            }
+            Some((ri, s, lat))
+        }
+    }
 }
 
 pub struct Schedule {
@@ -1974,15 +2013,16 @@ impl Schedule {
                 })
                 .collect();
             // (bridged from the end of what the bus has)
-            let lanes = match last {
+            let (lanes, index) = match last {
                 Some(l) if !lanes.is_empty() => {
                     let with: Vec<usize> = std::iter::once(l).chain(lanes.iter().copied()).collect();
                     Self::add_connectors(traffic, &with);
-                    bridge_gaps(&traffic.net, &with).0[1..].to_vec()
+                    let (bridged, index) = bridge_gaps(&traffic.net, &with);
+                    (bridged[1..].to_vec(), index[1..].iter().map(|i| i - 1).collect())
                 }
                 _ => {
                     Self::add_connectors(traffic, &lanes);
-                    bridge_gaps(&traffic.net, &lanes).0
+                    bridge_gaps(&traffic.net, &lanes)
                 }
             };
             if !lanes.is_empty() {
@@ -1997,7 +2037,8 @@ impl Schedule {
                         continue;
                     };
                     if let Some((ri, ss, lat)) =
-                        project_stop(&traffic.net, &lanes, pos, Some(STOP_REACH), from, world.stop_side(*sid))
+                        project_stop(&traffic.net, &lanes, pos, Some(STOP_REACH), from, world.stop_side(*sid),
+                            station_route(run.station_steps[si], run.next, &slots[..n], &index))
                     {
                         from = ri;
                         stops.push((base + ri, ss, bay_offset(lat), *t_dep, *sid, world.stop_side(*sid)));
@@ -2067,6 +2108,7 @@ impl Schedule {
         let arrive: Vec<f64> = tt.stations.iter().map(|s| departure + s.0).collect();
         let leave: Vec<f64> = tt.stations.iter().map(|s| departure + s.1).collect();
         let (steps, track) = self.steps_of(&trip_name, &stations);
+        let station_steps = trip_station_steps(trip, track, steps.len());
         Self::add_twins(traffic, &steps);
         let slots = self.slots(world, traffic, &steps, None);
         if !slots.iter().any(|s| matches!(s, Slot::Lane(_))) && !slots.contains(&Slot::Waiting) {
@@ -2188,7 +2230,8 @@ impl Schedule {
             }
             let found = world.object_positions.lock().get(sid).copied();
             match found {
-                Some((pos, _)) => match project_stop(net, &section, pos, reach, from, world.stop_side(*sid)) {
+                Some((pos, _)) => match project_stop(net, &section, pos, reach, from, world.stop_side(*sid),
+                    station_route(station_steps[si], start, &slots[start..end], &index)) {
                     Some((ri, ss, lat)) => {
                         from = ri;
                         served[si] = true;
@@ -2320,6 +2363,7 @@ impl Schedule {
                     next: end,
                     stations: stations.iter().copied().zip(leave.iter().copied()).collect(),
                     served,
+                    station_steps,
                 });
             }
             log::info!(
@@ -2520,6 +2564,7 @@ impl Schedule {
                     .zip(leave.iter().copied())
                     .collect(),
                 served,
+                station_steps,
             });
         }
         if profile {
@@ -6178,5 +6223,61 @@ pub(crate) mod tests {
         for lat in [0.0, 2.0, -4.0] {
             assert_eq!(bay_offset(lat), lat);
         }
+    }
+}
+
+#[cfg(test)]
+mod authored_station_tests {
+    use super::*;
+    use glam::DVec3;
+    use omsi_sim::traffic::{LaneBuilder, LaneKind};
+
+    #[test]
+    fn paired_boxes_keep_their_authored_visit_even_across_the_platform_side() {
+        let net = Network {
+            lanes: vec![
+                LaneBuilder::polyline(vec![DVec3::ZERO, DVec3::new(0.0, 100.0, 0.0)], LaneKind::Street, 3.0),
+                LaneBuilder::polyline(vec![DVec3::new(-6.0, 100.0, 0.0), DVec3::new(-6.0, 0.0, 0.0)], LaneKind::Street, 3.0),
+            ],
+            ..Default::default()
+        };
+        let unload = DVec3::new(1.0, 50.0, 0.0);
+        let board = DVec3::new(-1.2, 52.0, 1.0);
+        // Recife's type-1 BRT trips name one entry for both boxes, although one
+        // box stands across the nominal platform side. A geometric search selects
+        // the return visit for that box and advances the search past the boarding visit.
+        assert_eq!(project_stop(&net, &[0, 1], unload, Some(25.0), 0, 1.0, StopRoute::Nearest).unwrap().0, 1);
+        let first = project_stop(&net, &[0, 1], unload, Some(25.0), 0, 1.0, StopRoute::Track(0)).unwrap();
+        let second = project_stop(&net, &[0, 1], board, Some(25.0), first.0, 1.0, StopRoute::Track(0)).unwrap();
+        assert_eq!((first.0, second.0), (0, 0));
+        assert!((first.2 - 1.0).abs() < 0.01 && (second.2 + 1.2).abs() < 0.01);
+        assert!(second.1 > first.1);
+        // A repeated lane is a later visit, even with an identical geometric position.
+        assert_eq!(project_stop(&net, &[0, 1, 0], board, None, 0, 1.0, StopRoute::Track(2)).unwrap().0, 2);
+        assert!(project_stop(&net, &[0], board, None, 0, 1.0, StopRoute::Outside).is_none());
+        assert!(project_stop(&net, &[0], DVec3::new(40.0, 50.0, 0.0), Some(25.0), 0, 1.0, StopRoute::Track(0)).is_none());
+    }
+
+    #[test]
+    fn streamed_track_stations_account_for_absent_steps_and_connectors() {
+        let slots = [Slot::Lane(7), Slot::Absent, Slot::Lane(9), Slot::Waiting];
+        assert_eq!(station_route(Some(12), 10, &slots, &[0, 3]), StopRoute::Track(3));
+        assert_eq!(station_route(Some(10), 10, &slots, &[0, 3]), StopRoute::Track(0));
+        for step in [9, 11, 13, 14] {
+            assert_eq!(station_route(Some(step), 10, &slots, &[0, 3]), StopRoute::Outside);
+        }
+        assert_eq!(station_route(None, 10, &slots, &[0, 3]), StopRoute::Nearest);
+    }
+
+    #[test]
+    fn only_valid_type_one_track_stations_select_authored_entries() {
+        let mut trip = omsi_timetable::Trip {
+            stations_legacy: vec![vec!["42".into(), "70".into()], vec!["43".into(), "bad".into()], vec!["44".into(), "99".into()]],
+            ..Default::default()
+        };
+        assert_eq!(trip_station_steps(&trip, true, 80), vec![Some(70), None, None]);
+        assert_eq!(trip_station_steps(&trip, false, 80), vec![None; 3]);
+        trip.stations = vec![42, 43];
+        assert_eq!(trip_station_steps(&trip, true, 80), vec![None; 2]);
     }
 }
