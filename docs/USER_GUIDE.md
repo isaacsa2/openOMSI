@@ -283,7 +283,10 @@ the panel's own light, and the glow draws a halo around them), `led_mips` (0..4,
 `\S:n` mask are sampled at the level their screen footprint asks for, never coarser than
 this. 0 point-samples them, the sharpest dots and the worst shimmer; 1.3 keeps a matrix's
 dots a couple of pixels across where the full chain has run them together; 4 is near the
-calm of the full chain), `mouse_sens` (mouse steering,
+calm of the full chain). The bus's own screens in Enhanced (the IBIS, ticket and
+html terminals, the dashboard's LCDs) dim at night as a real dashboard's do, and are never
+lifted over their own colour by the eye's adaptation to the dark cab; the gauges' backlight
+and the destination LED matrices (`led_glow`) are left as they are. `mouse_sens` (mouse steering,
 1 = OMSI's), `mouse_smooth` (0: the mouse's wheel follows the cursor without easing),
 `ui_scale` (the size of the game's interface over the picture - its texts,
 the menu, the timetable, the navigator and the city map - from 0.5 to 2, 1 by default, on
