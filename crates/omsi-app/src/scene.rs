@@ -463,6 +463,7 @@ pub struct LightObject {
     pub sound: Option<PathBuf>,
     pub sounds: Arc<Mutex<Option<omsi_audio::SoundSet>>>,
     pub shown: Option<u64>,
+    pub texts: Vec<(TextureId, omsi_sim::texttex::TextTextureState)>,
 }
 
 pub struct SplineType {
@@ -645,6 +646,72 @@ fn paint_at_foot(sco: &SceneryObject, meshes: &[(MeshData, Vec<omsi_o3d::Materia
     }
     let (lo, hi) = meshes.iter().flat_map(|(m, _, _)| m.positions.iter()).fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
     lo >= -0.05 && hi <= 0.25 && hi - lo <= 0.05
+}
+
+fn spline_paint_slots(def: &omsi_scenery::sli::Spline) -> Vec<usize> {
+    // Painted profiles compose after the roads commit depth, like plain-object
+    // paint. A stripe can share a spline with asphalt: classifying the whole
+    // cross-section left those edge lines in the camera-dependent blend sort.
+    if !def.paths.is_empty() || !def.rail_enh.is_empty() || !def.third_rail.is_empty()
+    {
+        return Vec::new();
+    }
+    let painted = |p: &omsi_scenery::sli::SplineProfile| {
+        if p.points.len() < 2 || def.textures.get(p.texture).is_none_or(|t| t.alpha != 2)
+            || p.points.iter().any(|q| !q.x.is_finite() || !q.z.is_finite())
+        {
+            return false;
+        }
+        let (x0, x1, z0, z1) = p.points.iter().fold(
+            (f32::MAX, f32::MIN, f32::MAX, f32::MIN),
+            |(x0, x1, z0, z1), p| (x0.min(p.x), x1.max(p.x), z0.min(p.z), z1.max(p.z)),
+        );
+        x1 > x0 && x1 - x0 <= 0.5 && z0 >= -0.05 && z1 <= 0.25 && z1 - z0 <= 0.05
+    };
+    let mut slots = Vec::new();
+    for p in &def.profiles {
+        // Never move asphalt that happens to use the stripe's material too.
+        if !slots.contains(&p.texture)
+            && def.profiles.iter().filter(|q| q.texture == p.texture).all(&painted)
+        {
+            slots.push(p.texture);
+        }
+    }
+    slots
+}
+
+fn spline_render_phase(def: &omsi_scenery::sli::Spline) -> RenderPhase {
+    let slots = spline_paint_slots(def);
+    if !def.profiles.is_empty() && def.profiles.iter().all(|p| slots.contains(&p.texture)) {
+        RenderPhase::BeforeNormal
+    } else {
+        RenderPhase::Spline
+    }
+}
+
+fn split_spline_paint(src: &MeshData, def: &omsi_scenery::sli::Spline) -> (MeshData, MeshData) {
+    let slots = spline_paint_slots(def);
+    if slots.is_empty() { return (src.clone(), MeshData::default()); }
+    let part = |paint| {
+        let mut out = MeshData { one_sided: src.one_sided, ..Default::default() };
+        let mut vertices = HashMap::new();
+        for &(start, count, slot) in &src.ranges {
+            if slots.contains(&(slot as usize)) != paint { continue; }
+            let first = out.indices.len() as u32;
+            for &k in &src.indices[start as usize..(start + count) as usize] {
+                let v = *vertices.entry(k).or_insert_with(|| {
+                    out.positions.push(src.positions[k as usize]);
+                    out.normals.push(src.normals.get(k as usize).copied().unwrap_or(glam::Vec3::Z));
+                    out.uvs.push(src.uvs.get(k as usize).copied().unwrap_or(glam::Vec2::ZERO));
+                    out.positions.len() as u32 - 1
+                });
+                out.indices.push(v);
+            }
+            if count > 0 { out.ranges.push((first, count, slot)); }
+        }
+        out
+    };
+    (part(false), part(true))
 }
 
 fn scenery_render_phase(kind: omsi_scenery::sco::RenderType) -> RenderPhase {
@@ -1784,34 +1851,109 @@ fn terrain_ground(src: &MeshData, slots: &[usize], pos: DVec3, xf: Mat4, origin:
 }
 
 /// Two crossed unit quads (1 m wide, 1 m tall, centred at x=0, standing on z=0).
+/// Windy trees: whether a scenery object is a plant whose leaves the wind moves - by its
+/// `[groups]` (the stock "Trees LQ", "Deciduous", "Shrubbery", "Arbors", "Plants" and their
+/// kin in other content), or, for an object filed in no group, by the words of its file's
+/// name - and if so how much it gives to the wind. Not a `[tree]` (its cards have their
+/// own) and not a backdrop (a forest painted on one wide card).
+fn vegetation_give_of(sco: &omsi_scenery::sco::SceneryObject) -> Option<f32> {
+    const GROUP_WORDS: [&str; 18] = ["tree", "baum", "bäume", "baeume", "deciduous", "conifer", "shrub", "bush", "busch", "strauch", "hecke", "hedge", "plant", "pflanz", "arbor", "vegetation", "forest", "wald"];
+    const NAME_WORDS: [&str; 15] = ["tree", "trees", "baum", "shrub", "shrubbery", "bush", "busch", "strauch", "hecke", "hedge", "arbor", "chestnut", "kastanie", "palm", "plant"];
+    if sco.tree.is_some() {
+        return None;
+    }
+    let groups: Vec<String> = sco.groups.iter().map(|g| g.trim().to_lowercase()).filter(|g| !g.is_empty()).collect();
+    if groups.iter().any(|g| g.contains("backdrop")) {
+        return None;
+    }
+    let stem = sco.path.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let plant = if groups.is_empty() {
+        stem.split(|c: char| !c.is_alphabetic()).any(|w| NAME_WORDS.contains(&w))
+    } else {
+        groups.iter().any(|g| GROUP_WORDS.iter().any(|w| g.contains(w)))
+    };
+    plant.then(|| vegetation_give(&[&stem, &groups.join(" ")]))
+}
+
+/// The windy trees' pivot of a plant model's leaf slot (`MaterialExtra::sway`, mesh units):
+/// the crown leaves the trunk where the slot's lowest leaves hang, and at a quarter of the
+/// plant's height at least (a picture of the whole tree on crossed cards, trunk and all,
+/// is one slot); a plant up to 3 m tall - a shrub, a hedge - bends from the ground.
+fn foliage_sway(meshes: &[(MeshData, Vec<omsi_o3d::Material>, Vec<MaterialDef>)], mesh: &MeshData, slot: u32, give: f32) -> Option<[f32; 3]> {
+    let (lo, hi) = meshes
+        .iter()
+        .flat_map(|(m, _, _)| m.positions.iter())
+        .fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
+    let leaf_lo = mesh
+        .ranges
+        .iter()
+        .filter(|r| r.2 == slot)
+        .flat_map(|r| mesh.indices.get(r.0 as usize..(r.0 + r.1) as usize).unwrap_or(&[]))
+        .filter_map(|&i| mesh.positions.get(i as usize))
+        .fold(f32::MAX, |lo, p| lo.min(p.z));
+    let height = hi - lo;
+    if !(height > 0.2) || leaf_lo == f32::MAX {
+        return None;
+    }
+    let pivot = if height <= 3.0 { lo } else { leaf_lo.max(lo + 0.25 * height) };
+    (hi - pivot > 0.1).then_some([pivot, hi, if height <= 3.0 { 0.5 * give } else { give }])
+}
+
+/// How much a tree gives to the wind by its kind (windy trees): a conifer's needles and
+/// stiff whorls of branches move less than a broadleaf's crown.
+fn vegetation_give(names: &[&str]) -> f32 {
+    const CONIFER: [&str; 12] = ["fir", "tanne", "fichte", "kiefer", "pine", "spruce", "conifer", "nadel", "cypress", "zypresse", "thuja", "larch"];
+    let conifer = names.iter().any(|n| {
+        let n = n.to_ascii_lowercase();
+        CONIFER.iter().any(|c| n.contains(c))
+    });
+    if conifer { 0.6 } else { 1.0 }
+}
+
+/// The windy trees' pivot of a `[tree]`'s cards (`MaterialExtra::sway`, in the card's units
+/// of its height): the crown leaves the trunk at about a quarter of the picture's height; a
+/// shrub (a type no taller than 3 m) bends from the ground.
+fn tree_card_sway(ot: &ObjectType, texture: &str) -> [f32; 3] {
+    let shrub = ot.sco.tree.as_ref().is_some_and(|t| t.2 > 0.0 && t.2 <= 3.0);
+    let path = ot.sco.path.to_string_lossy();
+    [if shrub { SHRUB_CARD_PIVOT } else { TREE_CARD_PIVOT }, 1.0, vegetation_give(&[texture, &path])]
+}
+
+/// Where a `[tree]` card's crown leaves its trunk, and a shrub's (of the card's height).
+const TREE_CARD_PIVOT: f32 = 0.28;
+const SHRUB_CARD_PIVOT: f32 = 0.03;
+
 fn tree_quad_mesh() -> MeshData {
+    // Each card is a small grid of quads rather than one: a flat grid is the same picture,
+    // and it gives the windy trees (shader.wgsl `tree_sway`) vertices to bend the crown by
+    // while the trunk below the pivot stays where it stands. The rows lie on the pivots
+    // (the bend starts exactly there) and evenly over the crown, enough for its curve; the
+    // bend is the same across the card, so two columns do (the boughs' lobes are a crown
+    // wide). 12 quads a side: every tree of a forest pays for it.
+    const TREE_COLS: u32 = 2;
+    const ROWS: [f32; 7] = [0.0, SHRUB_CARD_PIVOT, TREE_CARD_PIVOT, 0.46, 0.64, 0.82, 1.0];
+    const TREE_ROWS: u32 = ROWS.len() as u32 - 1;
     let mut m = MeshData::default();
     for (dx, dy) in [(0.5f32, 0.0f32), (0.0, 0.5)] {
         let base = m.positions.len() as u32;
-        for (sx, z, u, v) in [
-            (-1.0f32, 0.0f32, 0.0f32, 1.0f32),
-            (1.0, 0.0, 1.0, 1.0),
-            (1.0, 1.0, 1.0, 0.0),
-            (-1.0, 1.0, 0.0, 0.0),
-        ] {
-            m.positions.push(glam::Vec3::new(dx * sx, dy * sx, z));
-            m.normals.push(glam::Vec3::Z);
-            m.uvs.push(glam::Vec2::new(u, v));
+        for r in 0..=TREE_ROWS {
+            for c in 0..=TREE_COLS {
+                let u = c as f32 / TREE_COLS as f32;
+                let z = ROWS[r as usize];
+                let sx = u * 2.0 - 1.0;
+                m.positions.push(glam::Vec3::new(dx * sx, dy * sx, z));
+                m.normals.push(glam::Vec3::Z);
+                m.uvs.push(glam::Vec2::new(u, 1.0 - z));
+            }
         }
-        m.indices.extend_from_slice(&[
-            base,
-            base + 1,
-            base + 2,
-            base,
-            base + 2,
-            base + 3,
-            base,
-            base + 2,
-            base + 1,
-            base,
-            base + 3,
-            base + 2,
-        ]);
+        let at = |c: u32, r: u32| base + r * (TREE_COLS + 1) + c;
+        for r in 0..TREE_ROWS {
+            for c in 0..TREE_COLS {
+                let (a, b, cc, d) = (at(c, r), at(c + 1, r), at(c + 1, r + 1), at(c, r + 1));
+                // both sides
+                m.indices.extend_from_slice(&[a, b, cc, a, cc, d, a, cc, b, a, d, cc]);
+            }
+        }
     }
     m.ranges.push((0, m.indices.len() as u32, 0));
     m
@@ -5251,6 +5393,7 @@ impl World {
                         color: ml.color,
                         intensity: 1.0,
                         core: ml.radius.max(0.5),
+                        housed: true,
                         ..Default::default()
                     });
                 }
@@ -6257,6 +6400,12 @@ impl World {
                 let mut extra = material_extra(&slot_ov, env_mask, bump, specular);
                 extra.ambient = Some(ambient);
                 extra.no_map_lights = ot.sco.no_map_lighting;
+                // windy trees: a plant's leaves (its cut-out or blended slots) bend in the wind
+                if alpha != AlphaMode::Opaque {
+                    if let Some(give) = vegetation_give_of(&ot.sco) {
+                        extra.sway = foliage_sway(&ot.meshes, mesh, slot as u32, give);
+                    }
+                }
                 if tex.is_some() {
                     let dirs_ref: Vec<&Path> = dirs.iter().map(|p| p.as_path()).collect();
                     let c = self.textures.cfg(&m.texture, &dirs_ref);
@@ -7000,9 +7149,7 @@ impl World {
                     } else {
                         sg.terrain.iter().copied().filter(|t| mesh.ranges.iter().any(|r| r.2 as usize == *t)).collect()
                     };
-                    let id = if terrain.is_empty() {
-                        gpu.add_mesh(renderer, scene, mesh)
-                    } else {
+                    if !terrain.is_empty() {
                         let ground = terrain_ground(mesh, &terrain, p.origin, Mat4::IDENTITY, p.origin);
                         let gid = gpu.add_mesh(renderer, scene, &ground);
                         scene.meshes[gid].source = Some(st.def.path.display().to_string());
@@ -7016,34 +7163,33 @@ impl World {
                                 vec![mat],
                             ));
                             if let Some(inst) = scene.instances.get_mut(terrain_instance) {
-                                inst.render_phase = RenderPhase::Spline;
+                                inst.render_phase = spline_render_phase(&st.def);
                                 inst.blend_sort_origin = Some(*sort_origin);
                             }
                         }
-                        gpu.add_mesh(renderer, scene, &terrain_rest(mesh, &terrain))
-                    };
-                    tg.meshes.push(id);
-                    scene.meshes[id].source = Some(st.def.path.display().to_string());
+                    }
+                    let rest = (!terrain.is_empty()).then(|| terrain_rest(mesh, &terrain));
+                    let src = rest.as_ref().unwrap_or(mesh);
+                    let (road, paint) = split_spline_paint(src, &st.def);
                     // Drawn where the map puts it and drawn over the ground by the surfaces'
                     // depth bias, as a road wins over flush ground in Omsi.exe. Lifted 8 cm
                     // instead, it stood over the ground the editor had aligned to it (the
                     // footways of Spandau's Hansastr. lie at the ground's height), and under
                     // every kerb and footway edge one saw into the hole cut beneath it (#823).
-                    let si = instance!(renderer.add_surface_instance(
-                        scene,
-                        id,
-                        p.origin,
-                        Mat4::IDENTITY,
-                        mats
-                    ));
-                    if let Some(inst) = scene.instances.get_mut(si) {
-                        inst.render_phase = RenderPhase::Spline;
-                        inst.blend_sort_origin = Some(*sort_origin);
-                    }
-                    // a bridge deck or an elevated railway casts a sun shadow (see
-                    // `SPLINE_SHADOW_CLEARANCE`)
-                    if *casts_shadow {
-                        renderer.set_casts_shadow(scene, si, true);
+                    for (data, phase) in [(road, RenderPhase::Spline), (paint, RenderPhase::BeforeNormal)] {
+                        if data.is_empty() { continue; }
+                        let id = gpu.add_mesh(renderer, scene, &data);
+                        tg.meshes.push(id);
+                        scene.meshes[id].source = Some(st.def.path.display().to_string());
+                        let si = instance!(renderer.add_surface_instance(
+                            scene, id, p.origin, Mat4::IDENTITY, mats.clone()
+                        ));
+                        if let Some(inst) = scene.instances.get_mut(si) {
+                            inst.render_phase = phase;
+                            inst.blend_sort_origin = Some(*sort_origin);
+                        }
+                        // Preserve the deck's shadow geometry after splitting its slots.
+                        if *casts_shadow { renderer.set_casts_shadow(scene, si, true); }
                     }
                     pl.splines += 1;
                     done_some = true;
@@ -7076,6 +7222,7 @@ impl World {
                                 [0.0; 3],
                                 omsi_render::MaterialExtra {
                                     tree: true,
+                                    sway: Some(tree_card_sway(ot, texture)),
                                     ..Default::default()
                                 },
                             );
@@ -7148,6 +7295,8 @@ impl World {
                     let mut object_variants: Vec<(usize, usize, MaterialId, MaterialId, String)> =
                         Vec::new();
                     let mut script_texts: Vec<(TextureId, omsi_sim::texttex::TextTextureState)> =
+                        Vec::new();
+                    let mut lamp_texts: Vec<(TextureId, omsi_sim::texttex::TextTextureState)> =
                         Vec::new();
                     // `[htmltexture]` pages shown on this object: (script texture index, texture)
                     let mut html_pages: Vec<(usize, TextureId)> = Vec::new();
@@ -7381,8 +7530,7 @@ impl World {
                                     // a script's string variable (the stock bus stop display's
                                     // departures): a texture of the object's own, drawn by
                                     // `update_scripted` whenever the script refreshes it
-                                    let scripted_text = lamp.is_none()
-                                        && tt.variable.trim().parse::<usize>().is_err()
+                                    let scripted_text = tt.variable.trim().parse::<usize>().is_err()
                                         && ot
                                             .program
                                             .as_ref()
@@ -7412,7 +7560,11 @@ impl World {
                                         tg.textures.push(tex);
                                         tg.materials.push(mat);
                                         renderer.set_material(scene, inst, slot, mat);
-                                        script_texts.push((tex, state));
+                                        if lamp.is_none() {
+                                            script_texts.push((tex, state));
+                                        } else {
+                                            lamp_texts.push((tex, state));
+                                        }
                                         continue;
                                     }
                                     let text = tt
@@ -7681,6 +7833,7 @@ impl World {
                             sound,
                             sounds: Default::default(),
                             shown: None,
+                            texts: lamp_texts,
                         });
                     } else if let Some(inst) = object_script.take() {
                         let texture_selection = scenery_texture_selection(&ot, &inst);
@@ -8924,14 +9077,21 @@ const OMSI_TILE_DIST: i32 = 1;
 /// on it (#650). A stand-in is told apart by its size: more than twice as wide as all the
 /// tiles OMSI has loaded with it (Chicago's are 3.6 to 8 km, its largest real objects -
 /// Navy Pier, the Merchandise Mart, the road grids of whole tiles - at most 1.25 km), so
-/// the far view keeps every ordinary object.
+/// the far view keeps every ordinary object. A large model whose entire geometry is far
+/// from its origin is also a stand-in: TH_Wald's forest cards sit over a kilometre from
+/// their placement, crossing local roads when their distant owner tile is loaded here.
 fn stand_in_area(ot: &ObjectType, xf: &Mat4, pos: DVec3, tile: (i32, i32)) -> Option<[f64; 4]> {
     let ts = tile_size();
     let loaded = (2 * OMSI_TILE_DIST + 1) as f64 * ts;
-    let wide = ot.meshes.iter().any(|(m, _, _)| {
-        let b = mesh_bounds(m, xf, pos);
-        (b[2] - b[0]).max(b[3] - b[1]) > 2.0 * loaded
-    });
+    // The footprint belongs to the whole object, regardless of how the exporter
+    // splits it into meshes. Separate parts can each fit below the cutoff while
+    // their combined extent is a distant scenery backdrop.
+    let bounds = ot.meshes.iter()
+        .filter(|(m, _, _)| !m.positions.is_empty())
+        .map(|(m, _, _)| mesh_bounds(m, xf, pos))
+        .reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
+    let wide = bounds.is_some_and(|b| (b[2] - b[0]).max(b[3] - b[1]) > 2.0 * loaded)
+        || ot.meshes.iter().any(|(m, _, _)| stand_in_mesh(m, xf, pos, loaded));
     if !wide {
         return None;
     }
@@ -8942,6 +9102,27 @@ fn stand_in_area(ot: &ObjectType, xf: &Mat4, pos: DVec3, tile: (i32, i32)) -> Op
         (tile.0 + OMSI_TILE_DIST + 1) as f64 * ts,
         (tile.1 + OMSI_TILE_DIST + 1) as f64 * ts,
     ])
+}
+
+fn stand_in_mesh(m: &MeshData, xf: &Mat4, pos: DVec3, loaded: f64) -> bool {
+    let b = mesh_bounds(m, xf, pos);
+    let width = (b[2] - b[0]).max(b[3] - b[1]);
+    if width > 2.0 * loaded {
+        return true;
+    }
+    if width <= loaded || m.positions.is_empty() {
+        return false;
+    }
+    // Measure the offset in the model's own frame, before heading rotates its bounds:
+    // the world AABB of a diagonal card can include its origin although the card is
+    // wholly far away. Small offset parts and ordinary long models keep the far view.
+    let local = mesh_bounds(m, &Mat4::IDENTITY, DVec3::ZERO);
+    let nearest = glam::Vec3::new(
+        0.0f64.clamp(local[0], local[2]) as f32,
+        0.0f64.clamp(local[1], local[3]) as f32,
+        0.0,
+    );
+    xf.transform_vector3(nearest).length() as f64 > loaded
 }
 
 /// World bounds (min x, min y, max x, max y) of a mesh placed with `xf` at `origin`.
@@ -10359,6 +10540,7 @@ fn material_extra(
         led: false,
         no_map_lights: false,
         tree: false,
+        sway: None,
         moisture: 0.0,
         transmap_declared: ov.iter().any(|o| o.transmap.is_some()),
         // (the last addressing command of the slot decides; the colour is given in bytes)
@@ -10649,7 +10831,7 @@ fn alpha_mask(path: &Path) -> Option<Arc<Vec<u8>>> {
 }
 
 /// Whether the triangles of material `slot` lie on a see-through part of their texture
-/// (`mask`, see [`alpha_mask`]): nine in ten of them with an alpha under 0.9 at their
+/// (`mask`, see [`alpha_mask`]): two in three of them with an alpha under 0.9 at their
 /// middle. A pane does - the SOR NB12's glass is 62 of 255 on its body texture; a door or
 /// a body panel blended by `[matl_alpha] 2` has its paint at 255 and does not.
 fn slot_is_see_through(mesh: &MeshData, slot: usize, mask: &[u8]) -> bool {
@@ -10670,7 +10852,10 @@ fn slot_is_see_through(mesh: &MeshData, slot: usize, mask: &[u8]) -> bool {
             }
         }
     }
-    all > 0 && clear * 10 >= all * 9
+    // (two thirds: a layer over the windows that painters draw on - the glass's own unwrap
+    // in the paint scheme, its adverts and tint - is covered where the picture is, and is
+    // a pane all the same)
+    all > 0 && clear * 3 >= all * 2
 }
 
 /// Return whether the triangles of one material occupy a volumetric part of the vehicle.
@@ -12065,7 +12250,7 @@ impl World {
                     let m = renderer.add_material_extra(
                         scene,
                         Some(*tex),
-                        AlphaMode::Blend,
+                        if d.alpha == AlphaMode::Test { AlphaMode::Test } else { AlphaMode::Blend },
                         [1.0; 4],
                         false,
                         None,
@@ -12151,7 +12336,12 @@ impl World {
                 .iter()
                 .filter_map(|(_, _, slot)| inst.materials.get(*slot as usize))
                 .filter_map(|&m| scene.materials.get(m))
-                .map(|m| (m.alpha, (!m.no_z_write || m.writes_depth) && !m.no_z_check))
+                // (a pane - a window, or a layer over the glass painted on its own unwrap -
+                // writes its depth as Omsi.exe writes it, but it is no blended bodywork:
+                // taken as one, a bus whose glass the model lists before its saloon was
+                // drawn in model order and its saloon was gone behind every window, the
+                // panes on both sides over the street behind them coming out black)
+                .map(|m| (m.alpha, !m.no_z_write && !m.no_z_check))
                 .collect()
         };
         let mut blended_first = false;
@@ -12915,7 +13105,7 @@ fn object_lanes(
         if length <= 0.01 {
             continue;
         }
-        let dz = v.get(7).copied().unwrap_or(0.0) as f64;
+        let (grad_start, grad_end) = (v[6] as f64, v[7] as f64);
         let kind = LaneKind::from_code(p.kind);
         let turn = match v.get(11).map(|t| *t as i32) {
             Some(2) => 1,
@@ -12956,7 +13146,7 @@ fn object_lanes(
         // who goes first where this path meets another (`Network::must_yield`)
         let priority = rule_of("priority");
         let mut push = |reverse: bool| {
-            let mut l = LaneBuilder::arc(start, path_heading, length, radius, dz, kind, p.width);
+            let mut l = LaneBuilder::arc_with_gradients(start, path_heading, length, radius, grad_start, grad_end, kind, p.width);
             if reverse {
                 let pts: Vec<DVec3> = l.points.iter().rev().copied().collect();
                 l = LaneBuilder::polyline(pts, kind, p.width);
@@ -13040,6 +13230,33 @@ pub(crate) fn resolve_scenery_freetex_name<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn far_offset_forest_backdrops_keep_their_owner_tiles_visibility() {
+        let rectangle = |x: f32, half_width: f32| MeshData {
+            positions: vec![
+                glam::Vec3::new(x, -half_width, -80.0),
+                glam::Vec3::new(x, half_width, -80.0),
+                glam::Vec3::new(x, half_width, 127.0),
+                glam::Vec3::new(x, -half_width, 127.0),
+            ],
+            ..Default::default()
+        };
+        let loaded = 900.0;
+        let forest = rectangle(-1109.0, 693.0);
+        for heading in [0.0, 45.0, 225.0] {
+            let xf = object_rotation([heading, 0.0, 0.0]);
+            assert!(stand_in_mesh(&forest, &xf, DVec3::new(6242.0, 3348.0, 70.0), loaded),
+                "the distant forest at heading {heading} must not cover a road outside its owner tiles");
+        }
+        // Ordinary large geometry beside its origin still uses the full view distance.
+        assert!(!stand_in_mesh(&rectangle(0.0, 693.0), &Mat4::IDENTITY, DVec3::ZERO, loaded));
+        // A small offset part is not enough to classify an object as a far backdrop.
+        assert!(!stand_in_mesh(&rectangle(-1109.0, 5.0), &Mat4::IDENTITY, DVec3::ZERO, loaded));
+        assert!(!stand_in_mesh(&forest, &Mat4::from_scale(glam::Vec3::splat(0.2)), DVec3::ZERO, loaded));
+        // Keep the existing whole-city stand-in rule, even for a centred model.
+        assert!(stand_in_mesh(&rectangle(0.0, 2000.0), &Mat4::IDENTITY, DVec3::ZERO, loaded));
+    }
 
     #[test]
     fn a_mirror_keeps_the_glass_that_uses_most_of_the_picture() {
@@ -13432,6 +13649,134 @@ mod tests {
         assert!(!paint_at_foot(&sco("[surface]\n[mesh]\nplate.o3d\n"), &[mesh(&[0.0, 0.0, 0.0])]));
     }
 
+    #[test]
+    #[ignore = "requires a graphics adapter; checks road marking composition"]
+    fn painted_spline_stays_above_roads_and_below_raised_surfaces() {
+        let def = omsi_scenery::sli::Spline::parse(&omsi_cfg::CfgFile::from_str(
+            "synthetic.sli",
+            "[texture]\nasphalt.dds\n[matl_alpha]\n2\n[texture]\nline.dds\n[matl_alpha]\n2\n\
+             [profile]\n0\n[profilepnt]\n-4.3\n0.1\n0\n1\n[profilepnt]\n4.3\n0.1\n1\n1\n\
+             [profile]\n1\n[profilepnt]\n-0.11\n0.105\n0\n1\n[profilepnt]\n0.11\n0.105\n1\n1\n",
+        ));
+        for msaa in [1, 4] {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let mut renderer = pollster::block_on(Renderer::new_with(&instance, None,
+                Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+                omsi_render::RenderOptions { msaa, ssao: false, shadow_size: 1024,
+                    fxaa: false, render_scale: 1.0, ..Default::default() },
+            )).expect("test renderer");
+            let mut scene = renderer.new_scene();
+            let plane = |half_width: f32| MeshData {
+                positions: vec![glam::Vec3::new(-half_width, -1000.0, 0.0), glam::Vec3::new(half_width, -1000.0, 0.0),
+                    glam::Vec3::new(half_width, 1000.0, 0.0), glam::Vec3::new(-half_width, 1000.0, 0.0)],
+                normals: vec![glam::Vec3::Z; 4], uvs: vec![glam::Vec2::ZERO; 4],
+                ranges: vec![(0, 6, 0)], indices: vec![0, 1, 2, 0, 2, 3], one_sided: false,
+            };
+            let mut combined = plane(1000.0);
+            let stripe = plane(0.11);
+            combined.positions.extend(stripe.positions.iter().map(|p| *p + glam::Vec3::Z * 0.005));
+            combined.normals.extend(stripe.normals);
+            combined.uvs.extend(stripe.uvs);
+            combined.indices.extend(stripe.indices.iter().map(|i| i + 4));
+            combined.ranges.push((6, 6, 1));
+            let (road_data, line_data) = split_spline_paint(&combined, &def);
+            let road_mesh = renderer.add_mesh(&mut scene, &road_data);
+            let line_mesh = renderer.add_mesh(&mut scene, &line_data);
+            let blue = renderer.add_material_extra(&mut scene, None, AlphaMode::Blend,
+                [0.0, 0.0, 1.0, 1.0], true, None, None, None, None, [0.0; 3],
+                MaterialExtra { no_z_write: true, ..Default::default() });
+            let red = renderer.add_material_extra(&mut scene, None, AlphaMode::Blend,
+                [1.0, 0.0, 0.0, 1.0], true, None, None, None, None, [0.0; 3],
+                MaterialExtra { no_z_write: true, ..Default::default() });
+            let green = renderer.add_material(&mut scene, None, AlphaMode::Opaque, [0.0, 1.0, 0.0, 1.0], true);
+            let road = renderer.add_surface_instance(&mut scene, road_mesh, DVec3::ZERO, Mat4::IDENTITY, vec![blue]);
+            scene.instances[road].render_phase = RenderPhase::Spline;
+            scene.instances[road].blend_sort_origin = Some(DVec3::ZERO);
+            let line = renderer.add_surface_instance(&mut scene, line_mesh, DVec3::ZERO, Mat4::IDENTITY, vec![blue, red]);
+            scene.instances[line].render_phase = RenderPhase::BeforeNormal;
+            scene.instances[line].blend_sort_origin = Some(DVec3::new(0.0, 0.01, 0.0));
+            let bridge = renderer.add_surface_instance(&mut scene, road_mesh, DVec3::new(0.0, 0.0, 0.03), Mat4::IDENTITY, vec![green]);
+            scene.instances[bridge].render_phase = RenderPhase::Surface;
+            let lighting = omsi_render::Lighting { shadows: false, fog_density: 0.0, ..Default::default() };
+            for y in [-20.0, 20.0] {
+                let camera = omsi_render::Camera { position: DVec3::new(0.0, y, 2.0),
+                    yaw: if y < 0.0 { 0.0 } else { 180.0 }, pitch: -(2.0f32 / 20.0).atan().to_degrees(),
+                    roll: 0.0, fov_deg: 60.0, near: 0.1, far: 2000.0 };
+                for raised in [false, true] {
+                    renderer.set_params(&mut scene, bridge, &[], raised, &[]);
+                    let rgba = renderer.render_to_image(&mut scene, 129, 129, &camera, &lighting).unwrap();
+                    let pixel = &rgba[(64 * 129 + 64) * 4..][..3];
+                    let wanted = if raised { 1 } else { 0 };
+                    assert!(pixel[wanted] > 200 && pixel[2] < 20 && pixel[1 - wanted] < 20,
+                        "msaa {msaa}, camera y {y}, raised {raised}: {pixel:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn only_flat_blended_ground_strips_draw_after_the_roads() {
+        use omsi_scenery::sli::{Spline, SplineProfile, SplineProfilePoint, SplineTexture};
+        let line = Spline {
+            textures: vec![SplineTexture { alpha: 2, ..Default::default() }],
+            profiles: vec![SplineProfile { texture: 0, points: vec![
+                SplineProfilePoint { x: -0.11, z: 0.1, ..Default::default() },
+                SplineProfilePoint { x: 0.11, z: 0.1, ..Default::default() },
+            ] }], ..Default::default()
+        };
+        assert_eq!(spline_render_phase(&line), RenderPhase::BeforeNormal);
+        let mut road = line.clone();
+        road.profiles[0].points[0].x = -4.3;
+        road.profiles[0].points[1].x = 4.3;
+        assert_eq!(spline_render_phase(&road), RenderPhase::Spline);
+        let mut solid = line.clone();
+        solid.textures[0].alpha = 0;
+        assert_eq!(spline_render_phase(&solid), RenderPhase::Spline);
+        let mut fence = line.clone();
+        fence.profiles[0].points[1].z = 1.0;
+        assert_eq!(spline_render_phase(&fence), RenderPhase::Spline);
+        let mut wire = line.clone();
+        for p in &mut wire.profiles[0].points { p.z = 5.0; }
+        assert_eq!(spline_render_phase(&wire), RenderPhase::Spline);
+        let mut mixed = line.clone();
+        mixed.profiles.push(road.profiles[0].clone());
+        assert_eq!(spline_render_phase(&mixed), RenderPhase::Spline);
+        let mut traffic = line.clone();
+        traffic.paths.push(Default::default());
+        assert_eq!(spline_render_phase(&traffic), RenderPhase::Spline);
+        let mut rail = line.clone();
+        rail.rail_enh.push(Default::default());
+        assert_eq!(spline_render_phase(&rail), RenderPhase::Spline);
+        let mut unused = line;
+        unused.textures.push(SplineTexture::default());
+        assert_eq!(spline_render_phase(&unused), RenderPhase::BeforeNormal,
+            "an unused opaque texture does not change a painted strip");
+        assert_eq!(spline_render_phase(&Spline::default()), RenderPhase::Spline);
+    }
+
+    #[test]
+    fn mixed_spline_keeps_asphalt_and_painted_ranges_apart() {
+        let def = omsi_scenery::sli::Spline::parse(&omsi_cfg::CfgFile::from_str("mixed.sli",
+            "[texture]\nasphalt.dds\n[matl_alpha]\n2\n[texture]\nline.dds\n[matl_alpha]\n2\n\
+             [profile]\n0\n[profilepnt]\n-2.15\n0.1\n0\n1\n[profilepnt]\n2.15\n0.1\n1\n1\n\
+             [profile]\n1\n[profilepnt]\n1.23\n0.105\n0\n1\n[profilepnt]\n1.45\n0.105\n1\n1\n"));
+        let src = MeshData {
+            positions: vec![glam::Vec3::ZERO, glam::Vec3::X, glam::Vec3::Y,
+                glam::Vec3::Z, glam::Vec3::ONE, glam::Vec3::new(1.0, 1.0, 0.0)],
+            normals: vec![glam::Vec3::Z; 6], uvs: vec![glam::Vec2::ZERO; 6],
+            indices: vec![0, 1, 2, 3, 4, 5], ranges: vec![(0, 3, 0), (3, 3, 1)], one_sided: true,
+        };
+        let (road, paint) = split_spline_paint(&src, &def);
+        assert_eq!(road.ranges.iter().map(|r| r.2).collect::<Vec<_>>(), vec![0]);
+        assert_eq!(paint.ranges.iter().map(|r| r.2).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(road.indices.len(), 3);
+        assert_eq!(paint.indices.len(), 3);
+        assert_eq!(paint.positions, src.positions[3..]);
+        assert_eq!(paint.normals, src.normals[3..]);
+        assert_eq!(paint.uvs, src.uvs[3..]);
+        assert!(road.one_sided && paint.one_sided);
+    }
+
     /// A `[variable_terrainlightmap]` tile's light map is baked as Omsi.exe bakes it: over the
     /// tile and its neighbours, north up, colour x min(1, (core / distance)^2) from the lamp's
     /// own height, added up, held at 1 and truncated, nothing beyond 15.96 cores.
@@ -13771,6 +14116,10 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+#[path = "scene/object_path_tests.rs"]
+mod object_path_tests;
 
 #[cfg(test)]
 #[path = "scene/terrain_mapping_tests.rs"]
