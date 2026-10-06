@@ -1943,6 +1943,72 @@ impl Schedule {
                 Placed::Drop => {}
             }
         }
+        // AI bus scripts use the same timetable host callbacks as a player's duty:
+        // schedule_active and GetTT* must follow the trip and its current stop.
+        self.refresh_ai_timetable_hosts(traffic, day_time);
+    }
+
+    fn refresh_ai_timetable_hosts(&self, traffic: &mut Traffic, day_time: f64) {
+        struct Update {
+            id: u64,
+            line: String,
+            terminus: String,
+            stops: Vec<(String, f32, f32)>,
+            stop_ids: Vec<i64>,
+            next: i32,
+            delay: f32,
+        }
+
+        let mut updates = Vec::new();
+        for (&id, &i) in &self.car_departure {
+            let Some(car) = traffic.cars.iter().find(|c| c.id == id) else { continue };
+            let Some(service) = car.bus.as_ref() else { continue };
+            let departure = self.dep_time(i);
+            let times = self.times_of(i);
+            let dep = &self.departures[i];
+            let trip = &self.data.trips[dep.trip];
+            let stop_ids = trip_stations(trip).to_vec();
+            let names = self.trip_stop_names(dep.trip);
+            let front = service.stops.front().map(|s| (s.id, s.depart));
+            let next = ai_next_stop_index(&stop_ids, &times.stations, departure, front) as i32;
+            let stops = names
+                .into_iter()
+                .enumerate()
+                .filter_map(|(k, name)| times.stations.get(k).map(|&(a, d)| {
+                    (name, (departure + a) as f32, (departure + d) as f32)
+                }))
+                .collect();
+            updates.push(Update {
+                id,
+                line: self.display_line(i),
+                terminus: trip.terminus.clone(),
+                stops,
+                stop_ids,
+                next,
+                // BusService tracks the lateness of the last/current stop. It is more stable
+                // than recomputing it from the wall clock while the bus is between stops.
+                delay: service.delay,
+            });
+        }
+
+        for u in updates {
+            let Some(car) = traffic.cars.iter_mut().find(|c| c.id == u.id) else { continue };
+            let terminus_index = tt_terminus_index(car.vehicle.host.hof.as_deref(), &u.terminus);
+            {
+                let host = &mut car.vehicle.host;
+                host.schedule_active = 1.0;
+                host.tt_line = u.line;
+                host.tt_stops = u.stops;
+                host.tt_stop_ids = u.stop_ids;
+                host.tt_busstop_index = u.next;
+                host.tt_terminus_index = terminus_index;
+                host.tt_delay = u.delay;
+            }
+            // Make it visible immediately, including before the next engine-variable refresh.
+            car.vehicle.set_var("schedule_active", 1.0);
+        }
+
+        let _ = day_time; // kept in the signature for future exact between-stop delay tracking
     }
 
     /// Carry the routes of the running trips on over the lanes the network gained.
@@ -4303,6 +4369,27 @@ struct OnRoad {
     late: f64,
 }
 
+/// The current GetTT stop of an AI bus. A circular route may call at the same stop object
+/// more than once, so the stop id alone is not enough; match the BusService departure time.
+fn ai_next_stop_index(
+    ids: &[i64],
+    times: &[(f64, f64)],
+    departure: f64,
+    front: Option<(i64, f64)>,
+) -> usize {
+    let Some((id, due)) = front else { return ids.len().saturating_sub(1) };
+    ids.iter()
+        .enumerate()
+        .filter(|(_, sid)| **sid == id)
+        .min_by(|(a, _), (b, _)| {
+            let da = times.get(*a).map(|t| (departure + t.1 - due).abs()).unwrap_or(f64::MAX);
+            let db = times.get(*b).map(|t| (departure + t.1 - due).abs()).unwrap_or(f64::MAX);
+            da.total_cmp(&db)
+        })
+        .map(|(k, _)| k)
+        .unwrap_or(0)
+}
+
 /// GetTTTerminusIndex as Omsi.exe answers it: the first depot terminus whose name is the
 /// trip's terminus (the second [trip] line), else -1.
 fn tt_terminus_index(hof: Option<&omsi_vehicle::hof::Hof>, terminus: &str) -> i32 {
@@ -5707,6 +5794,15 @@ pub(crate) mod tests {
         d.update(&mut v, 542.0);
         assert_eq!(v.host.schedule_active, 0.0);
         assert_eq!(v.var("schedule_active"), Some(0.0));
+    }
+
+    #[test]
+    fn ai_timetable_stop_uses_time_to_disambiguate_repeated_stop_ids() {
+        let ids = [10, 20, 10];
+        let times = [(0.0, 0.0), (100.0, 110.0), (200.0, 210.0)];
+        assert_eq!(ai_next_stop_index(&ids, &times, 1000.0, Some((10, 1210.0))), 2);
+        assert_eq!(ai_next_stop_index(&ids, &times, 1000.0, Some((20, 1110.0))), 1);
+        assert_eq!(ai_next_stop_index(&ids, &times, 1000.0, None), 2);
     }
 
     #[test]

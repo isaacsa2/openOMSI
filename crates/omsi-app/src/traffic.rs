@@ -6844,6 +6844,14 @@ impl Traffic {
         self.lights.get(c)?.time_until_go(li)
     }
 
+    /// Give a timetable bus the number of passengers currently boarding/riding/alighting.
+    /// `VehicleInstance::update_engine_vars` exposes it to scripts as `humans_count`.
+    pub fn set_passenger_count(&mut self, id: u64, count: usize) {
+        if let Some(c) = self.cars.iter_mut().find(|c| c.id == id) {
+            c.vehicle.host.humans_count = count as f32;
+        }
+    }
+
     /// Tell a scheduled bus's script who wants in or out (`PAX_Entry<i>_Req`,
     /// `PAX_Exit<i>_Req`) and who stands in its doorways (`_Busy`): the stock AI door
     /// scripts open the rear doors only for a stop request, which comes from the exit

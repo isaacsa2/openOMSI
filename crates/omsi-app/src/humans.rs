@@ -2992,6 +2992,10 @@ impl Humans {
         })
     }
 
+    fn service_stop(at_station: bool, scheduled: Option<i64>, nearby: Option<i64>) -> Option<i64> {
+        at_station.then(|| scheduled.or(nearby)).flatten()
+    }
+
     fn vehicle_next_stop(&self, vehicle: &VehicleInstance) -> Option<RequestStop> {
         if let Ok(index) = usize::try_from(vehicle.host.tt_busstop_index) {
             if let Some(id) = vehicle.host.tt_stop_ids.get(index) {
@@ -3021,7 +3025,8 @@ impl Humans {
         self.request_stop(*id, Some(&name), None)
     }
 
-    /// The buses passengers deal with this frame.
+    /// The stop passengers treat a scheduled bus as serving. The timetable id is
+    /// authoritative; geometry is only a fallback for legacy/incomplete service data.
     fn gather_buses(
         &mut self,
         world: &World,
@@ -3122,11 +3127,13 @@ impl Humans {
                     continue;
                 };
                 let speed = c.state.speed as f64;
-                let stop = if c.at_station() && speed.abs() < 0.3 {
-                    serving(c.vehicle.position, c.vehicle.heading, 18.0)
-                } else {
-                    None
-                };
+                // The service already knows exactly which timetable stop this bus is serving.
+                // Prefer that id over guessing from nearby stop objects: on many maps the stop
+                // cube is more than 18 m from the bus bay, or the opposite-direction stop is
+                // closer. Guessing there made the passengers see closed doors at the real stop.
+                let scheduled_stop = c.bus.as_ref().and_then(|b| b.stops.front()).map(|s| s.id);
+                let nearby_stop = || serving(c.vehicle.position, c.vehicle.heading, 18.0);
+                let stop = Self::service_stop(c.at_station() && speed.abs() < 0.3, scheduled_stop, nearby_stop());
                 let since = match stop {
                     Some(s) => {
                         let v = match self.ai_visits.get(&c.id) {
@@ -3144,9 +3151,12 @@ impl Humans {
                     vec![false; cabin.exits.len()],
                 );
                 if open {
-                    if Self::script_reports(&c.vehicle, "PAX_Entry0_Open") || c.vehicle.var("door_0").is_some() || c.vehicle.var("door0").is_some() {
-                        let (e, x) =
-                            Self::doors_open(&c.vehicle, cabin.entries.len(), cabin.exits.len());
+                    let reports_passenger_doors =
+                        (0..cabin.entries.len()).any(|i| Self::script_reports(&c.vehicle, &format!("PAX_Entry{i}_Open")))
+                        || (0..cabin.exits.len()).any(|i| Self::script_reports(&c.vehicle, &format!("PAX_Exit{i}_Open")))
+                        || (0..8).any(|i| c.vehicle.var(&format!("door_{i}")).is_some() || c.vehicle.var(&format!("door{i}")).is_some());
+                    if reports_passenger_doors {
+                        let (e, x) = Self::doors_open(&c.vehicle, cabin.entries.len(), cabin.exits.len());
                         entry_open = e;
                         exit_open = x;
                     } else if since > 2.5 {
@@ -5244,6 +5254,25 @@ impl Humans {
         self.people.iter().filter(|p| matches!(p.place, Place::Bus(b, _) if b == bus) || p.state.bus() == Some(bus)).count()
     }
 
+    /// Passenger counts for timetable AI buses. Their scripts read this through
+    /// `humans_count` just like the player's bus does.
+    pub fn ai_people_in(&self) -> Vec<(u64, usize)> {
+        let mut counts: HashMap<u64, usize> = HashMap::new();
+        for p in &self.people {
+            let bus = match p.place {
+                Place::Bus(BusId::Ai(id), _) => Some(id),
+                _ => match p.state.bus() {
+                    Some(BusId::Ai(id)) => Some(id),
+                    _ => None,
+                },
+            };
+            if let Some(id) = bus {
+                *counts.entry(id).or_default() += 1;
+            }
+        }
+        counts.into_iter().collect()
+    }
+
     /// Where bus `bus` stands (its origin), as of the last tick.
     pub fn bus_center(&self, bus: BusId) -> Option<DVec3> {
         self.last_buses.iter().find(|b| b.id == bus).map(|b| b.pos)
@@ -5681,6 +5710,14 @@ impl Humans {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scheduled_bus_uses_its_timetable_stop_before_nearby_geometry() {
+        assert_eq!(Humans::service_stop(true, Some(42), Some(99)), Some(42));
+        assert_eq!(Humans::service_stop(true, None, Some(99)), Some(99));
+        assert_eq!(Humans::service_stop(false, Some(42), Some(99)), None);
+    }
+
 
     /// Off a bus 3 m from the pavement's path (along y), walking onto it at 1.1 m/s: hardly
     /// faster over any quarter of a second (pulled by the corridor all the way, over 1.5

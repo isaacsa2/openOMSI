@@ -1028,6 +1028,9 @@ pub(crate) fn run_offscreen(
                 for (id, doors) in h.take_ai_requests() {
                     t.set_pax_requests(id, &doors);
                 }
+                for (id, count) in h.ai_people_in() {
+                    t.set_passenger_count(id, count);
+                }
             }
             if let Some(p) = player.as_mut() {
                 if took {

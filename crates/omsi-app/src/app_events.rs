@@ -1369,6 +1369,9 @@ impl ApplicationHandler for App {
                         for (id, doors) in h.take_ai_requests() {
                             t.set_pax_requests(id, &doors);
                         }
+                        for (id, count) in h.ai_people_in() {
+                            t.set_passenger_count(id, count);
+                        }
                     }
                     if let Some(m) = h.take_message() {
                         self.service_msg = Some((m, 6.0));
