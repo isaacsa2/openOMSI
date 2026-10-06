@@ -2441,6 +2441,7 @@ mod tests {
             terminus: Some("Elsewhere".into()),
             takes: Takes::Terminus,
             places_off: Vec::new(),
+            served: None,
         };
         let register = |humans: &mut Humans, bus: &BusNow| {
             humans
@@ -2465,6 +2466,13 @@ mod tests {
             None,
             "do not arrive at a different stop while the trip stop is absent"
         );
+        bus.served = Some(123);
+        assert_eq!(
+            register(&mut humans, &bus).next,
+            Some(123),
+            "an unloaded timetable stop retains the upstream served-stop fallback"
+        );
+        bus.served = None;
         bus.next_stop = None;
         assert_eq!(
             register(&mut humans, &bus).next,
