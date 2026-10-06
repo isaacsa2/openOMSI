@@ -3707,6 +3707,9 @@ impl Schedule {
     /// 5 m beside the player's own bus at the Bauernhof, where the passengers queued.
     /// Returns how many of today's departures that takes from the AI.
     pub fn reserve_tour(&mut self, line: &str, tour: &str) -> usize {
+        // Switching duties must give the previous one back first. Otherwise its future
+        // departures remain marked spawned and that tour silently loses its AI service.
+        self.release_player_tour();
         self.player_tour = Some((line.to_string(), tour.to_string()));
         let mine: Vec<bool> = (0..self.departures.len())
             .map(|i| self.is_player_tour(i))
@@ -3723,6 +3726,27 @@ impl Schedule {
         self.retry_at.retain(|i, _| !mine[*i]);
         self.purge_player_tour = true;
         log::info!("timetable: {n} departures of line {line} tour {tour} left to the player");
+        n
+    }
+
+    /// Give the player's reserved tour back to the timetable. Departures that are still in
+    /// the future become eligible for AI again; a trip already driven is never duplicated.
+    pub fn release_player_tour(&mut self) -> usize {
+        let Some((line, tour)) = self.player_tour.take() else {
+            self.player_departure = None;
+            return 0;
+        };
+        self.player_departure = None;
+        let mut n = 0;
+        for i in 0..self.departures.len() {
+            let d = &self.departures[i];
+            let ours = d.line.eq_ignore_ascii_case(&line) && d.tour.eq_ignore_ascii_case(&tour);
+            if ours && d.time > self.last_tod && !self.is_player_tour(i) && self.runs(i) {
+                self.departures[i].spawned = false;
+                n += 1;
+            }
+        }
+        log::info!("timetable: line {line} tour {tour} returned to AI; {n} later departures run again");
         n
     }
 

@@ -1369,6 +1369,15 @@ impl ApplicationHandler for App {
                         for (id, doors) in h.take_ai_requests() {
                             t.set_pax_requests(id, &doors);
                         }
+                        // Player scripts already receive these counts below. Timetable buses
+                        // run the same passenger/door scripts, so keep their host callbacks in
+                        // step as well (used by capacity, fare-gate and seat logic).
+                        for c in t.cars.iter_mut().filter(|c| c.is_bus()) {
+                            let (riders, links, seats) = h.ai_script_counts(c.id);
+                            c.vehicle.host.humans_count = riders as f32;
+                            c.vehicle.host.humans_on_path_link = links;
+                            c.vehicle.host.humans_on_seat = seats;
+                        }
                     }
                     if let Some(m) = h.take_message() {
                         self.service_msg = Some((m, 6.0));

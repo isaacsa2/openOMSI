@@ -851,6 +851,9 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
             }
             "free" => {
                 app.duty = None;
+                if let Some(s) = app.schedule.as_mut() {
+                    s.release_player_tour();
+                }
                 // unscheduled: the GetTT* callbacks answer ""/0/-1 again, as in Omsi.exe
                 if let Some(p) = app.player.as_mut() {
                     let h = &mut p.vehicle.host;

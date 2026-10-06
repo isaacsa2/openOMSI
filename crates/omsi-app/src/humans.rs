@@ -2106,6 +2106,32 @@ impl Humans {
             .count()
     }
 
+    /// The passenger data an AI bus's OMSI scripts read: total riders, people walking on
+    /// each cabin path link and people occupying each script seat number.
+    pub fn ai_script_counts(&self, id: u64) -> (usize, Vec<u32>, Vec<u32>) {
+        let bus = BusId::Ai(id);
+        let riders = self.people.iter().filter(|p| p.inside(bus)).count();
+        let Some(cabin) = self.last_buses.iter().find(|b| b.id == bus).map(|b| &b.cabin) else {
+            return (riders, Vec::new(), Vec::new());
+        };
+        let sitting = self.people.iter().filter_map(|p| match &p.state {
+            State::Pax(x) if x.inside == Some(bus) && x.task == Task::SittingInBus => x.seat,
+            _ => None,
+        });
+        let seats = seat_numbers(&cabin.seats, sitting);
+        let mut links = vec![0u32; cabin.links.len()];
+        for p in &self.people {
+            if let State::Pax(x) = &p.state {
+                if x.inside == Some(bus) && (x.st == 1 || x.st == 5 || x.st == 9) {
+                    if let Some(c) = x.link.and_then(|l| links.get_mut(l)) {
+                        *c += 1;
+                    }
+                }
+            }
+        }
+        (riders, links, seats)
+    }
+
     /// People walking the footpaths of the traffic network: (lane, distance along it). The
     /// traffic gives way to them at crossings and presses the pedestrian lights' buttons
     /// for them.
@@ -2528,7 +2554,29 @@ impl Humans {
         let weights: Vec<f32> = lines
             .iter()
             .map(|(n, _)| {
-                world.bus_stops.lock().iter().find(|s| s.3.trim() == n.trim()).map(|s| world.stop_exit_weight(s.0)).unwrap_or(0.5)
+                // The timetable name is authoritative. A map object's visible label can be
+                // different (or differently encoded), so looking only at that label made its
+                // exit weight fall back to 0.5 while the neighbouring stops kept their real
+                // values (often 10). That badly skewed where passengers got off (#1583).
+                let by_timetable: Vec<f32> = self
+                    .stop_names
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|names| names.iter())
+                    .filter(|(_, name)| name.trim() == n.trim())
+                    .map(|(id, _)| world.stop_exit_weight(*id))
+                    .collect();
+                if !by_timetable.is_empty() {
+                    by_timetable.iter().sum::<f32>() / by_timetable.len() as f32
+                } else {
+                    world
+                        .bus_stops
+                        .lock()
+                        .iter()
+                        .find(|s| s.3.trim() == n.trim())
+                        .map(|s| world.stop_exit_weight(s.0))
+                        .unwrap_or(0.5)
+                }
             })
             .collect();
         let total: f32 = weights.iter().sum();
