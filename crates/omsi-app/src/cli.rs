@@ -8,6 +8,11 @@ pub(crate) const DEFAULT_SIZE: &str = "1600x900";
 #[derive(Parser, Debug, Clone)]
 #[command(name = "openomsi", version = crate::startup::VERSION, about = "openOMSI")]
 pub(crate) struct Args {
+    /// Run the reproducible stock-content benchmark (Grundorf + MAN SD80 + stock AI).
+    /// It fixes the simulation scene, seed, viewport and pacing, then records a bounded
+    /// performance capture. The selected graphics quality/backend is deliberately preserved.
+    #[arg(long)]
+    pub(crate) benchmark: bool,
     /// Capture the existing profiler for 10, 30 or 60 seconds after loading.
     #[arg(long, value_parser = crate::performance_capture::duration)]
     pub(crate) profile_capture: Option<u32>,
@@ -264,6 +269,63 @@ pub(crate) struct Args {
     /// may be given several times. `OMSI_CONTENT_ZIP` (separated like PATH) does the same.
     #[arg(long = "content-zip")]
     pub(crate) content_zip: Vec<PathBuf>,
+}
+
+/// Stable stock-content benchmark scenario. This deliberately uses only files shipped with
+/// the original OMSI 2 installation so a clean install can run it without third-party mods.
+pub(crate) const BENCHMARK_SCENARIO: &str = "stock-grundorf-v1";
+pub(crate) const BENCHMARK_SEED: u64 = 30_794_024;
+
+pub(crate) fn apply_benchmark(args: &mut Args) {
+    if !args.benchmark {
+        return;
+    }
+
+    args.no_menu = true;
+    args.launcher = false;
+    args.menu = false;
+    args.map = "maps/Grundorf/global.cfg".into();
+    args.bus = Some("Vehicles/MAN_SD200/MAN_SD80.bus".into());
+    args.entry = 0;
+    args.view = "driver".into();
+    args.autostart = true;
+    args.on_foot = false;
+    args.size = DEFAULT_SIZE.into();
+    args.cam = None;
+    args.radius = None;
+    args.view_distance = None;
+    args.all = false;
+
+    // Stock moving workload around a stationary player bus. Grundorf's own AI list and
+    // timetable keep the test independent of add-ons while still exercising traffic,
+    // scheduled buses and passengers.
+    args.traffic = 20;
+    args.passengers = true;
+    args.schedule = true;
+    args.no_timetable_buses = false;
+    args.riders = 0;
+    args.time = "09:00".into();
+    args.date = Some("1989-05-30".into());
+    args.season = Some("summer".into());
+    args.weather = None;
+
+    // A benchmark is a measured window, not a normal play session. Preserve an explicitly
+    // requested 10/30/60 s capture; otherwise use 30 s after a fixed 20 s warm-up.
+    if args.profile_capture.is_none() {
+        args.profile_capture = Some(30);
+    }
+    args.profile_delay = 20;
+    if args.profile_output.is_none() {
+        args.profile_output = Some(
+            omsi_launcher_lib::data_dir()
+                .join(format!("benchmark-{BENCHMARK_SCENARIO}-{}", std::process::id())),
+        );
+    }
+
+    // Allow enough wall time for the stock map to load, warm up and finish the capture even
+    // on slow machines. The capture itself remains exactly the requested bounded duration.
+    args.exit_after = Some(120.0);
+    args.physics = "rigid".into();
 }
 
 pub(crate) fn parse_time(s: &str) -> f64 {
