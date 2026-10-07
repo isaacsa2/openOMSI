@@ -69,6 +69,38 @@ fn compressed_path(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Physical sidecar used for a logical asset path.
+pub fn compressed_path_of(path: &Path) -> PathBuf {
+    compressed_path(path)
+}
+
+/// Header information that can be read without decompressing the asset.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompressedFileInfo {
+    pub original_bytes: u64,
+    pub stored_bytes: u64,
+    pub crc32: u32,
+}
+
+pub fn compressed_file_info(path: &Path) -> io::Result<CompressedFileInfo> {
+    let sidecar = compressed_path(path);
+    let mut f = std::fs::File::open(&sidecar)?;
+    let mut head = [0u8; COMPRESSED_HEADER];
+    f.read_exact(&mut head)?;
+    if &head[..4] != COMPRESSED_MAGIC {
+        return Err(bad(format!("{}: not an openOMSI compressed asset", sidecar.display())));
+    }
+    let original_bytes = le64(&head, 4);
+    if original_bytes > MAX_ENTRY {
+        return Err(bad(format!("{}: asset is too large ({} bytes)", sidecar.display(), original_bytes)));
+    }
+    Ok(CompressedFileInfo {
+        original_bytes,
+        stored_bytes: f.metadata()?.len(),
+        crc32: le32(&head, 12),
+    })
+}
+
 fn read_compressed(path: &Path) -> io::Result<Vec<u8>> {
     let sidecar = compressed_path(path);
     let packed = std::fs::read(&sidecar)?;
@@ -109,7 +141,7 @@ pub struct CompressionResult {
 }
 
 /// Compress one loose file into its transparent `.omc` sidecar and remove the original
-/// only after the sidecar has been written successfully.  Files that save less than
+/// only after the sidecar has been written successfully. Files that save less than
 /// `min_saving_percent` are left untouched.
 pub fn compress_file(path: &Path, min_saving_percent: u8) -> io::Result<CompressionResult> {
     let data = std::fs::read(path)?;
@@ -132,12 +164,26 @@ pub fn compress_file(path: &Path, min_saving_percent: u8) -> io::Result<Compress
 
     let stored_len = stored.len() as u64;
     let required = original.saturating_mul(100u64.saturating_sub(min_saving_percent.min(99) as u64)) / 100;
+    let sidecar = compressed_path(path);
     if stored_len >= required {
+        // A stale sidecar can be left by an interrupted older attempt. The real file wins
+        // in the VFS, so removing the stale copy is the only sensible result here.
+        if sidecar.exists() {
+            let _ = std::fs::remove_file(&sidecar);
+        }
         return Ok(CompressionResult { original_bytes: original, stored_bytes: original, compressed: false });
     }
 
-    let sidecar = compressed_path(path);
-    std::fs::write(&sidecar, &stored)?;
+    let mut tmp = sidecar.as_os_str().to_os_string();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::write(&tmp, &stored)?;
+    // Windows rename does not replace an existing destination.
+    if sidecar.exists() {
+        std::fs::remove_file(&sidecar)?;
+    }
+    std::fs::rename(&tmp, &sidecar)?;
     if let Err(e) = std::fs::remove_file(path) {
         let _ = std::fs::remove_file(&sidecar);
         return Err(e);
@@ -146,19 +192,28 @@ pub fn compress_file(path: &Path, min_saving_percent: u8) -> io::Result<Compress
     Ok(CompressionResult { original_bytes: original, stored_bytes: stored_len, compressed: true })
 }
 
-/// Restore a file previously replaced by a transparent `.omc` sidecar.
+/// Restore a file previously replaced by a transparent `.omc` sidecar. If a real file
+/// appeared since compression (for example an add-on updater replaced it), that real file
+/// is kept and only the stale sidecar is removed.
 pub fn restore_compressed_file(path: &Path) -> io::Result<bool> {
     let sidecar = compressed_path(path);
     if !sidecar.is_file() {
         return Ok(false);
     }
     if path.exists() {
-        return Ok(false);
+        std::fs::remove_file(&sidecar)?;
+        return Ok(true);
     }
+
     let data = read_compressed(path)?;
-    std::fs::write(path, data)?;
+    let mut tmp = path.as_os_str().to_os_string();
+    tmp.push(".omc-restore.tmp");
+    let tmp = PathBuf::from(tmp);
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::write(&tmp, data)?;
+    std::fs::rename(&tmp, path)?;
     if let Err(e) = std::fs::remove_file(&sidecar) {
-        let _ = std::fs::remove_file(path);
+        // The restored original is already valid; leave both rather than deleting it.
         return Err(e);
     }
     Ok(true)
