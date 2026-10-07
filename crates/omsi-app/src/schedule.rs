@@ -325,17 +325,6 @@ struct Choice {
     train: Option<Vec<(Arc<VehicleType>, bool)>>,
 }
 
-/// The bus stands next to the kerb: the pole's offset less half a bus width and a gap; only
-/// where the pole is clearly off the lane (a bay).
-///
-/// A pole further off than a bay's width stands behind the pavement or the verge (the
-/// stop objects of many maps are placed there): the bus stays in its lane at the kerb then.
-/// Taken as a bay up to 4 m wide, the bus pulled out over the kerb onto the grass.
-///
-/// Not at all, now: a timetable bus stays on its path at the stop, as OMSI's do (a
-/// map's bus bay is a spline of its own that the route runs through). The pole's offset
-/// says nothing about where the kerb is - most stand behind the pavement - and a bus
-/// moved 1.6 m to the right of its lane drove along with its right wheels on the pavement.
 /// Stops moved `shift` metres back along `route` (the lanes the stops' route indices less
 /// `base` count in): where the vehicle's origin comes to rest (`bus_service::stop_shift`).
 /// One that comes to lie before the route's first lane keeps a distance below zero on it.
@@ -6759,6 +6748,33 @@ mod authored_station_tests {
                             "authored visit: lat={lat}, side={side}, left_hand={left_hand}, rail={rail}",
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn authored_platform_boxes_on_curves_keep_the_repeated_visit_and_path() {
+        let bus = crate::schedule::tests::script_test_vehicle("{frame}\n{end}\n", "", "");
+        for radius in [-40.0, 40.0] {
+            let net = Network {
+                lanes: vec![LaneBuilder::arc(DVec3::ZERO, 0.0, 60.0, radius, 0.0, LaneKind::Street, 3.0)],
+                ..Default::default()
+            };
+            let (point, heading) = net.lanes[0].at(30.0);
+            let h = (heading as f64).to_radians();
+            let right = DVec3::new(h.cos(), -h.sin(), 0.0);
+            for offset in [-4.0, 4.0] {
+                for side in [0.0, 1.0, 2.0] {
+                    let visit = StopRoute::Track(1);
+                    let (ri, s, lat) = project_stop(&net, &[0, 0], point + right * offset, Some(25.0), 0, side, visit).unwrap();
+                    assert_eq!(ri, 1, "the authored repeated visit is retained");
+                    assert!((s - 30.0).abs() < 0.5, "projection keeps the position along the curve: {s}");
+                    assert!(lat.abs() > 3.5, "the platform box lies off the path");
+                    let mut stops = [(ri, s, bay_offset(lat, visit), 0.0, 42, side)];
+                    place_stops(&net, &[0, 0], 0, &mut stops, &bus.ty, false);
+                    assert_eq!(stops[0].2, 0.0, "no bay target on either curve/platform side");
+                    assert!(stops[0].1.is_finite());
                 }
             }
         }
