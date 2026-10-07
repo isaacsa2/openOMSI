@@ -743,7 +743,9 @@ impl App {
                 // (and a player who joins another's game sees the host's people)
                 if self.args.passengers || self.args.lan_join.is_some() {
                     let mut h = humans::Humans::new(&self.args.root);
-                    if let Some(lan) = self.lan.as_ref() {
+                    if self.args.benchmark {
+                        h.set_lan_seed(crate::cli::BENCHMARK_SEED);
+                    } else if let Some(lan) = self.lan.as_ref() {
                         h.set_lan_seed(lan::population_seed(lan));
                     }
                     h.exact_fare = self.settings.exact_fare;
@@ -777,7 +779,9 @@ impl App {
                         Ok(mut t) => {
                             t.lights_only = !populated;
                             t.no_timetable_buses = self.args.no_timetable_buses;
-                            if let Some(lan) = self.lan.as_ref() {
+                            if self.args.benchmark {
+                                t.set_lan_seed(crate::cli::BENCHMARK_SEED);
+                            } else if let Some(lan) = self.lan.as_ref() {
                                 t.set_lan_seed(lan::population_seed(lan));
                             }
                             if self.args.traffic > 0 {
