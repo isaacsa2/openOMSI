@@ -840,7 +840,10 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     if (snow > 0.0) {
         let up = clamp(n.z, 0.0, 1.0);
         let ground = select(0.0, 1.0, terrain || material.params2.z > 0.0);
-        let cover = snow * clamp(max(ground, smoothstep(0.78, 0.95, up) * 0.8), 0.0, 1.0) * (0.55 + 0.35 * tex.a);
+        // (a road kept clear - "snow on road" off - stays asphalt: whitened, it turned the
+        // roads white exactly when the weather says they are cleared, #1362)
+        let cleared = select(1.0, 0.0, camera.post.z > 0.5 && !terrain && material.params2.z > 0.0);
+        let cover = cleared * snow * clamp(max(ground, smoothstep(0.78, 0.95, up) * 0.8), 0.0, 1.0) * (0.55 + 0.35 * tex.a);
         albedo = mix(albedo, vec3<f32>(0.82, 0.84, 0.88), cover);
         ambient_albedo = mix(ambient_albedo, vec3<f32>(0.82, 0.84, 0.88), cover);
         // fresh snow is all but matte: it scatters the light and shows no highlight
@@ -1082,7 +1085,11 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     let cabin_light = interior_lamps(in.world, n, in.params2.z);
     let cabin = sf.albedo * cabin_light * mix(1.0, ao, 0.85);
     var rgb = (direct + ambient + lamps) * pre + cabin;
-    var emit = tex.rgb * material.emissive.rgb * max(enh.exposure.z * 2.0, 0.8);
+    // A material's own emissive colour ([matl_allcolor], an .x's emissive) is the texture at
+    // full brightness in Omsi.exe: shown at the screen's white, not scaled with the eye's
+    // night adaptation - a texture lit that way by [matl_allcolor] glared at several times
+    // white at night (#1228, #1236). (The night maps of lit windows keep their light.)
+    var emit = tex.rgb * material.emissive.rgb * clamp(enh.exposure.z * 2.0, 0.8, 1.0);
     // (the tile light map on the splines and [LightMapMapping] objects is the vanilla
     // path's: here the map's lamps light them, tinted from that map, as they light every
     // other surface - added on top it lit the roads twice, with a hard edge where a road
