@@ -1723,15 +1723,21 @@ impl LanSession {
         self.sent.get()
     }
 
-    /// The game's clock: what the host's welcomes and clock messages say.
-    /// The host's weather changed (the clients take it up with the next clock message).
-    pub fn set_weather(&mut self, weather: &str) {
-        self.world.weather = weather.to_string();
-    }
-
     /// The weather the session runs with.
     pub fn weather(&self) -> &str {
         &self.world.weather
+    }
+
+    /// Change the session weather. A host publishes the new value with the next CLOCK
+    /// immediately instead of waiting for the regular five-second clock interval.
+    pub fn set_weather(&mut self, weather: &str) {
+        let weather = clean_text(&weather.trim().replace('\\', "/"), 260);
+        if self.world.weather != weather {
+            self.world.weather = weather;
+            if self.role == Role::Host {
+                self.clock_acc = CLOCK_EVERY;
+            }
+        }
     }
 
     pub fn set_clock(&mut self, date: &str, time: f64) {

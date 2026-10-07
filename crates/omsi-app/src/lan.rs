@@ -1404,6 +1404,13 @@ fn host_weather(args: &Args, weather: &str) -> Result<Option<String>, String> {
     }
 }
 
+fn runtime_weather_changed(host: &str, local: Option<&str>, seen: Option<&str>) -> bool {
+    let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
+    let host_norm = norm(host);
+    host_norm != norm(local.unwrap_or(""))
+        && seen.is_none_or(|last| norm(last) != host_norm)
+}
+
 /// Take the host's world (a joining player, before the map is loaded): the date, the time
 /// of day as the host's clock has it now, the weather and the season go into the
 /// arguments the world is made from. The map stays ours (a different one is warned about).
@@ -3204,6 +3211,10 @@ pub fn tick(
         if let Some(c) = frame.clock {
             lan.set_clock(&date_of(c), c.time);
         }
+        // The in-game Weather/Climate tab rewrites args.weather as a custom:... value.
+        // Keep the authoritative LAN world in step with it; set_weather also makes this
+        // change ride the next CLOCK immediately instead of waiting for the 5 s interval.
+        lan.set_weather(args.weather.as_deref().unwrap_or(""));
         if !lan.pending_joins().is_empty() {
             lan.set_local_footprints(host_footprints(player.as_deref(), traffic.as_deref()));
             lan.answer_joins();
@@ -3230,11 +3241,11 @@ pub fn tick(
             lan.take_host_clock();
         } else if let Some(h) = lan.take_host_clock() {
             // the host changed its weather (its administration): ours follows
-            let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
-            if !h.world.weather.is_empty() && norm(&h.world.weather) != norm(args.weather.as_deref().unwrap_or("")) && game.weather_seen.as_deref() != Some(h.world.weather.as_str()) {
+            if runtime_weather_changed(&h.world.weather, args.weather.as_deref(), game.weather_seen.as_deref()) {
                 game.weather_seen = Some(h.world.weather.clone());
                 if let Ok(wt) = host_weather(args, &h.world.weather) {
-                    log::info!("LAN: the host's weather is now {}", h.world.weather);
+                    let shown = if h.world.weather.trim().is_empty() { "(natural/default)" } else { h.world.weather.as_str() };
+                    log::info!("LAN: the host's weather is now {shown}");
                     updates.push(WorldUpdate::Weather(wt));
                 }
             }
@@ -3761,6 +3772,18 @@ mod tests {
         }
         assert_eq!(host_weather(&args, ""), Ok(None));
         assert!(host_weather(&args, "weather/none_such.owt").is_err());
+    }
+
+    #[test]
+    fn runtime_weather_change_detects_custom_and_clearing_to_default() {
+        let custom = "custom:vis=5000;br=0.80;wd=90;ws=4.0;t=22.0;rh=70;p=1013;c=2;cb=120;pt=1;pi=80;wet=0.50;snow=0;snowroad=0";
+        assert!(runtime_weather_changed(custom, Some("Weather/#CAVOK.owt"), None));
+        assert!(!runtime_weather_changed(custom, Some(custom), None));
+        assert!(!runtime_weather_changed(custom, Some("CUSTOM:VIS=5000;BR=0.80;WD=90;WS=4.0;T=22.0;RH=70;P=1013;C=2;CB=120;PT=1;PI=80;WET=0.50;SNOW=0;SNOWROAD=0"), None));
+        assert!(!runtime_weather_changed(custom, Some("Weather/#CAVOK.owt"), Some(custom)));
+        // Empty is meaningful too: the host went back to natural/map-default weather.
+        assert!(runtime_weather_changed("", Some(custom), Some(custom)));
+        assert!(!runtime_weather_changed("", None, Some(custom)));
     }
 
     /// Every session starts with every bus offered: a server joined before (on a phone the
