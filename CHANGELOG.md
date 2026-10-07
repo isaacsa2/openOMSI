@@ -238,7 +238,63 @@ A release about light and weather: the Enhanced and Enhanced+ pictures worked ou
 
 ## 0.1.1382 - 2026-10-04
 
-Bug Fixes & Improvements
+### Passengers and timetable
+- On a duty, waiting passengers board when the trip serves their destination even if the depot file names the terminus differently, and all leave at the final stop. At this release, free drive does not take waiting passengers.
+- Passenger cabins support sixteen entries and sixteen exits. Doors without their own script variables retain OMSI 2's eighth-door fallback (#719).
+- Door scripts receive `PAX_Entry<n>_Busy` and `PAX_Exit<n>_Busy` while a passenger occupies the doorway, so light barriers can hold the doors open (#720).
+- A `[passpos]` can use script variables to enable a seat and report its occupancy, including configurable layouts and folding seats (#721).
+- Passengers use the validator nearest their entry door across the bus's sections instead of only the cabin file's last stamper (#722). Entry flags `{noticketsale}` and `{withbutton}` survive blank lines, allowing passengers to request a closed door they can open (#1156).
+- Passenger trailers without an interior connection to the front vehicle are boarded and left through their own doors (#718).
+- "Skip the next stop" in the game menu, or Ctrl+Shift+H, advances the duty and IBIS past an unreachable stop (#1015).
+- Duties write a journey log in the content folder's `Journeys`, with each stop's planned and actual times, lateness and missed stops, updated as the trip proceeds (#800, #1061).
+
+### Destinations and route helpers
+- Picking a destination uses the exact depot row, including termini with a blank first line, rather than the first row sharing its name (#738). The displayed route number keeps its letter, such as 92E.
+- Manual line and destination choices set hand-cranked roller blinds too (#1095, #1098); holding Page Up or Page Down keeps turning them (#1098, #1145).
+- IBIS duties select the route and its destination when the depot file has separate route-specific rows of the same terminus.
+- LAN timetable buses show the depot row assigned by the host; text-only destination lookup prefers the sign text over another row's district line, avoiding U Ruhleben/Machandelweg and Newtondorf/Bhf Newtondorf mix-ups.
+- Stop announcements replace a slash in the stop name with `%` when opening the sound file, as in OMSI 2 (#1096).
+- A map's `[helparrow]` objects appear while OMSI 2 route arrows are enabled (#954); turning the arrows off removes those already drawn (#1108).
+
+### Controls, camera and interface
+- "Smooth mouse steering" can be switched off so the wheel and pedals follow the cursor immediately (#1092). Num 5 centres at least as fast as the steering keys and automatic return (#851).
+- Mouse look turns the driver's view all the way round (#909); opentrack lateral movement follows the head in the correct direction (#1157).
+- Controllers can bind the reset of all views (#1167), and a configured device can be removed from the launcher's list (#636).
+- The touch steering wheel returns at the keyboard steering rate, depending on motion and Old Steering, instead of always springing to the centre (#1090).
+- On foot, C or the phone's on-screen button kneels for a lower camera view (#1148); dragging the navigator on a phone moves it without turning the view (#1138).
+- The information bar wraps to the available room on a phone, keeps clear of the navigator and remembers whether it was shown (#1164).
+- The Android launcher recognises Shift, Ctrl and Alt from a hardware keyboard for bindings and shortcuts such as Ctrl+V (#634); vehicle types list their livery count (#717).
+- Launcher Settings → Sound can add, edit and remove bus radio internet stations, saving `radio.cfg` while preserving its comments and volume (#857).
+- The in-game settings offer 16x anisotropic filtering, matching the launcher (#669).
+
+### Multiplayer and services
+- Other players appear as named purple direction arrows on the navigator and city map (#1011, #1080).
+- The in-game Place a vehicle and Swap menus respect a server's allowed vehicle list (#1183).
+- Hosts with an OMSI 2 installation inside the content folder send normalised `Vehicles/...` paths, so clients can resolve their AI cars, buses and trains (#1097).
+- Repair immediately repairs a bus that has no timed repair handler instead of rejecting it (#1048).
+
+### Rendering and map compatibility
+- OpenGL devices without vertex-shader storage buffers, including Mali phones, stay within the sixteen texture units and can use Vanilla+ instead of panicking (#1133, #1154, #1162, #1176, #770, #316). A caught backend startup panic no longer produces a false end-of-game crash report on Android.
+- Exhaust, steam, wheel spray and chimney smoke render again, and `[smoke]` alpha is parsed correctly (#949, #948, #852). Their braking follows OMSI 2's 20 Hz rate; puffs fade into the road instead of leaving hard bright bands.
+- Every vehicle's tyres throw spray and a settling mist through puddles, growing with speed, instead of only the player's wheels spraying sideways.
+- Enhanced full beams reach as far as their declared range (#1068). Independent `[spotlight_2]` lamps can light alongside the selected spotlight (#730); `[light_enh]` uses its bitmap, depth offset, brightness and star like `[light_enh_2]` (#1159).
+- Static reflection cameras keep their authored direction, and rear-section cameras are numbered after the front section for door CCTV (#726).
+- Tiles with `[variable_terrainlightmap]` bake night lighting from surrounding lamps (#951). Seasonal textures choose WinterSnowfall, WinterSnow, winter or autumn variants as OMSI 2 does (#1084).
+- Vanilla and Vanilla+ sphere-map reflections use OMSI 2's vertex mapping (#1193); snow on bus windows has mip levels instead of sparkling single pixels (#946).
+- Enhanced sunlight is attenuated by cloud and fog, avoiding sunlight under an overcast sky and white glare in dense fog (#1106).
+- Retextured scenery takes textures from its own `.sco` folder (#978); full-colour fonts sample the colour bitmap correctly when its size differs from the alpha bitmap (#829).
+- Bridge decks and raised junctions use their authored crossing height deformation even far above terrain (#961). Close-up rails, markings and paving keep their depth order over road splines (#1196, #1134), and flat scenery markings draw above the road too (#1009).
+
+## 0.1.1324 - 2026-10-03
+
+### Merged pull requests
+- Road feel finds a texture's `.surf` surface map inside mounted archives as well as loose files [#1189](https://github.com/openOMSI-Project/openOMSI/pull/1189).
+- Bug and feature report forms guide issue submissions [#1192](https://github.com/openOMSI-Project/openOMSI/pull/1192); pull requests receive per-platform test-build download links [#1200](https://github.com/openOMSI-Project/openOMSI/pull/1200).
+
+## 0.1.1318 - 2026-10-03
+
+### Merged pull requests
+- Windows DirectInput controllers recover from disconnects and lost acquisition. The launcher releases its controller handles before starting the game, allowing the game to acquire the wheel exclusively for force feedback [#1163](https://github.com/openOMSI-Project/openOMSI/pull/1163).
 
 ## 0.1.1313 - 2026-10-03
 
@@ -318,6 +374,11 @@ Bug Fixes & Improvements
 - Script, text and HTML textures larger than the chip takes are halved until they fit.
 - A window the system cannot open ends with a message instead of a panic report.
 - A script value that is not a number no longer turns the bus to NaN and stops the game. [#1045](https://github.com/openOMSI-Project/openOMSI/issues/1045)
+
+## 0.1.1225 - 2026-10-03
+
+### Documentation
+- Added the missing 0.1.1147 release notes, covering changes after 0.1.1120 while preserving the newer entries [#995](https://github.com/openOMSI-Project/openOMSI/pull/995). This release changes documentation only.
 
 ## 0.1.1223 - 2026-10-03
 
