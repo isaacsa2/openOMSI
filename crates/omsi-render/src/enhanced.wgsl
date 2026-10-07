@@ -539,11 +539,13 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     if ((ALPHA_TEST || capture) && mode > 0.5 && mode < 1.5) {
         if (ALPHA_TO_COVERAGE) {
             let aa = max(fwidth(tex.a) * 0.5, 1.0 / 255.0);
-            if (tex.a < 0.5 - aa) {
+            // (not `ALPHA_REF - aa`: a layer whose clear glass is alpha 128 kept a third of
+            // its samples there, a moire of the layer's paint over every window)
+            if (tex.a < ALPHA_REF) {
                 discard;
             }
-            tex.a = smoothstep(0.5 - aa, 0.5 + aa, tex.a);
-        } else if (tex.a < 0.5) {
+            tex.a = smoothstep(ALPHA_REF - aa, ALPHA_REF + aa, tex.a);
+        } else if (tex.a < ALPHA_REF) {
             discard;
         }
     }

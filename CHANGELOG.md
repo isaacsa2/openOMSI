@@ -4,6 +4,22 @@ Every push to `main` is released as `MAJOR.MINOR.COMMIT` (see
 [docs/VERSIONING.md](docs/VERSIONING.md)); the downloads are on the
 [Releases](https://github.com/openOMSI-Project/openOMSI/releases) page.
 
+## 0.2.9 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.8 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.7 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.6 - 2026-10-06
+
+### Bug Fixes & Improvements
+
 ## 0.2.5 - 2026-10-06
 
 ### Bug Fixes & Improvements
