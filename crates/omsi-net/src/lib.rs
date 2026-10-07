@@ -1723,12 +1723,6 @@ impl LanSession {
         self.sent.get()
     }
 
-    /// The game's clock: what the host's welcomes and clock messages say.
-    /// The host's weather changed (the clients take it up with the next clock message).
-    pub fn set_weather(&mut self, weather: &str) {
-        self.world.weather = weather.to_string();
-    }
-
     /// The weather the session runs with.
     pub fn weather(&self) -> &str {
         &self.world.weather
