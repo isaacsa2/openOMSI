@@ -1,5 +1,10 @@
 # Performance capture comparison
 
+For the most repeatable game workload, prefer the built-in `--benchmark` scenario (or
+**Setup → Run performance benchmark**) and compare two runs of the same scenario. Captures
+carry the benchmark id; the tool refuses to compare a benchmark run with a normal capture or
+with a different scenario unless the mismatch is explicitly overridden.
+
 `scripts/compare-performance.py` compares two schema-1 captures produced by the
 bounded profiler capture. It does not run the game and it does not turn a noisy
 real-time workload into a deterministic benchmark.
