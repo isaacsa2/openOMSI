@@ -10,6 +10,7 @@ use omsi_launcher_lib as core;
 use omsi_ui::paint::Align;
 use omsi_ui::{Color, Rect, Weight};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct PagesView {
