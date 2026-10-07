@@ -7,38 +7,95 @@ Every push to `main` is released as `MAJOR.MINOR.COMMIT` (see
 ## 0.2.10 - 2026-10-07
 
 ### Bug Fixes & Improvements
+- Headlamps and spotlights no longer show a coarse checker pattern in the fog near the lamps. Their scattered light is integrated over the viewing angle, keeping the brightest part of each beam smooth.
+- Content folders use `Sounds`, as in OMSI 2, instead of `Sound`.
 
 ## 0.2.9 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- With multisampling, a paintable window layer's clear texels (alpha 128 or below) are discarded completely, as in OMSI 2. Alpha-to-coverage smooths only the edge above that threshold, so a faint veil of the layer's paint no longer remains over the glass.
 
 ## 0.2.8 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- Alpha-tested materials discard texels whose alpha is exactly 128, matching OMSI 2's `ALPHAREF 0x80` and `GREATER` comparison. Paintable window layers such as those on the NefAZ 5299 2017/2024 no longer turn the windows black; the classic, Enhanced and shadow passes use the same cut.
 
 ## 0.2.7 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- Android: renderer startup tries at most two pipeline sets and remembers the working reduced set per graphics adapter in `gpu-fallback.cfg`. Repeated pipeline builds since 0.2.4 could keep the launcher busy until Android closed it, notably on the S24/S25 (#1708).
+- Hidden backdrops for distant tiles no longer cast shadows from objects left out of the picture, including London's bridge lamps (#1545, part).
+- Street lamp and signal coronas fade through fog with the scene instead of shining beyond their hidden poles (#1212).
+- An entirely clear texture on a blended `[matl_alpha] 2` slot acts as an invisible cover in model order, as in OMSI 2, so roller blinds and window covers hide the parts behind them (#1113, #576).
+- Passengers walking to a still-closed exit choose the nearest exit instead of all gathering at the first door in the list (#1149).
+- Sound triggers fired while the player's bus is being set up stay silent; a session no longer starts with an engine shutting down (#1198).
 
 ## 0.2.6 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- Waiting passengers choose destinations from trips due at their stop within the next fifteen minutes, instead of trips from any time or day. School stops no longer fill for hours, nor night stops for the next morning's first bus (#1415).
+- Traffic lights and level crossings are requested as far ahead as the map's `[approachdist]` specifies, up to 1200 m, instead of being limited to 160 m (#1421).
+- LAN: another player's articulated bus tilts its rear sections to meet the section ahead at each joint, keeping them on slopes instead of sinking into them (#1702).
+- Taking over a bus waits for its tile's roads and yards as well as its terrain, so a parked bus no longer falls through after a restart (#1279).
+- Scenery objects update the material slots named by their `[alphascale]` variables every frame, not only traffic lights (#1299).
+- Long route helper texts are made smaller before being narrowed, instead of appearing as thin sticks (#1696, #1365).
+- Seat positions set in the game menu are saved per bus in `seats.cfg` (#1355); a setting allows the arrow keys to switch cameras while using a wheel too (#1345).
+- Ending a duty, including the server's duty-off command, clears its `GetTT*` timetable data (#1317). Insert opens the timetable only when `keyboard.cfg` has no `view_set_schedule` entry; an explicitly unbound action stays unbound (#1245).
+- Head sway at a standstill fades out when the bus starts moving (#1325). The menu, server traffic command and `server.cfg` use the same maximum traffic setting (#1327).
 
 ## 0.2.5 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- The player's bus uses its `[registration_list]` plate when one is available instead of replacing it with the template's automatic registration; Hong Kong fleet numbers keep their plate and suffix fields (#1584, #1591, #133).
+- Free-drive passengers board according to the player's destination display again, as they do for a timetable bus; nobody boarded without a duty since 0.2.0 (#1627, #1623).
+- Moving the clock by more than two minutes respawns timetable buses for the new time (#1607, #1455). AI buses keep `schedule_active` and their `GetTT*` trip, stop and delay data up to date (#1580). Type-1 trip stations belong to their own track entry, so NCC's return stop is no longer served on the outward trip (#1592).
+- Route helpers rendered with the interface font break lines at `@` (#1553, #1482). Text textures keep their slot's border/clamp addressing, so stop flags no longer repeat their name across the flag (#1645).
+- A free-texture destination display keeps that texture under multiple switched light maps, and a light map whose variable is off stays unlit (#1650).
+- Money on a `[ticket_sale_*_point_2]` moves with the mesh it names (#1468).
+- Shift, Ctrl and Alt can trigger actions when bound as keys on their own (#1477). H-shifter return-to-neutral applies only to controllers; keyboard gears remain engaged (#1440). Num 5 centres faster while the steering key towards the middle is held (#1652).
+- Controllers have a "Stick steers like a wheel" option for wheels identified as Xbox controllers, keeping their axis linear at any speed (#1653).
+- Launcher Setup rejects an incomplete OMSI folder and explains what is missing instead of silently choosing another installation (#1656). Android keeps the chosen content folder out of the gallery immediately (#1632).
+- Saves fall back to `~/.openomsi/content` when the content folder is not writable, and the launcher lists them (#1673). Manually entered route numbers can be up to 64 characters long (#1518).
+- Spline attachment rows place only one object a little beyond a dead end, so a fence post no longer stands in Thüringer Wald's carriageway (#1693).
+- Spotlights respect a declared short range instead of lighting farther and more brightly (#1541).
+- When the texture budget is still exceeded, the largest vehicle textures can be reduced to 1024 px (#1463).
 
 ## 0.2.4 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- Glass and paintable layers over windows no longer force the whole vehicle into model order. Only blended bodywork that writes depth does, keeping the saloon visible behind windows instead of turning them black.
+- Android checks all kinds of pipeline errors and retries without multisampling, then without optional pipelines, logging failures. A driver's internal shader error no longer leaves an invalid main pipeline and a black 3D picture (#1663, #1664).
+- AI cars waiting for a full junction exit enter after 45 seconds only when nobody needs the crossing lanes. Timetable buses stuck for minutes away from stops and lights are removed once out of sight, helping junctions recover from permanent gridlock.
+
+### Merged pull requests
+- The launcher's automatic depot file carries the chosen line, so the destination display can look it up [#1690](https://github.com/openOMSI-Project/openOMSI/pull/1690).
 
 ## 0.2.3 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- Enhanced night adaptation keeps a minimum light level for the camera's lamp-lit district and adapts towards darkness over minutes. Village lamps and squares no longer become overexposed white; unlit country roads still adapt to moonlight.
+- Enhanced and Enhanced+ envmap reflections preserve the mask or glass alpha's average reflectance and the source picture's contrast, so windows and painted bodywork reflect as strongly as in Vanilla.
+
+### Merged pull requests
+- Alpha-tested bus text fields no longer draw an opaque box [#1674](https://github.com/openOMSI-Project/openOMSI/pull/1674); cab screens and LCDs dim at night [#1681](https://github.com/openOMSI-Project/openOMSI/pull/1681).
+- Spline attachment rows combine their rotations correctly [#1678](https://github.com/openOMSI-Project/openOMSI/pull/1678); far-offset forests and landscape backdrops stay visible [#1677](https://github.com/openOMSI-Project/openOMSI/pull/1677); central and edge road markings stay visible as the camera moves [#1680](https://github.com/openOMSI-Project/openOMSI/pull/1680).
+- Ambient and AI vehicle sounds keep working after a bus is deleted [#1654](https://github.com/openOMSI-Project/openOMSI/pull/1654); traffic light countdown displays show the correct count [#1579](https://github.com/openOMSI-Project/openOMSI/pull/1579).
+- Synthetic tests cover ibox digit entry, and the user guide no longer describes the removed `OMSI_SELF_LIT_NIGHT` option [#1659](https://github.com/openOMSI-Project/openOMSI/pull/1659).
 
 ## 0.2.2 - 2026-10-06
 
 ### Bug Fixes & Improvements
+- Enhanced and Enhanced+: foliage bends and sways with the weather's wind and gusts, including in shadows; the `windy_trees` setting is on by default.
+- Condensation on the player's windows follows cabin temperature, humidity, heating and ventilation, with a milky film, blurred view and defroster patch.
+- Envmap bodywork has a smooth clear coat, and paint using `[matl_transmap]` reflects again instead of staying matte; Enhanced+ traces the coat.
+- Enhanced night metering samples the street seen by the camera rather than a point in the air below it. Lamp-lit areas viewed from higher cameras no longer turn white.
+
+### Merged pull requests
+- Enhanced skips FXAA when MSAA is active [#1646](https://github.com/openOMSI-Project/openOMSI/pull/1646).
+- AI buses no longer stay at a stop permanently when their passengers cannot alight [#1640](https://github.com/openOMSI-Project/openOMSI/pull/1640); duty passenger matching falls back to the trip's terminus when the display has no destination [#1609](https://github.com/openOMSI-Project/openOMSI/pull/1609).
+- Object path gradients no longer make vehicle axles jump [#1617](https://github.com/openOMSI-Project/openOMSI/pull/1617); bitmap text lines fit their available width [#1634](https://github.com/openOMSI-Project/openOMSI/pull/1634); scenery split across meshes keeps correct visibility bounds [#1604](https://github.com/openOMSI-Project/openOMSI/pull/1604).
+- macOS supports Xbox controllers [#1600](https://github.com/openOMSI-Project/openOMSI/pull/1600) and reads a gamepad's HID device and gilrs pad as one device [#1601](https://github.com/openOMSI-Project/openOMSI/pull/1601).
+- Aachen ibox ticket printers keep leading zeros during digit entry and follow the timetable's stop list; drivers can use map-wide voice radio through GreenTeaSpeak [#1610](https://github.com/openOMSI-Project/openOMSI/pull/1610).
 
 ## 0.2.1 - 2026-10-06
 
