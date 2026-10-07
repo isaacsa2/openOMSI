@@ -16,6 +16,7 @@ No AI logic changes. EARLY_LEAVE remains 20 seconds; #1682 is not revived.
 | Parked obstruction/merge/lane change | Existing parked-clearance and way-user tests | Narrow streets, blocked stops |
 | Junction keep-clear | Existing open PR #1761 | Review/test that PR, do not duplicate it here |
 | AI destination/plain aigroup_2 | Existing open PR #1757 | Review/test that PR |
+| Timed stops vs on-demand departure waits | New upstream open PR #1773 | Review that PR's holds/waits_here plumbing; this tests-only branch does not implement it |
 
 Synthetic vehicle scripts are made by the existing script_test_vehicle helper.
 They are not copied from OMSI assets and need no paid DLC. Test-only phase
@@ -23,3 +24,7 @@ arrival is explicit; it does not claim to exercise physical approach, passenger
 walking or tile IO. All runtime claims still require the listed manual cases.
 
 Validation required: `cargo test --workspace`, `cargo build --release`.
+The initial head passed the Release workflow and workspace tests on Windows/Linux
+x64. The branch now includes official main 37d9e61b (0.2.14), including upstream
+fixes for disabling timetable AI with a player line (#1762) and signal rest loops
+(#1722). Current-head CI is restarted; those fixes are not duplicated here.
