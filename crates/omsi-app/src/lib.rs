@@ -631,6 +631,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         menu_edit_search: false,
         menu_search: String::new(),
         swap_pending: false,
+        pending_placement: None,
         menu_drag: None,
         menu_kbd: true,
         weather_blend: None,
