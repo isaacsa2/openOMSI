@@ -3620,7 +3620,9 @@ impl Renderer {
                 },
             ],
         });
-        let (cloud_shape_view, cloud_detail_view, cloud_sampler, cloud_shape_cpu) = cloud_noise_textures(&device, &queue, !options.preview_only);
+        // Textured clouds never sample the volume or use its CPU sun-shadow map.
+        // Keep 1-texel binding-compatible placeholders for that explicit quality level.
+        let (cloud_shape_view, cloud_detail_view, cloud_sampler, cloud_shape_cpu) = cloud_noise_textures(&device, &queue, !options.preview_only && options.cloud_quality != 1);
         log::info!("renderer: compiling the sky and clouds shaders");
         let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sky"),
@@ -15116,6 +15118,7 @@ mod tests {
             let mut renderer = pollster::block_on(Renderer::new_with(&instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb), RenderOptions { msaa: 1, ssao: false, cloud_quality, ..Default::default() })).unwrap();
             assert!(renderer.sky_mirror_pipeline.is_some());
             assert!(renderer.probe.is_some());
+            assert_eq!(renderer.cloud_shape_cpu.is_empty(), cloud_quality == 1);
             let mut scene = renderer.new_scene();
             let sky = renderer.add_texture(&mut scene, &omsi_texture::Image { width: 2, height: 2, rgba: vec![180; 16], has_alpha: true }, true);
             renderer.set_sky_textures_photographic_clouds(&mut scene, [sky; 3], Some(sky), Some(sky));
