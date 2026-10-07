@@ -1081,10 +1081,16 @@ mod tests {
 
     #[test]
     fn compatibility_fixture_preserves_material_slots_and_variant_inheritance() {
-        let model = super::Model::parse(&omsi_cfg::CfgFile::from_str(
+        let file = omsi_cfg::CfgFile::from_str(
             "synthetic-material.cfg",
             include_str!("../tests/fixtures/material-compatibility.cfg"),
-        ));
+        );
+        // OMSI's known keywords require their original spelling. A typo in a
+        // synthetic fixture must not masquerade as missing material support.
+        for line in file.lines.iter().filter(|l| l.starts_with('[')) {
+            assert!(omsi_cfg::keyword_of(line).is_some(), "invalid fixture keyword: {line}");
+        }
+        let model = super::Model::parse(&file);
         let materials = &model.meshes[0].materials;
         assert_eq!(materials.len(), 4);
         let base = &materials[0];
@@ -1102,6 +1108,8 @@ mod tests {
         assert!(variant.item);
         assert_eq!(variant.change, Some(("DISPLAY.dds".into(), 0, "display_mode".into())));
         assert_eq!(variant.alpha, base.alpha);
+        assert_eq!((variant.no_z_write, variant.no_z_check, variant.z_bias),
+            (base.no_z_write, base.no_z_check, base.z_bias));
         assert_eq!(variant.alphascale, base.alphascale);
         assert_eq!(variant.freetex, base.freetex);
         assert_eq!(variant.lightmaps, base.lightmaps);

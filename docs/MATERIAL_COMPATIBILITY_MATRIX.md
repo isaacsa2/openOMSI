@@ -20,3 +20,10 @@ require a manual test.
 | #1745 | None for rendered glass overlay | Reproduce reported 0.2.11 bus with reference screenshot, then compare main using identical backend/settings. |
 
 No renderer, shader, parser behavior, or scenery texture logic is changed. #1765 is an open upstream PR touching scenery freetex/texttexture and must be considered before future fixes.
+
+The first CI run failed the parser fixture on Linux/Windows because the fixture
+wrote `[matl_zbias]` rather than OMSI's exact `[matl_Zbias]`. The existing parser
+correctly ignored the misspelled keyword; this was a fixture error, not a runtime
+divergence. The fixture now uses the canonical spelling and checks every keyword
+before parsing. The synthetic property-plan test passed in both jobs. Current
+head validation is restarted after synchronization with official main 37d9e61b.
