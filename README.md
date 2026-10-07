@@ -33,7 +33,8 @@ and fully compatible with the existing maps, buses, scenery and mods.
 
 ## Download
 
-Every commit to `main` is built by GitHub Actions and published on the
+Every commit to `main` is built by GitHub Actions. The latest promoted stable build and
+the moving `nightly` test build are available on the
 [**Releases**](https://github.com/openOMSI-Project/openOMSI/releases) page:
 
 | Platform | File |
@@ -48,10 +49,11 @@ Start the game, point the launcher to your OMSI 2 folder once, pick a map, a bus
 and drive. Mods go into the folder next to the game (or through the launcher's **Mods**
 page); the original installation is never written to.
 
-From 0.1.7 on the launcher updates itself: when a newer release is out it asks at the start
-and, with your yes, downloads it, replaces the program and starts again (on Android through
-the system's installer). Settings → General → Updates switches the check off or installs without
-asking.
+From 0.1.7 on the launcher updates itself: when a newer **stable** release is out it asks at
+the start and, with your yes, downloads it, replaces the program and starts again (on Android
+through the system's installer). Nightly prereleases are opt-in downloads from GitHub and are
+not offered by the stable updater. Settings → General → Updates switches the check off or
+installs stable updates without asking.
 
 ## Installation
 
