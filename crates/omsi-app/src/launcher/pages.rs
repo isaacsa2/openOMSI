@@ -29,8 +29,97 @@ pub struct PagesView {
     pub controls_tab: usize,
     /// The Settings page's tab (see `SETTINGS_TABS`).
     pub settings_tab: usize,
+    pub storage: StorageView,
     pub pads: PadsView,
     pub tt: super::timetable::TimetableView,
+}
+
+enum StorageEvent {
+    Progress(String),
+    Done(std::result::Result<crate::asset_storage::StorageReport, String>),
+}
+
+#[derive(Default)]
+pub struct StorageView {
+    root: String,
+    report: Option<crate::asset_storage::StorageReport>,
+    message: String,
+    job: Option<std::sync::mpsc::Receiver<StorageEvent>>,
+    confirm_restore: bool,
+}
+
+impl StorageView {
+    fn busy(&self) -> bool {
+        self.job.is_some()
+    }
+
+    fn refresh_root(&mut self, root: &std::path::Path) {
+        let key = root.to_string_lossy().to_string();
+        if self.root == key || self.busy() {
+            return;
+        }
+        self.root = key;
+        self.report = if root.as_os_str().is_empty() { None } else { Some(crate::asset_storage::quick_status(root)) };
+        self.message.clear();
+        self.confirm_restore = false;
+    }
+
+    fn poll(&mut self) {
+        let mut finished = false;
+        if let Some(rx) = self.job.as_ref() {
+            loop {
+                match rx.try_recv() {
+                    Ok(StorageEvent::Progress(m)) => self.message = m,
+                    Ok(StorageEvent::Done(Ok(r))) => {
+                        self.report = Some(r);
+                        self.message = "Done.".into();
+                        self.confirm_restore = false;
+                        finished = true;
+                        break;
+                    }
+                    Ok(StorageEvent::Done(Err(e))) => {
+                        self.message = e;
+                        finished = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.message = "The storage task stopped unexpectedly.".into();
+                        finished = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if finished {
+            self.job = None;
+        }
+    }
+
+    fn start(&mut self, root: PathBuf, mode: crate::asset_storage::Mode) {
+        if self.busy() || root.as_os_str().is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.job = Some(rx);
+        self.confirm_restore = false;
+        self.message = match mode {
+            crate::asset_storage::Mode::Analyze => "Analyzing content…",
+            crate::asset_storage::Mode::Compress => "Compressing content…",
+            crate::asset_storage::Mode::Restore => "Restoring original files…",
+        }
+        .into();
+        let _ = std::thread::Builder::new()
+            .name("content compression".into())
+            .spawn(move || {
+                let progress_tx = tx.clone();
+                let result = crate::asset_storage::execute(&root, mode, |m| {
+                    let _ = progress_tx.send(StorageEvent::Progress(m));
+                })
+                .map_err(|e| format!("{e:#}"));
+                let _ = tx.send(StorageEvent::Done(result));
+            });
+    }
 }
 
 /// The game controllers tab: the devices `gamectrler.cfg` sets up, the ones connected now,
@@ -307,7 +396,7 @@ fn toggle_setting(ui: &mut Ui, s: &mut Value, dirty: &mut f32, r: Rect, label: &
 }
 
 /// The settings page's tabs: what one has come to change.
-pub const SETTINGS_TABS: [&str; 6] = ["Graphics", "Driving", "Camera", "Sound", "Gameplay", "General"];
+pub const SETTINGS_TABS: [&str; 7] = ["Graphics", "Driving", "Camera", "Sound", "Gameplay", "General", "Storage"];
 
 /// What the tabs show of the launcher and ask of it (they see only the settings): the
 /// updater's state, "Check now", "Reset all settings", the Controls page at one of its tabs.
@@ -316,6 +405,7 @@ struct Outside {
     check_updates: bool,
     reset: bool,
     controls: Option<usize>,
+    storage_action: Option<crate::asset_storage::Mode>,
 }
 
 thread_local! {
@@ -336,7 +426,11 @@ pub fn settings(l: &mut Launcher, area: Rect) {
     let body = Rect::new(body.x, bar.bottom() + 18.0, body.w, (body.bottom() - bar.bottom() - 18.0).max(0.0));
     let s = &mut l.state.settings;
     let dirty = &mut l.state.settings_dirty;
-    let mut out = Outside { update: l.update.status(), check_updates: false, reset: false, controls: None };
+    let root = PathBuf::from(&l.state.config.root);
+    l.pages.storage.refresh_root(&root);
+    l.pages.storage.poll();
+    let storage = &mut l.pages.storage;
+    let mut out = Outside { update: l.update.status(), check_updates: false, reset: false, controls: None, storage_action: None };
     // (two columns side by side; where they would be too narrow to read - a phone - one
     // under the other, each as high as it was the frame before)
     let stacked = body.w < 900.0;
@@ -351,7 +445,7 @@ pub fn settings(l: &mut Launcher, area: Rect) {
             let h = v.h.max(hs[0]).max(hs[1]);
             ([Rect::new(v.x, v.y, cw, h), Rect::new(v.x + cw + GAP * 2.0, v.y, cw, h)], h)
         };
-        let used = settings_tab(ui, tab, s, dirty, &mut out, cols);
+        let used = settings_tab(ui, tab, s, dirty, storage, &mut out, cols);
         SETTINGS_COL_H.with(|c| {
             let mut all = c.get();
             all[tab] = used;
@@ -359,6 +453,9 @@ pub fn settings(l: &mut Launcher, area: Rect) {
         });
         h
     });
+    if let Some(mode) = out.storage_action {
+        storage.start(root, mode);
+    }
     if out.check_updates {
         l.update.check();
     }
@@ -438,14 +535,15 @@ impl Col {
 
 /// Tab `tab` of the settings in its two columns. Returns the height each column needed (0
 /// for one the tab leaves empty).
-fn settings_tab(ui: &mut Ui, tab: usize, s: &mut Value, dirty: &mut f32, out: &mut Outside, cols: [Rect; 2]) -> [f32; 2] {
+fn settings_tab(ui: &mut Ui, tab: usize, s: &mut Value, dirty: &mut f32, storage: &mut StorageView, out: &mut Outside, cols: [Rect; 2]) -> [f32; 2] {
     match tab {
         0 => graphics_tab(ui, s, dirty, cols),
         1 => driving_tab(ui, s, dirty, out, cols),
         2 => camera_tab(ui, s, dirty, out, cols),
         3 => sound_tab(ui, s, dirty, cols),
         4 => gameplay_tab(ui, s, dirty, cols),
-        _ => general_tab(ui, s, dirty, out, cols),
+        5 => general_tab(ui, s, dirty, out, cols),
+        _ => storage_tab(ui, storage, out, cols),
     }
 }
 
