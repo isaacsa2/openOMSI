@@ -701,7 +701,7 @@ impl Settings {
         text.push_str(&format!("voice_chat={}\n", self.voice_chat as u8));
         text.push_str(&format!("windy_trees={}\n", self.windy_trees as u8));
         text.push_str(&format!("cloud_quality={}\n", self.cloud_quality));
-        text.push_str(&format!("gpu_texture_compression={}\\n", self.gpu_texture_compression));
+        text.push_str(&format!("gpu_texture_compression={}\n", self.gpu_texture_compression));
         text
     }
 
