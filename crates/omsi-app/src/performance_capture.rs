@@ -28,11 +28,18 @@ pub(crate) struct Frame {
 
 #[derive(Serialize)]
 struct Graphics {
+    graphics_mode: String,
     msaa: u32,
+    anisotropy: u16,
     ssao: bool,
     render_scale: f32,
     shadows: bool,
+    shadow_size: u32,
+    mirror_size: u32,
     mirror_refresh: String,
+    cloud_quality: String,
+    gpu_texture_compression: String,
+    max_obj_dist: f32,
     lan_active: bool,
 }
 
@@ -73,6 +80,7 @@ pub(crate) struct Capture {
     seconds: u32,
     delay: u32,
     output: PathBuf,
+    benchmark: Option<String>,
     ready_at: Option<Instant>,
     elapsed: f64,
     previous: Option<Stages>,
@@ -82,9 +90,24 @@ pub(crate) struct Capture {
 }
 
 impl Capture {
-    pub(crate) fn new(seconds: u32, delay: u32, output: PathBuf) -> Self {
-        Self { seconds, delay, output, ready_at: None, elapsed: 0.0, previous: None,
-            frames: Vec::new(), gpu_start: BTreeMap::new(), memory_start: Memory::default() }
+    pub(crate) fn new(
+        seconds: u32,
+        delay: u32,
+        output: PathBuf,
+        benchmark: Option<String>,
+    ) -> Self {
+        Self {
+            seconds,
+            delay,
+            output,
+            benchmark,
+            ready_at: None,
+            elapsed: 0.0,
+            previous: None,
+            frames: Vec::new(),
+            gpu_start: BTreeMap::new(),
+            memory_start: Memory::default(),
+        }
     }
 
     /// Returns true when the bounded capture is complete. Counter resets after a
@@ -113,6 +136,7 @@ impl Capture {
         let summary = summarize(&self.frames, self.frames.len() >= MAX_FRAMES);
         let json = serde_json::json!({"schema_version": 1,
             "version": crate::startup::VERSION, "build": crate::startup::BUILD,
+            "benchmark": self.benchmark,
             "requested_seconds": self.seconds, "warmup_seconds": self.delay,
             "summary": summary, "gpu_passes": gpu,
             "memory_start": self.memory_start, "memory_end": memory_end,
@@ -194,9 +218,21 @@ impl crate::App {
         }
         let done = capture.sample(self.total_frames, dt, totals);
         if let (Some(frame), Some(r)) = (capture.frames.last_mut(), self.renderer.as_ref()) {
-            frame.graphics = Some(Graphics { msaa: r.options.msaa, ssao: r.options.ssao,
-                render_scale: r.options.render_scale, shadows: self.settings.shadows,
-                mirror_refresh: self.settings.mirror_refresh.clone(), lan_active: self.lan.is_some() });
+            frame.graphics = Some(Graphics {
+                graphics_mode: self.settings.graphics.clone(),
+                msaa: r.options.msaa,
+                anisotropy: self.settings.anisotropy,
+                ssao: r.options.ssao,
+                render_scale: r.options.render_scale,
+                shadows: self.settings.shadows,
+                shadow_size: self.settings.shadow_size,
+                mirror_size: self.settings.mirror_size,
+                mirror_refresh: self.settings.mirror_refresh.clone(),
+                cloud_quality: self.settings.cloud_quality.clone(),
+                gpu_texture_compression: self.settings.gpu_texture_compression.clone(),
+                max_obj_dist: self.settings.max_obj_dist,
+                lan_active: self.lan.is_some(),
+            });
         }
         if !done {
             self.capture = Some(capture);
@@ -232,7 +268,7 @@ mod tests {
     }
     #[test]
     fn capture_subtracts_baseline_and_rebases_reset_counters() {
-        let mut c = Capture::new(10, 0, PathBuf::new());
+        let mut c = Capture::new(10, 0, PathBuf::new(), None);
         let stages = |v| BTreeMap::from([("render.cull".into(), v)]);
         assert!(!c.sample(1, 9.0, stages(10.0))); // warm-up is only the baseline
         assert!(!c.sample(2, 0.02, stages(10.002)));
@@ -246,7 +282,7 @@ mod tests {
     fn durations_and_invalid_frame_values_are_bounded() {
         assert_eq!(duration("30"), Ok(30));
         assert!(duration("31").is_err());
-        let mut c = Capture::new(10, 0, PathBuf::new());
+        let mut c = Capture::new(10, 0, PathBuf::new(), None);
         c.sample(0, 1.0, Stages::new());
         c.sample(1, f64::NAN, Stages::new());
         c.sample(2, -1.0, Stages::new());
