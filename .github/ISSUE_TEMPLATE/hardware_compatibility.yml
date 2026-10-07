@@ -152,6 +152,5 @@ body:
     attributes:
       label: Logs / diagnostics / notes
       description: Paste only the relevant log excerpt, or attach a diagnostics ZIP if your test build provides one and you have inspected it.
-      render: shell
     validations:
       required: false
