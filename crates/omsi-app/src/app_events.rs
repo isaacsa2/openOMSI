@@ -267,6 +267,11 @@ impl ApplicationHandler for App {
                 button: winit::event::MouseButton::Left,
                 ..
             } => {
+                // while the plugins' panels have the mouse its clicks are theirs, none the bus's
+                if self.plugin_focus() {
+                    self.plugin_click(state == ElementState::Pressed);
+                    return;
+                }
                 if self.touch.enabled {
                     let p = glam::Vec2::new(self.cursor.0, self.cursor.1);
                     if state == ElementState::Pressed {
@@ -708,6 +713,7 @@ impl ApplicationHandler for App {
                     || self.chooser.is_some()
                     || self.list_kind.is_some()
                     || self.navigator.as_ref().is_some_and(|n| n.map_open())
+                    || crate::plugin_ui::focused(&self.plugins)
                     || !matches!(self.view.as_str(), "driver" | "outside" | "pax");
                 let hide = (moved || actions.iter().any(|a| a.1)) && !needs_mouse && !vr_on;
                 if self.vr_nav_edit.is_none() && hide != self.cursor_hidden.is_some() && (hide || needs_mouse) {
@@ -784,7 +790,10 @@ impl ApplicationHandler for App {
                 // mouse steering asks only for a player's vehicle, 0x6f4257; not on foot,
                 // #516)
                 let bus_view = self.mouse_steers_in_view();
-                if let (true, Some(s)) = (self.mouse_drive && bus_view && !self.mouse_look && !self.input_away
+                // (the plugins' panels having the mouse hold the wheel and the pedals as
+                // looking round does: the cursor goes to their buttons)
+                let panels_mouse = self.plugin_focus();
+                if let (true, Some(s)) = (self.mouse_drive && bus_view && !self.mouse_look && !self.input_away && !panels_mouse
                                               && self.game_menu.is_none(), self.surface.as_ref()) {
                     let (w, h) = (s.config.width as f32, s.config.height as f32);
                     if std::mem::take(&mut self.center_cursor) {
@@ -845,7 +854,7 @@ impl ApplicationHandler for App {
                     }
                     analog.throttle = Some(self.mouse_pedals.0);
                     analog.brake = Some(self.mouse_pedals.1);
-                } else if self.mouse_drive && bus_view && (self.mouse_look || self.input_away)
+                } else if self.mouse_drive && bus_view && (self.mouse_look || self.input_away || panels_mouse)
                     && self.game_menu.is_none() {
                     // looking round with the right button: the wheel and the pedals stay where
                     // the mouse left them, as in OMSI (they went slack until the button was let
@@ -1061,8 +1070,14 @@ impl ApplicationHandler for App {
                             // setting stays on: turning it off here undid the switch in the
                             // menu at once)
                             if self.settings.head_tracking && self.headtrack.is_none() && self.headtrack_failed.is_none_or(|t| t.elapsed().as_secs_f32() > 5.0) {
-                                self.headtrack = crate::headtrack::HeadTracker::start(self.settings.head_tracking_port);
+                                let hwnd = self.window.as_ref().and_then(|window| crate::controllers::window_handle(window));
+                                self.headtrack = crate::headtrack::HeadTracker::start(self.settings.head_tracking_port, hwnd);
                                 self.headtrack_failed = self.headtrack.is_none().then(std::time::Instant::now);
+                            }
+                            if !self.settings.head_tracking {
+                                self.headtrack_scale_last = None;
+                                self.headtrack_scale_bias = [0.0; 6];
+                                self.headtrack_invert_last = None;
                             }
                             let tracked = self.headtrack.as_ref().and_then(|h| h.pose()).filter(|_| self.settings.head_tracking && matches!(self.view.as_str(), "driver" | "pax"));
                             #[cfg(windows)]
@@ -1075,7 +1090,64 @@ impl ApplicationHandler for App {
                                 crate::player::steering_view_yaw(p.steer_look, p.vehicle.physics.controls.steering, dt,
                                                                  self.settings.steer_look && self.view == "driver", self.settings.steer_look_angle, self.settings.steer_look_response)
                             };
-                            if let Some(t) = tracked {
+                            let mut tracked_rot = None;
+                            if let Some(mut t) = tracked {
+                                // TrackIR/NPClient reports an absolute pose. Apply the six
+                                // user-facing sensitivity controls, but when a sensitivity
+                                // slider changes while the head is stationary, compensate the
+                                // already displayed output so the camera does not jump.
+                                // Inversion is deliberately NOT compensated: it only changes
+                                // direction, and switching it back restores the original pose.
+                                let mut scales = [0.0_f32; 6];
+                                scales[0] = (self.settings.head_tracking_x_sens / 100.0).clamp(0.0, 1.0).powi(2);
+                                scales[1] = (self.settings.head_tracking_y_sens / 100.0).clamp(0.0, 1.0).powi(2);
+                                scales[2] = (self.settings.head_tracking_z_sens / 100.0).clamp(0.0, 1.0).powi(2);
+                                scales[3] = (self.settings.head_tracking_yaw_sens / 100.0).clamp(0.0, 1.0).powi(2);
+                                scales[4] = (self.settings.head_tracking_pitch_sens / 100.0).clamp(0.0, 1.0).powi(2);
+                                scales[5] = (self.settings.head_tracking_roll_sens / 100.0).clamp(0.0, 1.0).powi(2);
+
+                                let legacy = ["yaw", "pitch", "roll"];
+                                let invert = [
+                                    self.settings.head_tracking_invert_x,
+                                    self.settings.head_tracking_invert_y,
+                                    self.settings.head_tracking_invert_z,
+                                    self.settings.head_tracking_invert_yaw || self.settings.head_tracking_invert.contains(legacy[0]),
+                                    self.settings.head_tracking_invert_pitch || self.settings.head_tracking_invert.contains(legacy[1]),
+                                    self.settings.head_tracking_invert_roll || self.settings.head_tracking_invert.contains(legacy[2]),
+                                ];
+                                for k in 0..6 {
+                                    if invert[k] { scales[k] = -scales[k]; }
+                                }
+
+                                let raw = [t.pos[0], t.pos[1], t.pos[2], t.rot[0], t.rot[1], t.rot[2]];
+                                let invert_changed = self.headtrack_invert_last.is_some_and(|previous| previous != invert);
+                                if invert_changed {
+                                    self.headtrack_scale_bias = [0.0; 6];
+                                } else if let Some(previous) = self.headtrack_scale_last {
+                                    let sensitivity_changed = (0..6).any(|k| (previous[k].abs() - scales[k].abs()).abs() > f32::EPSILON);
+                                    if sensitivity_changed {
+                                        for k in 0..6 {
+                                            let old_output = raw[k] * previous[k] + self.headtrack_scale_bias[k];
+                                            self.headtrack_scale_bias[k] = old_output - raw[k] * scales[k];
+                                        }
+                                    }
+                                } else {
+                                    self.headtrack_scale_bias = [0.0; 6];
+                                }
+                                self.headtrack_scale_last = Some(scales);
+                                self.headtrack_invert_last = Some(invert);
+
+                                let adjusted = [
+                                    raw[0] * scales[0] + self.headtrack_scale_bias[0],
+                                    raw[1] * scales[1] + self.headtrack_scale_bias[1],
+                                    raw[2] * scales[2] + self.headtrack_scale_bias[2],
+                                    raw[3] * scales[3] + self.headtrack_scale_bias[3],
+                                    raw[4] * scales[4] + self.headtrack_scale_bias[4],
+                                    raw[5] * scales[5] + self.headtrack_scale_bias[5],
+                                ];
+                                t.pos = [adjusted[0], adjusted[1], adjusted[2]];
+                                t.rot = [adjusted[3], adjusted[4], adjusted[5]];
+                                tracked_rot = Some(t.rot);
                                 p.seat += t.seat_offset();
                             }
                             // (the outside view's field of view starts from the plain 60
@@ -1103,14 +1175,6 @@ impl ApplicationHandler for App {
                             // what turns the bus's own camera into the picture: the head's turn,
                             // the field of view setting and the zoom (for the camera left in a
                             // switch as well as for the one taken)
-                            let tracked_rot = tracked.map(|mut t| {
-                                for (k, axis) in ["yaw", "pitch", "roll"].iter().enumerate() {
-                                    if self.settings.head_tracking_invert.contains(axis) {
-                                        t.rot[k] = -t.rot[k];
-                                    }
-                                }
-                                t.rot
-                            });
                             let fov_setting = self.settings.fov;
                             // Eased Space return (F1): look + zoom glide home on the
                             // same ease-out as the viewpoint switch instead of
@@ -1462,6 +1526,9 @@ impl ApplicationHandler for App {
                 }
                 *self.profile.entry("humans").or_default() += __t.elapsed().as_secs_f64();
                 self.foot_after_humans();
+                if !self.paused {
+                    self.tick_service(dt);
+                }
                 if let (Some(d), Some(p), Some(w), false) = (
                     self.duty.as_mut(),
                     self.player.as_mut(),
@@ -2225,6 +2292,10 @@ impl ApplicationHandler for App {
                             lines.push(format!("Change due: {owed:.2}"));
                         }
                     }
+                    // (the cursor no longer works the cab: how to have it back)
+                    if crate::plugin_ui::focused(&self.plugins) {
+                        lines.push(crate::plugin_ui::FOCUS_NOTE.into());
+                    }
                     let __t = Instant::now();
                     // (the frame's overlays start empty; the notes are the interface's, in
                     // Roboto - OMSI's bitmap font HUD is the start menu's and the offscreen
@@ -2343,6 +2414,37 @@ impl ApplicationHandler for App {
                             }
                         }
                     }
+                    // the Lua plugins' panels (`omsi.ui`): over the picture and the navigator,
+                    // under the game's own interface; not under its menus, nor in VR
+                    let plugin_focus = crate::plugin_ui::focused(&self.plugins);
+                    if let Some(plugin_ui) = self.plugins.as_ref().map(|p| p.ui.clone()) {
+                        let dpi = self
+                            .window
+                            .as_ref()
+                            .map_or(1.0, |w| w.scale_factor() as f32);
+                        let settings = &self.settings;
+                        let size = ui::size_factor(
+                            hud[3],
+                            dpi,
+                            settings.ui_scale,
+                            settings.ui_scale_window,
+                        );
+                        let map_open = self.navigator.as_ref().is_some_and(|n| n.map_open());
+                        let frame = crate::plugin_ui::PanelsFrame {
+                            hud,
+                            scale: dpi * size,
+                            hidden: vr_active
+                                || self.game_menu.is_some()
+                                || self.chooser.is_some()
+                                || map_open,
+                            cursor: self.cursor,
+                            dt,
+                            backdrop: ui::backdrop(settings.ui_opacity),
+                            navigator: self.navigator.as_ref().and_then(|n| n.screen_rect()),
+                        };
+                        let mut state = plugin_ui.borrow_mut();
+                        self.plugin_panels.frame(r, scene, &mut state, &frame);
+                    }
                     if let (Some(ui), Some(s)) = (self.ui.as_mut(), self.surface.as_ref()) {
                         let scale = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0);
                         let (w, h) = (hud[2], hud[3]);
@@ -2393,6 +2495,7 @@ impl ApplicationHandler for App {
                         let (cx, cy) = self.cursor;
                         let map_open = self.navigator.as_ref().is_some_and(|n| n.map_open());
                         let covered = self.game_menu.is_some()
+                            || plugin_focus
                             || self.vr_nav_edit.is_some()
                             || self.chooser.is_some()
                             || ui.chat.hovered
@@ -2506,6 +2609,7 @@ impl ApplicationHandler for App {
                 // see `Settings::led_glow`); the panel's picture and its mask are held at
                 // this mip level at most (`Settings::led_mips`)
                 lighting.led_glow = self.settings.led_glow as f32 * 0.25;
+                lighting.night_brightness = self.settings.night_brightness;
                 lighting.led_mips = self.settings.led_mips;
                 let mut finish = false;
                 let mut reconfigure = false;

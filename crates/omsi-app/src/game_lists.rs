@@ -1092,6 +1092,7 @@ fn steps_of(verb: &str) -> Option<Vec<f32>> {
         "pax" => PAX.to_vec(),
         "volume" => VOLUME.to_vec(),
         "led_glow" => (0..16).map(|v| v as f32).collect(),
+        "night_brightness" => (0..=12).map(|v| v as f32 * 0.25).collect(),
         "led_mips" => (0..=80).map(|v| v as f32 * 0.05).collect(),
         "ui_scale" => (10..=40).map(|v| v as f32 * 0.05).collect(),
         "chat_size" => (5..=30).map(|v| v as f32 * 0.1).collect(),
@@ -1104,6 +1105,7 @@ fn steps_of(verb: &str) -> Option<Vec<f32>> {
         "steer_look_response" => (1..=20).map(|v| v as f32 * 0.05).collect(),
         "head_idle" => (0..=20).map(|v| v as f32 * 0.05).collect(),
         "head_idle_pace" => (10..=40).map(|v| v as f32 * 0.05).collect(),
+        "head_tracking_yaw_sens" | "head_tracking_pitch_sens" | "head_tracking_roll_sens" | "head_tracking_x_sens" | "head_tracking_y_sens" | "head_tracking_z_sens" => (0..=100).map(|v| v as f32).collect(),
         "pedal_t" | "pedal_b" => PEDAL.to_vec(),
         "ctrl_deadzone" => (0..=30).map(|v| v as f32 * 0.01).collect(),
         "mouse_sens" => (10..=300).map(|v| v as f32 / 100.0).collect(),
@@ -1230,6 +1232,7 @@ fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "pax" => s.pax_density,
         "volume" => s.volume,
         "led_glow" => s.led_glow as f32,
+        "night_brightness" => s.night_brightness,
         "led_mips" => s.led_mips,
         "ctrl_deadzone" => s.ctrl_deadzone,
         "pedal_t" => s.pedal_throttle,
@@ -1262,6 +1265,12 @@ fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "steer_look_response" => s.steer_look_response,
         "head_idle" => s.head_idle,
         "head_idle_pace" => s.head_idle_pace,
+        "head_tracking_yaw_sens" => s.head_tracking_yaw_sens,
+        "head_tracking_pitch_sens" => s.head_tracking_pitch_sens,
+        "head_tracking_roll_sens" => s.head_tracking_roll_sens,
+        "head_tracking_x_sens" => s.head_tracking_x_sens,
+        "head_tracking_y_sens" => s.head_tracking_y_sens,
+        "head_tracking_z_sens" => s.head_tracking_z_sens,
         "seat" => s.seat[arg.trim().parse::<usize>().unwrap_or(0).min(2)],
         "seat_pitch" => s.seat_pitch_deg,
         "hour" => ((app.clock.time / 3600.0) as i64).rem_euclid(24) as f32,
@@ -1310,6 +1319,10 @@ fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option<(&'static 
         "led_glow" => {
             app.settings.led_glow = v.round() as _;
             Some(("led_glow", app.settings.led_glow.to_string()))
+        }
+        "night_brightness" => {
+            app.settings.night_brightness = v.clamp(0.0, 3.0);
+            Some(("night_brightness", app.settings.night_brightness.to_string()))
         }
         "led_mips" => {
             app.settings.led_mips = v.clamp(0.0, 4.0);
@@ -1427,6 +1440,30 @@ fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option<(&'static 
             Some(("head_idle_pace", app.settings.head_idle_pace.to_string()))
         }
         // the seat: kept for this bus (`bus_seats`), not for every bus (#1355)
+        "head_tracking_yaw_sens" => {
+            app.settings.head_tracking_yaw_sens = v.round().clamp(0.0, 100.0);
+            Some(("head_tracking_yaw_sens", app.settings.head_tracking_yaw_sens.to_string()))
+        }
+        "head_tracking_pitch_sens" => {
+            app.settings.head_tracking_pitch_sens = v.round().clamp(0.0, 100.0);
+            Some(("head_tracking_pitch_sens", app.settings.head_tracking_pitch_sens.to_string()))
+        }
+        "head_tracking_roll_sens" => {
+            app.settings.head_tracking_roll_sens = v.round().clamp(0.0, 100.0);
+            Some(("head_tracking_roll_sens", app.settings.head_tracking_roll_sens.to_string()))
+        }
+        "head_tracking_x_sens" => {
+            app.settings.head_tracking_x_sens = v.round().clamp(0.0, 100.0);
+            Some(("head_tracking_x_sens", app.settings.head_tracking_x_sens.to_string()))
+        }
+        "head_tracking_y_sens" => {
+            app.settings.head_tracking_y_sens = v.round().clamp(0.0, 100.0);
+            Some(("head_tracking_y_sens", app.settings.head_tracking_y_sens.to_string()))
+        }
+        "head_tracking_z_sens" => {
+            app.settings.head_tracking_z_sens = v.round().clamp(0.0, 100.0);
+            Some(("head_tracking_z_sens", app.settings.head_tracking_z_sens.to_string()))
+        }
         "seat" => {
             let k: usize = arg.trim().parse().unwrap_or(0).min(2);
             app.settings.seat[k] = (v * 100.0).round() / 100.0;
@@ -1518,6 +1555,12 @@ fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "brake_hold" => s.brake_hold,
         "auto_clutch" => s.auto_clutch,
         "headtrack" => s.head_tracking,
+        "head_tracking_invert_yaw" => s.head_tracking_invert_yaw,
+        "head_tracking_invert_pitch" => s.head_tracking_invert_pitch,
+        "head_tracking_invert_roll" => s.head_tracking_invert_roll,
+        "head_tracking_invert_x" => s.head_tracking_invert_x,
+        "head_tracking_invert_y" => s.head_tracking_invert_y,
+        "head_tracking_invert_z" => s.head_tracking_invert_z,
         "timetable_win" => app.timetable,
         "info_bar" => app.info_bar,
         "nav_arrows" => app.navigator.as_ref().map_or(s.nav_arrows, |n| n.arrows),
@@ -1662,6 +1705,30 @@ fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static str, String
         "headtrack" => {
             app.settings.head_tracking = on;
             Some(("head_tracking", bit))
+        }
+        "head_tracking_invert_yaw" => {
+            app.settings.head_tracking_invert_yaw = on;
+            Some(("head_tracking_invert_yaw", bit))
+        }
+        "head_tracking_invert_pitch" => {
+            app.settings.head_tracking_invert_pitch = on;
+            Some(("head_tracking_invert_pitch", bit))
+        }
+        "head_tracking_invert_roll" => {
+            app.settings.head_tracking_invert_roll = on;
+            Some(("head_tracking_invert_roll", bit))
+        }
+        "head_tracking_invert_x" => {
+            app.settings.head_tracking_invert_x = on;
+            Some(("head_tracking_invert_x", bit))
+        }
+        "head_tracking_invert_y" => {
+            app.settings.head_tracking_invert_y = on;
+            Some(("head_tracking_invert_y", bit))
+        }
+        "head_tracking_invert_z" => {
+            app.settings.head_tracking_invert_z = on;
+            Some(("head_tracking_invert_z", bit))
         }
         "camcoll" => {
             app.settings.camera_collision = on;
@@ -2262,6 +2329,7 @@ fn options_pages(app: &App) -> Vec<Page> {
         switch_row(app, "ssao", "Ambient occlusion", later).filter(|_| !app.settings.ray_tracing()),
         pick("shadow_casters", "Shadows cast by", later),
         switch_row(app, "detail_textures", "Detail texturing up close", "The ground and large walls get fine grain when close"),
+        slider_row(app, "night_brightness", "Night brightness", "Enhanced graphics: how much brighter the night is shown", &|v| if v < 0.01 { "Off".to_string() } else { format!("+{v:.2}") }),
         slider_row(app, "led_glow", "LED glow", "How strongly the dots of LED destination displays glow", &|v| format!("{}/15", v as i64)),
         slider_row(app, "led_mips", "LED mask mipmaps", "Keep the mip chain of the LED masks (smoother from a distance).", &|v| format!("{v:.2}")),
         switch_row(app, "reflections", "Reflection maps (paint, chrome, glass)", later).filter(|_| !app.settings.ray_tracing()),
@@ -2377,7 +2445,19 @@ fn options_pages(app: &App) -> Vec<Page> {
         slider_row(app, "head_idle_pace", "Sway pace", "How fast that sway moves (100% is the pace it is designed at)", &|v| format!("{:.0}%", v * 100.0)),
         switch_row(app, "hands_in_cab", "Driver's hands in the cab view", "Shows the driver's hand on the steering wheel (Cockpit only)"),
         switch_row(app, "driver", "Driver at the wheel (outside views)", "Shows the driver in the outside views and in the mirrors"),
-        switch_row(app, "headtrack", "Head tracking", &format!("Head tracking with opentrack (UDP port {})", s.head_tracking_port)),
+        switch_row(app, "headtrack", "Head tracking (native TrackIR / OpenTrack)", &format!("Use native TrackIR on Windows, or OpenTrack on UDP port {}", s.head_tracking_port)),
+        slider_row(app, "head_tracking_yaw_sens", "TrackIR yaw sensitivity", "Left / right head movement. 100% is 1:1; the low end is deliberately finer.", &|v| format!("{v:.0}%")),
+        slider_row(app, "head_tracking_pitch_sens", "TrackIR pitch sensitivity", "Up / down head movement. 100% is 1:1; the low end is deliberately finer.", &|v| format!("{v:.0}%")),
+        slider_row(app, "head_tracking_roll_sens", "TrackIR roll sensitivity", "Head tilt. 100% is 1:1; the low end is deliberately finer.", &|v| format!("{v:.0}%")),
+        slider_row(app, "head_tracking_x_sens", "TrackIR X sensitivity", "Move your head left / right. 100% is 1:1; the low end is deliberately finer.", &|v| format!("{v:.0}%")),
+        slider_row(app, "head_tracking_y_sens", "TrackIR Y sensitivity", "Move your head up / down. 100% is 1:1; the low end is deliberately finer.", &|v| format!("{v:.0}%")),
+        slider_row(app, "head_tracking_z_sens", "TrackIR Z sensitivity", "Move your head forward / back. 100% is 1:1; the low end is deliberately finer.", &|v| format!("{v:.0}%")),
+        switch_row(app, "head_tracking_invert_yaw", "Invert TrackIR yaw", "Reverse left / right head rotation"),
+        switch_row(app, "head_tracking_invert_pitch", "Invert TrackIR pitch", "Reverse up / down head rotation"),
+        switch_row(app, "head_tracking_invert_roll", "Invert TrackIR roll", "Reverse head tilt"),
+        switch_row(app, "head_tracking_invert_x", "Invert TrackIR X", "Reverse left / right head movement"),
+        switch_row(app, "head_tracking_invert_y", "Invert TrackIR Y", "Reverse up / down head movement"),
+        switch_row(app, "head_tracking_invert_z", "Invert TrackIR Z", "Reverse forward / back head movement"),
         slider_row(app, "look_sens", "Mouse look sensitivity", "How fast the view turns when looking round with the mouse (100% is OMSI's)", &pct),
         slider_row(app, "look_smoothing_ms", "Smooth the mouse look", "How long the view takes to come round to where the mouse or the stick turned it (off: at once, as OMSI)", &|v| if v <= 0.0 { "Off".to_string() } else { format!("{v:.0} ms") }),
         switch_row(app, "alt_view", "Right mouse button turns the view", "Shift+right zooms; off: right zooms as in OMSI, the wheel button turns"),

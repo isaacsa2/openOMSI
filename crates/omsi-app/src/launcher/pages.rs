@@ -576,6 +576,11 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
         }
         sel_setting(ui, s, dirty, "s-casters", c.row(), "Shadows cast by", "shadow_casters", &[("all", "Every solid mesh"), ("omsi", "[shadow] meshes, as OMSI")]);
         toggle_setting(ui, s, dirty, c.row(), "Detail texturing up close", "detail_textures");
+        let mut night = get(s, "night_brightness").as_f64().unwrap_or(0.0) as f32;
+        if ui.slider("s-night", c.row(), &mut night, 0.0, 3.0, 0.25, "Night brightness", &|v| if v < 0.01 { "Off".to_string() } else { format!("+{v:.2}") }) {
+            s["night_brightness"] = json!((night / 0.25).round() * 0.25);
+            *dirty = 0.3;
+        }
         // (an LED panel's dots are its own light: how bright they burn, and how much of the
         // mip chain the panel's picture and its mask are held at - 0 point-samples them,
         // the sharpest dots and the worst shimmer; higher holds them at the level the
@@ -671,6 +676,8 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
     toggle_setting(ui, s, dirty, c.row(), "Indicators cancel themselves (as the bus's script does)", "blinker_cancel");
     toggle_setting(ui, s, dirty, c.row(), "The keyboard brake stays on until the throttle (as in OMSI)", "brake_hold");
     toggle_setting(ui, s, dirty, c.row(), "Automatic clutch (manual gearboxes)", "auto_clutch");
+    // (it was in the game's menu only, #1780)
+    toggle_setting(ui, s, dirty, c.row(), "Automated manual gearbox (shifts a manual gearbox for you by the engine speed)", "auto_shift");
     if ui.button("s-go-keys", c.row(), "Change the keys", Some("keyboard"), ButtonKind::Normal) {
         out.controls = Some(0);
     }
@@ -818,7 +825,61 @@ fn camera_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, co
     toggle_setting(ui, s, dirty, c.row(), "Camera collisions (outside view)", "camera_collision");
     toggle_setting(ui, s, dirty, c.row(), "Driver at the wheel (outside views)", "driver");
     c.section(ui, "Head tracking");
-    toggle_setting(ui, s, dirty, c.row(), "Head tracking (TrackIR and others through opentrack, UDP 4242)", "head_tracking");
+    toggle_setting(ui, s, dirty, c.row(), "Head tracking (native TrackIR / OpenTrack)", "head_tracking");
+
+    // TrackIR axis controls. Values are stored as user-facing percentages:
+    // 0% disables an axis; 100% (the default) is 1:1.
+    c.section(ui, "Rotation");
+    for (key, id, label) in [
+        ("head_tracking_yaw_sens", "s-trackir-yaw", "Yaw sensitivity (left / right)"),
+        ("head_tracking_pitch_sens", "s-trackir-pitch", "Pitch sensitivity (up / down)"),
+        ("head_tracking_roll_sens", "s-trackir-roll", "Roll sensitivity"),
+    ] {
+        let mut v = get(s, key).as_f64().unwrap_or(100.0) as f32;
+        if ui.slider(id, c.row(), &mut v, 0.0, 100.0, 1.0, label, &|v| {
+            if v <= 0.0 { "Off".to_string() } else { format!("{v:.0}%") }
+        }) {
+            s[key] = json!(v.round().clamp(0.0, 100.0));
+            *dirty = 0.3;
+        }
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Invert yaw", "head_tracking_invert_yaw");
+    toggle_setting(ui, s, dirty, c.row(), "Invert pitch", "head_tracking_invert_pitch");
+    toggle_setting(ui, s, dirty, c.row(), "Invert roll", "head_tracking_invert_roll");
+
+    c.section(ui, "Position");
+    for (key, id, label) in [
+        ("head_tracking_x_sens", "s-trackir-x", "X sensitivity (left / right)"),
+        ("head_tracking_y_sens", "s-trackir-y", "Y sensitivity (up / down)"),
+        ("head_tracking_z_sens", "s-trackir-z", "Z sensitivity (forward / back)"),
+    ] {
+        let mut v = get(s, key).as_f64().unwrap_or(100.0) as f32;
+        if ui.slider(id, c.row(), &mut v, 0.0, 100.0, 1.0, label, &|v| {
+            if v <= 0.0 { "Off".to_string() } else { format!("{v:.0}%") }
+        }) {
+            s[key] = json!(v.round().clamp(0.0, 100.0));
+            *dirty = 0.3;
+        }
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Invert X", "head_tracking_invert_x");
+    toggle_setting(ui, s, dirty, c.row(), "Invert Y", "head_tracking_invert_y");
+    toggle_setting(ui, s, dirty, c.row(), "Invert Z", "head_tracking_invert_z");
+
+    if ui.button("s-trackir-reset", c.row(), "Reset head-tracking axes", Some("restart_alt"), ButtonKind::Normal) {
+        for key in [
+            "head_tracking_yaw_sens", "head_tracking_pitch_sens", "head_tracking_roll_sens",
+            "head_tracking_x_sens", "head_tracking_y_sens", "head_tracking_z_sens",
+        ] {
+            s[key] = json!(15.0);
+        }
+        for key in [
+            "head_tracking_invert_yaw", "head_tracking_invert_pitch", "head_tracking_invert_roll",
+            "head_tracking_invert_x", "head_tracking_invert_y", "head_tracking_invert_z",
+        ] {
+            s[key] = json!(false);
+        }
+        *dirty = 0.3;
+    }
     c.section(ui, "Triple screen");
     toggle_setting(
         ui,
@@ -2713,14 +2774,14 @@ mod settings_tests {
     fn by_tab() -> Vec<Vec<&'static str>> {
         let mut graphics = vec![
             "s-gp-sel", "s-gp-load", "s-gp-del", "s-gp-name", "s-gp-save",
-            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "s-cloud-quality", "set-windy_trees",
+            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-night", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "s-cloud-quality", "set-windy_trees",
             "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression", "s-gpu-texcomp",
         ];
         if !cfg!(target_os = "macos") {
             graphics.push("s-api");
         }
         let driving = vec![
-            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-momentary_gears", "s-go-keys",
+            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-auto_shift", "set-momentary_gears", "s-go-keys",
             "s-wrange", "s-wlock", "s-pad-steer-smooth", "set-pad_steer_linear", "set-arrows_switch_cams", "s-pedt", "s-pedb", "set-ff_enabled", "set-ff_invert", "s-ffroad", "s-ffeng", "s-fffade", "s-wreset", "s-go-pads",
         ];
         let mut camera = vec![
@@ -2746,6 +2807,11 @@ mod settings_tests {
             "set-camera_collision",
             "set-driver",
             "set-head_tracking",
+            "s-trackir-yaw", "s-trackir-pitch", "s-trackir-roll",
+            "set-head_tracking_invert_yaw", "set-head_tracking_invert_pitch", "set-head_tracking_invert_roll",
+            "s-trackir-x", "s-trackir-y", "s-trackir-z",
+            "set-head_tracking_invert_x", "set-head_tracking_invert_y", "set-head_tracking_invert_z",
+            "s-trackir-reset",
             "set-triple_screen",
             "set-triple_span",
             "set-triple_hud_center",
