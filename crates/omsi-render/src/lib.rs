@@ -2236,6 +2236,19 @@ pub const MSAA: u32 = 4;
 /// Sun shadow map resolution when nothing else is asked for.
 pub const SHADOW_SIZE: u32 = 2048;
 
+/// Whether BC/DXT textures may stay compressed on the GPU.
+///
+/// `Auto` keeps the normal adapter-driven behaviour, `Enabled` explicitly keeps that
+/// path selected, and `Disabled` leaves BC support out of the device so compressed source
+/// textures are decoded to RGBA by the existing upload path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuTextureCompression {
+    #[default]
+    Auto,
+    Enabled,
+    Disabled,
+}
+
 /// What the renderer is built with: the user's graphics settings.
 #[derive(Debug, Clone, Copy)]
 pub struct RenderOptions {
@@ -2251,9 +2264,11 @@ pub struct RenderOptions {
     /// (0.5..1); 0 = automatic: full size up to `AUTO_SCALE_PIXELS`, smaller above.
     pub render_scale: f32,
     /// Uncompressed texture files (BMP, TGA, JPG) are compressed to BC1/BC3 on loading
-    /// where the device takes block formats and the result is close to the picture
-    /// (DXT files always go up as blocks there).
+    /// where the device takes block formats and the result is close to the picture.
     pub compress_textures: bool,
+    /// Whether source BC/DXT textures may remain compressed on the GPU. Disabled makes the
+    /// existing texture loader decode them to RGBA instead.
+    pub gpu_texture_compression: GpuTextureCompression,
     /// FXAA over the enhanced path's tone-mapped picture.
     pub fxaa: bool,
     /// The original's `performance_minObjSize` (see `Lighting::min_obj_size`, which may
@@ -2293,6 +2308,7 @@ impl Default for RenderOptions {
             ssao: true,
             render_scale: 0.0,
             compress_textures: true,
+            gpu_texture_compression: GpuTextureCompression::Auto,
             fxaa: true,
             min_obj_size: 0.013,
             max_obj_dist: 0.0,
@@ -2645,10 +2661,21 @@ impl Renderer {
         if omsi_cfg::env::var_os("OMSI_GPU_TIMERS").is_some() {
             required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
-        // DXT textures stay compressed on the GPU where it takes them (Apple silicon does);
-        // OMSI_NO_BC=1 uploads everything as RGBA (the old way, for comparisons)
-        if omsi_cfg::env::var_os("OMSI_NO_BC").is_none() {
+        // DXT/BC textures normally stay compressed on a GPU that takes them. The launcher
+        // compatibility setting can deliberately leave BC support out of the device; the
+        // existing upload path then decodes those textures to RGBA. OMSI_NO_BC=1 remains a
+        // hard diagnostic override.
+        let bc_allowed = !matches!(
+            options.gpu_texture_compression,
+            GpuTextureCompression::Disabled
+        ) && omsi_cfg::env::var_os("OMSI_NO_BC").is_none();
+        if bc_allowed {
             required_features |= adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC;
+        } else if matches!(
+            options.gpu_texture_compression,
+            GpuTextureCompression::Disabled
+        ) {
+            log::info!("GPU texture compression disabled by settings; DXT/BC textures will be decoded to RGBA");
         }
         if intel_vulkan_safe {
             // Keep vkCreateDevice entirely free of optional extensions. Compressed source
