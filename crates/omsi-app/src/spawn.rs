@@ -116,6 +116,7 @@ fn attach_coupled_types(
 pub(crate) struct PreparedPlayer {
     pub(crate) ty: Arc<omsi_sim::VehicleType>,
     parts: Vec<(Arc<omsi_sim::VehicleType>, bool)>,
+    staged: Option<scene::VehiclePrefetch>,
 }
 
 impl PreparedPlayer {
@@ -124,15 +125,16 @@ impl PreparedPlayer {
         let path = player_bus_path(&args.root, bus)?;
         let ty = Arc::new(omsi_sim::VehicleType::load(&args.root, &path)?);
         let parts = load_coupled_types(&args.root, ty.clone());
-        Ok(Self { ty, parts })
+        Ok(Self { ty, parts, staged: None })
     }
 
-    pub(crate) fn prefetch(&self, prefetch: &scene::VehiclePrefetch, paint: Option<&str>) {
+    pub(crate) fn prefetch(&mut self, prefetch: scene::VehiclePrefetch, paint: Option<&str>) {
         let scheme = paint_scheme(&self.ty, paint);
         prefetch.prefetch(&self.ty, scheme);
         for (ty, _) in &self.parts {
             prefetch.prefetch(ty, scheme.filter(|i| *i < ty.paint_schemes.len()));
         }
+        self.staged = Some(prefetch);
     }
 }
 
@@ -224,8 +226,11 @@ pub(crate) fn spawn_player_prepared(
     world: &World,
     renderer: &Renderer,
     scene: &mut Scene,
-    prepared: PreparedPlayer,
+    mut prepared: PreparedPlayer,
 ) -> Result<Option<Player>> {
+    if let Some(staged) = prepared.staged.take() {
+        world.accept_placement_prefetch(staged);
+    }
     let vt = prepared.ty;
     log::info!(
         "vehicle {} {}: {} meshes, {} script blocks, {} variables",

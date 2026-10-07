@@ -2570,13 +2570,13 @@ impl App {
             hof: hof.or(self.args.hof.clone()),
             ..self.args.clone()
         };
-        let prefetch = w.vehicle_prefetch(r);
+        let prefetch = w.placement_prefetch(r);
         let worker_args = one.clone();
         let (tx, receiver) = std::sync::mpsc::channel();
         let worker = std::thread::Builder::new().name("vehicle-placement".into()).spawn(move || {
             let start = Instant::now();
-            let result = crate::spawn::PreparedPlayer::load(&worker_args).map(|prepared| {
-                prepared.prefetch(&prefetch, worker_args.paint.as_deref());
+            let result = crate::spawn::PreparedPlayer::load(&worker_args).map(|mut prepared| {
+                prepared.prefetch(prefetch, worker_args.paint.as_deref());
                 prepared
             });
             log::info!("vehicle placement: preparation {:.3} s", start.elapsed().as_secs_f64());
