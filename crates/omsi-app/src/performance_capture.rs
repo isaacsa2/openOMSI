@@ -241,15 +241,29 @@ impl crate::App {
         let gpu = self.renderer.as_ref().map(|r| r.gpu_pass_times()).unwrap_or_default();
         let memory = memory();
         let out = capture.output.clone();
+        let benchmark = capture.benchmark.is_some();
         omsi_cfg::env::set_profile_capture(false);
         if let Some(r) = self.renderer.as_mut() {
             r.set_profiling(omsi_cfg::env::var_os("OMSI_PROFILE").is_some());
         }
-        // Writing a large JSON file is outside the measured frame and off the UI thread.
-        std::thread::spawn(move || match capture.write(gpu, memory) {
-            Ok(()) => log::info!("performance capture exported to {}", out.display()),
-            Err(e) => log::warn!("could not export performance capture: {e:#}"),
-        });
+        if benchmark {
+            // The benchmark ends after its measured window. Write synchronously now, outside
+            // that window, so process exit cannot race the export worker and lose the result.
+            match capture.write(gpu, memory) {
+                Ok(()) => {
+                    log::info!("benchmark capture exported to {}", out.display());
+                    self.args.exit_after = Some(self.started.elapsed().as_secs_f32() + 0.5);
+                }
+                Err(e) => log::warn!("could not export benchmark capture: {e:#}"),
+            }
+        } else {
+            // An ordinary game keeps running; keep its potentially large JSON write off the UI
+            // thread after sampling has ended.
+            std::thread::spawn(move || match capture.write(gpu, memory) {
+                Ok(()) => log::info!("performance capture exported to {}", out.display()),
+                Err(e) => log::warn!("could not export performance capture: {e:#}"),
+            });
+        }
     }
 }
 
