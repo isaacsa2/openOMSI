@@ -248,11 +248,13 @@ pub(crate) struct Args {
     /// may be given several times. `OMSI_CONTENT_ZIP` (separated like PATH) does the same.
     #[arg(long = "content-zip")]
     pub(crate) content_zip: Vec<PathBuf>,
-    /// Experimental: replace large WAV/O3D assets under Vehicles and Sceneryobjects with
-    /// transparent compressed sidecars, then exit. Use only on a copy while testing.
+    /// Analyze how much supported content can be compressed without changing any file.
+    #[arg(long, hide = true)]
+    pub(crate) analyze_compression: bool,
+    /// Experimental: losslessly compress supported large content assets, then exit.
     #[arg(long, hide = true)]
     pub(crate) compress_assets: bool,
-    /// Restore assets replaced by --compress-assets, then exit.
+    /// Restore every asset replaced by --compress-assets, then exit.
     #[arg(long, hide = true)]
     pub(crate) restore_compressed_assets: bool,
 }
