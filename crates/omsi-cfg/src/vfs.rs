@@ -132,6 +132,15 @@ fn read_compressed(path: &Path) -> io::Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Size a byte slice would take in the experimental sidecar format. Used by the launcher
+/// to estimate savings without changing the file.
+pub fn trial_compressed_size(data: &[u8]) -> io::Result<u64> {
+    let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(data)?;
+    let payload = encoder.finish()?;
+    Ok((COMPRESSED_HEADER + payload.len()) as u64)
+}
+
 /// Result of attempting to compress one loose asset.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompressionResult {
