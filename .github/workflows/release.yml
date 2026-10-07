@@ -296,7 +296,7 @@ jobs:
           ls -l out
           # what changed: this version's section of CHANGELOG.md (up to the next version)
           awk -v v="## $VERSION" 'index($0, v) == 1 && (length($0) == length(v) || substr($0, length(v) + 1, 1) == " ") {f = 1; next} f && /^## / {exit} f {print}' CHANGELOG.md > changes.md
-          # a release for every push: without a section of its own, what CHANGELOG.md gained
+          # Without a section of its own, use what CHANGELOG.md gained since the previous stable.
           # since the previous release (the lines added, in their order)
           if ! grep -q '[^[:space:]]' changes.md; then
             prev=$(git tag -l 'v*' --sort=-v:refname | grep -vx "v$VERSION" | head -1)
