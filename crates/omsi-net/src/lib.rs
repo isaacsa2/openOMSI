@@ -1734,6 +1734,18 @@ impl LanSession {
         &self.world.weather
     }
 
+    /// Change the session weather. A host publishes the new value with the next CLOCK
+    /// immediately instead of waiting for the regular five-second clock interval.
+    pub fn set_weather(&mut self, weather: &str) {
+        let weather = clean_text(&weather.trim().replace('\\', "/"), 260);
+        if self.world.weather != weather {
+            self.world.weather = weather;
+            if self.role == Role::Host {
+                self.clock_acc = CLOCK_EVERY;
+            }
+        }
+    }
+
     pub fn set_clock(&mut self, date: &str, time: f64) {
         if self.world.date != date {
             self.world.date = date.to_string();
