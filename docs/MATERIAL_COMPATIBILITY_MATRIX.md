@@ -3,8 +3,14 @@
 The synthetic configuration in `crates/omsi-model/tests/fixtures` is original test data; it uses no DLC assets and does not load its placeholder textures or mesh.
 
 Run `cargo test --locked -p omsi-model compatibility_fixture`.
+Also run `cargo test --locked -p omsi-sim synthetic_material_plan`.
 
 It checks preservation of ordered multiple lightmaps alongside freetex and alphascale, distinct indices for a repeated texture name, case-insensitive base-slot inheritance for matl_item, and isolation of a variant's transmap. It preserves alpha/depth directives but does not prove rendered transparency correctness.
+The synthetic runtime test uses the same fixture with two material slots and the
+existing PropsPlan/compute_mesh_props paths. It sweeps both lighting variables,
+the 0.5 threshold, alpha 0/0.5/1, variant selection 0/1, and an undeclared lighting
+variable after rebuilding the plan. Texture compositing and GPU rendering still
+require a manual test.
 
 | Issue | Automated coverage | Required manual retest |
 | --- | --- | --- |
