@@ -107,6 +107,8 @@ def compare(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     stages.sort(key=lambda row: row["delta_ms"], reverse=True)
 
     mismatches = []
+    if base.get("benchmark") != candidate.get("benchmark"):
+        mismatches.append(f"benchmark: {base.get('benchmark')!r} -> {candidate.get('benchmark')!r}")
     for key in ("requested_seconds", "warmup_seconds"):
         if base.get(key) != candidate.get(key):
             mismatches.append(f"{key}: {base.get(key)!r} -> {candidate.get(key)!r}")
