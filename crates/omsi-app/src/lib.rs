@@ -188,7 +188,8 @@ pub fn run() -> Result<()> {
             ""
         }
     );
-    let args = Args::parse();
+    let mut args = Args::parse();
+    apply_benchmark(&mut args);
     omsi_cfg::env::set_profile_capture(args.profile_capture.is_some());
     // Diagnostics must work even when an OMSI installation or the graphics device
     // is unavailable; do this before content validation or renderer creation.
@@ -254,16 +255,20 @@ pub(crate) fn prepare(mut args: Args, bare: bool) -> Result<Option<(Args, Option
     };
     // the scripts' `random` differs from session to session (starting air pressure, part
     // lifetimes ...); OMSI_SEED=n repeats a session's numbers
-    let seed = omsi_cfg::env::var("OMSI_SEED")
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .unwrap_or_else(|| {
-            let t = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(1);
-            (t ^ ((std::process::id() as u64) << 32)) % 1_000_000_000
-        });
+    let seed = if args.benchmark {
+        BENCHMARK_SEED
+    } else {
+        omsi_cfg::env::var("OMSI_SEED")
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or_else(|| {
+                let t = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(1);
+                (t ^ ((std::process::id() as u64) << 32)) % 1_000_000_000
+            })
+    };
     omsi_script::set_session_seed(seed);
     log::info!("script random seed {seed} (OMSI_SEED={seed} repeats it)");
     let launcher_mode = args.launcher || (bare && !args.menu);
@@ -304,6 +309,27 @@ pub(crate) fn prepare(mut args: Args, bare: bool) -> Result<Option<(Args, Option
                 std::process::exit(1);
             }
         }
+    }
+    if args.benchmark {
+        let required = [
+            "maps/Grundorf/global.cfg",
+            "Vehicles/MAN_SD200/MAN_SD80.bus",
+        ];
+        let missing: Vec<_> = required
+            .iter()
+            .filter(|rel| !args.root.join(rel).is_file())
+            .copied()
+            .collect();
+        if !missing.is_empty() {
+            return Err(anyhow!(
+                "benchmark {} needs the stock OMSI 2 files: {}",
+                BENCHMARK_SCENARIO,
+                missing.join(", ")
+            ));
+        }
+        log::info!(
+            "benchmark {BENCHMARK_SCENARIO}: Grundorf, MAN SD80, stock traffic/timetable/passengers, seed {BENCHMARK_SEED}"
+        );
     }
     if let Some(memo) = root_memo().filter(|_| is_omsi_root(&args.root)) {
         let _ = std::fs::write(memo, args.root.to_string_lossy().as_bytes());
@@ -352,18 +378,33 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
             Err(e) => log::warn!("LAN: {e}"),
         }
     }
+    // Benchmark pacing is local to this run; it never rewrites settings.cfg. Keep the
+    // selected graphics quality/backend, but remove presentation caps and automatic
+    // resolution changes so captures from the same preset are comparable.
+    let mut settings = settings::Settings::load();
+    if args.benchmark {
+        settings.fullscreen = false;
+        settings.vsync = false;
+        settings.max_fps = 1000;
+        settings.render_scale = 1.0;
+        settings.time_sync = false;
+        settings.metar_sync = false;
+        settings.time_speed = 1.0;
+        settings.vr = false;
+        settings.triple_span = false;
+    }
+
     // a duty starts at its trip, as in OMSI (not at the map's entry point); a joining
     // player's once the host's world is known (below): it was never placed at all, and
     // "Automatic" put it at the map's first entry point, the depot
     // real-time sync: the game starts at this device's date and time (a joining player's
     // clock is the host's, a server's is its server.cfg's); a duty does not move it
-    if settings::Settings::load().time_sync && args.lan_join.is_none() && args.server.is_none() && args.offscreen.is_none() {
+    if settings.time_sync && args.lan_join.is_none() && args.server.is_none() && args.offscreen.is_none() {
         real_time::start_at_now(&mut args);
     }
     if args.export_glb.is_none() && args.lan_join.is_none() {
         place_on_duty(&mut args);
     }
-    let settings = settings::Settings::load();
     applog::log_system(&settings);
     if args.drive_keys.eq_ignore_ascii_case("simple")
         && !settings.drive_keys.eq_ignore_ascii_case("simple")
@@ -451,9 +492,17 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     // (as the last session left it, #1164)
     let info_bar = settings.info_bar;
     let is_server = args.server.is_some();
-    let capture = args.profile_capture.map(|seconds| performance_capture::Capture::new(
-        seconds, args.profile_delay, args.profile_output.clone().unwrap_or_else(||
-            omsi_launcher_lib::data_dir().join(format!("performance-{}", std::process::id())))));
+    let capture = args.profile_capture.map(|seconds| {
+        let output = args.profile_output.clone().unwrap_or_else(|| {
+            omsi_launcher_lib::data_dir().join(format!("performance-{}", std::process::id()))
+        });
+        performance_capture::Capture::new(
+            seconds,
+            args.profile_delay,
+            output,
+            args.benchmark.then(|| BENCHMARK_SCENARIO.to_string()),
+        )
+    });
     let mut app = App {
         args,
         instance: graphics_instance(),
