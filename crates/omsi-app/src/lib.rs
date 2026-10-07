@@ -295,11 +295,37 @@ pub(crate) fn prepare(mut args: Args, bare: bool) -> Result<Option<(Args, Option
             }
         }
     }
-    if args.compress_assets && args.restore_compressed_assets {
-        return Err(anyhow!("--compress-assets and --restore-compressed-assets cannot be used together"));
+    let storage_modes = args.analyze_compression as u8 + args.compress_assets as u8 + args.restore_compressed_assets as u8;
+    if storage_modes > 1 {
+        return Err(anyhow!("use only one of --analyze-compression, --compress-assets or --restore-compressed-assets"));
     }
-    if args.compress_assets || args.restore_compressed_assets {
-        asset_storage::run(&args.root, args.restore_compressed_assets)?;
+    if storage_modes == 1 {
+        let mode = if args.analyze_compression {
+            asset_storage::Mode::Analyze
+        } else if args.compress_assets {
+            asset_storage::Mode::Compress
+        } else {
+            asset_storage::Mode::Restore
+        };
+        let report = asset_storage::execute(&args.root, mode, |m| println!("{m}"))?;
+        match mode {
+            asset_storage::Mode::Analyze => {
+                println!(
+                    "eligible: {} files, {:.2} GiB; estimated saving {:.2} GiB",
+                    report.eligible_files,
+                    report.eligible_bytes as f64 / 1073741824.0,
+                    report.estimated_saved_bytes() as f64 / 1073741824.0
+                );
+            }
+            asset_storage::Mode::Compress => {
+                println!(
+                    "active: {} files compressed; {:.2} GiB saved",
+                    report.compressed_files,
+                    report.current_saved_bytes() as f64 / 1073741824.0
+                );
+            }
+            asset_storage::Mode::Restore => println!("content compression disabled; original files restored"),
+        }
         return Ok(None);
     }
 
