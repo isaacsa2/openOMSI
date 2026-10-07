@@ -29,6 +29,7 @@ Não reaplicamos esses patches sobre a main: o pacote usa a implementação ofic
 | [#111](https://github.com/isaacsa2/openOMSI/pull/111) — `fix/balanced-graphics-presets` | Launcher e jogo usam os mesmos presets. Low/Medium mais leves, memória de textura automática, refresh de espelhos persistido; novos padrões desktop mais leves. Configurações personalizadas salvas continuam respeitadas. | Nenhum benchmark de FPS ou garantia para todos os PCs. Mudanças gráficas que dependem da inicialização precisam reiniciar o jogo. |
 | [#112](https://github.com/isaacsa2/openOMSI/pull/112) — `feat/ingame-vehicle-hof-search` | Busca no jogo por modelo/pacote, HOF e destino; Enter confirma e Esc cancela; mantém a identidade da seleção. | Testes sintéticos de filtro; interação visual ainda precisa de teste. Letras/símbolos de linha já têm suporte na main e precisam validação com scripts reais. |
 | [#113](https://github.com/isaacsa2/openOMSI/pull/113) — `fix/ai-timetable-stop-waits` | Perfil selecionado determina espera por objeto e horário da visita. Paradas comuns liberam após passageiros; tipos 3/4 e terminal mantêm a espera. Antes a espera antecipada era aplicada indiscriminadamente. | Preserva tolerância existente dos pontos de horário e política ferroviária. Validar horários, repetição da mesma parada, streaming e troca de tour. |
+| [`fix-duty-reselect-current-trip`](https://github.com/isaacsa2/openOMSI/tree/fix-duty-reselect-current-trip) | A seleção/reseleção de uma viagem e parada inicializa o turno com a hora atual do jogo, em vez do horário da primeira partida do tour. A escolha explícita de viagem/parada continua prevalecendo. | Integração sem conflito com busca e espera nos pontos. Testar seleção de uma viagem posterior à primeira e verificar horário, papel e destino após a seleção. |
 
 ## Diagnóstico dos 13 relatos originais
 
@@ -58,13 +59,14 @@ Também permanece aberto o relato de zero tráfego em certos mapas: é necessár
 - Após a sincronização, merges dos cinco PRs não tiveram conflitos. No pacote, dois testes acrescentados no mesmo local de `humans.rs` precisaram ser concatenados; ambos foram preservados.
 - `git diff --check` passou nos cinco PRs e no pacote. O fmt global já falhava na base oficial; não foi aplicada reformatação geral. Não há Rust instalado no ambiente retomado para repetir os checks locais.
 - Pushes desta atualização disparam novos checks/builds. A validação anterior não substitui o resultado do novo commit ou do pacote combinado. Não aguardamos CI em loop.
+- Adicionado `fix-duty-reselect-current-trip`, commit de origem `2bc2d3c`: aplicação sem conflito, helper removido sem referências restantes e `git diff --check` aprovado. Busca no jogo e espera nos pontos preservadas; execução do caso real e testes/build do novo pacote dependem de validação adicional.
 - Nenhuma classificação nova como “bug do asset/configuração” foi confirmada sem os arquivos. Não houve benchmark de desempenho nem execução dos mapas do relato nesta máquina.
 
 ## Mensagem para os betatesters
 
 Pessoal, atualizei o pacote experimental pra main atual do openOMSI, já com as mudanças da 0.2.13. Oito correções nossas entraram na versão oficial: passageiros, timetable, paradas, alinhamento de plataformas, restrições, semáforos, desvio de carros estacionados e limpeza de perfil.
 
-O pacote acrescenta ajustes nas portas traseiras e na entrada a pé de articulados, na espera do ônibus AI nos pontos, presets gráficos mais leves e busca de veículos/HOF/destinos dentro do jogo.
+O pacote acrescenta ajustes nas portas traseiras e na entrada a pé de articulados, na espera do ônibus AI nos pontos, presets gráficos mais leves e busca de veículos/HOF/destinos dentro do jogo. Também inclui um ajuste ao escolher ou reselecionar uma viagem do turno: usa a hora atual do jogo e mantém a viagem/parada escolhida.
 
 Quando o build da plataforma terminar, usem o artifact da PR #106: https://github.com/isaacsa2/openOMSI/pull/106 . Extraiam numa pasta separada e confiram a versão que aparece no launcher. O download oficial pode aparecer antes ou depois deste pacote; os testes precisam identificar qual build foi usado.
 
@@ -78,6 +80,7 @@ Queria que vocês testassem principalmente:
 - Portas direitas/esquerdas, plataformas centrais/BRT, articulados e paradas em curva. Retestem a plataforma direita de Curitiba; esse caso e o Recife ainda precisam confirmação.
 - Presets Low e Medium, comparando com as configurações anteriores no mesmo local. Reiniciem depois de mudar o preset e mandem FPS, placa de vídeo, resolução e mapa. Configuração salva não muda sozinha.
 - Busca de veículo, HOF e destino dentro do jogo: digitar, confirmar, apagar a busca e cancelar com Esc.
+- Selecionar ou reselecionar uma viagem posterior à primeira do turno, sem mudar a hora do jogo: conferir viagem, parada, horário, papel e letreiro. Testem também a troca para a viagem seguinte.
 - Launcher e menu de pausa no Steam Deck/telas pequenas e no desktop: campos, botões e rolagem.
 - Exclusão de um perfil temporário: os runs dele devem sumir sem afetar outro perfil.
 - Linhas com símbolos/letras, como -10, 10E e N41.
