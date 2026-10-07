@@ -25642,9 +25642,86 @@ _version: 2
   pt: "Alta (volumétricas)"
   pt-pt: "Alta (volumétricas)"
 "The mouse is on the plugin panels · Esc gives it back":
+  pt: "O mouse está nos painéis dos plugins · Esc devolve o controle"
+  pt-pt: "O rato está nos painéis dos plugins · Esc devolve o controlo"
   de: "Die Maus ist auf den Plugin-Fenstern · Esc gibt sie zurück"
   nl: "De muis staat op de pluginpanelen · Esc geeft hem terug"
   fr: "La souris est sur les panneaux des plugins · Échap la rend"
   ru: "Мышь на панелях плагинов · Esc возвращает её"
   uk: "Миша на панелях плагінів · Esc повертає її"
   pl: "Mysz jest na panelach wtyczek · Esc ją oddaje"
+"GPU texture compression":
+  pt: "Compressão de texturas na GPU"
+  pt-pt: "Compressão de texturas na GPU"
+"Disabled — decode DXT/BC to RGBA":
+  pt: "Desativada — converter DXT/BC em RGBA"
+  pt-pt: "Desativada — converter DXT/BC em RGBA"
+"Export diagnostics":
+  pt: "Exportar diagnóstico"
+  pt-pt: "Exportar diagnóstico"
+"Support package saved: {}":
+  pt: "Pacote de diagnóstico salvo: {}"
+  pt-pt: "Pacote de diagnóstico guardado: {}"
+"Could not export diagnostics: {why}":
+  pt: "Não foi possível exportar o diagnóstico: {why}"
+  pt-pt: "Não foi possível exportar o diagnóstico: {why}"
+"Join via":
+  pt: "Conectar via"
+  pt-pt: "Ligar através de"
+"8x MSAA":
+  pt: "MSAA 8x"
+  pt-pt: "MSAA 8x"
+"Windy trees":
+  pt: "Árvores ao vento"
+  pt-pt: "Árvores ao vento"
+"Automated manual gearbox (shifts a manual gearbox for you by the engine speed)":
+  pt: "Câmbio manual automatizado (troca as marchas conforme a rotação do motor)"
+  pt-pt: "Caixa manual automatizada (muda de velocidade conforme a rotação do motor)"
+"Stick steers like a wheel (a wheel seen as a gamepad)":
+  pt: "Analógico dirige como volante (volante detectado como controle)"
+  pt-pt: "Manípulo dirige como volante (volante detetado como comando)"
+"Arrow keys switch the cameras with a wheel too (no glance)":
+  pt: "Setas também trocam as câmeras ao usar volante (sem olhar para os lados)"
+  pt-pt: "As setas também mudam de câmara ao usar um volante (sem olhar para os lados)"
+"Head tracking (native TrackIR / OpenTrack)":
+  pt: "Rastreamento da cabeça (TrackIR nativo / OpenTrack)"
+  pt-pt: "Seguimento da cabeça (TrackIR nativo / OpenTrack)"
+"Invert yaw":
+  pt: "Inverter rotação horizontal"
+  pt-pt: "Inverter rotação horizontal"
+"Invert pitch":
+  pt: "Inverter inclinação vertical"
+  pt-pt: "Inverter inclinação vertical"
+"Invert roll":
+  pt: "Inverter inclinação lateral"
+  pt-pt: "Inverter inclinação lateral"
+"Invert X":
+  pt: "Inverter X"
+  pt-pt: "Inverter X"
+"Invert Y":
+  pt: "Inverter Y"
+  pt-pt: "Inverter Y"
+"Invert Z":
+  pt: "Inverter Z"
+  pt-pt: "Inverter Z"
+"Reset head-tracking axes":
+  pt: "Redefinir eixos do rastreamento da cabeça"
+  pt-pt: "Repor eixos do seguimento da cabeça"
+"Add a station":
+  pt: "Adicionar uma parada"
+  pt-pt: "Adicionar uma paragem"
+"Back to keys":
+  pt: "Voltar às teclas"
+  pt-pt: "Voltar às teclas"
+"Add event…":
+  pt: "Adicionar evento…"
+  pt-pt: "Adicionar evento…"
+"Event added. Press the key you want to use (Escape cancels).":
+  pt: "Evento adicionado. Pressione a tecla desejada (Esc cancela)."
+  pt-pt: "Evento adicionado. Prima a tecla pretendida (Esc cancela)."
+"Click again to remove":
+  pt: "Clique novamente para remover"
+  pt-pt: "Clique novamente para remover"
+"Remove this device":
+  pt: "Remover este dispositivo"
+  pt-pt: "Remover este dispositivo"

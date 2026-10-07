@@ -809,8 +809,8 @@ impl State {
     fn handle(&mut self, m: Msg) {
         match m {
             Msg::Diagnostics(result) => match result {
-                Ok(path) => self.set_status(format!("Support package saved: {}", path.display()), false),
-                Err(why) => self.set_status(format!("Could not export diagnostics: {why}"), true),
+                Ok(path) => self.set_status(omsi_ui::tr("Support package saved: {}").replacen("{}", &path.display().to_string(), 1), false),
+                Err(why) => self.set_status(omsi_ui::tr("Could not export diagnostics: {why}").replacen("{why}", &why.to_string(), 1), true),
             },
             Msg::Crashed(why) => {
                 log::error!("launcher: a background job stopped: {why}");
