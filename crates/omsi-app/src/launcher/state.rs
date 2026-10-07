@@ -35,6 +35,7 @@ pub enum Msg {
     /// A background job stopped on an error of its own (a panic): whatever it was loading
     /// is not coming.
     Crashed(String),
+    Diagnostics(Result<std::path::PathBuf, String>),
 }
 
 /// A server in the Multiplayer page's list (`~/.openomsi/servers.json`), as the player
@@ -365,7 +366,7 @@ impl State {
         self.spawn(move || Msg::Launched(core::launch(&d).map_err(|e| format!("{e:#}"))));
     }
 
-    fn spawn(&self, f: impl FnOnce() -> Msg + Send + 'static) {
+    pub(crate) fn spawn(&self, f: impl FnOnce() -> Msg + Send + 'static) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             // (a job that panics - an odd file of some mod - sent nothing, and the page
@@ -807,6 +808,10 @@ impl State {
 
     fn handle(&mut self, m: Msg) {
         match m {
+            Msg::Diagnostics(result) => match result {
+                Ok(path) => self.set_status(format!("Support package saved: {}", path.display()), false),
+                Err(why) => self.set_status(format!("Could not export diagnostics: {why}"), true),
+            },
             Msg::Crashed(why) => {
                 log::error!("launcher: a background job stopped: {why}");
                 self.loading_content = false;

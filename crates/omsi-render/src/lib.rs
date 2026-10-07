@@ -1984,6 +1984,8 @@ pub struct Renderer {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub adapter_name: String,
+    /// Hardware/driver metadata of this device, without OS paths or serial numbers.
+    pub adapter_info: wgpu::AdapterInfo,
     camera_layout: wgpu::BindGroupLayout,
     material_layout: wgpu::BindGroupLayout,
     pass: PassPipelines,
@@ -2775,7 +2777,7 @@ impl Renderer {
             let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
             let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
             let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let renderer = Self::build(device.clone(), queue.clone(), name.clone(), format, RenderOptions { msaa, ..options });
+            let renderer = Self::build(device.clone(), queue.clone(), name.clone(), info.clone(), format, RenderOptions { msaa, ..options });
             // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
             if !basic && omsi_cfg::env::var("OMSI_FAKE_GPU_ERROR").as_deref() == Ok("pipeline") {
                 let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("test"), source: wgpu::ShaderSource::Wgsl("fn broken( {".into()) });
@@ -2832,6 +2834,7 @@ impl Renderer {
         device: wgpu::Device,
         queue: wgpu::Queue,
         adapter_name: String,
+        adapter_info: wgpu::AdapterInfo,
         format: wgpu::TextureFormat,
         options: RenderOptions,
     ) -> Renderer {
@@ -4790,6 +4793,7 @@ impl Renderer {
             device,
             queue,
             adapter_name,
+            adapter_info,
             camera_layout,
             material_layout,
             pass,
@@ -8236,7 +8240,7 @@ impl Renderer {
         RT_BUFFERS.store(false, std::sync::atomic::Ordering::Relaxed);
         // (the meshes' shared pages stay on, as after the multisampling fallback below)
         let mesh_pages = self.mesh_pages;
-        *self = Renderer { mesh_pages, ..Self::build(self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format, options) };
+        *self = Renderer { mesh_pages, ..Self::build(self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.adapter_info.clone(), self.format, options) };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
@@ -8274,6 +8278,7 @@ impl Renderer {
             self.device.clone(),
             self.queue.clone(),
             self.adapter_name.clone(),
+            self.adapter_info.clone(),
             self.format,
             options,
         ) };
@@ -13084,6 +13089,11 @@ impl Renderer {
     /// textures, before the driver gives up the device).
     pub fn take_out_of_memory(&self) -> bool {
         self.out_of_memory.swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Whether this renderer was built with the reduced pipeline set.
+    pub fn basic_rendering(&self) -> bool {
+        self.pass.snow_pipeline.is_none()
     }
 
     pub fn device_lost(&self) -> Option<String> {

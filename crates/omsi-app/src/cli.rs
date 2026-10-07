@@ -8,6 +8,9 @@ pub(crate) const DEFAULT_SIZE: &str = "1600x900";
 #[derive(Parser, Debug, Clone)]
 #[command(name = "openomsi", version = crate::startup::VERSION, about = "openOMSI")]
 pub(crate) struct Args {
+    /// Write a privacy-filtered ZIP for a GitHub issue without starting the game.
+    #[arg(long)]
+    pub(crate) export_diagnostics: Option<PathBuf>,
     /// OMSI 2 installation root (the folder that contains `maps`, `Vehicles`, …).
     /// Found by itself when left out: $OMSI_ROOT, the folder remembered from last time,
     /// a folder next to this program, or the usual Steam locations.
