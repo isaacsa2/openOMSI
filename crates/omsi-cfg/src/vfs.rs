@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -53,6 +53,122 @@ static MOUNTS: RwLock<Vec<Arc<ZipArchive>>> = RwLock::new(Vec::new());
 /// The largest entry that is read into memory (a corrupt size field must not allocate
 /// gigabytes).
 const MAX_ENTRY: u64 = 1 << 31;
+
+// Experimental transparent per-file compression for large legacy assets.  A logical
+// `foo.wav` may live on disk as `foo.wav.omc`; callers keep using the original path.
+// The format deliberately uses raw DEFLATE here because flate2 is already part of the VFS
+// on every supported platform.  If the experiment is worthwhile the storage format can
+// move to zstd later without changing asset loaders.
+const COMPRESSED_SUFFIX: &str = ".omc";
+const COMPRESSED_MAGIC: &[u8; 4] = b"OMC1";
+const COMPRESSED_HEADER: usize = 16;
+
+fn compressed_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(COMPRESSED_SUFFIX);
+    PathBuf::from(name)
+}
+
+fn read_compressed(path: &Path) -> io::Result<Vec<u8>> {
+    let sidecar = compressed_path(path);
+    let packed = std::fs::read(&sidecar)?;
+    if packed.len() < COMPRESSED_HEADER || &packed[..4] != COMPRESSED_MAGIC {
+        return Err(bad(format!("{}: not an openOMSI compressed asset", sidecar.display())));
+    }
+    let size = le64(&packed, 4);
+    let expected_crc = le32(&packed, 12);
+    if size > MAX_ENTRY {
+        return Err(bad(format!("{}: asset is too large ({} bytes)", sidecar.display(), size)));
+    }
+    let mut out = Vec::with_capacity(size as usize);
+    flate2::read::DeflateDecoder::new(&packed[COMPRESSED_HEADER..])
+        .take(size + 1)
+        .read_to_end(&mut out)?;
+    if out.len() as u64 != size {
+        return Err(bad(format!(
+            "{}: {} bytes unpacked, {} expected",
+            sidecar.display(),
+            out.len(),
+            size
+        )));
+    }
+    let mut crc = flate2::Crc::new();
+    crc.update(&out);
+    if crc.sum() != expected_crc {
+        return Err(bad(format!("{}: checksum mismatch", sidecar.display())));
+    }
+    Ok(out)
+}
+
+/// Result of attempting to compress one loose asset.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompressionResult {
+    pub original_bytes: u64,
+    pub stored_bytes: u64,
+    pub compressed: bool,
+}
+
+/// Compress one loose file into its transparent `.omc` sidecar and remove the original
+/// only after the sidecar has been written successfully.  Files that save less than
+/// `min_saving_percent` are left untouched.
+pub fn compress_file(path: &Path, min_saving_percent: u8) -> io::Result<CompressionResult> {
+    let data = std::fs::read(path)?;
+    let original = data.len() as u64;
+    if original == 0 || original > MAX_ENTRY {
+        return Ok(CompressionResult { original_bytes: original, stored_bytes: original, compressed: false });
+    }
+
+    let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&data)?;
+    let payload = encoder.finish()?;
+
+    let mut crc = flate2::Crc::new();
+    crc.update(&data);
+    let mut stored = Vec::with_capacity(COMPRESSED_HEADER + payload.len());
+    stored.extend_from_slice(COMPRESSED_MAGIC);
+    stored.extend_from_slice(&original.to_le_bytes());
+    stored.extend_from_slice(&crc.sum().to_le_bytes());
+    stored.extend_from_slice(&payload);
+
+    let stored_len = stored.len() as u64;
+    let required = original.saturating_mul(100u64.saturating_sub(min_saving_percent.min(99) as u64)) / 100;
+    if stored_len >= required {
+        return Ok(CompressionResult { original_bytes: original, stored_bytes: original, compressed: false });
+    }
+
+    let sidecar = compressed_path(path);
+    std::fs::write(&sidecar, &stored)?;
+    if let Err(e) = std::fs::remove_file(path) {
+        let _ = std::fs::remove_file(&sidecar);
+        return Err(e);
+    }
+
+    Ok(CompressionResult { original_bytes: original, stored_bytes: stored_len, compressed: true })
+}
+
+/// Restore a file previously replaced by a transparent `.omc` sidecar.
+pub fn restore_compressed_file(path: &Path) -> io::Result<bool> {
+    let sidecar = compressed_path(path);
+    if !sidecar.is_file() {
+        return Ok(false);
+    }
+    if path.exists() {
+        return Ok(false);
+    }
+    let data = read_compressed(path)?;
+    std::fs::write(path, data)?;
+    if let Err(e) = std::fs::remove_file(&sidecar) {
+        let _ = std::fs::remove_file(path);
+        return Err(e);
+    }
+    Ok(true)
+}
+
+/// Convert a physical `*.omc` path back to the logical asset name.
+pub fn logical_path_of_compressed(path: &Path) -> Option<PathBuf> {
+    let s = path.to_string_lossy();
+    s.strip_suffix(COMPRESSED_SUFFIX).map(PathBuf::from)
+}
 
 fn le16(b: &[u8], o: usize) -> u16 {
     u16::from_le_bytes([b[o], b[o + 1]])
@@ -410,7 +526,11 @@ pub fn archive_of(path: &Path) -> Option<PathBuf> {
 pub fn read(path: &Path) -> io::Result<Vec<u8>> {
     match locate(path) {
         Some((m, key)) => m.read(&key),
-        None => std::fs::read(path),
+        None => match std::fs::read(path) {
+            Ok(bytes) => Ok(bytes),
+            Err(e) if e.kind() == io::ErrorKind::NotFound && compressed_path(path).is_file() => read_compressed(path),
+            Err(e) => Err(e),
+        },
     }
 }
 
@@ -422,14 +542,14 @@ pub fn read_text(path: &Path) -> io::Result<String> {
 pub fn exists(path: &Path) -> bool {
     match locate(path) {
         Some((m, key)) => key.is_empty() || m.is_file(&key) || m.is_dir(&key),
-        None => path.exists(),
+        None => path.exists() || compressed_path(path).is_file(),
     }
 }
 
 pub fn is_file(path: &Path) -> bool {
     match locate(path) {
         Some((m, key)) => m.is_file(&key),
-        None => path.is_file(),
+        None => path.is_file() || compressed_path(path).is_file(),
     }
 }
 
@@ -446,19 +566,30 @@ pub fn list_dir(path: &Path) -> Option<Vec<(OsString, bool)>> {
         Some((m, key)) => m.dirs.get(&key).map(|l| l.iter().map(|(n, d)| (OsString::from(n), *d)).collect()),
         None => {
             let rd = std::fs::read_dir(path).ok()?;
-            // the entry's own type costs nothing; only a symbolic link needs a stat
-            Some(
-                rd.flatten()
-                    .map(|e| {
-                        let dir = match e.file_type() {
-                            Ok(t) if t.is_symlink() => e.path().is_dir(),
-                            Ok(t) => t.is_dir(),
-                            Err(_) => false,
-                        };
-                        (e.file_name(), dir)
-                    })
-                    .collect(),
-            )
+            // A physical *.omc entry is exposed under its logical original name.  That keeps
+            // directory-driven discovery (vehicles, scenery, textures, sounds) unaware of
+            // the storage representation.
+            let mut out: Vec<(OsString, bool)> = Vec::new();
+            let mut seen = std::collections::HashSet::<String>::new();
+            for e in rd.flatten() {
+                let dir = match e.file_type() {
+                    Ok(t) if t.is_symlink() => e.path().is_dir(),
+                    Ok(t) => t.is_dir(),
+                    Err(_) => false,
+                };
+                let mut name = e.file_name();
+                if !dir {
+                    let text = name.to_string_lossy();
+                    if let Some(base) = text.strip_suffix(COMPRESSED_SUFFIX) {
+                        name = OsString::from(base);
+                    }
+                }
+                let key = name.to_string_lossy().to_lowercase();
+                if seen.insert(key) {
+                    out.push((name, dir));
+                }
+            }
+            Some(out)
         }
     }
 }
@@ -570,6 +701,34 @@ mod tests {
         out.extend_from_slice(&cd_offset.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes());
         std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn transparent_compressed_loose_file() {
+        let dir = std::env::temp_dir().join(format!("omsi-cfg-compressed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("engine.wav");
+        let data = b"engine-sample-".repeat(16_384);
+        std::fs::write(&wav, &data).unwrap();
+
+        let r = compress_file(&wav, 10).unwrap();
+        assert!(r.compressed && !wav.exists());
+        assert!(compressed_path(&wav).is_file());
+        assert!(is_file(&wav) && exists(&wav));
+        assert_eq!(read(&wav).unwrap(), data);
+
+        let names: Vec<String> = list_dir(&dir)
+            .unwrap()
+            .into_iter()
+            .map(|(n, _)| n.to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"engine.wav".to_string()), "{names:?}");
+        assert!(!names.iter().any(|n| n.ends_with(COMPRESSED_SUFFIX)), "{names:?}");
+
+        assert!(restore_compressed_file(&wav).unwrap());
+        assert!(wav.is_file() && !compressed_path(&wav).exists());
+        assert_eq!(std::fs::read(&wav).unwrap(), data);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
