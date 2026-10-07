@@ -25648,3 +25648,15 @@ _version: 2
   ru: "Мышь на панелях плагинов · Esc возвращает её"
   uk: "Миша на панелях плагінів · Esc повертає її"
   pl: "Mysz jest na panelach wtyczek · Esc ją oddaje"
+"A vehicle is still loading":
+  pt: "Um veículo ainda está carregando"
+  pt-pt: "Ainda está a carregar um veículo"
+"Loading vehicle...":
+  pt: "Carregando veículo..."
+  pt-pt: "A carregar veículo..."
+"Vehicle loading stopped unexpectedly":
+  pt: "O carregamento do veículo parou inesperadamente"
+  pt-pt: "O carregamento do veículo parou inesperadamente"
+"Vehicle loaded":
+  pt: "Veículo carregado"
+  pt-pt: "Veículo carregado"
