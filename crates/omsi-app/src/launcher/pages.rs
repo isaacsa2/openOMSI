@@ -2467,7 +2467,9 @@ pub fn mods(l: &mut Launcher, area: Rect) {
 
 pub fn setup(l: &mut Launcher, area: Rect) {
     let body = l.page_title(area, "Setup", "Where the original game and this one are.");
-    let support = Rect::new(body.x, body.y + 316.0, body.w.min(820.0), 42.0);
+    let actions_w = body.w.min(820.0);
+    let action_w = (actions_w - 12.0) * 0.5;
+    let support = Rect::new(body.x, body.y + 316.0, action_w, 42.0);
     if l.ui.button("export-diagnostics", support, "Export diagnostics", Some("download"), ButtonKind::Normal) {
         let c = &l.state.choice;
         let snapshot = crate::support_bundle::snapshot(l.renderer.as_ref(), &crate::settings::Settings::load(),
@@ -2475,6 +2477,16 @@ pub fn setup(l: &mut Launcher, area: Rect) {
         let out = crate::support_bundle::default_output();
         l.state.spawn(move || super::state::Msg::Diagnostics(
             crate::support_bundle::export(&out, &snapshot).map(|_| out).map_err(|e| format!("{e:#}"))));
+    }
+    let benchmark = Rect::new(support.right() + 12.0, support.y, action_w, support.h);
+    if l.ui.button(
+        "run-benchmark",
+        benchmark,
+        "Run performance benchmark",
+        Some("speed"),
+        ButtonKind::Normal,
+    ) {
+        l.state.benchmark();
     }
     let r = Rect::new(body.x, body.y, body.w.min(820.0), 300.0);
     l.ui.panel(r);
