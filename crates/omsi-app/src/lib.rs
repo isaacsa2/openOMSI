@@ -87,6 +87,7 @@ mod evdev_buttons;
 mod evdev_ff;
 mod cli;
 mod diagnostics;
+mod performance_capture;
 mod support_bundle;
 mod duty_start;
 mod input_script;
@@ -188,6 +189,7 @@ pub fn run() -> Result<()> {
         }
     );
     let args = Args::parse();
+    omsi_cfg::env::set_profile_capture(args.profile_capture.is_some());
     // Diagnostics must work even when an OMSI installation or the graphics device
     // is unavailable; do this before content validation or renderer creation.
     if let Some(out) = &args.export_diagnostics {
@@ -449,6 +451,9 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     // (as the last session left it, #1164)
     let info_bar = settings.info_bar;
     let is_server = args.server.is_some();
+    let capture = args.profile_capture.map(|seconds| performance_capture::Capture::new(
+        seconds, args.profile_delay, args.profile_output.clone().unwrap_or_else(||
+            omsi_launcher_lib::data_dir().join(format!("performance-{}", std::process::id())))));
     let mut app = App {
         args,
         instance: graphics_instance(),
@@ -491,6 +496,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         radio: radio::Radio::load(&args_root_for_keys),
         profile: Default::default(),
         profile_prev: Default::default(),
+        capture,
         first_populate: true,
         envir: None,
         weather: None,
