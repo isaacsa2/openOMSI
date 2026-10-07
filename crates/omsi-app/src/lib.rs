@@ -10,6 +10,7 @@
 //! window of one process.
 
 mod admin;
+mod asset_storage;
 mod discord;
 #[cfg(steam)]
 mod steam;
@@ -294,6 +295,14 @@ pub(crate) fn prepare(mut args: Args, bare: bool) -> Result<Option<(Args, Option
             }
         }
     }
+    if args.compress_assets && args.restore_compressed_assets {
+        return Err(anyhow!("--compress-assets and --restore-compressed-assets cannot be used together"));
+    }
+    if args.compress_assets || args.restore_compressed_assets {
+        asset_storage::run(&args.root, args.restore_compressed_assets)?;
+        return Ok(None);
+    }
+
     if let Some(memo) = root_memo().filter(|_| is_omsi_root(&args.root)) {
         let _ = std::fs::write(memo, args.root.to_string_lossy().as_bytes());
     }
