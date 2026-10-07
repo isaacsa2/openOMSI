@@ -1893,9 +1893,18 @@ fn mirror_refresh(x: &str) -> &'static str {
     }
 }
 
-/// Quality presets shared by the launcher and the in-game options. Keep texture memory
-/// automatic: a quality label cannot know the adapter's available VRAM.
+/// Quality presets for the default renderer, Vanilla+.
 pub fn graphics_presets() -> [(&'static str, Value); 4] {
+    graphics_presets_for("vanilla_plus")
+}
+
+/// Quality levels within the explicitly selected renderer, shared by both interfaces.
+/// A quality change never opts into Enhanced or ray tracing. Texture memory stays
+/// automatic, and the renderer retains its device/format limits and fallback policy.
+pub fn graphics_presets_for(mode: &str) -> [(&'static str, Value); 4] {
+    let mode = graphics_mode(mode);
+    let classic = mode == "vanilla";
+    let traced = mode == "enhanced_plus";
     let preset = |msaa,
                   anisotropy,
                   shadow_size,
@@ -1909,14 +1918,15 @@ pub fn graphics_presets() -> [(&'static str, Value); 4] {
                   mirror_size,
                   mirror_refresh,
                   scale| {
-        json!({"graphics": "vanilla_plus", "msaa": msaa, "anisotropy": anisotropy,
-            "shadow_size": shadow_size, "ssao": ssao, "shadows": shadows,
-            "detail_textures": detail, "clouds": clouds, "windy_trees": clouds,
-            "reflections": detail, "view_distance": distance, "min_obj_size": size,
+        json!({"graphics": mode, "msaa": msaa, "anisotropy": anisotropy,
+            "shadow_size": shadow_size, "ssao": traced || (ssao && !classic),
+            "shadows": traced || (shadows && !classic),
+            "detail_textures": detail && !classic, "clouds": clouds, "windy_trees": clouds,
+            "reflections": traced || detail, "view_distance": distance, "min_obj_size": size,
             "max_obj_dist": object_distance, "mirror_size": mirror_size,
             "mirror_refresh": mirror_refresh, "render_scale": scale, "texture_memory": 0})
     };
-    [
+    let mut levels = [
         (
             "Low",
             preset(
@@ -1941,7 +1951,28 @@ pub fn graphics_presets() -> [(&'static str, Value); 4] {
                 4, 8, 4096, true, true, true, true, "2000", 0.005, "1500", 512, "full", "auto",
             ),
         ),
-    ]
+    ];
+    for (i, (_, settings)) in levels.iter_mut().enumerate() {
+        match mode {
+            "enhanced" => {
+                settings["msaa"] = json!([1, 1, 2, 4][i]);
+                settings["render_scale"] = json!(["0.67", "0.85", "auto", "auto"][i]);
+            }
+            "enhanced_plus" => {
+                settings["msaa"] = json!([1, 1, 1, 2][i]);
+                settings["shadow_size"] = json!([1024, 1024, 2048, 2048][i]);
+                settings["mirror_size"] = json!([128, 128, 256, 512][i]);
+                settings["mirror_refresh"] = json!(["eco", "eco", "eco", "full"][i]);
+                settings["render_scale"] = json!(["0.5", "0.67", "0.85", "auto"][i]);
+            }
+            _ => {}
+        }
+        if matches!(mode, "enhanced" | "enhanced_plus") && i == 2 {
+            settings["view_distance"] = json!("1200");
+            settings["max_obj_dist"] = json!("900");
+        }
+    }
+    levels
 }
 
 /// The page's view of a `settings.cfg` text (None: no file yet, the game's defaults).
@@ -3047,6 +3078,60 @@ mod tests {
         assert_eq!(v["mirror_size"], 0);
         let text = settings_to_text(&v, None);
         assert!(text.lines().any(|l| l == "mirror_size=0"), "{text}");
+    }
+
+    #[test]
+    fn preset_levels_preserve_the_explicit_renderer_and_machine_settings() {
+        for mode in ["vanilla", "vanilla_plus", "enhanced", "enhanced_plus"] {
+            for (_, preset) in graphics_presets_for(mode) {
+                let mut settings = settings_from_text(Some(&format!(
+                    "graphics={mode}\ngraphics_api=gl\nlanguage=PTB\nai_unsched_factor=25\n",
+                )));
+                apply_graphics_profile(&preset, &mut settings);
+                let saved = settings_from_text(Some(&settings_to_text(&settings, None)));
+                assert_eq!(saved["graphics"], mode);
+                assert_eq!(saved["graphics_api"], "gl");
+                assert_eq!(saved["language"], "PTB");
+                assert_eq!(saved["ai_unsched_factor"], 25);
+                assert_eq!(saved["texture_memory"], 0);
+                for key in [
+                    "ssao",
+                    "shadows",
+                    "detail_textures",
+                    "reflections",
+                    "mirror_refresh",
+                ] {
+                    assert_eq!(saved[key], preset[key], "{mode}: {key}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preset_effects_follow_the_renderer_contract() {
+        assert_eq!(graphics_presets(), graphics_presets_for("Vanilla+"));
+        assert_eq!(graphics_presets_for("unknown"), graphics_presets());
+        for (_, classic) in graphics_presets_for("OMSI 2") {
+            assert_eq!(classic["graphics"], "vanilla");
+            for key in ["ssao", "shadows", "detail_textures"] {
+                assert_eq!(classic[key], false, "{key}");
+            }
+        }
+        for (_, traced) in graphics_presets_for("Enhanced+") {
+            for key in ["ssao", "shadows", "reflections"] {
+                assert_eq!(traced[key], true, "{key}");
+            }
+            assert!(traced["msaa"].as_u64().unwrap() <= 2);
+        }
+        assert_eq!(
+            graphics_presets_for("enhanced")[0].1["render_scale"],
+            "0.67"
+        );
+        assert_eq!(
+            graphics_presets_for("enhanced_plus")[0].1["render_scale"],
+            "0.5"
+        );
+        assert_eq!(settings_from_text(None)["graphics"], "vanilla_plus");
     }
 
     #[test]

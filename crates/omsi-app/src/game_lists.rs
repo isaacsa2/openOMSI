@@ -1963,8 +1963,9 @@ pub(crate) fn dropdown_for(app: &App, row: usize, id: &str) -> Option<Dropdown> 
             PRECIP_KINDS.iter().enumerate().map(|(i, n)| (tr(*n), format!("precip {i}"))).collect()
         }
         "preset" => {
-            current = preset_now(&settings_file());
-            presets().iter().enumerate().map(|(i, p)| (tr(p.0), format!("preset {i}"))).collect()
+            let file = settings_file();
+            current = preset_now(&file);
+            presets(&file).iter().enumerate().map(|(i, p)| (tr(p.0), format!("preset {i}"))).collect()
         }
         "gfxprofile" => omsi_launcher_lib::graphics_profiles().into_keys().map(|n| (n.clone(), format!("gfxprofile {n}"))).collect(),
         "reset" => vec![(tr("Cancel"), "noop".to_string()), (tr("Reset all settings"), "reset_all".to_string())],
@@ -2030,8 +2031,9 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
             }
         }
         "preset" => {
-            if let Some(p) = arg.trim().parse::<usize>().ok().and_then(|i| presets().into_iter().nth(i)) {
+            if let Some(i) = arg.trim().parse::<usize>().ok().filter(|i| *i < 4) {
                 store_with(app, |v| {
+                    let p = presets(v).into_iter().nth(i).unwrap();
                     if let Some(o) = p.1.as_object() {
                         for (k, x) in o {
                             v[k.as_str()] = x.clone();
@@ -2161,18 +2163,22 @@ fn select_row(file: &serde_json::Value, key: &str, name: &str, desc: &str) -> Op
     Some((row(name, 'o', &label, desc, None), format!("sel {key}")))
 }
 
-fn presets() -> [(&'static str, serde_json::Value); 4] {
-    omsi_launcher_lib::graphics_presets()
+fn presets(file: &serde_json::Value) -> [(&'static str, serde_json::Value); 4] {
+    omsi_launcher_lib::graphics_presets_for(
+        file.get("graphics")
+            .and_then(|v| v.as_str())
+            .unwrap_or("vanilla_plus"),
+    )
 }
 
 fn preset_now(file: &serde_json::Value) -> Option<usize> {
-    presets().iter().position(|p| {
+    presets(file).iter().position(|p| {
         p.1.as_object().is_some_and(|o| o.iter().all(|(k, v)| same_value(&value_text(v), &value_text(file.get(k).unwrap_or(&serde_json::Value::Null)))))
     })
 }
 
 fn preset_row(file: &serde_json::Value, name: &str, desc: &str) -> Option<(String, String)> {
-    let label = omsi_ui::tr(preset_now(file).map(|i| presets()[i].0).unwrap_or("Custom")).into_owned();
+    let label = omsi_ui::tr(preset_now(file).map(|i| presets(file)[i].0).unwrap_or("Custom")).into_owned();
     Some((row(name, 'o', &label, desc, None), "preset".to_string()))
 }
 
@@ -2244,8 +2250,8 @@ fn options_pages(app: &App) -> Vec<Page> {
         .flatten()
         .collect();
     let graphics: Vec<(String, String)> = vec![
-        preset_row(&file, "Quality preset", later),
         pick("graphics", "Graphics", later),
+        preset_row(&file, "Quality preset", later),
         pick("msaa", "Anti-aliasing", later),
         pick("render_scale", "Render scale", later),
         pick("anisotropy", "Anisotropic", later),
@@ -2925,6 +2931,26 @@ mod tests {
             "recife"
         ));
         assert!(super::search_matches("Anything", "bus x.bus", "  "));
+    }
+
+    #[test]
+    fn quality_labels_match_the_selected_renderer_after_settings_roundtrip() {
+        for mode in ["vanilla", "vanilla_plus", "enhanced", "enhanced_plus"] {
+            for (i, (_, profile)) in omsi_launcher_lib::graphics_presets_for(mode)
+                .into_iter()
+                .enumerate()
+            {
+                let mut file = omsi_launcher_lib::settings_from_text(None);
+                omsi_launcher_lib::apply_graphics_profile(&profile, &mut file);
+                let file = omsi_launcher_lib::settings_from_text(Some(
+                    &omsi_launcher_lib::settings_to_text(&file, None),
+                ));
+                assert_eq!(super::preset_now(&file), Some(i), "{mode}: {i}");
+                let mut custom = file;
+                custom["mirror_size"] = serde_json::json!(1024);
+                assert_eq!(super::preset_now(&custom), None);
+            }
+        }
     }
 
     /// A destination picked from the list keeps the route number the bus shows, its letter

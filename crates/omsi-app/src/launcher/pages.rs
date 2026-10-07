@@ -521,10 +521,26 @@ fn graphics_profiles_block(ui: &mut Ui, s: &mut Value, dirty: &mut f32, c: &mut 
 /// How the game looks and how fast it runs.
 fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) -> [f32; 2] {
     let mut c = Col::new(ui, cols[0], "Graphics");
-    // Quality presets, first: they set most of what follows. (OMSI's own
-    // option_presets/*.oop are named after the PCs of their day - "PC 2006", "X10 high",
-    // "Chicago Recommended" - which read as random words here.)
-    let presets = omsi_launcher_lib::graphics_presets();
+    // Choose the renderer first; quality presets tune that mode without replacing it.
+    sel_setting(
+        ui,
+        s,
+        dirty,
+        "s-graphics",
+        c.row(),
+        "Graphics",
+        "graphics",
+        &[
+            ("vanilla", "Vanilla (as OMSI 2)"),
+            ("vanilla_plus", "Vanilla+"),
+            ("enhanced", "Enhanced"),
+            ("enhanced_plus", "Enhanced+"),
+        ],
+    );
+    // OMSI's own option_presets/*.oop are named after the PCs of their day.
+    let presets = omsi_launcher_lib::graphics_presets_for(
+        get(s, "graphics").as_str().unwrap_or("vanilla_plus"),
+    );
     {
         // the preset the settings match now, else "Custom"
         let matches = |p: &serde_json::Value| p.as_object().map(|o| o.iter().all(|(k, v)| {
@@ -545,7 +561,6 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
             }
         }
     }
-    sel_setting(ui, s, dirty, "s-graphics", c.row(), "Graphics", "graphics", &[("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")]);
     // Vanilla draws what OMSI 2 draws: no sun shadows, ambient occlusion or detail grain
     let classic = get(s, "graphics").as_str() == Some("vanilla");
     let traced = get(s, "graphics").as_str() == Some("enhanced_plus");
