@@ -1257,6 +1257,7 @@ pub struct Scene {
     camera_bind_group: Option<wgpu::BindGroup>,
     shadow_bind_group: Option<wgpu::BindGroup>,
     sky_bind_group: Option<wgpu::BindGroup>,
+    sky_photo_bind_group: Option<wgpu::BindGroup>,
     /// HUD images drawn after the scene: (texture, rect in pixels x0,y0,x1,y1).
     pub overlays: Vec<(TextureId, [f32; 4])>,
     /// Overlay textures that hold premultiplied alpha (drawn by `omsi-ui`, e.g. the
@@ -2278,6 +2279,8 @@ pub struct RenderOptions {
     /// Mali and Adreno drivers before the first frame, #364, #333, #316, #371). Asked for,
     /// they are built on every device and graphics API; a computer always builds them.
     pub no_enhanced: bool,
+    /// 0 follows the graphics mode, 1 textured clouds, 2 volumetric clouds.
+    pub cloud_quality: u32,
     /// Enhanced+: the enhanced path with ray-traced sun shadows, ambient occlusion and
     /// reflections, where the device can trace rays (hardware ray queries); elsewhere the
     /// enhanced picture as it is.
@@ -2300,6 +2303,7 @@ impl Default for RenderOptions {
             shadow_blobs: true,
             reflections: true,
             no_enhanced: false,
+            cloud_quality: 0,
             ray_tracing: false,
         }
     }
@@ -3644,6 +3648,9 @@ impl Renderer {
             log::warn!("renderer: the enhanced graphics take more textures than OpenGL has units for on {adapter_name}; drawing vanilla+");
         }
         let leave_out_enhanced = leave_out_enhanced || sixteen_texture_units();
+        if options.cloud_quality == 2 && leave_out_enhanced {
+            log::warn!("renderer: volumetric clouds are unavailable on {adapter_name}; using the textured cloud layer");
+        }
         let sky_mirror_pipeline = (!leave_out_enhanced).then(|| sky_pipeline_for(format, "fs_enhanced_mirror"));
         let hdr_pass = (!leave_out_enhanced).then(|| PassPipelines {
             pipelines: scene_pipelines(hdr_format, "fs_enhanced", msaa),
@@ -4529,7 +4536,7 @@ impl Renderer {
                 multisample: Default::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &sky_shader,
-                    entry_point: Some("fs_sky_cube"),
+                    entry_point: Some(if options.cloud_quality == 1 { "fs_low_sky_cube" } else { "fs_sky_cube" }),
                     // a redraw is blended into what the face holds (the blend constant is
                     // the old picture's share): the clouds' grain averages out
                     targets: &[Some(wgpu::ColorTargetState {
@@ -4981,6 +4988,7 @@ impl Renderer {
             camera_bind_group: None,
             shadow_bind_group: None,
             sky_bind_group: None,
+            sky_photo_bind_group: None,
             overlays: Vec::new(),
             premultiplied: Default::default(),
             transposed: Default::default(),
@@ -6359,6 +6367,7 @@ impl Renderer {
         textures: [TextureId; 3],
         clouds: Option<TextureId>,
     ) {
+        scene.sky_photo_bind_group = None;
         let views: Vec<&wgpu::TextureView> =
             textures.iter().map(|t| &scene.textures[*t].view).collect();
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -6407,6 +6416,15 @@ impl Renderer {
             ],
         });
         scene.sky_bind_group = Some(bg);
+    }
+
+    /// Keep the procedural field for volumetric clouds and bind the unmodified photograph
+    /// to the same slots for the low-cost dome. No extra texture unit on OpenGL/Android.
+    pub fn set_sky_textures_photographic_clouds(&self, scene: &mut Scene, sky: [TextureId; 3], field: Option<TextureId>, photo: Option<TextureId>) {
+        self.set_sky_textures_clouds(scene, sky, photo);
+        let photo_group = photo.and_then(|_| scene.sky_bind_group.take());
+        self.set_sky_textures_clouds(scene, sky, field);
+        scene.sky_photo_bind_group = photo_group;
     }
 
     pub fn add_instance(
@@ -7295,7 +7313,7 @@ impl Renderer {
         // way from here, a little blurred (a cloud's shadow has a soft edge tens of metres
         // wide) and followed over a moment as the clouds drift
         let cloud_t = {
-            let now = if lighting.enhanced && lighting.cloud_density > 0.0 {
+            let now = if lighting.enhanced && lighting.cloud_density > 0.0 && self.options.cloud_quality != 1 {
                 cloud_sun_transmittance(&self.cloud_shape_cpu, lighting, cam_rel, ro)
             } else {
                 1.0
@@ -8794,6 +8812,9 @@ impl Renderer {
         // the mirrors are drawn by the same path as the window (their picture graded with
         // the window's exposure, see the post passes)
         let enhanced = enhanced_frame;
+        let high_clouds = self.options.cloud_quality == 2 || (self.options.cloud_quality == 0 && lighting.enhanced);
+        let volumetric_sky = high_clouds && self.hdr_pass.is_some() && lighting.cloud_density > 0.001;
+
         // Rain reflections belong to all graphics modes. Classic shading uses the same
         // scene/mask targets, then presents their linear colour without Enhanced grading.
         let puddles_wanted = with_overlays
@@ -9055,7 +9076,7 @@ impl Renderer {
             },
             flags: [
                 if lighting.detail { 1.0 } else { 0.0 },
-                if enhanced { 1.0 } else { 0.0 },
+                if scene.sky_photo_bind_group.is_some() && !volumetric_sky && (!enhanced || self.options.cloud_quality == 1) { 2.0 } else if enhanced { 1.0 } else { 0.0 },
                 // (below zero: the rain films have the clean current picture to look through,
                 // see `rain_behind`; above zero is an old branch never taken)
                 if glass_on { -1.0 } else { 0.0 },
@@ -9106,7 +9127,7 @@ impl Renderer {
                 log::info!("sky glow from the lamps: {raw:.3} (taken {:.3})", step.exp());
             }
         }
-        let probe_redraw = enhanced
+        let probe_redraw = (enhanced || volumetric_sky)
             && (lead_view || self.sky_state.is_none())
             && self.prepare_enhanced(lighting, cam_rel, ro, dt);
         // --- what every pass draws, as batches over one draw list (see `Batch`): the shadow
@@ -10206,7 +10227,7 @@ impl Renderer {
         }
         // --- the enhanced sky cube: a face a frame (all six the first time and for a new
         // sky), drawn in the window's frame only
-        if enhanced && (lead_view || probe_redraw) {
+        if (enhanced || volumetric_sky) && (lead_view || probe_redraw) {
             if let (Some(probe), Some(sky_bg)) = (self.probe.as_mut(), scene.sky_bind_group.as_ref()) {
                 // (face, round, the old picture's share): a whole new cube is every round
                 // of every face averaged; afterwards one face a frame, blended in
@@ -10256,7 +10277,7 @@ impl Renderer {
                     pass.set_pipeline(&probe.cube_pipeline);
                     pass.set_blend_constant(wgpu::Color { r: history, g: history, b: history, a: history });
                     pass.set_bind_group(0, &probe.cube_bind_groups[(f * SKY_CUBE_ROUNDS + round) as usize], &[]);
-                    pass.set_bind_group(1, sky_bg, &[]);
+                    pass.set_bind_group(1, scene.sky_photo_bind_group.as_ref().filter(|_| self.options.cloud_quality == 1).unwrap_or(sky_bg), &[]);
                     pass.draw(0..3, 0..1);
                 }
             }
@@ -10425,7 +10446,7 @@ impl Renderer {
             // (a mirror of an Enhanced picture, plainly shaded: the window's sky, see
             // `sky_mirror_pipeline`)
             let sky_pipe = match &self.sky_mirror_pipeline {
-                Some(p) if lighting.enhanced && !enhanced && !with_overlays && self.sky_state.is_some() && omsi_cfg::env::var_os("OMSI_NO_ENHANCED").is_none() => p,
+                Some(p) if (volumetric_sky || lighting.enhanced && self.options.cloud_quality != 1 && !with_overlays) && !enhanced && self.sky_state.is_some() && omsi_cfg::env::var_os("OMSI_NO_ENHANCED").is_none() => p,
                 _ => &pp.sky_pipeline,
             };
             // the enhanced pass's screen mask beside the picture (see `MASK_FORMAT`)
@@ -10485,7 +10506,7 @@ impl Renderer {
                     });
                     pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
                     if first {
-                        if let Some(sky) = &scene.sky_bind_group {
+                        if let Some(sky) = scene.sky_photo_bind_group.as_ref().filter(|_| !volumetric_sky && (!enhanced || self.options.cloud_quality == 1)).or(scene.sky_bind_group.as_ref()) {
                             pass.set_pipeline(sky_pipe);
                             pass.set_bind_group(1, sky, &[]);
                             pass.set_vertex_buffer(0, self.sky_mesh.0.slice(..));
@@ -10557,7 +10578,7 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
-            if let Some(sky) = scene.sky_bind_group.as_ref().filter(|_| parts == 1) {
+            if let Some(sky) = scene.sky_photo_bind_group.as_ref().filter(|_| !volumetric_sky && (!enhanced || self.options.cloud_quality == 1)).or(scene.sky_bind_group.as_ref()).filter(|_| parts == 1) {
                 pass.set_pipeline(sky_pipe);
                 pass.set_bind_group(1, sky, &[]);
                 pass.set_vertex_buffer(0, self.sky_mesh.0.slice(..));
@@ -15024,6 +15045,27 @@ mod tests {
         assert!(smoke_sprite(&SmokeParticle { ground: Some(30.0 + 3.5 + 0.91), ..p }, ro).is_none());
         assert!(smoke_sprite(&SmokeParticle { ground: Some(30.0 + 3.5 + 0.89), ..p }, ro).is_some());
         assert!(smoke_sprite(&SmokeParticle { alpha: 0.0, ..p }, ro).is_none());
+    }
+
+    #[test]
+    fn independent_cloud_quality_initializes_on_the_noop_backend() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::NOOP;
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+        let instance = wgpu::Instance::new(descriptor);
+        for cloud_quality in [1, 2] {
+            let mut renderer = pollster::block_on(Renderer::new_with(&instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb), RenderOptions { msaa: 1, ssao: false, cloud_quality, ..Default::default() })).unwrap();
+            assert!(renderer.sky_mirror_pipeline.is_some());
+            assert!(renderer.probe.is_some());
+            let mut scene = renderer.new_scene();
+            let sky = renderer.add_texture(&mut scene, &omsi_texture::Image { width: 2, height: 2, rgba: vec![180; 16], has_alpha: true }, true);
+            renderer.set_sky_textures_photographic_clouds(&mut scene, [sky; 3], Some(sky), Some(sky));
+            let camera = Camera { position: DVec3::ZERO, yaw: 0.0, pitch: 25.0, roll: 0.0, fov_deg: 60.0, near: 0.1, far: 1000.0 };
+            for enhanced in [false, true] {
+                let lighting = Lighting { enhanced, cloud_density: 0.5, shadows: false, ..Default::default() };
+                renderer.render_to_image(&mut scene, 16, 16, &camera, &lighting).unwrap();
+            }
+        }
     }
 
     #[test]
