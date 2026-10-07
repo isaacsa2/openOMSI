@@ -1549,6 +1549,8 @@ pub struct Humans {
     pub paid: Option<(f32, f32)>,
     pub change_due: Option<f32>,
     pub money: Option<crate::money::Money>,
+    /// The tear-off ticket blocks of the player's bus (`money::TicketBlocks`).
+    pub ticket_blocks: Option<crate::money::TicketBlocks>,
     /// A rider pressed the stop button for the next stop (the app fires the vehicle trigger `int_haltewunsch`).
     pub stop_request: bool,
     /// Tickets sold at the cash desk this session and what they were worth.
@@ -1845,6 +1847,7 @@ impl Humans {
             paid: None,
             change_due: None,
             money: None,
+            ticket_blocks: None,
             stop_request: false,
             tickets_sold: 0,
             ticket_cash: 0.0,
@@ -4736,9 +4739,18 @@ impl Humans {
         }
     }
 
-    pub fn sync_money(&mut self, renderer: &Renderer, scene: &mut Scene, bus: &VehicleInstance) {
+    pub fn sync_money(&mut self, world: &World, renderer: &Renderer, scene: &mut Scene, bus: &VehicleInstance) {
         if let Some(m) = self.money.as_mut() {
             m.sync(renderer, scene, bus);
+        }
+        if let Some(pack) = self.tickets.as_ref().map(|t| t.path.clone()) {
+            let fresh = self.ticket_blocks.as_ref().is_none_or(|b| b.made_for != (bus.ty.def.path.clone(), pack.clone()));
+            if fresh && !bus.ty.def.attachments.is_empty() {
+                self.ticket_blocks = Some(crate::money::TicketBlocks::new(world, renderer, scene, bus, &pack));
+            }
+        }
+        if let Some(b) = self.ticket_blocks.as_ref() {
+            b.sync(renderer, scene, bus);
         }
     }
 
@@ -5218,6 +5230,8 @@ impl Humans {
     /// and where that is in the world now.
     pub fn cabin_walk(&self, bus: BusId, local: Vec3, step: glam::Vec2) -> Option<(Vec3, DVec3)> {
         const WIDTH: f32 = 0.3;
+        // what one step can climb, m
+        const STEP_UP: f32 = 0.6;
         let bn = self.last_buses.iter().find(|b| b.id == bus)?;
         let pts = &bn.cabin.graph.points;
         let want = glam::Vec2::new(local.x + step.x, local.y + step.y);
@@ -5228,7 +5242,11 @@ impl Humans {
             let ab = b2 - a2;
             let t = if ab.length_squared() > 1e-6 { ((want - a2).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
             let q = a2 + ab * t;
-            let d = (want - q).length() + (local.z - (pa.z + (pb.z - pa.z) * t)).abs();
+            // (the height tells the decks of a double-decker apart, not the steps: counted
+            // in full, a staircase rising from its first centimetre lost to the aisle beside
+            // it and the corridor held the walker at the aisle - an invisible wall at the
+            // foot of the stairs)
+            let d = (want - q).length() + ((local.z - (pa.z + (pb.z - pa.z) * t)).abs() - STEP_UP).max(0.0) * 2.0;
             if best.map(|x| d < x.0).unwrap_or(true) {
                 best = Some((d, q, pa.z + (pb.z - pa.z) * t));
             }
@@ -5245,8 +5263,10 @@ impl Humans {
         let xy = if d > WIDTH { q + (want - q) / d * WIDTH } else { want };
         // not through the seats and the driver's place: no nearer to one than 0.38 m
         // (walking away from one that close is let be)
+        // (on the walker's deck: the seats under a staircase, or the upper deck's over the
+        // aisle below, stopped the walker where nothing stands)
         let from = local.truncate();
-        let solid = bn.cabin.seats.iter().filter(|s| s.seated).map(|s| s.pos.truncate()).chain(bn.cabin.data.driver_positions.iter().map(|d| glam::Vec2::new(d.pos[0], d.pos[1])));
+        let solid = bn.cabin.seats.iter().filter(|s| s.seated && (s.floor.z - local.z).abs() < 0.45).map(|s| s.pos.truncate()).chain(bn.cabin.data.driver_positions.iter().filter(|d| (d.pos[2] - (local.z + 0.4)).abs() < 1.0).map(|d| glam::Vec2::new(d.pos[0], d.pos[1])));
         for c in solid {
             let (dn, d0) = ((xy - c).length(), (from - c).length());
             if dn < 0.38 && dn < d0 {
