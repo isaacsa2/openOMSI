@@ -139,6 +139,10 @@ fn vs_main(@location(0) pos: vec3<f32>) -> VsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return vanilla_sky(in);
+}
+
+fn vanilla_sky(in: VsOut) -> vec4<f32> {
     let d = normalize(in.dir);
     let az = atan2(d.x, d.y);
     let u = fract((az - camera.sky.x) / 6.2831853 + 0.5);
@@ -155,7 +159,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // how many texels of the field a pixel covers there: the far clouds are drawn from a
         // smaller mip (no shimmering, no grain)
         let lod = log2(max(t * length(fwidth(d)) / max(d.z, 0.05) / CLOUD_FIELD_TILE * 512.0, 1.0));
-        let c = cloud_cover_at(p, lod);
+        var c = cloud_cover_at(p, lod);
+        var photo_rgb = vec3<f32>(1.0);
+        if (camera.flags.y > 1.5) {
+            let photo_uv = p / CLOUD_FIELD_TILE + camera.clouds.yz * (2500.0 / CLOUD_FIELD_TILE);
+            let photo = textureSampleLevel(t_clouds, s_repeat, photo_uv, lod);
+            // The alpha is the photographed silhouette; keep its detail rather than
+            // replacing it with a generated heap. RGB retains the photograph's shading.
+            c = vec3<f32>(photo.a * clamp(camera.clouds.x / 0.4, 0.0, 1.0), 0.0, photo.a);
+            photo_rgb = photo.rgb;
+        }
         // a closing cover (Overcast: a sky that rains) is one grey deck, no blue between
         let closed = smoothstep(0.8, 1.0, camera.clouds.x);
         let cover = mix(smoothstep(0.0, 1.0, c.x), 1.0, closed) * clamp((d.z - 0.01) * 7.0, 0.0, 1.0);
@@ -168,7 +181,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let lit = camera.sun_color.rgb * 1.1 * sun_up + camera.ambient.rgb * mix(0.5, 1.5, sun_up) + camera.sky_color.rgb * 0.3;
         var cloud_col = max(min(lit, vec3<f32>(0.97)) * core, col * 1.12);
         // the deck greys over
-        cloud_col = cloud_col * (1.0 - 0.3 * closed) * mix(1.0, 0.85 + 0.3 * c.x, closed);
+        cloud_col = cloud_col * photo_rgb * (1.0 - 0.3 * closed) * mix(1.0, 0.85 + 0.3 * c.x, closed);
         col = mix(col, cloud_col, cover);
     }
     // fog swallows the horizon, and a thick fog (a few hundred metres of sight) the whole
