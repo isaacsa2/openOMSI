@@ -358,8 +358,19 @@ fn shift_stops(net: &Network, route: &[usize], base: usize, stops: &mut [(usize,
     }
 }
 
-fn bay_offset(lat: f32) -> f32 {
-    lat
+/// Raw stop-box lateral offset carried until [`place_stops`].
+///
+/// A type-1 timetable station that names an exact track entry is already authored onto the
+/// lane the bus must use. Its stop object may stand on a platform, shelter or the opposite
+/// edge of a central BRT platform; using that object's lateral distance as a bay target makes
+/// the AI leave the authored lane just before stopping. Non-finite is the existing
+/// "stay on the route path" marker consumed by [`bay_for`].
+fn bay_offset(lat: f32, on: StopRoute) -> f32 {
+    if matches!(on, StopRoute::Track(_)) {
+        f32::NAN
+    } else {
+        lat
+    }
 }
 
 /// Where a timetable bus stands across its lane at a stop, as Omsi.exe puts it
@@ -2200,6 +2211,7 @@ impl Schedule {
                     let Some((pos, _)) = world.object_positions.lock().get(sid).copied() else {
                         continue;
                     };
+                    let on = station_route(run.station_steps[si], run.next, &slots[..n], &index);
                     if let Some((ri, ss, lat)) = project_stop(
                         &traffic.net,
                         &lanes,
@@ -2207,10 +2219,10 @@ impl Schedule {
                         Some(STOP_REACH),
                         from,
                         world.stop_side(*sid),
-                        station_route(run.station_steps[si], run.next, &slots[..n], &index),
+                        on,
                     ) {
                         from = ri;
-                        stops.push((base + ri, ss, bay_offset(lat), *t_dep, *sid, world.stop_side(*sid)));
+                        stops.push((base + ri, ss, bay_offset(lat, on), *t_dep, *sid, world.stop_side(*sid)));
                         run.served[si] = true;
                     }
                 }
@@ -2424,21 +2436,24 @@ impl Schedule {
                 continue;
             }
             match found {
-                Some((pos, _)) => match project_stop(
-                    net,
-                    &section,
-                    pos,
-                    reach,
-                    from,
-                    world.stop_side(*sid),
-                    station_route(station_steps[si], start, &slots[start..end], &index),
-                ) {
-                    Some((ri, ss, lat)) => {
-                        from = ri;
-                        served[si] = true;
-                        stops.push((ri, ss, bay_offset(lat), leave[si], *sid, world.stop_side(*sid)));
+                Some((pos, _)) => {
+                    let on = station_route(station_steps[si], start, &slots[start..end], &index);
+                    match project_stop(
+                        net,
+                        &section,
+                        pos,
+                        reach,
+                        from,
+                        world.stop_side(*sid),
+                        on,
+                    ) {
+                        Some((ri, ss, lat)) => {
+                            from = ri;
+                            served[si] = true;
+                            stops.push((ri, ss, bay_offset(lat, on), leave[si], *sid, world.stop_side(*sid)));
+                        }
+                        None => log::debug!("station {sid}: not near the route"),
                     }
-                    None => log::debug!("station {sid}: not near the route"),
                 },
                 None => log::debug!("station {sid}: object not in the map"),
             }
@@ -6630,6 +6645,38 @@ mod authored_station_tests {
     use super::*;
     use glam::DVec3;
     use omsi_sim::traffic::{LaneBuilder, LaneKind};
+
+    #[test]
+    fn authored_track_stop_keeps_ai_on_the_route_path() {
+        let bus = crate::schedule::tests::script_test_vehicle("{frame}\\n{end}\\n", "", "");
+        let ty = &bus.ty;
+        let left_platform = -4.0;
+
+        // An exact timetable track entry already tells the AI where to drive laterally.
+        // The stop object only supplies the longitudinal stop position in this case.
+        assert_eq!(
+            bay_for(
+                bay_offset(left_platform, StopRoute::Track(0)),
+                ty,
+                false,
+                false,
+                1.0,
+            ),
+            0.0
+        );
+
+        // Untyped/fallback stops retain the existing bay alignment behaviour.
+        assert_ne!(
+            bay_for(
+                bay_offset(left_platform, StopRoute::Nearest),
+                ty,
+                false,
+                false,
+                1.0,
+            ),
+            0.0
+        );
+    }
 
     #[test]
     fn paired_boxes_keep_their_authored_visit_even_across_the_platform_side() {
