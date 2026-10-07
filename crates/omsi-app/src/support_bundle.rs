@@ -180,7 +180,7 @@ fn summary(value: &Value) -> String {
     format!("openOMSI support package (schema 1)\n\n{}\n\nLogs are privacy projections, not raw log copies. Null means unavailable.\nRoots and archives are aliases; no absolute paths or archive filenames are exported.\nLoaded pack tracking is not available. Settings are allowlisted; no environment, command line, chat, player identity, configuration files or serial numbers are attached.\n", serde_json::to_string_pretty(value).unwrap_or_default())
 }
 
-fn archive(out: &Path, value: &Value, logs: &[(String, String)]) -> anyhow::Result<()> {
+fn archive(out: &Path, value: &Value, logs: &[(String, String)], performance: Option<&Value>) -> anyhow::Result<()> {
     // create_new: a mistaken filename must never overwrite an unrelated file.
     let file = std::fs::OpenOptions::new().write(true).create_new(true).open(out)?;
     let mut zip = zip::ZipWriter::new(file);
@@ -193,6 +193,13 @@ fn archive(out: &Path, value: &Value, logs: &[(String, String)]) -> anyhow::Resu
         for (name, text) in logs {
             zip.start_file(format!("logs/{name}"), opts)?;
             zip.write_all(log_projection(text).as_bytes())?;
+        }
+        if let Some(performance) = performance {
+            zip.start_file("performance/performance.json", opts)?;
+            zip.write_all(&serde_json::to_vec_pretty(performance)?)?;
+            zip.start_file("performance/performance-summary.txt", opts)?;
+            zip.write_all(format!("Sanitized performance capture summary\n{}\n",
+                serde_json::to_string_pretty(&performance["summary"])?).as_bytes())?;
         }
         Ok(())
     })();
@@ -225,7 +232,50 @@ pub(crate) fn export(out: &Path, value: &Value) -> anyhow::Result<()> {
         .map(|i| format!("game-{}.log", i.slot)).unwrap_or_else(|| "game.log".into());
     let logs: Vec<_> = [game_log.as_str(), "launcher.log", "crash.log"].iter()
         .filter_map(|name| tail(&dir.join(name)).ok().map(|text| (name.to_string(), text))).collect();
-    archive(out, &value, &logs)
+    let performance = recent.as_ref().and_then(|i| {
+        let path = dir.join(format!("performance-{}/performance.json", i.pid));
+        let file = std::fs::File::open(path).ok()?;
+        if file.metadata().ok()?.len() > 64 * 1024 * 1024 { return None; }
+        let raw: Value = serde_json::from_reader(file.take(64 * 1024 * 1024)).ok()?;
+        performance_projection(&raw)
+    });
+    archive(out, &value, &logs, performance.as_ref())
+}
+
+/// Copy numeric capture fields only. Dynamic stage keys are a fixed catalog;
+/// arbitrary text files and user-supplied metadata never enter the ZIP.
+fn performance_projection(raw: &Value) -> Option<Value> {
+    if raw.get("schema_version")?.as_u64()? != 1 { return None; }
+    const KEYS: &[&str] = &["schema_version", "requested_seconds", "warmup_seconds", "summary",
+        "frames", "measured_seconds", "average_fps", "p50_ms", "p95_ms", "p99_ms", "worst_frame_ms",
+        "frames_over_16_7_ms", "frames_over_33_3_ms", "frames_over_50_ms", "frames_over_100_ms",
+        "frame_limit_reached", "stage_average_ms", "frame_number", "timestamp_seconds", "frame_time_ms",
+        "stages_ms", "graphics", "msaa", "ssao", "render_scale", "shadows", "lan_active",
+        "memory_start", "memory_end", "physical_memory_bytes", "gpu_textures_bytes", "gpu_meshes_bytes"];
+    const STAGES: &[&str] = &["acquire", "present", "gpu", "streaming", "traffic", "traffic.populate",
+        "traffic.schedule", "traffic.tick", "traffic.audio", "traffic.sync", "player", "player.hover",
+        "lan", "humans", "lights.atlas", "lights.collect", "lights.rain", "lights.spray",
+        "lights.ambience", "lights+rain", "scripted", "scripted.boards", "hud", "hud.navigator",
+        "mirrors", "render", "limiter", "setup", "prepare", "ray tracing", "shadow items", "cull",
+        "items", "upload", "bundles", "encode", "finish", "submit", "finish.shadow", "finish.prepass",
+        "finish.main", "finish.wait shadow", "finish.wait prepass"];
+    fn numeric(value: &Value, stages: bool) -> Value {
+        match value {
+            Value::Number(_) | Value::Bool(_) | Value::Null => value.clone(),
+            Value::Array(a) => Value::Array(a.iter().take(120_000).map(|v| numeric(v, false)).collect()),
+            Value::Object(o) => Value::Object(o.iter().filter_map(|(k, v)| {
+                let allowed = if stages {
+                    let name = k.strip_prefix("render.").unwrap_or(k);
+                    STAGES.contains(&name.strip_prefix("mirror.").unwrap_or(name))
+                } else { KEYS.contains(&k.as_str()) };
+                if !allowed || v.is_string() { return None; }
+                if stages && !v.is_number() { return None; }
+                Some((k.clone(), numeric(v, k == "stages_ms" || k == "stage_average_ms")))
+            }).collect()),
+            Value::String(_) => Value::Null,
+        }
+    }
+    Some(numeric(raw, false))
 }
 
 fn filter_cached(value: &mut Value) {
@@ -296,7 +346,7 @@ mod tests {
     fn archive_has_only_fixed_entries_and_refuses_overwrite() {
         let path = std::env::temp_dir().join(format!("omsi-support-test-{}.zip", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        archive(&path, &json!({"schema_version": 1}), &[("game.log".into(), "chat: SECRET".into())]).unwrap();
+        archive(&path, &json!({"schema_version": 1}), &[("game.log".into(), "chat: SECRET".into())], None).unwrap();
         let mut z = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
         assert_eq!(z.len(), 3);
         assert_eq!(z.by_index(0).unwrap().name(), "diagnostics.txt");
@@ -304,8 +354,24 @@ mod tests {
         let mut log = String::new();
         z.by_name("logs/game.log").unwrap().read_to_string(&mut log).unwrap();
         assert!(!log.contains("SECRET"));
-        assert!(archive(&path, &Value::Null, &[]).is_err());
+        assert!(archive(&path, &Value::Null, &[], None).is_err());
         drop(z);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn capture_projection_rejects_unknown_keys_and_all_free_text() {
+        let raw = json!({"schema_version": 1, "password": 123456,
+            "summary": {"average_fps": 60, "frames": "secret", "stage_average_ms": {
+                "render.mirror.cull": 1, "unrelated-personal.txt": 999, "gpu": "token"}},
+            "frames": [{"frame_number": 1, "graphics": {"lan_active": true, "msaa": 4,
+                "mirror_refresh": "C:\\Users\\Isaac\\private"}}]});
+        let safe = performance_projection(&raw).unwrap();
+        assert_eq!(safe["summary"]["stage_average_ms"], json!({"render.mirror.cull": 1}));
+        assert!(safe.get("password").is_none());
+        assert!(safe["summary"].get("frames").is_none());
+        let text = safe.to_string();
+        for s in ["secret", "Isaac", "token", "unrelated-personal"] { assert!(!text.contains(s)); }
+        assert!(performance_projection(&json!({"schema_version": 2})).is_none());
     }
 }

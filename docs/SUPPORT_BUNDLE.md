@@ -12,6 +12,10 @@ openomsi --export-diagnostics support.zip
 
 The ZIP refuses to overwrite an existing file. It contains `diagnostics.txt`,
 `diagnostics.json` and privacy projections under `logs/` for available app logs.
+If the selected registered game has a completed schema-1 capture in the default
+`performance-<pid>/performance.json` location, sanitized numeric capture data and
+a regenerated summary are included under `performance/`. Arbitrary text summaries,
+custom output directories, unknown stage names and free-text metadata are not copied.
 The launcher selection and the last recorded game are labelled separately; a
 session snapshot is taken at the first frame, every minute and on device loss.
 The timestamp distinguishes a previous session from the current selection.
@@ -44,6 +48,10 @@ Manual verification:
   inspect every ZIP member and verify these strings are absent.
 - Verify missing/unreadable logs and absent controller data do not prevent export.
 - A pre-existing output filename must be untouched.
+- Complete a default-location performance capture, export, and inspect both
+  performance members. A missing, invalid or oversized (over 64 MiB) capture must
+  be omitted without preventing diagnostics export. Inject secrets into capture
+  metadata/stage names and verify none survive.
 
 Automated tests cover redaction, cached snapshot filtering, free-text exclusion,
 ZIP entries and overwrite protection. Run `cargo test --workspace` and
