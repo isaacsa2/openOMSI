@@ -1276,6 +1276,7 @@ pub fn controls(l: &mut Launcher, area: Rect) {
             l.pages.capturing = None;
         }
         l.ui.input.raw_key = None;
+        l.ui.input.raw_chord = 0;
     }
     // The keys below are the ones the game uses only with "Custom controls" (Settings →
     // Driving keys); the ready-made layouts keep W A S D / the arrows for driving. Say so,
