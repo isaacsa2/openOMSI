@@ -1258,7 +1258,7 @@ pub fn controls(l: &mut Launcher, area: Rect) {
         } else if !matches!(code, K::ShiftLeft | K::ShiftRight | K::ControlLeft | K::ControlRight | K::AltLeft | K::AltRight | K::SuperLeft | K::SuperRight) {
             match crate::keys::dik_code(code) {
                 Some(scan) => {
-                    let m = omsi_content::input::chord(l.ui.input.shift, l.ui.input.ctrl, l.ui.input.alt) as i64;
+                    let m = l.ui.input.binding_modifiers() as i64;
                     let section = ["vehicles", "game"][sec];
                     let vr_binding = l.state.keybindings.get(section).and_then(|a| a.as_array())
                         .and_then(|a| a.get(idx)).and_then(|b| b.get("action"))

@@ -70,6 +70,12 @@ pub struct Input {
     pub touch: bool,
 }
 
+impl Input {
+    pub fn binding_modifiers(&self) -> i32 {
+        omsi_content::input::chord(self.shift, self.ctrl, self.alt)
+    }
+}
+
 /// Shift, Ctrl, Alt and the logo key as the launcher knows them. The window says when they
 /// change (`ModifiersChanged`) - except on Android, whose winit backend never does: Shift or
 /// Ctrl held on a phone's keyboard went unseen there, a key bound with Shift was saved as the
@@ -1457,6 +1463,24 @@ mod tests {
         assert_eq!(m.state(), M::CONTROL);
         m.apply(&mut input);
         assert!(!input.shift && input.ctrl && !input.alt);
+    }
+
+    #[test]
+    fn binding_keeps_modifiers_when_released_before_redraw() {
+        use winit::keyboard::{KeyCode as K, ModifiersState as M};
+        for held in [M::SHIFT, M::CONTROL, M::ALT, M::SHIFT | M::CONTROL | M::ALT] {
+            let mut m = Modifiers::default();
+            let mut input = Input::default();
+            m.told(held);
+            m.apply(&mut input);
+            // KeyboardInput presses A; ModifiersChanged releases the chord before redraw.
+            input.raw_key = Some(K::KeyA);
+            m.told(M::empty());
+            m.apply(&mut input);
+            assert_eq!(input.raw_key, Some(K::KeyA));
+            assert_eq!(input.binding_modifiers(), omsi_content::input::chord(
+                held.shift_key(), held.control_key(), held.alt_key()));
+        }
     }
 
     /// What was clicked and typed while the launcher drew nothing (a game ran) is gone:
