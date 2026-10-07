@@ -364,7 +364,7 @@ fn bay_offset(lat: f32) -> f32 {
 
 /// Where a timetable bus stands across its lane at a stop, as Omsi.exe puts it
 /// (0x7dac5e..0x7dae81): its kerb-side flank 0.3 m past the `[busstop]` box's centre -
-/// `lat` less half its `[boundingbox]` width plus 0.3 on the right (the other way round
+/// `lat` less its `[boundingbox]` lateral centre and half width plus 0.3 on the right (the other way round
 /// where traffic keeps left), from the box's offset `lat` off the path (right positive);
 /// a railway vehicle keeps to its track. OMSI clamps it only to the room beside other
 /// vehicles, not to a kerb: the bus pulls into the bay whether or not a path leads there
@@ -374,14 +374,15 @@ fn bay_for(lat: f32, ty: &omsi_sim::VehicleType, rail: bool, left_hand: bool, si
     if rail || !lat.is_finite() {
         return 0.0;
     }
-    let hw = ty.def.bounding_box.map(|b| b[0] * 0.5).unwrap_or(1.25);
+    let bb = ty.def.bounding_box.unwrap_or([2.5, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let (hw, centre) = (bb[0] * 0.5, bb[3]);
     // Platform side is independent of traffic hand. With boarding on both sides,
     // align the flank facing this stop's box rather than assuming a right-hand kerb.
     let left = if side == 2.0 { lat < 0.0 } else { left_hand != (side == 1.0) };
     if left {
-        lat + hw - 0.3
+        lat - centre + hw - 0.3
     } else {
-        lat - hw + 0.3
+        lat - centre - hw + 0.3
     }
 }
 
@@ -5195,6 +5196,18 @@ impl PlayerDuty {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn off_centre_bounding_boxes_align_the_physical_flank_on_either_side() {
+        let mut bus = script_test_vehicle("{frame}\n{end}\n", "", "");
+        let ty = std::sync::Arc::get_mut(&mut bus.ty).unwrap();
+        ty.def.bounding_box = Some([2.5, 12.0, 3.0, 0.6, 0.0, 1.5]);
+        let right = bay_for(4.0, ty, false, false, 0.0);
+        assert!((right + 0.6 + 1.25 - 4.3).abs() < 1e-5);
+        let left = bay_for(-4.0, ty, false, false, 1.0);
+        assert!((left + 0.6 - 1.25 + 4.3).abs() < 1e-5);
+        assert_eq!(bay_for(4.0, ty, true, false, 0.0), 0.0);
+    }
+
     #[test]
     fn bay_alignment_follows_the_platform_side_without_moving_rail_vehicles() {
         let bus = script_test_vehicle("{frame}\n{end}\n", "", "");
