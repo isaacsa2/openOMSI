@@ -2993,7 +2993,8 @@ mod settings_tests {
             "set-navigator", "set-nav_arrows", "set-nav_ai", "corner-top-left", "corner-top-right", "corner-bottom-left", "corner-bottom-right",
             "set-update_check", "set-update_auto", "set-update_notify", "set-presence", "s-upd-check", "s-upd-github", "s-reset",
         ];
-        vec![graphics, driving, camera, sound, gameplay, general]
+        let storage = vec!["storage-compression", "storage-analyze"];
+        vec![graphics, driving, camera, sound, gameplay, general, storage]
     }
 
     /// Settings that show every row: Enhanced (Vanilla hides the shadows and effects), VR on.
@@ -3006,7 +3007,7 @@ mod settings_tests {
     }
 
     fn outside() -> Outside {
-        Outside { update: Status::Idle, check_updates: false, reset: false, controls: None }
+        Outside { update: Status::Idle, check_updates: false, reset: false, controls: None, storage_action: None }
     }
 
     /// One frame of tab `tab`, its two columns tall enough that nothing is cut off. The Sound
@@ -3017,7 +3018,8 @@ mod settings_tests {
         });
         ui.begin(Vec2::new(1200.0, 2000.0), 1.0, 1.0 / 60.0);
         let mut dirty = 0.0;
-        settings_tab(ui, tab, s, &mut dirty, out, [Rect::new(0.0, 0.0, 580.0, 2000.0), Rect::new(620.0, 0.0, 580.0, 2000.0)]);
+        let mut storage = StorageView::default();
+        settings_tab(ui, tab, s, &mut dirty, &mut storage, out, [Rect::new(0.0, 0.0, 580.0, 2000.0), Rect::new(620.0, 0.0, 580.0, 2000.0)]);
     }
 
     /// Click the widget `name` on tab `tab`: the mouse goes down over it and comes up again.
