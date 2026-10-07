@@ -1881,6 +1881,13 @@ impl App {
     /// Show one of the menu's lists in the chooser (see `game_lists`).
     pub(crate) fn open_list(&mut self, kind: crate::game_lists::ListKind) {
         crate::game_lists::forget_page_titles();
+        if self.list_kind.as_ref() != Some(&kind) {
+            self.menu_search.clear();
+            if self.menu_edit_search {
+                self.menu_edit = None;
+                self.menu_edit_search = false;
+            }
+        }
         self.dropdown = None;
         self.admin_list = Some(crate::game_lists::items(self, &kind));
         self.list_kind = Some(kind);
@@ -1989,6 +1996,32 @@ impl App {
         self.refresh_list();
     }
 
+    fn search_edit_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Escape => {
+                self.menu_edit = None;
+                self.menu_edit_search = false;
+            }
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                self.menu_search = self.menu_edit.take().unwrap_or_default();
+                self.menu_edit_search = false;
+            }
+            KeyCode::Backspace | KeyCode::Delete => {
+                if let Some(text) = self.menu_edit.as_mut() {
+                    text.pop();
+                }
+            }
+            _ => {
+                if let Some(c) = route_char(code) {
+                    self.route_edit_text(&c.to_string());
+                    return;
+                }
+            }
+        }
+        self.refresh_list();
+        self.chooser = Some(0);
+    }
+
     /// A key while a route number is typed in the destination list (#836). Printable
     /// text comes through `route_edit_text` so keyboard layouts and symbols are preserved;
     /// physical key codes remain a fallback for platforms that do not provide text.
@@ -2021,6 +2054,17 @@ impl App {
     /// Text entered in OMSI's free route-number field. It is intentionally not restricted
     /// to letters and digits: add-on displays use values such as `-10` and other symbols.
     pub(crate) fn route_edit_text(&mut self, text: &str) {
+        if self.menu_edit_search {
+            if let Some(query) = self.menu_edit.as_mut() {
+                for c in text.chars().filter(|c| !c.is_control()) {
+                    if query.chars().count() >= 80 { break; }
+                    query.push(c);
+                }
+            }
+            self.refresh_list();
+            self.chooser = Some(0);
+            return;
+        }
         if !matches!(self.list_kind, Some(crate::game_lists::ListKind::RouteNumbers)) || self.menu_edit.is_none() {
             return;
         }
@@ -2124,6 +2168,8 @@ impl App {
         self.dropdown = None;
         if self.menu_edit_icao { if let Some(w)=self.window.as_ref(){w.set_ime_allowed(false);} }
         self.menu_edit_icao=false;
+        self.menu_edit_search = false;
+        self.menu_search.clear();
         self.menu_edit = None;
         self.chooser = None;
         self.admin_list = None;
@@ -2222,7 +2268,9 @@ impl App {
             return;
         }
         if self.menu_edit.is_some() {
-            if self.menu_edit_icao {
+            if self.menu_edit_search {
+                self.search_edit_key(code);
+            } else if self.menu_edit_icao {
                 self.icao_edit_key(code);
             } else if matches!(self.list_kind, Some(crate::game_lists::ListKind::RouteNumbers)) {
                 self.route_edit_key(code);

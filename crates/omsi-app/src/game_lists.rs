@@ -52,6 +52,24 @@ pub(crate) enum ListKind {
     PlaceHof(String, String),
 }
 
+pub(crate) fn searchable(kind: &ListKind) -> bool {
+    matches!(
+        kind,
+        ListKind::Hofs
+            | ListKind::Destinations
+            | ListKind::PlaceMaker
+            | ListKind::PlaceType(_)
+            | ListKind::PlaceHof(..)
+    )
+}
+
+fn search_matches(label: &str, action: &str, query: &str) -> bool {
+    let haystack = format!("{label} {action}").to_lowercase();
+    query
+        .split_whitespace()
+        .all(|word| haystack.contains(&word.to_lowercase()))
+}
+
 /// A vehicle file of the menu's list (`Vehicles/...`) as its definition.
 fn bus_def(app: &App, bus: &str) -> Option<omsi_vehicle::Vehicle> {
     let path = crate::spawn::player_bus_path(&app.args.root, bus).ok()?;
@@ -531,8 +549,13 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                 }
             }
             groups.sort_by(|a, b| bus_cmp(&a.1, &b.1).then_with(|| a.0.cmp(&b.0)));
+            let query = if app.menu_edit_search { app.menu_edit.as_deref().unwrap_or("") } else { &app.menu_search };
             for (key, name, vs) in groups {
-                if vs.len() == 1 {
+                if !query.trim().is_empty() {
+                    for v in vs {
+                        out.push((format!("{name}  ·  {}", v.2), format!("bus {}", v.3)));
+                    }
+                } else if vs.len() == 1 {
                     // (a manufacturer with one type: that type at once)
                     out.push((format!("{name}  ·  {}", vs[0].2), format!("bus {}", vs[0].3)));
                 } else {
@@ -595,6 +618,16 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                 out.push((tr("This bus has no list of fleet numbers"), "back".into()));
             }
         }
+    }
+    if searchable(kind) {
+        let query = if app.menu_edit_search { app.menu_edit.as_deref().unwrap_or("") } else { &app.menu_search };
+        out.retain(|(label, action)| search_matches(label, action, query));
+        let label = if app.menu_edit_search {
+            format!("{}: {query}_  ({})", tr("Search…"), tr("Enter sets it, Esc cancels"))
+        } else {
+            format!("{}: {query}...", tr("Search…"))
+        };
+        out.insert(0, (label, "search".into()));
     }
     out.push((tr("Back"), "back".into()));
     out
@@ -722,6 +755,11 @@ pub(crate) fn run(app: &mut App, kind: &ListKind, action: &str) -> Option<ListKi
 pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -> Option<ListKind> {
     if crate::game_controller_menu::is_controller_list(Some(kind)) {
         return crate::game_controller_menu::run(app, kind, action, mv);
+    }
+    if action == "search" && searchable(kind) {
+        app.menu_edit = Some(app.menu_search.clone());
+        app.menu_edit_search = true;
+        return Some(kind.clone());
     }
     if action == "back" {
         return match kind {
@@ -2000,6 +2038,7 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
                         }
                     }
                 });
+                app.service_msg = Some((omsi_ui::tr("Takes effect when the game starts the next time").into_owned(), 5.0));
             }
         }
         "gfxprofile" => {
@@ -2123,12 +2162,7 @@ fn select_row(file: &serde_json::Value, key: &str, name: &str, desc: &str) -> Op
 }
 
 fn presets() -> [(&'static str, serde_json::Value); 4] {
-    [
-        ("Low", serde_json::json!({"msaa": 1, "anisotropy": 2, "shadow_size": 1024, "ssao": false, "shadows": false, "detail_textures": false, "clouds": false, "view_distance": "600", "min_obj_size": 0.03, "max_obj_dist": "500", "mirror_size": 128, "render_scale": "0.75", "texture_memory": 800})),
-        ("Medium", serde_json::json!({"msaa": 2, "anisotropy": 4, "shadow_size": 2048, "ssao": false, "shadows": true, "detail_textures": true, "clouds": true, "view_distance": "900", "min_obj_size": 0.02, "max_obj_dist": "750", "mirror_size": 256, "render_scale": "auto", "texture_memory": 1200})),
-        ("High", serde_json::json!({"msaa": 4, "anisotropy": 8, "shadow_size": 2048, "ssao": true, "shadows": true, "detail_textures": true, "clouds": true, "view_distance": "auto", "min_obj_size": 0.013, "max_obj_dist": "auto", "mirror_size": 256, "render_scale": "auto", "texture_memory": 0})),
-        ("Ultra", serde_json::json!({"msaa": 4, "anisotropy": 8, "shadow_size": 4096, "ssao": true, "shadows": true, "detail_textures": true, "clouds": true, "view_distance": "2000", "min_obj_size": 0.005, "max_obj_dist": "1500", "mirror_size": 512, "render_scale": "auto", "texture_memory": 0})),
-    ]
+    omsi_launcher_lib::graphics_presets()
 }
 
 fn preset_now(file: &serde_json::Value) -> Option<usize> {
@@ -2210,7 +2244,7 @@ fn options_pages(app: &App) -> Vec<Page> {
         .flatten()
         .collect();
     let graphics: Vec<(String, String)> = vec![
-        preset_row(&file, "Quality preset", "Sets most of the graphics options at once"),
+        preset_row(&file, "Quality preset", later),
         pick("graphics", "Graphics", later),
         pick("msaa", "Anti-aliasing", later),
         pick("render_scale", "Render scale", later),
@@ -2881,6 +2915,26 @@ fn start_duty(app: &mut App, line: &str, tour: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn searches_model_and_hof_names_and_paths_without_losing_their_actions() {
+        assert!(super::search_matches(
+            "Volvo BRT",
+            "bus Vehicles/Pack/biarticulado.bus",
+            "VOLVO biarticulado"
+        ));
+        assert!(super::search_matches(
+            "Curitiba",
+            "hof Vehicles/Bus/curitiba.hof",
+            "curitiba .hof"
+        ));
+        assert!(!super::search_matches(
+            "Curitiba",
+            "hof curitiba.hof",
+            "recife"
+        ));
+        assert!(super::search_matches("Anything", "bus x.bus", "  "));
+    }
+
     /// A destination picked from the list keeps the route number the bus shows, its letter
     /// too (92E, IBIS 92 and suffix 10).
     #[test]

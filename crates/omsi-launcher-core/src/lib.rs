@@ -1893,9 +1893,60 @@ fn mirror_refresh(x: &str) -> &'static str {
     }
 }
 
+/// Quality presets shared by the launcher and the in-game options. Keep texture memory
+/// automatic: a quality label cannot know the adapter's available VRAM.
+pub fn graphics_presets() -> [(&'static str, Value); 4] {
+    let preset = |msaa,
+                  anisotropy,
+                  shadow_size,
+                  ssao,
+                  shadows,
+                  detail,
+                  clouds,
+                  distance,
+                  size,
+                  object_distance,
+                  mirror_size,
+                  mirror_refresh,
+                  scale| {
+        json!({"graphics": "vanilla_plus", "msaa": msaa, "anisotropy": anisotropy,
+            "shadow_size": shadow_size, "ssao": ssao, "shadows": shadows,
+            "detail_textures": detail, "clouds": clouds, "windy_trees": clouds,
+            "reflections": detail, "view_distance": distance, "min_obj_size": size,
+            "max_obj_dist": object_distance, "mirror_size": mirror_size,
+            "mirror_refresh": mirror_refresh, "render_scale": scale, "texture_memory": 0})
+    };
+    [
+        (
+            "Low",
+            preset(
+                1, 2, 1024, false, false, false, false, "600", 0.03, "500", 128, "eco", "0.75",
+            ),
+        ),
+        (
+            "Medium",
+            preset(
+                2, 4, 1024, false, true, true, true, "900", 0.02, "750", 256, "eco", "auto",
+            ),
+        ),
+        (
+            "High",
+            preset(
+                4, 8, 2048, true, true, true, true, "auto", 0.013, "auto", 256, "full", "auto",
+            ),
+        ),
+        (
+            "Ultra",
+            preset(
+                4, 8, 4096, true, true, true, true, "2000", 0.005, "1500", 512, "full", "auto",
+            ),
+        ),
+    ]
+}
+
 /// The page's view of a `settings.cfg` text (None: no file yet, the game's defaults).
 pub fn settings_from_text(text: Option<&str>) -> Value {
-    let mut v = json!({ "msaa": 4, "anisotropy": 8, "ssao": true, "shadows": true, "shadow_size": 2048, "navigator": true, "ui_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "texture_memory": 0, "texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
+    let mut v = json!({ "msaa": 2, "anisotropy": 4, "ssao": false, "shadows": true, "shadow_size": 1024, "navigator": true, "ui_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "texture_memory": 0, "texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
     v["triple_screen"] = json!(false);
     v["triple_span"] = json!(true);
     v["triple_hud_center"] = json!(true);
@@ -1910,7 +1961,7 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
     v["vr_scale"] = json!(0.65);
     v["vr_head_smoothing_ms"] = json!(0);
     v["vr_mirror_rate"] = json!(16);
-    v["mirror_refresh"] = json!("full");
+    v["mirror_refresh"] = json!("eco");
     v["vr_desktop_mirror"] = json!(true);
     v["discord_status"] = json!(true);
     v["discord_app_id"] = json!("");
@@ -2138,9 +2189,9 @@ pub fn save_settings(v: &Value) -> Result<()> {
 
 /// The settings a graphics profile holds: what the Graphics tab shows, except the machine's
 /// own (fullscreen, graphics API).
-pub const GRAPHICS_PROFILE_KEYS: [&str; 22] = [
+pub const GRAPHICS_PROFILE_KEYS: [&str; 23] = [
     "graphics", "msaa", "render_scale", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "led_glow", "led_mips", "reflections", "clouds", "windy_trees",
-    "vsync", "max_fps", "view_distance", "max_obj_dist", "min_obj_size", "mirror_size", "texture_memory", "texture_compression",
+    "vsync", "max_fps", "view_distance", "max_obj_dist", "min_obj_size", "mirror_size", "mirror_refresh", "texture_memory", "texture_compression",
 ];
 
 fn graphics_profiles_path() -> PathBuf {
@@ -2197,11 +2248,11 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     let f = |k: &str, d: f64| v.get(k).and_then(|x| x.as_f64()).unwrap_or(d);
     let text = format!(
         "# openOMSI settings (written by the launcher)\nversion=2\nmsaa={}\nanisotropy={}\nssao={}\nshadows={}\nshadow_size={}\nnavigator={}\nui_opacity={}\nnavigator_corner={}\nboarding={}\ndetail_textures={}\nexact_fare={}\nenhanced={}\ngraphics={}\nfullscreen={}\nvsync={}\nvolume={}\ndrive_keys={}\nrender_scale={}\nview_distance={}\nlanguage={}\ntexture_memory={}\ntexture_compression={}\nchat={}\ntooltips={}\nname_tags={}\nshow_fps={}\nclouds={}\npax_density={}\nvol_ai={}\nvol_scenery={}\nmirror_size={}\ndoppler={}\ndriver={}\nmax_fps={}\nmin_obj_size={}\nmax_obj_dist={}\n",
-        n("msaa", 4),
-        n("anisotropy", 8),
-        b("ssao", true),
+        n("msaa", 2),
+        n("anisotropy", 4),
+        b("ssao", false),
         b("shadows", true),
-        n("shadow_size", 2048),
+        n("shadow_size", 1024),
         b("navigator", true),
         f("ui_opacity", 0.85),
         v.get("navigator_corner").and_then(|x| x.as_str()).unwrap_or("bottom-left"),
@@ -2346,7 +2397,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!("pad_steer_linear={}\n", b("pad_steer_linear", false)));
     text.push_str(&format!("arrows_switch_cams={}\n", b("arrows_switch_cams", false)));
     text.push_str(&format!("resolution={}\n", resolution_text(v.get("resolution").and_then(|x| x.as_str()).unwrap_or("auto"))));
-    text.push_str(&format!("mirror_refresh={}\n", mirror_refresh(v.get("mirror_refresh").and_then(|x| x.as_str()).unwrap_or("full"))));
+    text.push_str(&format!("mirror_refresh={}\n", mirror_refresh(v.get("mirror_refresh").and_then(|x| x.as_str()).unwrap_or("eco"))));
     text.push_str(&format!("look_sens={}\nlook_smoothing_ms={}\nsteer_look_angle={}\nsteer_look_response={}\nhead_idle={}\nhead_idle_pace={}\ntime_sync={}\nmetar_sync={}\nmetar_station={}\n", f("look_sens", 1.0).clamp(0.1, 2.0), f("look_smoothing_ms", 0.0).clamp(0.0, 200.0), f("steer_look_angle", 30.0).clamp(0.0, 60.0), f("steer_look_response", 0.25).clamp(0.05, 1.0), f("head_idle", 0.0).clamp(0.0, 1.0), f("head_idle_pace", 1.0).clamp(0.5, 2.0), b("time_sync", false), b("metar_sync", false), v.get("metar_station").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphabetic()).take(4).collect::<String>().to_ascii_uppercase()));
     text.push_str(&format!("pad_steer_smooth={}\n", f("pad_steer_smooth", 120.0).clamp(0.0, 300.0)));
     let triple_fov = f("triple_fov_deg", 0.0);
@@ -2999,8 +3050,37 @@ mod tests {
     }
 
     #[test]
+    fn low_preset_leaves_ray_tracing_and_preserves_non_graphics_settings() {
+        let mut settings = settings_from_text(Some("graphics=enhanced_plus\nmirror_refresh=full\ntexture_memory=1200\nlanguage=PTB\nai_unsched_factor=25\n"));
+        apply_graphics_profile(&graphics_presets()[0].1, &mut settings);
+        assert_eq!(settings["graphics"], "vanilla_plus");
+        assert_eq!(settings["mirror_refresh"], "eco");
+        assert_eq!(settings["texture_memory"], 0);
+        assert_eq!(settings["language"], "PTB");
+        assert_eq!(settings["ai_unsched_factor"], 25);
+        let roundtrip = settings_from_text(Some(&settings_to_text(&settings, None)));
+        assert_eq!(roundtrip["graphics"], "vanilla_plus");
+        assert_eq!(roundtrip["mirror_refresh"], "eco");
+    }
+
+    #[test]
+    fn lighter_defaults_do_not_override_saved_quality() {
+        let defaults = settings_from_text(None);
+        assert_eq!(defaults["msaa"], 2);
+        assert_eq!(defaults["ssao"], false);
+        assert_eq!(defaults["shadow_size"], 1024);
+        let saved = settings_from_text(Some(
+            "msaa=8\nssao=1\nshadow_size=4096\nmirror_refresh=full\n",
+        ));
+        assert_eq!(saved["msaa"], 8);
+        assert_eq!(saved["ssao"], true);
+        assert_eq!(saved["shadow_size"], 4096);
+        assert_eq!(saved["mirror_refresh"], "full");
+    }
+
+    #[test]
     fn mirror_refresh_survives_the_launcher() {
-        assert_eq!(settings_from_text(None)["mirror_refresh"], "full");
+        assert_eq!(settings_from_text(None)["mirror_refresh"], "eco");
         for mode in ["off", "eco", "full"] {
             let v = settings_from_text(Some(&format!("mirror_refresh={mode}\n")));
             assert_eq!(v["mirror_refresh"], mode);

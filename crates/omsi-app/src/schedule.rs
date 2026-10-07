@@ -1399,6 +1399,21 @@ impl Schedule {
         (of(&[1, 4]), of(&[3]))
     }
 
+    /// Keep the visit's departure as well as its object ID: circular routes can use the
+    /// same box as an ordinary stop and again as their terminal.
+    fn wait_stops(&self, i: usize) -> Vec<(i64, f64)> {
+        let ids = trip_stations(&self.data.trips[self.departures[i].trip]);
+        let times = self.times_of(i);
+        let departure = self.dep_time(i);
+        ids.iter()
+            .zip(&times.stations)
+            .zip(&times.kinds)
+            .enumerate()
+            .filter(|(index, (_, kind))| matches!(kind, 3 | 4) || index + 1 == ids.len())
+            .map(|(_, ((id, (_, dep)), _))| (*id, departure + dep))
+            .collect()
+    }
+
     fn times_of(&self, i: usize) -> &TripTimes {
         let d = &self.departures[i];
         &self.times[d.trip][d.profile]
@@ -2506,6 +2521,7 @@ impl Schedule {
             let names = self.trip_stop_names(self.departures[i].trip);
             let last_stop = trip_stations(&self.data.trips[self.departures[i].trip]).last().copied();
             let (always, early) = self.special_stops(i);
+            let wait_stops = self.wait_stops(i);
             let car = &mut traffic.cars[ci];
             if let Some(k) = car.vehicle.ty.program.str_var("Linie") {
                 car.vehicle.state.str_vars[k as usize] = line.clone();
@@ -2525,6 +2541,7 @@ impl Schedule {
                 b.last_stop = last_stop;
                 b.always = always;
                 b.serve_early = early;
+            b.wait_stops = if rail { None } else { Some(wait_stops) };
             }
             let id = car.id;
             self.car_departure.insert(id, i);
@@ -2709,6 +2726,7 @@ impl Schedule {
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let last_stop = trip_stations(&self.data.trips[self.departures[i].trip]).last().copied();
         let (always, early) = self.special_stops(i);
+        let wait_stops = self.wait_stops(i);
         let car = &mut traffic.cars[ci];
         // on its layover only when it stands at its first stop now (the trip's first station
         // may lie on a part of the track that is not loaded): it waits there for its departure
@@ -2720,6 +2738,7 @@ impl Schedule {
             b.last_stop = last_stop;
             b.always = always;
             b.serve_early = early;
+            b.wait_stops = if rail { None } else { Some(wait_stops) };
         }
         // the bus scripts read the line/terminus for their displays
         if let Some(i) = ty.program.str_var("Linie") {
