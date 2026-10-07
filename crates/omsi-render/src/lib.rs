@@ -517,7 +517,8 @@ struct MaterialUniform {
     /// `[matl_texadress_mirroronce]`; z the border colour's rgb packed as r * 65536 + g * 256 + b (bytes), w its alpha.
     flags: [f32; 4],
     /// rgb: the D3D material's ambient colour, which takes the ambient light (C); w: 1 for
-    /// a texture that is a season's snow picture (no snow laid over it), 2 the map's water
+    /// a texture that is a season's snow picture (no snow laid over it), 2 the map's water,
+    /// -1 a slot without a texture
     ambient: [f32; 4],
     /// `MaterialExtra::sway`: x 1 for foliage the wind moves, y its pivot's and z its top's
     /// height (mesh units), w how much it gives to the wind
@@ -1297,6 +1298,9 @@ pub struct Scene {
     cpu_params: Vec<[f32; 4]>,
     /// The light grid and lights as last uploaded, so that unchanged ones are not sent again.
     last_grid: Vec<u32>,
+    /// The street lamps that had a shadow map last frame (their places in centimetres):
+    /// they keep it against a lamp only a little stronger (`prepare_lights`).
+    lamp_shadow_last: Vec<[i64; 3]>,
     last_lights: Vec<u8>,
     /// Material bind groups and uniform buffers made since the last `prepare`, by what they
     /// hold: materials made in one go with the same textures and values share them (a C2's
@@ -1988,6 +1992,9 @@ pub struct Renderer {
     material_layout: wgpu::BindGroupLayout,
     pass: PassPipelines,
     hdr_pass: Option<PassPipelines>,
+    /// The enhanced sky tone-mapped into the plain pass's target: the sky of the mirrors
+    /// of an Enhanced picture (sky_enhanced.wgsl `fs_enhanced_mirror`).
+    sky_mirror_pipeline: Option<wgpu::RenderPipeline>,
     reflection_pass: Option<PassPipelines>,
     corona_bind_group: wgpu::BindGroup,
     /// The snowfall's parameters (snow.wgsl `SnowParams`) and their bind group.
@@ -3633,6 +3640,7 @@ impl Renderer {
             log::warn!("renderer: the enhanced graphics take more textures than OpenGL has units for on {adapter_name}; drawing vanilla+");
         }
         let leave_out_enhanced = leave_out_enhanced || sixteen_texture_units();
+        let sky_mirror_pipeline = (!leave_out_enhanced).then(|| sky_pipeline_for(format, "fs_enhanced_mirror"));
         let hdr_pass = (!leave_out_enhanced).then(|| PassPipelines {
             pipelines: scene_pipelines(hdr_format, "fs_enhanced", msaa),
             rain_pipelines: scene_pipelines(hdr_format, "fs_enhanced", 1),
@@ -4794,6 +4802,7 @@ impl Renderer {
             material_layout,
             pass,
             hdr_pass,
+            sky_mirror_pipeline,
             reflection_pass,
             corona_bind_group,
             snow_buf,
@@ -4992,6 +5001,7 @@ impl Renderer {
             cpu_models: Vec::new(),
             cpu_params: Vec::new(),
             last_grid: Vec::new(),
+            lamp_shadow_last: Vec::new(),
             last_lights: Vec::new(),
             bind_groups: HashMap::new(),
             looks: hashbrown::HashMap::new(),
@@ -5696,7 +5706,7 @@ impl Renderer {
             .map(|maps| maps.flags)
             .unwrap_or([0.0; 4]);
         if uniform.ambient[3] < 1.5 {
-            uniform.ambient[3] = snow_texture_flag(scene, texture);
+            uniform.ambient[3] = if texture.is_none() { -1.0 } else { snow_texture_flag(scene, texture) };
         }
         let slot = |t: Option<TextureId>| {
             t.and_then(|t| scene.textures.get(t).map(|g| (t, g.gen)))
@@ -6004,7 +6014,8 @@ impl Renderer {
             },
             ambient: {
                 let a = extra.ambient.unwrap_or([color[0], color[1], color[2]]);
-                [a[0], a[1], a[2], if extra.water { 2.0 } else { snow_texture_flag(scene, texture) }]
+                // (w -1: no texture - the Enhanced shading lights it by its diffuse colour)
+                [a[0], a[1], a[2], if extra.water { 2.0 } else if texture.is_none() { -1.0 } else { snow_texture_flag(scene, texture) }]
             },
             sway: extra.sway.map_or([0.0; 4], |s| [1.0, s[0], s[1], s[2]]),
         };
@@ -7834,7 +7845,7 @@ impl Renderer {
     fn prepare_lights(&self, scene: &mut Scene, cam_rel: Vec3, enhanced: bool, lamp_shadows: bool) -> ([f32; 4], Vec<LampShadow>) {
         // the street lamps that get a shadow map: the few lighting the camera's
         // surroundings most (by their strength over the distance)
-        let mut chosen: Vec<(f32, LampShadow)> = Vec::new();
+        let mut chosen: Vec<(f32, LampShadow, [i64; 3])> = Vec::new();
         let ro = scene.render_origin;
         let side = LIGHT_GRID_SIDE;
         let half = side as f32 * LIGHT_CELL * 0.5;
@@ -7868,8 +7879,15 @@ impl Renderer {
             if lamp_shadows && enhanced && l.housed && l.intensity > 0.0 {
                 let d = (p - cam_rel).length();
                 if d < l.radius + LAMP_SHADOW_REACH {
-                    let score = l.intensity * (l.color[0] + l.color[1] + l.color[2]) * l.core * l.core / (d * d + 25.0);
-                    chosen.push((score, LampShadow { index: idx, position: p, range: l.radius }));
+                    let mut score = l.intensity * (l.color[0] + l.color[1] + l.color[2]) * l.core * l.core / (d * d + 25.0);
+                    // (a lamp that had a map keeps it until another is clearly stronger: the
+                    // set changing with every metre the camera moved switched shadows on and
+                    // off between lamps that light the view about alike, #1613)
+                    let key = l.position.to_array().map(|c| (c * 100.0).round() as i64);
+                    if scene.lamp_shadow_last.contains(&key) {
+                        score *= 1.6;
+                    }
+                    chosen.push((score, LampShadow { index: idx, position: p, range: l.radius }, key));
                 }
             }
             for y in (y0.max(0.0) as usize)..=(y1.min(side as f32 - 1.0) as usize) {
@@ -7931,7 +7949,9 @@ impl Renderer {
             self.rebuild_camera_bind_group(scene);
         }
         chosen.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let lamps = chosen.into_iter().take(LAMP_SHADOWS).map(|c| c.1).collect();
+        chosen.truncate(LAMP_SHADOWS);
+        scene.lamp_shadow_last = chosen.iter().map(|c| c.2).collect();
+        let lamps = chosen.into_iter().map(|c| c.1).collect();
         ([origin[0], origin[1], LIGHT_CELL, side as f32], lamps)
     }
 
@@ -10410,6 +10430,12 @@ impl Renderer {
                     }
                 };
             let pp = self.main_pass(enhanced, reflection_frame);
+            // (a mirror of an Enhanced picture, plainly shaded: the window's sky, see
+            // `sky_mirror_pipeline`)
+            let sky_pipe = match &self.sky_mirror_pipeline {
+                Some(p) if lighting.enhanced && !enhanced && !with_overlays && self.sky_state.is_some() && omsi_cfg::env::var_os("OMSI_NO_ENHANCED").is_none() => p,
+                _ => &pp.sky_pipeline,
+            };
             // the enhanced pass's screen mask beside the picture (see `MASK_FORMAT`)
             let mask_attachment = hdr.map(|h| wgpu::RenderPassColorAttachment {
                 view: h.mask_msaa.as_ref().unwrap_or(&h.mask),
@@ -10468,7 +10494,7 @@ impl Renderer {
                     pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
                     if first {
                         if let Some(sky) = &scene.sky_bind_group {
-                            pass.set_pipeline(&pp.sky_pipeline);
+                            pass.set_pipeline(sky_pipe);
                             pass.set_bind_group(1, sky, &[]);
                             pass.set_vertex_buffer(0, self.sky_mesh.0.slice(..));
                             pass.set_index_buffer(self.sky_mesh.1.slice(..), wgpu::IndexFormat::Uint32);
@@ -10540,7 +10566,7 @@ impl Renderer {
             });
             pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
             if let Some(sky) = scene.sky_bind_group.as_ref().filter(|_| parts == 1) {
-                pass.set_pipeline(&pp.sky_pipeline);
+                pass.set_pipeline(sky_pipe);
                 pass.set_bind_group(1, sky, &[]);
                 pass.set_vertex_buffer(0, self.sky_mesh.0.slice(..));
                 pass.set_index_buffer(self.sky_mesh.1.slice(..), wgpu::IndexFormat::Uint32);
@@ -13583,6 +13609,38 @@ mod tests {
                     "pitch {pitch}, fov {fov}, floor {show_floor}: {pixel:?}");
             }
         }
+    }
+
+    /// An untextured slot (a Blender export's Base Color alone) keeps its colour in Enhanced:
+    /// the white ambient Omsi.exe gives every o3d slot turned it white under the sky (#1737).
+    #[test]
+    #[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+    fn enhanced_untextured_keeps_its_colour() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let mut renderer = pollster::block_on(Renderer::new_with(
+            &instance,
+            None,
+            Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            RenderOptions { msaa: 1, ssao: false, shadow_size: 1024, fxaa: false, render_scale: 1.0, ..Default::default() },
+        )).expect("test renderer");
+        let mut scene = renderer.new_scene();
+        let mesh = renderer.add_mesh(&mut scene, &MeshData {
+            positions: vec![Vec3::new(-8.0, 4.0, -8.0), Vec3::new(8.0, 4.0, -8.0), Vec3::new(8.0, 4.0, 8.0), Vec3::new(-8.0, 4.0, 8.0)],
+            normals: vec![-Vec3::Y; 4],
+            uvs: vec![glam::Vec2::ZERO; 4],
+            ranges: vec![(0, 6, 0)],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            one_sided: false,
+        });
+        let camera = Camera { position: DVec3::ZERO, yaw: 0.0, pitch: 0.0, roll: 0.0, fov_deg: 90.0, near: 0.1, far: 100.0 };
+        let lighting = Lighting { enhanced: true, shadows: false, fog_density: 0.0, sun_dir: -Vec3::Y, ..Default::default() };
+        let material = renderer.add_material_extra(&mut scene, None, AlphaMode::Opaque,
+            [0.8, 0.05, 0.05, 1.0], false, None, None, None, None, [0.0; 3],
+            MaterialExtra { ambient: Some([1.0; 3]), ..Default::default() });
+        renderer.add_instance(&mut scene, mesh, DVec3::ZERO, Mat4::IDENTITY, vec![material]);
+        let rgba = renderer.render_to_image(&mut scene, 64, 64, &camera, &lighting).unwrap();
+        let px = &rgba[(32 * 64 + 32) * 4..][..3];
+        assert!(px[0] as u32 > px[1] as u32 * 2 + 10 && px[0] as u32 > px[2] as u32 * 2 + 10, "an untextured red slot must stay red: {px:?}");
     }
 
     /// Overlays drawn texel for pixel: onto whole pixels, their size kept.
