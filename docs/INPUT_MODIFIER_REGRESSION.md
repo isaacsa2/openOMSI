@@ -9,10 +9,14 @@ to the production capture helper. It also covers Ctrl/Alt/combined chords and th
 existing key-event fallback used on Android. Later modifier presses cannot replace
 an already queued non-modifier key; discarded input clears the snapshot.
 
-This environment has no Rust compiler. The test-first CI run was started, but was
-still queued when the fix was prepared; its expected failure has not been observed.
-CI must confirm the regression and corrected tests. This is source evidence for one
-timing defect, not a hardware reproduction or proof that all of #1748 is resolved.
+The test-first Windows job now reproduced the defect at commit deaa80be:
+`binding_keeps_modifiers_when_released_before_redraw` failed with actual 0 versus
+expected 2 (KEY_SHIFT). Its run is 37611143371, job 112764382875; the remaining
+602 app tests passed. This is compiled evidence for the event-timing defect, not
+a hardware reproduction or proof that all of #1748 is resolved. The initial
+corrected-head run was cancelled by workflow concurrency; current-head CI is
+restarted after synchronization with official main 37d9e61b. Confirm the corrected
+test and manually retest Windows before recommending any issue closure.
 
 Upstream #1437 and #1594 were reviewed. #1437 touches the same launcher files:
 coordinate the small event snapshot during integration. No binding UI redesign,
