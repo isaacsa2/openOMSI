@@ -2579,6 +2579,9 @@ pub struct Duty {
     /// One of OMSI's tutorials (1..4): its own situation, nothing else of the duty.
     #[serde(default)]
     pub tutorial: Option<usize>,
+    /// Run the built-in stock-content performance benchmark instead of a normal duty.
+    #[serde(default)]
+    pub benchmark: bool,
     /// A situation file to continue (the map's `laststn.osn`): nothing else of the duty.
     #[serde(default)]
     pub situation: Option<String>,
@@ -2680,6 +2683,13 @@ pub fn duty_args(d: &Duty) -> Result<Vec<String>> {
 
 // The installation is validated by duty_args; argument tests supply their own path.
 fn duty_args_for_root(d: &Duty, root: &Path) -> Result<Vec<String>> {
+    if d.benchmark {
+        return Ok(vec![
+            "--root".into(),
+            root.to_string_lossy().to_string(),
+            "--benchmark".into(),
+        ]);
+    }
     if let Some(t) = d.tutorial {
         return Ok(vec!["--root".into(), root.to_string_lossy().to_string(), "--no-menu".into(), "--tutorial".into(), t.to_string()]);
     }
