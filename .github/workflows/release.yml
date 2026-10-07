@@ -1,7 +1,7 @@
 # Builds openOMSI for Windows and Linux (x64, ARM64), macOS (Apple silicon, Intel) and Android
-# (plus the dedicated server for Linux and Windows) on every push to
-# main and publishes them as the release v<MAJOR.MINOR.COMMIT>; see docs/VERSIONING.md.
-# Pull requests run the same builds without publishing.
+# (plus the dedicated server for Linux and Windows). Pull requests build test artifacts,
+# pushes to main publish the moving "nightly" prerelease, and workflow_dispatch publishes
+# a stable v<MAJOR.MINOR.COMMIT> release; see docs/VERSIONING.md.
 name: Release
 
 on:
@@ -271,8 +271,11 @@ jobs:
           name: android
           path: out/*.apk
 
+  # A stable release is deliberate. Ordinary main pushes still build every platform,
+  # but publish only the prerelease below so the updater's /releases/latest channel
+  # remains on the last promoted full release.
   release:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch'
     needs: [version, windows, macos, linux, android]
     runs-on: ubuntu-latest
     permissions:
@@ -340,3 +343,48 @@ jobs:
               --title "openOMSI $VERSION" \
               --notes-file notes.md
           fi
+
+
+  # Moving test channel for every ordinary main push. GitHub's /releases/latest endpoint
+  # ignores prereleases, so the existing updater continues to see the promoted stable
+  # release without any updater code or settings change.
+  nightly:
+    if: github.event_name == 'push'
+    needs: [version, windows, macos, linux, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish moving nightly prerelease
+        run: |
+          # Keep one obvious test release instead of presenting every development commit
+          # as a recommended full release. Its assets still carry the exact build version.
+          gh release delete nightly --yes --cleanup-tag >/dev/null 2>&1 || true
+          git tag -f nightly "$GITHUB_SHA"
+          git push -f origin refs/tags/nightly
+
+          cat > notes.md <<NOTES
+          **openOMSI nightly — $VERSION**
+
+          > Development build from `main`. It passed the repository's automated build/test
+          > jobs, but it has not been promoted as a stable release. Expect regressions and
+          > include the exact version shown by the launcher when reporting a problem.
+
+          The stable updater does not install this prerelease automatically.
+          NOTES
+
+          gh release create nightly out/*.zip out/*.apk \
+            --verify-tag \
+            --prerelease \
+            --title "openOMSI nightly ($VERSION)" \
+            --notes-file notes.md
