@@ -6719,9 +6719,10 @@ pub(crate) mod tests {
 
     #[test]
     fn bays() {
-        // the stop's box offset is kept as it is until the vehicle is known
+        // Geometric stops retain their box offset until the vehicle is known.
         for lat in [0.0, 2.0, -4.0] {
-            assert_eq!(bay_offset(lat), lat);
+            assert_eq!(bay_offset(lat, StopRoute::Nearest), lat);
+            assert!(bay_offset(lat, StopRoute::Track(0)).is_nan());
         }
     }
 }
@@ -6734,7 +6735,7 @@ mod authored_station_tests {
 
     #[test]
     fn authored_track_stop_keeps_ai_on_the_route_path() {
-        let bus = crate::schedule::tests::script_test_vehicle("{frame}\\n{end}\\n", "", "");
+        let bus = crate::schedule::tests::script_test_vehicle("{frame}\n{end}\n", "", "");
         let ty = &bus.ty;
         let left_platform = -4.0;
 
@@ -6762,6 +6763,24 @@ mod authored_station_tests {
             ),
             0.0
         );
+    }
+
+    #[test]
+    fn authored_bays_ignore_box_side_traffic_hand_and_rail_kind() {
+        let bus = crate::schedule::tests::script_test_vehicle("{frame}\n{end}\n", "", "");
+        for lat in [-4.0, 0.0, 4.0] {
+            for side in [0.0, 1.0, 2.0] {
+                for left_hand in [false, true] {
+                    for rail in [false, true] {
+                        assert_eq!(
+                            bay_for(bay_offset(lat, StopRoute::Track(2)), &bus.ty, rail, left_hand, side),
+                            0.0,
+                            "authored visit: lat={lat}, side={side}, left_hand={left_hand}, rail={rail}",
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
