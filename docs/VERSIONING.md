@@ -24,20 +24,27 @@ launcher's side bar, in its log and in `openomsi --version` (baked in by
 
 ## Releases
 
-Every push to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml):
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) uses two publication
+channels while keeping one build matrix:
 
-1. works out the version with `scripts/version.sh`;
-2. builds Windows x64 and ARM64 (MSVC), macOS for Apple silicon and Intel, Linux x64 and
-   ARM64 and Android in parallel, and packs the dedicated server from the Linux and Windows
-   builds;
-3. creates the release `v<version>` (tag on that commit) with the archives
-   `openOMSI-<version>-windows-x64.zip`, `-windows-arm64.zip`, `-macos-arm64.zip`,
-   `-macos-x64.zip`, `-linux-x64.zip`, `-linux-arm64.zip`, `-android-arm64.apk`,
-   `-server-linux-x64.zip`, `-server-linux-arm64.zip`, `-server-windows-x64.zip`,
-   `-server-windows-arm64.zip`, and release notes generated from the commits.
+1. every pull request builds the platform test artifacts without publishing a release;
+2. every ordinary push to `main` builds and tests the same targets, then replaces the
+   moving **`nightly` prerelease** with that commit's artifacts;
+3. a maintainer runs the workflow manually (`workflow_dispatch`) to promote the selected
+   current commit as the full **stable** release `v<version>`.
 
-Pull requests run the same builds without publishing anything. Build output never goes
-into the repository (`target/` and `dist/` are ignored).
+Both channels use `scripts/version.sh` and build Windows x64/ARM64, macOS Apple
+silicon/Intel, Linux x64/ARM64, Android and the Windows/Linux dedicated-server archives.
+The nightly assets still include the exact `MAJOR.MINOR.COMMIT` version in their filenames,
+while the moving release/tag itself is named `nightly`.
+
+The launcher updater keeps using GitHub's `/releases/latest` endpoint. GitHub defines that
+endpoint as the newest published **non-prerelease, non-draft** release, so nightly builds do
+not replace the stable update channel and no updater protocol change is required.
+
+A stable promotion creates or updates `v<version>` with the same versioned archives and
+the changelog-derived release notes. Build output never goes into the repository
+(`target/` and `dist/` are ignored).
 
 ### Test builds of a pull request
 
