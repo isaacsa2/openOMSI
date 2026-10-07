@@ -8004,6 +8004,11 @@ impl Renderer {
         }
         out
     }
+    /// Switch the existing CPU-stage accumulators; no query support is requested.
+    pub fn set_profiling(&mut self, enabled: bool) {
+        self.profiling = enabled;
+    }
+
 }
 
 impl GpuTimers {
