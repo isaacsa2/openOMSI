@@ -8,6 +8,15 @@ pub(crate) const DEFAULT_SIZE: &str = "1600x900";
 #[derive(Parser, Debug, Clone)]
 #[command(name = "openomsi", version = crate::startup::VERSION, about = "openOMSI")]
 pub(crate) struct Args {
+    /// Capture the existing profiler for 10, 30 or 60 seconds after loading.
+    #[arg(long, value_parser = crate::performance_capture::duration)]
+    pub(crate) profile_capture: Option<u32>,
+    /// Capture output directory (default: application data/performance-<pid>).
+    #[arg(long, requires = "profile_capture")]
+    pub(crate) profile_output: Option<PathBuf>,
+    /// Warm-up after the world is loaded, in seconds.
+    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u32).range(0..=300))]
+    pub(crate) profile_delay: u32,
     /// OMSI 2 installation root (the folder that contains `maps`, `Vehicles`, …).
     /// Found by itself when left out: $OMSI_ROOT, the folder remembered from last time,
     /// a folder next to this program, or the usual Steam locations.

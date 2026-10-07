@@ -1175,6 +1175,14 @@ pub mod env {
     use std::ffi::OsString;
     use std::sync::{OnceLock, RwLock};
 
+    // A bounded capture uses the existing profiler without mutating the process
+    // environment (unsafe once the game has started its background threads).
+    static PROFILE_CAPTURE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    pub fn set_profile_capture(enabled: bool) {
+        PROFILE_CAPTURE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn cache() -> &'static RwLock<HashMap<String, Option<OsString>>> {
         static C: OnceLock<RwLock<HashMap<String, Option<OsString>>>> = OnceLock::new();
         C.get_or_init(Default::default)
@@ -1203,6 +1211,9 @@ pub mod env {
     }
 
     pub fn var_os(name: &str) -> Option<OsString> {
+        if name == "OMSI_PROFILE" && PROFILE_CAPTURE.load(std::sync::atomic::Ordering::Relaxed) {
+            return Some("1".into());
+        }
         if let Some(v) = LOCAL.with(|l| l.borrow().get(name).cloned()) {
             return v;
         }
