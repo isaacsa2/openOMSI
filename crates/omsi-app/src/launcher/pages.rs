@@ -2714,7 +2714,7 @@ mod settings_tests {
         let mut graphics = vec![
             "s-gp-sel", "s-gp-load", "s-gp-del", "s-gp-name", "s-gp-save",
             "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "s-cloud-quality", "set-windy_trees",
-            "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression",
+            "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression", "s-gpu-texcomp",
         ];
         if !cfg!(target_os = "macos") {
             graphics.push("s-api");
