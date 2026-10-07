@@ -141,7 +141,7 @@ def print_report(result: dict[str, Any], max_stages: int) -> None:
         print("| --- | ---: | ---: | ---: | ---: |")
         for row in stages:
             print(
-                f"| \`{row['name']}\` | {row['base_ms']:.3f} | {row['candidate_ms']:.3f} | "
+                f"| `{row['name']}` | {row['base_ms']:.3f} | {row['candidate_ms']:.3f} | "
                 f"{row['delta_ms']:+.3f} | {fmt_change(row['change_percent'])} |"
             )
     if result["mismatches"]:
