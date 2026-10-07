@@ -7,7 +7,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -88,10 +88,6 @@ fn rel(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn logical(root: &Path, entry: &ManifestEntry) -> PathBuf {
-    entry.path.split('/').fold(root.to_path_buf(), |p, c| p.join(c))
-}
-
 fn manifest_path(root: &Path) -> PathBuf {
     root.join(MANIFEST)
 }
@@ -154,11 +150,22 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Only OMSI content folders are scanned. Executables, libraries, archives and arbitrary
-/// files next to the installation are never candidates.
+/// Only content areas whose audio/models/textures are loaded through the VFS are scanned.
+/// In particular Plugins is excluded: a native plugin may open its own resources directly.
 fn files(root: &Path) -> Vec<PathBuf> {
+    const AREAS: [&str; 9] = [
+        "Vehicles",
+        "Sceneryobjects",
+        "Splines",
+        "Texture",
+        "Humans",
+        "Announcements",
+        "Sounds",
+        "maps",
+        "Trains",
+    ];
     let mut out = Vec::new();
-    for folder in omsi_cfg::CONTENT_FOLDERS {
+    for folder in AREAS {
         walk(&root.join(folder), &mut out);
     }
     out
@@ -199,10 +206,8 @@ fn sample_compressed(path: &Path) -> Option<(u64, u64)> {
     if data.is_empty() {
         return None;
     }
-    let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
-    enc.write_all(&data).ok()?;
-    let out = enc.finish().ok()?;
-    Some((data.len() as u64, out.len() as u64 + 16))
+    let stored = omsi_cfg::vfs::trial_compressed_size(&data).ok()?;
+    Some((data.len() as u64, stored))
 }
 
 fn estimate_stored(w: &KindWork) -> u64 {
