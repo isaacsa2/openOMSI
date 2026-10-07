@@ -4,6 +4,13 @@ Every push to `main` is released as `MAJOR.MINOR.COMMIT` (see
 [docs/VERSIONING.md](docs/VERSIONING.md)); the downloads are on the
 [Releases](https://github.com/openOMSI-Project/openOMSI/releases) page.
 
+## 0.2.11 - 2026-10-07
+
+### Bug Fixes & Improvements
+
+- Restored startup on Galaxy S24/S25 and other Adreno devices by starting with the basic pipeline set and simplifying unsupported scene-shader shadow paths.
+- Reworked the pause menu into a launcher-style sidebar, with scrolling and layout adjustments for smaller screens.
+
 ## 0.2.10 - 2026-10-07
 
 ### Bug Fixes & Improvements
