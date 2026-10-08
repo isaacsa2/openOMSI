@@ -74,7 +74,11 @@ pub(crate) struct Args {
     /// Your name as the other players see it.
     #[arg(long, default_value = "Driver")]
     pub(crate) lan_name: String,
-    /// Season override: spring, summer, autumn or winter (else the date decides, as in OMSI).
+    /// Season: spring, summer, autumn or winter, with its phase `-early`, `-mid` (the
+    /// default) or `-late` (`autumn-late`), else the date decides, as in OMSI. The date
+    /// moves into the phase's month (its typical day; a --date already in that month stays,
+    /// the year and the time of day stay), half a year later south of the equator; the
+    /// plants are mixed between the two texture seasons the phase lies between.
     #[arg(long)]
     pub(crate) season: Option<String>,
     /// Fire script triggers after spawning: name[@seconds],… (times apply during --drive).
@@ -108,6 +112,10 @@ pub(crate) struct Args {
     /// Run the timetable: scheduled AI buses from the map's TTData (needs --traffic > 0 or this).
     #[arg(long)]
     pub(crate) schedule: bool,
+    /// With --schedule: the timetable for the player's own duty only, no timetable AI
+    /// buses (the launcher's "Disable timetable buses" with a line chosen).
+    #[arg(long)]
+    pub(crate) no_timetable_buses: bool,
     /// Date at start, YYYY-MM-DD (default 1989-05-30).
     #[arg(long)]
     pub(crate) date: Option<String>,
@@ -120,7 +128,8 @@ pub(crate) struct Args {
     /// Set script string variables after spawning: name=value[,name=value…].
     #[arg(long)]
     pub(crate) setstr: Option<String>,
-    /// Weather file (relative to root), e.g. Weather/Bodennebel.owt.
+    /// Weather file (relative to root), e.g. Weather/Bodennebel.owt; `natural` (or none) is
+    /// the physical weather model, `cycle` the weather cycle.
     #[arg(long)]
     pub(crate) weather: Option<String>,
     /// Passengers at bus stops (window and offscreen).
@@ -182,6 +191,9 @@ pub(crate) struct Args {
     pub(crate) situation_vars: Vec<(String, f32)>,
     #[arg(skip)]
     pub(crate) situation_strvars: Vec<(String, String)>,
+    /// The saved bus odometer, applied after spawning so initialization cannot replace it.
+    #[arg(skip)]
+    pub(crate) situation_odometer_km: Option<f64>,
     /// Saved ordinal in the current timetable trip; absent in older situations.
     #[arg(skip)]
     pub(crate) situation_next_stop: Option<usize>,
@@ -203,6 +215,10 @@ pub(crate) struct Args {
     /// launcher's "Automatic") instead of `--entry`.
     #[arg(long)]
     pub(crate) auto_entry: bool,
+    /// With a duty: the clock stays at `--time` however late its first trip leaves (the
+    /// launcher's start at the real time).
+    #[arg(long)]
+    pub(crate) keep_time: bool,
     /// OMSI's tutorial 1..4 (its situation, and its pages beside the picture).
     #[arg(long)]
     pub(crate) tutorial: Option<usize>,
@@ -229,6 +245,11 @@ pub(crate) struct Args {
     /// automatic exposure, a glow around real highlights and the PBR Neutral tone curve).
     #[arg(long)]
     pub(crate) enhanced: bool,
+    /// Enhanced+ graphics, as the settings' `graphics=enhanced_plus`: Enhanced with
+    /// ray-traced sun shadows, ambient occlusion and reflections (where the graphics card
+    /// can trace rays).
+    #[arg(long)]
+    pub(crate) enhanced_plus: bool,
     /// Open the launcher (the default when the program is started without arguments).
     #[arg(long)]
     pub(crate) launcher: bool,
@@ -286,6 +307,7 @@ pub(crate) fn parse_triggers(args: &Args) -> Vec<(String, f32)> {
 impl Args {
     pub(crate) fn is_resuming(&self) -> bool {
         self.situation.is_some()
+            || self.situation_odometer_km.is_some()
             || !self.situation_vars.is_empty()
             || !self.situation_strvars.is_empty()
     }
@@ -301,4 +323,5 @@ pub(crate) struct SituationOther {
     pub paint: Option<String>,
     pub vars: Vec<(String, f32)>,
     pub strvars: Vec<(String, String)>,
+    pub odometer_km: Option<f64>,
 }

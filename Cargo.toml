@@ -29,8 +29,9 @@ exclude = ["launcher/src-tauri"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-rust-version = "1.85"
 
+# Every dependency that more than one crate uses is declared here once, so an update (by
+# hand or by Dependabot) moves all the crates together and none is left on an older version.
 [workspace.dependencies]
 anyhow = "1"
 thiserror = "2"
@@ -41,15 +42,32 @@ glam = "0.30"
 rayon = "1.10"
 walkdir = "2"
 clap = { version = "4", features = ["derive"] }
-hashbrown = "0.15"
+hashbrown = "0.17"
 smallvec = "1"
 parking_lot = "0.12"
 rand = "0.9"
 wgpu = { version = "29", default-features = false, features = ["std", "parking_lot", "metal", "vulkan", "dx12", "gles", "wgsl", "noop"] }
+# wgpu's parts that are used directly: always wgpu's own version, or their types do not
+# match wgpu's (Dependabot's `wgpu` group updates the three together)
+wgpu-hal = "29"
+naga = "29"
 winit = "0.30"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "tga", "dds", "jpeg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+ureq = { version = "2", default-features = false, features = ["tls"] }
+sha2 = "0.10"
+# the LAN mods' encryption (X25519, HKDF, ChaCha20-Poly1305) and omsi-net's signatures
+ring = "0.17"
+flate2 = "1"
+ab_glyph = "0.2"
+rfd = "0.15"
+libc = "0.2"
+windows = "0.62"
+winresource = "0.1"
 
 [profile.release]
 opt-level = 3
@@ -66,3 +84,21 @@ opt-level = 1
 inherits = "release"
 debug = 0
 strip = "debuginfo"
+
+# (a patch that no longer matches the version wgpu asks for is dropped with only a warning;
+# the Security audit workflow fails when Cargo.lock lists one as unused)
+[patch.crates-io]
+gpu-allocator = { git = "https://github.com/openOMSI-Project/gpu-allocator", rev = "6ad8a7eeb9c3e1dcd65656f718c593a0a1a3915d" }
+# wgpu from the org's fork (upstream v29.0.4 plus fixes): GL texture units sized from the driver,
+# the GL context released while a thread waits for the GPU, errors instead of panics on driver
+# failures, Adapter::memory_info, and GLES over ANGLE (Direct3D 11) on Windows; every crate of the
+# fork that Cargo.lock lists is patched, or the fork's and crates.io's halves would not match
+wgpu = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+wgpu-core = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+wgpu-core-deps-apple = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+wgpu-core-deps-emscripten = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+wgpu-hal = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+wgpu-types = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+wgpu-naga-bridge = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
+naga = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "49edcdfc0fdbae2ae50c18b0d75fba9c1972d04a" }
