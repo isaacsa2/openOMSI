@@ -153,6 +153,8 @@ flags! {
     OMSI_BRIDGE_ONLY: Bool, Test, Use, "off", "LAN: forget our own addresses so that only what the rendezvous bridge reports is tried.";
     OMSI_BUDGET_FROM: Text, Test, Use, "-", "Offscreen with OMSI_TEXTURE_MEMORY: x,y[,MB] - the texture budget is met as seen from that point.";
     OMSI_BUILD: Text, Build, Build, "-", "Compile-time (env!): the commit the binary was built from, set by build.rs. Not read at runtime.";
+    OMSI_BUILD_COMMIT: Text, Build, Build, "unknown", "Compile-time commit SHA for support metadata, set by build.rs. Not read at runtime.";
+    OMSI_BUILD_TIMESTAMP: Num, Build, Build, "0", "Compile-time Unix timestamp for support metadata, set by build.rs. Not read at runtime.";
     OMSI_CAM_VEHICLE: Text, Test, Use, "-", "Offscreen: x,y,z,yaw,pitch[,fov] - a camera in the bus's own frame.";
     OMSI_CHECK_ENTRIES: Bool, Test, Use, "off", "Map check: is there ground to stand on where a player is put down.";
     OMSI_CHECK_GROUND: Bool, Test, Use, "off", "Check: people on foot with a walkable surface above their heads, every two seconds.";
