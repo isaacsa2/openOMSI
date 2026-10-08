@@ -52,6 +52,24 @@ pub(crate) enum ListKind {
     PlaceHof(String, String),
 }
 
+pub(crate) fn searchable(kind: &ListKind) -> bool {
+    matches!(
+        kind,
+        ListKind::Hofs
+            | ListKind::Destinations
+            | ListKind::PlaceMaker
+            | ListKind::PlaceType(_)
+            | ListKind::PlaceHof(..)
+    )
+}
+
+fn search_matches(label: &str, action: &str, query: &str) -> bool {
+    let haystack = format!("{label} {action}").to_lowercase();
+    query
+        .split_whitespace()
+        .all(|word| haystack.contains(&word.to_lowercase()))
+}
+
 /// A vehicle file of the menu's list (`Vehicles/...`) as its definition.
 fn bus_def(app: &App, bus: &str) -> Option<omsi_vehicle::Vehicle> {
     let path = crate::spawn::player_bus_path(&app.args.root, bus).ok()?;
@@ -531,8 +549,13 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                 }
             }
             groups.sort_by(|a, b| bus_cmp(&a.1, &b.1).then_with(|| a.0.cmp(&b.0)));
+            let query = if app.menu_edit_search { app.menu_edit.as_deref().unwrap_or("") } else { &app.menu_search };
             for (key, name, vs) in groups {
-                if vs.len() == 1 {
+                if !query.trim().is_empty() {
+                    for v in vs {
+                        out.push((format!("{name}  ·  {}", v.2), format!("bus {}", v.3)));
+                    }
+                } else if vs.len() == 1 {
                     // (a manufacturer with one type: that type at once)
                     out.push((format!("{name}  ·  {}", vs[0].2), format!("bus {}", vs[0].3)));
                 } else {
@@ -595,6 +618,16 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                 out.push((tr("This bus has no list of fleet numbers"), "back".into()));
             }
         }
+    }
+    if searchable(kind) {
+        let query = if app.menu_edit_search { app.menu_edit.as_deref().unwrap_or("") } else { &app.menu_search };
+        out.retain(|(label, action)| search_matches(label, action, query));
+        let label = if app.menu_edit_search {
+            format!("{}: {query}_  ({})", tr("Search…"), tr("Enter sets it, Esc cancels"))
+        } else {
+            format!("{}: {query}...", tr("Search…"))
+        };
+        out.insert(0, (label, "search".into()));
     }
     out.push((tr("Back"), "back".into()));
     out
@@ -722,6 +755,11 @@ pub(crate) fn run(app: &mut App, kind: &ListKind, action: &str) -> Option<ListKi
 pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -> Option<ListKind> {
     if crate::game_controller_menu::is_controller_list(Some(kind)) {
         return crate::game_controller_menu::run(app, kind, action, mv);
+    }
+    if action == "search" && searchable(kind) {
+        app.menu_edit = Some(app.menu_search.clone());
+        app.menu_edit_search = true;
+        return Some(kind.clone());
     }
     if action == "back" {
         return match kind {
@@ -2961,6 +2999,26 @@ fn start_duty(app: &mut App, line: &str, tour: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn searches_model_and_hof_names_and_paths_without_losing_their_actions() {
+        assert!(super::search_matches(
+            "Volvo BRT",
+            "bus Vehicles/Pack/biarticulado.bus",
+            "VOLVO biarticulado"
+        ));
+        assert!(super::search_matches(
+            "Curitiba",
+            "hof Vehicles/Bus/curitiba.hof",
+            "curitiba .hof"
+        ));
+        assert!(!super::search_matches(
+            "Curitiba",
+            "hof curitiba.hof",
+            "recife"
+        ));
+        assert!(super::search_matches("Anything", "bus x.bus", "  "));
+    }
+
     /// A destination picked from the list keeps the route number the bus shows, its letter
     /// too (92E, IBIS 92 and suffix 10).
     #[test]
