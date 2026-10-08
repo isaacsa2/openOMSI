@@ -392,6 +392,139 @@ pub(crate) fn spawn_player_prepared(
                 .map(|i| (i.width, i.height, i.rgba))
         });
     }
+    let rail_bound = configure_player_physics(args, world, &vt, &mut vehicle);
+    let bindings = omsi_content::KeyboardCfg::load(&crate::startup::keyboard_cfg(&args.root))
+        .map(|k| k.with_game_defaults().vehicles)
+        .unwrap_or_default();
+    static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let mut p = Player {
+        uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        vehicle,
+        render,
+        trailer_renders,
+        axes: Default::default(),
+        analog: Default::default(),
+        cam_choice: (0, 0),
+        bindings,
+        sounds: None,
+        pressed_mesh: None,
+        press_info: (true, 0.0),
+        auto_drag: None,
+        pressed_trailer_mesh: None,
+        occlude_controls: false,
+        startup: None,
+        startup_at: None,
+        give_ticket: false,
+        give_change: false,
+        door_buttons: hashbrown::HashMap::new(),
+        cam_before_special: None,
+        held_keys: Default::default(),
+        held_repeat: Default::default(),
+        hand_coupled: 0,
+        rail_bound,
+        rail: None,
+        head: Vec3::ZERO,
+        head_vel: Vec3::ZERO,
+        head_omega: Vec3::ZERO,
+        head_idle: Default::default(),
+        steer_look: 0.0,
+        seat: Vec3::ZERO,
+        mirror_offsets: crate::settings::mirror_offsets(&vt.def.path),
+        mirror_shifts: crate::settings::mirror_shifts(&vt.def.path),
+        mirror_fovs: crate::settings::mirror_fovs(&vt.def.path),
+        mirrors_dirty: false,
+        take_change: false,
+        toggled_up: Default::default(),
+        momentary_gears: crate::settings::Settings::load().momentary_gears,
+        from_keyboard: false,
+        auto_shift: crate::settings::Settings::load().auto_shift,
+        auto_shift_wait: 0.0,
+        auto_shift_idle: 0.0,
+        side_lights_by_l: false,
+        driver: None,
+        ibis_duty: None,
+        blind_pick: None,
+        ibis_typist: None,
+        duty_typed: false,
+        html_next_stop: None,
+        ibis_background: false,
+        arm: Default::default(),
+        blinker_key_state: 0,
+        blinker_cancel: crate::settings::Settings::load().blinker_cancel,
+    };
+    for _ in 0..3 {
+        p.vehicle.update(1.0 / 30.0);
+    }
+    finish_player(args, world, renderer, scene, p)
+}
+
+/// The paint scheme a vehicle wears: the one named (or numbered) by `--paint`; none named is
+/// the model's own textures (the launcher's "Default paint"). Taking the first scheme then
+/// put another livery on a bus whose default was chosen. The game and the launcher's
+/// preview (`--export-glb`) both come here, so the preview shows what is driven.
+pub(crate) fn paint_scheme(vt: &omsi_sim::VehicleType, paint: Option<&str>) -> Option<usize> {
+    let asked = paint.map(str::trim).filter(|p| !p.is_empty());
+    let found = asked.and_then(|p| {
+        vt.paint_schemes
+            .iter()
+            .position(|s| s.name.eq_ignore_ascii_case(p))
+            .or_else(|| p.parse::<usize>().ok().filter(|i| *i < vt.paint_schemes.len()))
+    });
+    if let (Some(p), None) = (asked, found) {
+        log::warn!(
+            "paint scheme '{p}' not found; available: {:?}",
+            vt.paint_schemes.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
+        );
+    }
+    found
+}
+
+/// Where the map's `global.cfg` recorded an entry point (x, height, y within its tile), in
+/// world coordinates, taken in the tile of its object at `object` (Grundorf's records agree
+/// with their objects that way to a few decimetres).
+pub(crate) fn recorded_entry_pos(ep: &omsi_map::global::EntryPoint, object: DVec3) -> Option<DVec3> {
+    let s = omsi_map::tile_size();
+    let (tx, ty) = ((object.x / s).floor(), (object.y / s).floor());
+    ep.pos.iter().all(|v| v.is_finite()).then(|| DVec3::new(tx * s + ep.pos[0], ty * s + ep.pos[1], ep.pos[2]))
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_consist_follows_reversed_front_couplings_without_running_init() {
+        let dir = std::env::temp_dir().join(format!("omsi-placement-consist-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _cleanup = Cleanup(dir.clone());
+        for (file, body) in [
+            ("lead.bus", "[friendlyname]\nSynthetic\nLead\nTest\n[couple_back]\nfirst.bus\ntrue\n"),
+            ("first.bus", "[friendlyname]\nSynthetic\nFirst\nTest\n[couple_front]\nlast.bus\nfalse\n"),
+            ("last.bus", "[friendlyname]\nSynthetic\nLast\nTest\n"),
+        ] {
+            std::fs::write(dir.join(file), format!("{body}[model]\nempty.cfg\n")).unwrap();
+        }
+        std::fs::write(dir.join("empty.cfg"), "").unwrap();
+        let args = Args::parse_from(["omsi", "--root", dir.to_str().unwrap(), "--bus", "lead.bus"]);
+        let prepared = PreparedPlayer::load(&args).unwrap();
+        assert_eq!(prepared.parts.len(), 2);
+        assert!(prepared.parts.iter().all(|(_, reversed)| *reversed));
+        assert_eq!(prepared.parts[0].0.def.path.file_name().unwrap(), "first.bus");
+        assert_eq!(prepared.parts[1].0.def.path.file_name().unwrap(), "last.bus");
+        // A worker carries definitions only. Init and script sharing still happen
+        // once, when the prepared types are attached to the live instance.
+        let mut vehicle = omsi_sim::VehicleInstance::new(prepared.ty, omsi_sim::VehicleHost::new(start_clock(&args)));
+        let types = attach_coupled_types(&mut vehicle, prepared.parts);
+        assert_eq!(vehicle.trailers.len(), types.len());
+        assert!(vehicle.trailers.iter().all(|part| part.reversed));
+    }
+}
+
+fn configure_player_physics(args: &Args, world: &World, vt: &omsi_sim::VehicleType, vehicle: &mut omsi_sim::VehicleInstance) -> bool {
     // number / ident were installed before {init}; do not rewrite them here.
     // ground following through the loaded tiles (road surfaces first, then terrain)
     let terrains = world.terrains.clone();
@@ -468,68 +601,10 @@ pub(crate) fn spawn_player_prepared(
         vehicle.collision.as_ref().map(|c| c.meshes.len()).unwrap_or(0),
         vehicle.collision.as_ref().map(|c| c.mesh_parts()).unwrap_or(0)
     );
-    let bindings = omsi_content::KeyboardCfg::load(&crate::startup::keyboard_cfg(&args.root))
-        .map(|k| k.with_game_defaults().vehicles)
-        .unwrap_or_default();
-    static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let mut p = Player {
-        uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        vehicle,
-        render,
-        trailer_renders,
-        axes: Default::default(),
-        analog: Default::default(),
-        cam_choice: (0, 0),
-        bindings,
-        sounds: None,
-        pressed_mesh: None,
-        press_info: (true, 0.0),
-        auto_drag: None,
-        pressed_trailer_mesh: None,
-        occlude_controls: false,
-        startup: None,
-        startup_at: None,
-        give_ticket: false,
-        give_change: false,
-        door_buttons: hashbrown::HashMap::new(),
-        cam_before_special: None,
-        held_keys: Default::default(),
-        held_repeat: Default::default(),
-        hand_coupled: 0,
-        rail_bound,
-        rail: None,
-        head: Vec3::ZERO,
-        head_vel: Vec3::ZERO,
-        head_omega: Vec3::ZERO,
-        head_idle: Default::default(),
-        steer_look: 0.0,
-        seat: Vec3::ZERO,
-        mirror_offsets: crate::settings::mirror_offsets(&vt.def.path),
-        mirror_shifts: crate::settings::mirror_shifts(&vt.def.path),
-        mirror_fovs: crate::settings::mirror_fovs(&vt.def.path),
-        mirrors_dirty: false,
-        take_change: false,
-        toggled_up: Default::default(),
-        momentary_gears: crate::settings::Settings::load().momentary_gears,
-        from_keyboard: false,
-        auto_shift: crate::settings::Settings::load().auto_shift,
-        auto_shift_wait: 0.0,
-        auto_shift_idle: 0.0,
-        side_lights_by_l: false,
-        driver: None,
-        ibis_duty: None,
-        blind_pick: None,
-        ibis_typist: None,
-        duty_typed: false,
-        html_next_stop: None,
-        ibis_background: false,
-        arm: Default::default(),
-        blinker_key_state: 0,
-        blinker_cancel: crate::settings::Settings::load().blinker_cancel,
-    };
-    for _ in 0..3 {
-        p.vehicle.update(1.0 / 30.0);
-    }
+    rail_bound
+}
+
+fn finish_player(args: &Args, world: &World, renderer: &Renderer, scene: &mut Scene, mut p: Player) -> Result<Option<Player>> {
     if let Some(sv) = &args.setvar {
         for kv in sv.split(',') {
             if let Some((k, v)) = kv.split_once('=') {
@@ -573,7 +648,7 @@ pub(crate) fn spawn_player_prepared(
             log::warn!("trigger {name} not found");
         }
     }
-    if omsi_cfg::env::var_os("OMSI_DEBUG_MESHES").is_some() {
+    if omsi_cfg::flags::OMSI_DEBUG_MESHES.is_set() {
         for (i, vm) in p.vehicle.ty.meshes.iter().enumerate() {
             let def = &p.vehicle.ty.model.meshes[vm.def_index];
             let (lo, hi) = vm.data.positions.iter().fold(
@@ -592,7 +667,7 @@ pub(crate) fn spawn_player_prepared(
                 .fold(f32::MAX, f32::min);
             log::info!("mesh {i:3} {:40} vp={} tris={:6} bounds {:?}..{:?} uv {:?}..{:?} min|n|={nrm:.2} mats={} anims={} visible={:?}", def.file, def.viewpoint, vm.data.indices.len() / 3, lo, hi, uv0, uv1, vm.materials.len(), def.animations.len(), def.visible);
             // per material slot: which part of its texture the mesh shows (display texts)
-            if omsi_cfg::env::var("OMSI_DEBUG_MESHES")
+            if omsi_cfg::flags::OMSI_DEBUG_MESHES.var()
                 .map(|f| {
                     !f.is_empty()
                         && def
@@ -643,7 +718,7 @@ pub(crate) fn spawn_player_prepared(
             }
         }
     }
-    if omsi_cfg::env::var_os("OMSI_DEBUG_PROPS").is_some() {
+    if omsi_cfg::flags::OMSI_DEBUG_PROPS.is_set() {
         for (i, vm) in p.vehicle.ty.meshes.iter().enumerate() {
             let pr = &p.vehicle.mesh_props[i];
             let def = &p.vehicle.ty.model.meshes[vm.def_index];
@@ -709,70 +784,4 @@ pub(crate) fn spawn_player_prepared(
     p.vehicle.host.fired_triggers.clear();
     p.vehicle.host.fired_trigger_vars.clear();
     Ok(Some(p))
-}
-
-/// The paint scheme a vehicle wears: the one named (or numbered) by `--paint`; none named is
-/// the model's own textures (the launcher's "Default paint"). Taking the first scheme then
-/// put another livery on a bus whose default was chosen. The game and the launcher's
-/// preview (`--export-glb`) both come here, so the preview shows what is driven.
-pub(crate) fn paint_scheme(vt: &omsi_sim::VehicleType, paint: Option<&str>) -> Option<usize> {
-    let asked = paint.map(str::trim).filter(|p| !p.is_empty());
-    let found = asked.and_then(|p| {
-        vt.paint_schemes
-            .iter()
-            .position(|s| s.name.eq_ignore_ascii_case(p))
-            .or_else(|| p.parse::<usize>().ok().filter(|i| *i < vt.paint_schemes.len()))
-    });
-    if let (Some(p), None) = (asked, found) {
-        log::warn!(
-            "paint scheme '{p}' not found; available: {:?}",
-            vt.paint_schemes.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
-        );
-    }
-    found
-}
-
-/// Where the map's `global.cfg` recorded an entry point (x, height, y within its tile), in
-/// world coordinates, taken in the tile of its object at `object` (Grundorf's records agree
-/// with their objects that way to a few decimetres).
-pub(crate) fn recorded_entry_pos(ep: &omsi_map::global::EntryPoint, object: DVec3) -> Option<DVec3> {
-    let s = omsi_map::tile_size();
-    let (tx, ty) = ((object.x / s).floor(), (object.y / s).floor());
-    ep.pos.iter().all(|v| v.is_finite()).then(|| DVec3::new(tx * s + ep.pos[0], ty * s + ep.pos[1], ep.pos[2]))
-}
-
-#[cfg(test)]
-mod preparation_tests {
-    use super::*;
-
-    #[test]
-    fn prepared_consist_follows_reversed_front_couplings_without_running_init() {
-        let dir = std::env::temp_dir().join(format!("omsi-placement-consist-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        struct Cleanup(PathBuf);
-        impl Drop for Cleanup {
-            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
-        }
-        let _cleanup = Cleanup(dir.clone());
-        for (file, body) in [
-            ("lead.bus", "[friendlyname]\nSynthetic\nLead\nTest\n[couple_back]\nfirst.bus\ntrue\n"),
-            ("first.bus", "[friendlyname]\nSynthetic\nFirst\nTest\n[couple_front]\nlast.bus\nfalse\n"),
-            ("last.bus", "[friendlyname]\nSynthetic\nLast\nTest\n"),
-        ] {
-            std::fs::write(dir.join(file), format!("{body}[model]\nempty.cfg\n")).unwrap();
-        }
-        std::fs::write(dir.join("empty.cfg"), "").unwrap();
-        let args = Args::parse_from(["omsi", "--root", dir.to_str().unwrap(), "--bus", "lead.bus"]);
-        let prepared = PreparedPlayer::load(&args).unwrap();
-        assert_eq!(prepared.parts.len(), 2);
-        assert!(prepared.parts.iter().all(|(_, reversed)| *reversed));
-        assert_eq!(prepared.parts[0].0.def.path.file_name().unwrap(), "first.bus");
-        assert_eq!(prepared.parts[1].0.def.path.file_name().unwrap(), "last.bus");
-        // A worker carries definitions only. Init and script sharing still happen
-        // once, when the prepared types are attached to the live instance.
-        let mut vehicle = omsi_sim::VehicleInstance::new(prepared.ty, omsi_sim::VehicleHost::new(start_clock(&args)));
-        let types = attach_coupled_types(&mut vehicle, prepared.parts);
-        assert_eq!(vehicle.trailers.len(), types.len());
-        assert!(vehicle.trailers.iter().all(|part| part.reversed));
-    }
 }
