@@ -34,16 +34,22 @@ pub fn instance(mut descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
             "ANGLE_FEATURE_OVERRIDES_DISABLED",
             serial_compiler_overrides(&existing),
         );
-        log::info!("ANGLE: native shader worker jobs disabled; renderer compilation uses a managed 32 MB stack");
+        log::info!("ANGLE: native shader worker jobs disabled; renderer compilation uses a managed {COMPILER_STACK_MB} MB stack");
     }
     descriptor.backends = wgpu::Backends::GL;
     descriptor.backend_options.gl.platform = wgpu::GlPlatform::Angle;
     wgpu::Instance::new(descriptor)
 }
 
+/// The compiler thread's stack. Translating and compiling the scene pipeline (77
+/// functions in its fragment stage, inlined by HLSL) overflowed 32 MB on WARP.
+#[cfg(windows)]
+const COMPILER_STACK_MB: usize = 256;
+
 /// A single worker for the entire pipeline build, not one thread per pipeline. With
 /// ANGLE's native jobs disabled, translation and D3D compilation inherit this stack.
-/// Reserving stack address space does not commit all 32 MB at thread creation.
+/// Reserving stack address space does not commit it at thread creation: only the pages
+/// the compiler reaches are.
 pub(crate) fn compile<F, T>(device: &wgpu::Device, operation: F) -> T
 where
     F: FnOnce() -> T + Send,
@@ -55,7 +61,7 @@ where
         std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .name("ANGLE shader compiler".into())
-                .stack_size(32 * 1024 * 1024)
+                .stack_size(COMPILER_STACK_MB << 20)
                 .spawn_scoped(scope, operation)
                 .expect("ANGLE shader compiler thread")
                 .join()
