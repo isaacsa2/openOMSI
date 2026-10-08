@@ -68,6 +68,18 @@ impl Task {
 /// at the stop (`Pax::door_since`).
 const DOOR_GIVE_UP: f64 = 25.0;
 
+/// Track one continuous wait at a shut entry. Opening a door resets the wait, so a later
+/// closure gets a fresh timeout instead of inheriting the previous one.
+fn shut_door_wait(previous: Option<f64>, now: f64, at_shut_door: bool) -> (Option<f64>, bool) {
+    let since = if at_shut_door {
+        Some(previous.unwrap_or(now))
+    } else {
+        None
+    };
+    let expired = since.is_some_and(|start| now - start > DOOR_GIVE_UP);
+    (since, expired)
+}
+
 /// The ticket a passenger has (+0x61c): nothing to do, a ticket to stamp, one to buy.
 pub(super) const TICKET_NONE: u8 = 0;
 pub(super) const TICKET_STAMP: u8 = 2;
@@ -1876,9 +1888,9 @@ impl Humans {
         // stop again, for this bus only once it opens a door (they stood at its doors for
         // ten minutes and more).
         let at_shut_door = p.st == 2 && !bn.entry_open.iter().any(|o| *o);
-        let since = if at_shut_door { Some(p.door_since.unwrap_or(self.time)) } else { None };
+        let (since, give_up) = shut_door_wait(p.door_since, self.time, at_shut_door);
         self.pax_mut(i).unwrap().door_since = since;
-        if since.is_some_and(|t| self.time - t > DOOR_GIVE_UP) {
+        if give_up {
             if let Some(k) = p.seat {
                 self.free_seat(bn.id, k);
             }
@@ -2431,6 +2443,29 @@ impl Humans {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shut_door_give_up_uses_one_continuous_wait_and_resets_when_opened() {
+        let (since, expired) = shut_door_wait(None, 100.0, true);
+        assert_eq!(since, Some(100.0));
+        assert!(!expired);
+
+        let (since, expired) = shut_door_wait(since, 125.0, true);
+        assert_eq!(since, Some(100.0));
+        assert!(!expired, "the exact timeout boundary is still allowed");
+
+        let (since, expired) = shut_door_wait(since, 125.001, true);
+        assert_eq!(since, Some(100.0));
+        assert!(expired, "a continuous wait past the timeout gives up");
+
+        let (since, expired) = shut_door_wait(since, 130.0, false);
+        assert_eq!(since, None, "an open entry resets the old shut-door wait");
+        assert!(!expired);
+
+        let (since, expired) = shut_door_wait(since, 200.0, true);
+        assert_eq!(since, Some(200.0), "a later closure starts a fresh wait");
+        assert!(!expired);
+    }
 
     #[test]
     fn arriving_ai_uses_the_timetable_stop_not_a_neighbour() {
