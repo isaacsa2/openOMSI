@@ -4,6 +4,360 @@ Every push to `main` is released as `MAJOR.MINOR.COMMIT` (see
 [docs/VERSIONING.md](docs/VERSIONING.md)); the downloads are on the
 [Releases](https://github.com/openOMSI-Project/openOMSI/releases) page.
 
+## 0.2.17 - 2026-10-08
+
+A big one: early, mid and late seasons with trees that turn one by one, mouse steering to full
+lock, the wipers really clearing the glass, collisions with real momentum and dents, encrypted
+LAN mods, a DirectX 11 option for old graphics cards, and the game's code reorganised from the
+ground up so that it stays easy to change.
+
+### New
+- **Early, mid and late seasons.** Pick a season and under it Early, Mid or Late. The phase
+  sets a real date in that part of the season (the map's hemisphere decides which months), so
+  the sun's path, the length of the day, the natural weather's temperatures and snow, the
+  street lamps, the map's dated changes and the timetable all follow it by themselves. "By
+  date" works as before. Also on the command line: `--season autumn-late`.
+- **Trees that turn one by one.** In between two seasons the trees no longer change all
+  together: each tree takes one of the two looks, the same every time and for every LAN
+  player - early autumn is green with the first yellow trees, late autumn mostly bare with a
+  few still in leaf, early spring bare with the first green, late summer partly dry.
+- **Wipers clear the rain and snow only where the blade has passed**, along its sweep, pushing
+  the water ahead of it; drops merge and run off, and in snow the flakes settle on the glass
+  and build up at the edge of the wiped area [#1828](https://github.com/openOMSI-Project/openOMSI/pull/1828).
+- **Collisions with AI vehicles**: a car that is hit recoils by momentum and finds its way back
+  onto its lane, crash energy follows the masses and speeds of both vehicles, both the bus and
+  the AI cars get dents where they were hit, and glass shows cracks, lit like the pane it is in
+  [#1819](https://github.com/openOMSI-Project/openOMSI/pull/1819). Mouse pedal strength is a new
+  setting [#1819](https://github.com/openOMSI-Project/openOMSI/pull/1819).
+- **"ANGLE (DirectX 11)" graphics API on Windows**, for graphics chips whose DirectX 12, Vulkan
+  and OpenGL drivers don't run the game (Intel HD Graphics 2000-4000, Radeon HD 5000/6000). It
+  is tried by itself when the others fail, or chosen in Settings. The DLLs are built from
+  Google's ANGLE source in [angle-openomsi](https://github.com/openOMSI-Project/angle-openomsi)
+  and checked by their SHA-256.
+- **LAN mods are encrypted** on the network and on disk: the files a host sends can't be read
+  off the network, and copying them out of the game's folders gives you scrambled data, while
+  the game reads them normally. (This stops casual copying, not a determined person: the game
+  is open source and decrypts on the player's computer.) Hosts and players need 0.2.17 both.
+- The information bar shows how many passengers fit next to how many are aboard
+  [#1826](https://github.com/openOMSI-Project/openOMSI/pull/1826).
+- Plugins: `omsi.info()` names the stops on either side of the bus with their IDs, the
+  distance to each, and whether the bus stands at a stop
+  [#1588](https://github.com/openOMSI-Project/openOMSI/pull/1588).
+- New option (Settings → Gameplay → Traffic, off by default): timetable buses running ahead
+  of time wait for their departure only at the stops the timetable times itself, instead of
+  at every stop as in OMSI [#1773](https://github.com/openOMSI-Project/openOMSI/pull/1773).
+
+### Fixes
+- Mouse steering reaches full lock both ways: the wheel used to stop as soon as the cursor
+  hit the edge of the screen (on macOS often at a quarter of the lock). The cursor is now
+  held while you steer and comes back when you look around, open a menu or switch windows;
+  the mouse pedals reach full throttle and full brake too.
+- Dedicated server: people walk the pavements and wait at the stops around every player
+  again, and board the timetable buses there
+  [#1817](https://github.com/openOMSI-Project/openOMSI/pull/1817).
+- The offscreen pictures (and so the game's own picture checks) are taken exactly as the
+  window draws the game: the clock goes on, the AI's lights follow the daylight, the
+  collision settings count, the wet roads and the cabin air develop, the lighting is built
+  the same way.
+- No more crashes when the graphics driver fails in some ways it used to take the game down
+  with: running out of video memory while recording, a driver that can't compile a shader,
+  adapter checks that fail, closing an OpenGL context. Shader compile failures now say what
+  the driver said.
+- OpenGL: no more "Could not lock adapter context" crashes while another part of the game
+  waits for the GPU (#843, #898, #1110).
+- The LAN tests no longer fail now and then.
+
+### Under the hood
+- The game's code was reorganised without changing what it does (checked frame by frame
+  against the previous version): the frame is a sequence of named steps shared by the window
+  and the offscreen run; the AI traffic, the people and the timetable simulate in `omsi-sim`
+  with no graphics in them, and one place hands their state to the renderer; the renderer's
+  passes and pipelines each have a module of their own; the game's state is grouped by
+  subsystem; every `OMSI_*` switch is listed in `docs/DEBUG_FLAGS.md` and read through one
+  registry. No function is longer than 500 lines any more (there were ten), and a check on
+  every pull request keeps files and functions from growing past their size again.
+- openOMSI now builds on [wgpu-openomsi](https://github.com/openOMSI-Project/wgpu-openomsi),
+  the project's fork of wgpu 29.0.4 with the graphics fixes above (and a video-memory query,
+  which the log now shows).
+- `docs/ARCHITECTURE.md` describes the architecture; its history moved to `docs/HISTORY.md`.
+
+## 0.2.16 - 2026-10-07
+
+### New
+- Lua plugins can show panels (texts, icons, progress bars, buttons) and sliding notifications of their own in the game's look (`omsi.ui`); F10 gives the mouse to the panels, Esc back to the bus. See `docs/PLUGINS.md` and the `trip_panel.lua` example [#1788](https://github.com/openOMSI-Project/openOMSI/pull/1788).
+- Native TrackIR head tracking on Windows (NaturalPoint's NPClient), with sensitivity and inversion per axis in the launcher; opentrack keeps working as before [#1763](https://github.com/openOMSI-Project/openOMSI/pull/1763).
+- Night brightness (Settings → Graphics): brightens the Enhanced picture after sunset only, Off by default [#1799](https://github.com/openOMSI-Project/openOMSI/pull/1799).
+- Plugins: `trip_done` in `omsi.info()` [#1810](https://github.com/openOMSI-Project/openOMSI/pull/1810).
+
+### Fixes
+- Refuelling and the bus wash take their time, litre by litre, and stop when the bus drives off [#1785](https://github.com/openOMSI-Project/openOMSI/issues/1785).
+- Pedestrians run over are counted once each, within the bus's real box [#1805](https://github.com/openOMSI-Project/openOMSI/issues/1805).
+- Enhanced+: the buildings of a depot or other surface object cast their shadow up close too [#1783](https://github.com/openOMSI-Project/openOMSI/issues/1783).
+- Smoke, exhaust and other particles drift with the wind [#1798](https://github.com/openOMSI-Project/openOMSI/issues/1798).
+- The automated manual gearbox can be switched on in the launcher's driving settings [#1780](https://github.com/openOMSI-Project/openOMSI/issues/1780).
+- A traffic light no longer reacts to a bus on the neighbouring road or bay: the depot-gate request applies only off the lanes [#1790](https://github.com/openOMSI-Project/openOMSI/issues/1790).
+- A duty started at the real time keeps the clock instead of jumping to ten minutes before its first trip [#1792](https://github.com/openOMSI-Project/openOMSI/pull/1792).
+- Puddles are smaller, with sharp irregular edges [#1804](https://github.com/openOMSI-Project/openOMSI/pull/1804).
+- Dedicated server: AI traffic and pedestrians move smoothly on the players' screens and at their real speed; the server's clock keeps to real time [#1807](https://github.com/openOMSI-Project/openOMSI/pull/1807).
+- Hong Kong maps: AI buses of a plain `[aigroup_2]` group show their destination again [#1757](https://github.com/openOMSI-Project/openOMSI/pull/1757), and bus stop signs show their route numbers and pictures [#1765](https://github.com/openOMSI-Project/openOMSI/pull/1765).
+- AI vehicles wait before a junction when a queue on the short road pieces beyond it leaves no room, instead of blocking it [#1761](https://github.com/openOMSI-Project/openOMSI/pull/1761).
+
+## 0.2.15 - 2026-10-07
+
+### Bug Fixes & Improvements
+
+## 0.2.14 - 2026-10-07
+
+### Bug Fixes & Improvements
+
+## 0.2.13 - 2026-10-07
+
+### Bug Fixes & Improvements
+
+## 0.2.12 - 2026-10-07
+
+### Bug Fixes & Improvements
+
+## 0.2.11 - 2026-10-07
+
+### Bug Fixes & Improvements
+
+## 0.2.10 - 2026-10-07
+
+### Bug Fixes & Improvements
+
+## 0.2.9 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.8 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.7 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.6 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.5 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.4 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.3 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.2 - 2026-10-06
+
+### Bug Fixes & Improvements
+
+## 0.2.1 - 2026-10-06
+
+### Bug Fixes & Improvements
+- Android: a black screen instead of the game since 0.2.0 (#1633, #1597) on phones whose graphics driver cannot compile one of 0.2's new shaders (the snowfall, the lamps in the fog, the street lamps' shadow maps): the driver's error lost the whole graphics device. The game now notices this while it starts, opens the device again without those three and draws as before (snow then falls without flakes). The log names the shaders it was compiling when the device was lost.
+
+## 0.2.0 - 2026-10-06
+
+A release about light and weather: the Enhanced and Enhanced+ pictures worked out from the physics of the eye, the air and the lamps, and a new snowfall for every graphics mode.
+
+### Night (Enhanced, Enhanced+)
+- The night is dark again: the eye's adaptation follows a lightness-perception model (Krawczyk et al. 2005) instead of nearly full adaptation, the automatic metering no longer brightens a night, and the eye adapts to the lamps and headlights actually in view (their log-average) rather than to a fixed city level.
+- Street lamps cast real shadows: shadow maps for the four lamps lighting the camera's surroundings most (the bus, poles, signs and trees throw their shadows on the street).
+- A street lamp's light goes down and out, not into the sky: tree crowns and upper floors above the lamps stay dark.
+- The lit ground throws light back up: a bus's flank or a facade beside a lit street is no longer black; much more so over snow.
+- Moonlit nights: the moon is a directional light with its own shadows; on a dark country road under a full moon the eye takes to the moonlight.
+- The night sky's glow comes from the lamps round the camera (Walker's law): a village keeps its stars, a city glows orange-grey.
+
+### Weather (Enhanced, Enhanced+)
+- Fog and mist light up round every lamp and in front of every headlight (single scattering by the droplets, a forward peak and back-scatter): halos, cones under the lamps, the glow of a bus's own beams in the fog. Rain does not do this (its drops scatter too narrowly), so headlights keep a single glow in a drizzle.
+- Shafts of sunlight between the shadows of houses and trees in haze, mist and fog.
+- Falling snow takes the view as a real snowfall does (heavy snow: some 400 m).
+- Wet porous surfaces (soil, paving, plaster, bark) turn darker and deeper in colour in the rain, not only the asphalt.
+- An overcast deck lets through light by its thickness: a raining nimbostratus is darker, a grey day over snow brighter.
+- Raindrops and snowflakes are lit by what is round them - the sky, the sun, the lamps - instead of glowing at one level in the dark.
+
+### Light and the eye (Enhanced, Enhanced+)
+- Looking at the sun blinds: the eye's scattered light round it (CIE 146 glare function) with a faint ciliary corona and lenticular halo.
+- Eye adaptation: the picture darkens when the sun comes into view and brightens in a dark cab or an underpass, quickly towards the light and slowly towards the dark.
+- Lit windows and lights have a light glow; only what is brighter than the screen's white glows.
+
+### Snowfall (all graphics modes)
+- A new snowfall: up to 150 000 flakes worked out on the graphics card (nothing per flake on the processor), fixed in the world so the bus drives through the snow, falling gently at about a metre a second, swaying and drifting with the wind; a light fall is fewer, smaller crystals. No snow falls inside the player's bus.
+
+## 0.1.1740 - 2026-10-05
+
+### Merged pull requests
+- Headlamps: the grass and hedges beside the road are no longer washed out at night, the beam keeps to the lane, and a full beam reaches far down the road [#1563](https://github.com/openOMSI-Project/openOMSI/pull/1563); a spot declared ahead of the bus's lamps shines from both headlamps, not from the middle [#1565](https://github.com/openOMSI-Project/openOMSI/pull/1565).
+- Enhanced lighting uses a material's own ambient colour: depot interiors with black diffuse and white ambient (Thüringer Wald, OVR Lichtentanne) are no longer black [#1556](https://github.com/openOMSI-Project/openOMSI/pull/1556).
+- Raised floors, markings and rails stay visible above the road surfaces at a distance, without a depth bias that moved with the camera angle [#1557](https://github.com/openOMSI-Project/openOMSI/pull/1557).
+- Linux: wheels such as the Logitech G29 are no longer taken for gamepads: linear steering and native force feedback again [#1566](https://github.com/openOMSI-Project/openOMSI/pull/1566).
+- Performance: no more regular 30-45 ms hitches near heavy collision meshes (Grand Paris-Moulon's street lamps) [#1561](https://github.com/openOMSI-Project/openOMSI/pull/1561).
+
+## 0.1.1727 - 2026-10-05
+
+### Fixes
+- The Linux build of the release no longer runs out of disk space after the workspace tests (the release of 0.1.1726 did not build).
+
+## 0.1.1726 - 2026-10-05
+
+### Merged pull requests
+- Controllers: a gilrs panic on a controller's first event no longer ends the game on Windows [#1537](https://github.com/openOMSI-Project/openOMSI/pull/1537); an idle joystick nobody set up no longer takes the arrow keys for looking [#1548](https://github.com/openOMSI-Project/openOMSI/pull/1548).
+- Czech and Slovak content is read as Windows-1250, so stop names keep their ř, ě and ů [#1542](https://github.com/openOMSI-Project/openOMSI/pull/1542).
+- A `.owt` weather's second `[temp]` value is read as the dew point: winter weathers give the scripts a real humidity (exhaust steam in the frost, the heating's misted panes) [#1533](https://github.com/openOMSI-Project/openOMSI/pull/1533).
+- Destinations of legacy depot files show their names in the menu and on the displays, and a destination picked by hand runs the scripts' own trigger, as in OMSI 2 [#1535](https://github.com/openOMSI-Project/openOMSI/pull/1535).
+- Vulkan: running out of graphics memory on a demanding map frees the old render targets before falling back, and far textures are reduced right after streaming [#1551](https://github.com/openOMSI-Project/openOMSI/pull/1551).
+
+## 0.1.1711 - 2026-10-05
+
+### Fixes
+- The launcher's download of a server's map and buses before joining (#1486, with #1511) is taken out again for now.
+- The switches for sharing and downloading mods in multiplayer (#1432) are taken out again for now.
+
+## 0.1.1707 - 2026-10-05
+
+### Merged pull requests
+- Headlamps in Enhanced and Enhanced+ light the road as real ones do: evenly from the bumper on, wide, with a low beam's cut-off, instead of one bright pool where the lamp's axis meets the road; lamps pointing down (over a door) keep their cone [#1522](https://github.com/openOMSI-Project/openOMSI/pull/1522).
+- Performance: meshes share pages of vertex and index buffers, about a third less drawing work on the CPU; Enhanced+ keeps one ray tracing structure per mesh in its page [#1340](https://github.com/openOMSI-Project/openOMSI/pull/1340).
+- Catalan as an interface language [#1521](https://github.com/openOMSI-Project/openOMSI/pull/1521); Portuguese (Brazil and Portugal) complete again [#1501](https://github.com/openOMSI-Project/openOMSI/pull/1501).
+- Launcher: buttons that set the start to the current time and date [#1517](https://github.com/openOMSI-Project/openOMSI/pull/1517); no automatic update from a server while downloading missing mods is off [#1511](https://github.com/openOMSI-Project/openOMSI/pull/1511).
+- The personnel file stores late arrivals before early departures, as OMSI 2 does: the counts no longer swap between the two games [#1499](https://github.com/openOMSI-Project/openOMSI/pull/1499).
+- Dependency updates [#1510](https://github.com/openOMSI-Project/openOMSI/pull/1510) [#1509](https://github.com/openOMSI-Project/openOMSI/pull/1509) [#1508](https://github.com/openOMSI-Project/openOMSI/pull/1508) [#1507](https://github.com/openOMSI-Project/openOMSI/pull/1507) [#1506](https://github.com/openOMSI-Project/openOMSI/pull/1506); a plugin DLL that does not load says the system's reason again.
+
+## 0.1.1674 - 2026-10-05
+
+### Merged pull requests
+- AI trams no longer leave their rails to overtake over the oncoming lane: they wait behind what blocks them [#1512](https://github.com/openOMSI-Project/openOMSI/pull/1512).
+
+## 0.1.1671 - 2026-10-05
+
+### Merged pull requests
+- Junction plates are raised by their height field only where the field covers them: the road connection at U Ruhleben (Berlin-Spandau) is level again, without the gap and the bump, and AI lanes follow the field there too [#1493](https://github.com/openOMSI-Project/openOMSI/pull/1493).
+
+## 0.1.1668 - 2026-10-05
+
+### Merged pull requests
+- Controls: keyboard, wheels and gamepads can be set up while playing [#1382](https://github.com/openOMSI-Project/openOMSI/pull/1382); DirectInput wheels recover after a failed read or a replug, retrying a device that will not open at growing intervals [#1489](https://github.com/openOMSI-Project/openOMSI/pull/1489); H-pattern shifters can return to neutral when a gear is let go [#1490](https://github.com/openOMSI-Project/openOMSI/pull/1490); stale gamepad events after a focus change are ignored [#1388](https://github.com/openOMSI-Project/openOMSI/pull/1388); the menu shows the default keys of the timetable (Insert) and the information bar (Shift+Y) [#1425](https://github.com/openOMSI-Project/openOMSI/pull/1425).
+- VR: the head's pitch is applied [#1373](https://github.com/openOMSI-Project/openOMSI/pull/1373).
+- Launcher: the roadbook keeps a picked trip when the start follows the real time [#1460](https://github.com/openOMSI-Project/openOMSI/pull/1460); the tour list filters by route or stop, starts at the trip found and hides ended tours [#1461](https://github.com/openOMSI-Project/openOMSI/pull/1461); a shared `HOFs` folder serves every vehicle, listed in the depot too [#1491](https://github.com/openOMSI-Project/openOMSI/pull/1491); the map zooms smoothly on big maps [#1139](https://github.com/openOMSI-Project/openOMSI/pull/1139).
+- Multiplayer: joining players get the map's ground textures [#1485](https://github.com/openOMSI-Project/openOMSI/pull/1485); the launcher downloads a server's map and buses before joining, and only changed files update by themselves [#1486](https://github.com/openOMSI-Project/openOMSI/pull/1486); controls for mod transfers [#1432](https://github.com/openOMSI-Project/openOMSI/pull/1432); a game the server sends or turns away ends and says why, while a refused reconnect plays on [#1429](https://github.com/openOMSI-Project/openOMSI/pull/1429); traffic light cycles no longer stall on simultaneous inactive events [#1398](https://github.com/openOMSI-Project/openOMSI/pull/1398) and stay under the host's clock [#1399](https://github.com/openOMSI-Project/openOMSI/pull/1399); a host's natural weather or weather cycle reaches the clients.
+- Lua plugins: crash, pedestrian and skipped-stops events, trip, stop and vehicle details in `omsi.info()` [#1447](https://github.com/openOMSI-Project/openOMSI/pull/1447); `omsi.send` sends UDP messages (up to 8 KB) to other programs on this computer [#1448](https://github.com/openOMSI-Project/openOMSI/pull/1448); `.opl` plugins read the game's values through `openomsi_*` variables [#1361](https://github.com/openOMSI-Project/openOMSI/pull/1361).
+- Graphics: trees' pictures are no longer repeated and have no line along their top [#1480](https://github.com/openOMSI-Project/openOMSI/pull/1480); no invisible road walls from thin triangles [#1454](https://github.com/openOMSI-Project/openOMSI/pull/1454); the high cloud layer's noise no longer jitters [#1357](https://github.com/openOMSI-Project/openOMSI/pull/1357); transparent terrain costs less [#1426](https://github.com/openOMSI-Project/openOMSI/pull/1426); MSAA depth prepass for mixed-material views on Apple GPUs [#1465](https://github.com/openOMSI-Project/openOMSI/pull/1465); lamps light the walls next to them softer and a doubled maplight counts once [#1372](https://github.com/openOMSI-Project/openOMSI/pull/1372); OpenGL no longer deadlocks prefetching vehicles [#1416](https://github.com/openOMSI-Project/openOMSI/pull/1416).
+- Performance: a new pose rescans only the instances drawing reshaped meshes [#1466](https://github.com/openOMSI-Project/openOMSI/pull/1466); draws of materials that look alike are batched together [#1456](https://github.com/openOMSI-Project/openOMSI/pull/1456).
+- Translations: Traditional Chinese expanded [#1445](https://github.com/openOMSI-Project/openOMSI/pull/1445).
+- Build: the whole workspace's tests run on Windows and Linux before a release [#1431](https://github.com/openOMSI-Project/openOMSI/pull/1431); shared crates declared once, an unused patch fails the audit, Dependabot waits a week [#1403](https://github.com/openOMSI-Project/openOMSI/pull/1403) and updates wgpu with naga [#1370](https://github.com/openOMSI-Project/openOMSI/pull/1370); dependency updates [#1349](https://github.com/openOMSI-Project/openOMSI/pull/1349) [#1352](https://github.com/openOMSI-Project/openOMSI/pull/1352) [#1347](https://github.com/openOMSI-Project/openOMSI/pull/1347) [#1353](https://github.com/openOMSI-Project/openOMSI/pull/1353).
+
+## 0.1.1554 - 2026-10-05
+
+### Fixes
+- Enhanced+ ray tracing works on Windows and Linux again (RTX and RDNA 2 cards and newer, Direct3D 12 and Vulkan), not only on Apple silicon: on Direct3D 12 its shaders were refused by the shader compiler, so every frame was thrown away and the picture stood still on the loading screen. Cut-out leaves and fences also cast their full traced shadows on Vulkan and Direct3D 12 now.
+- Should a graphics driver refuse the ray tracing all the same, Enhanced+ falls back to Enhanced instead of freezing.
+
+## 0.1.1553 - 2026-10-05
+
+### Fixes
+- Enhanced+ no longer stops drawing at the end of the loading screen on Windows and Linux: its ray tracing is used on Apple silicon (Metal) only for now, and elsewhere Enhanced+ draws as Enhanced. The graphics library's ray tracing on Vulkan and Direct3D 12 is still experimental; `OMSI_RT=1` tries it.
+
+## 0.1.1552 - 2026-10-05
+
+### Fixes
+- "Playing now" stays up all day: the game reports every ten minutes instead of every three and waits half an hour when the counter is busy, and the website asks every five minutes - the counter had run out of its daily requests and answered nobody until midnight UTC.
+
+## 0.1.1551 - 2026-10-05
+
+### New
+- Enhanced+ graphics (Settings → Graphics, `--enhanced-plus`): hardware ray tracing on Apple M3/M4 and newer, RTX and RDNA 2 cards - ray-traced sun shadows (soft away from their caster, crisp at the contact), ambient occlusion and reflections: wet roads, puddles, water, glass and chrome mirror what really stands around them, off the screen too. Elsewhere it draws as Enhanced.
+- Natural light in Enhanced and Enhanced+: the sky is computed from the physics of the atmosphere (multiple scattering, ozone, the day's haze and its particle size, a stratospheric layer), so the blue hour, the twilight's purple and every sunset look their own. Clouds glow after the sun has set for the street, a veil of high cloud gives a milky sun with soft pale shadows, passing cumulus take the sun away and bring it back, the moon stands at its real place with its real phase and lights the night, stars show in a dark sky and a city lights its own clouds. A camera's tone curve and exposure, street lamps as bright points with a little glare (wide halos in mist and rain).
+- Natural weather (the default when no weather is chosen, `--weather natural`): a physical weather model instead of one fixed state. Highs and lows pass through, cumulus grows in the afternoon and dissolves in the evening, calm clear nights leave morning fog, fronts bring a grey deck and rain, snow lies in winter and thaws in a mild spell, rain leaves clear air behind - grey days, blue evenings and sunny mornings follow from the days before, as the season and the map's latitude allow.
+
+### Fixes
+- Vehicle shadow blobs no longer flicker against the road, and in Enhanced and Enhanced+ they darken the ground under the bus as in OMSI 2.
+
+## 0.1.1541 - 2026-10-04
+
+### Merged pull requests
+- Performance: vehicle scripts run about a quarter faster [#1328](https://github.com/openOMSI-Project/openOMSI/pull/1328), and finding the ground under the wheels costs about a quarter less CPU [#1334](https://github.com/openOMSI-Project/openOMSI/pull/1334), with the same results.
+- Texture memory: on Linux with NVIDIA's driver the card's memory is read from Vulkan, and cards over 6 GB get more automatic texture memory [#1320](https://github.com/openOMSI-Project/openOMSI/pull/1320).
+- Automatic start-up no longer releases the starter too early (Volvo 7900H, HH109, WSW C2), the stock buses unchanged [#1147](https://github.com/openOMSI-Project/openOMSI/pull/1147).
+- Trains: cars whose bogies are declared reversed face the right way, and cars are spaced by their declared couplings as in OMSI 2 [#1186](https://github.com/openOMSI-Project/openOMSI/pull/1186).
+- Camera: an optional precision curve for zooming with both mouse buttons, and a zoom cursor while the right button zooms [#903](https://github.com/openOMSI-Project/openOMSI/pull/903); the driver's eye is back on the authored seat point [#1337](https://github.com/openOMSI-Project/openOMSI/pull/1337).
+- Repository: new issues are sorted by topic and milestone, repeated crash reports point to the existing issue, and pull requests get translation and file size checks; dependency updates and a weekly security audit [#1329](https://github.com/openOMSI-Project/openOMSI/pull/1329).
+- Code clean-ups after review [#1322](https://github.com/openOMSI-Project/openOMSI/pull/1322).
+
+## 0.1.1518 - 2026-10-04
+
+### New
+- The chat has a size of its own: Ctrl + the mouse wheel over it, or Settings → General → Chat size (50-300 %), for large and 4K screens.
+
+## 0.1.1517 - 2026-10-04
+
+### Fixes
+- The README's "playing now" badge keeps its label while the counter cannot be reached.
+
+## 0.1.1515 - 2026-10-04
+
+### New
+- Multiplayer: every variable of the other players' buses (floats and strings: gearbox, displays, IBIS, ticket printer, plugin values) is synced, so their buses look and behave as they do for their drivers.
+- Updates during a session: the game looks for a new version, downloads it in the background and says so over the navigator; it is installed when the session ends. The cards can be switched off (Settings → General → "Tell me about a new version during a session").
+- The launcher looks for updates again every 30 minutes while it is open and after a game ends, not only when it starts.
+- "Playing now": the website and the README show how many people play openOMSI right now. The game sends only a random per-session id, its version and the kind of system; switch it off under Settings → General.
+
+### Fixes
+- Updates no longer fail with "Timeout" on a slow or unsteady connection: requests are tried again, a broken download goes on where it stopped, and github.com is asked when the GitHub API does not answer.
+
+## 0.1.1512 - 2026-10-04
+
+### Merged pull requests
+- Mirror panels: only the player's bus notes its mirrors' glass, so the panels no longer take another bus's mirrors [#1171](https://github.com/openOMSI-Project/openOMSI/pull/1171).
+- Translations: Simplified Chinese numbers in their single-character forms [#1282](https://github.com/openOMSI-Project/openOMSI/pull/1282), Traditional Chinese labels refined [#1264](https://github.com/openOMSI-Project/openOMSI/pull/1264).
+
+## 0.1.1502 - 2026-10-04
+
+### Merged pull requests
+- Force feedback: the wheel vibrates with the road surface and the engine, and jolts fade out instead of stopping dead, with three new sliders in the driving settings [#867](https://github.com/openOMSI-Project/openOMSI/pull/867).
+- The navigator shows buses, trolleybuses and trams as pictograms pointing the way they go, not as dots [#1315](https://github.com/openOMSI-Project/openOMSI/pull/1315).
+- Camera: the driver's head pitch can be set (-45 to +45 degrees) under Camera → Seat position [#1179](https://github.com/openOMSI-Project/openOMSI/pull/1179); the view can glide to where the mouse turned it (Look smoothing, off by default) [#998](https://github.com/openOMSI-Project/openOMSI/pull/998); the head can sway a little while the bus waits (Head sway at a standstill, off by default) [#1204](https://github.com/openOMSI-Project/openOMSI/pull/1204); a snappier F1 camera switch and an eased Space return [#870](https://github.com/openOMSI-Project/openOMSI/pull/870).
+- Controllers: the gamepad's right stick turning the view can be switched off [#1170](https://github.com/openOMSI-Project/openOMSI/pull/1170), and an idle device nobody set up no longer stops the gamepad stick from steering [#1165](https://github.com/openOMSI-Project/openOMSI/pull/1165).
+- Mouse steering switched on with O starts from the centre of the window [#1301](https://github.com/openOMSI-Project/openOMSI/pull/1301).
+- Mirror panels (Ctrl+M) show each mirror as its glass does, and the panel editor lists its keys and resizes panels [#1171](https://github.com/openOMSI-Project/openOMSI/pull/1171).
+- Passengers press the stop button at a random distance before their stop instead of all at the same point [#1191](https://github.com/openOMSI-Project/openOMSI/pull/1191).
+- Timetable: after serving the terminus, driving off starts the next trip early when it is due within five minutes [#1199](https://github.com/openOMSI-Project/openOMSI/pull/1199).
+- Servers: the status page counts the shared world (AI cars, buses, people) and an admin can set the AI traffic [#1206](https://github.com/openOMSI-Project/openOMSI/pull/1206); the dispatch can take a player's duty back [#1207](https://github.com/openOMSI-Project/openOMSI/pull/1207); the world options have a button to clear the AI traffic [#1234](https://github.com/openOMSI-Project/openOMSI/pull/1234).
+- The launcher's Join can be told to connect over UDP or WebSocket [#958](https://github.com/openOMSI-Project/openOMSI/pull/958).
+- Lua plugins can see and drive the vehicles round the bus (omsi.others) [#894](https://github.com/openOMSI-Project/openOMSI/pull/894).
+- Player screenshots leave the touch controls out [#1188](https://github.com/openOMSI-Project/openOMSI/pull/1188).
+- Texture memory is no longer capped at 2 GB on cards with more, and the VRAM of AMD cards on Linux is read [#1137](https://github.com/openOMSI-Project/openOMSI/pull/1137).
+- Android: a black screen on Adreno 6xx, 7xx and 8xx chips is avoided by rebuilding their shader cache [#1310](https://github.com/openOMSI-Project/openOMSI/pull/1310).
+- Translations: Simplified Chinese [#1282](https://github.com/openOMSI-Project/openOMSI/pull/1282), Traditional Chinese [#1264](https://github.com/openOMSI-Project/openOMSI/pull/1264), Polish [#1262](https://github.com/openOMSI-Project/openOMSI/pull/1262) and French [#1251](https://github.com/openOMSI-Project/openOMSI/pull/1251).
+
+## 0.1.1423 - 2026-10-04
+
+- Build: the small-BAR fix for NVIDIA cards ([#905](https://github.com/openOMSI-Project/openOMSI/pull/905)) now comes from the project's own copy of gpu-allocator, not a personal fork.
+
+## 0.1.1422 - 2026-10-04
+
+### Merged pull requests
+- Performance: script names are looked up without allocating and debug switches read once [#1292](https://github.com/openOMSI-Project/openOMSI/pull/1292), a wheel's ground probe walks its cell's faces once [#1287](https://github.com/openOMSI-Project/openOMSI/pull/1287), a render origin moved sideways rewrites only the models' translations [#1283](https://github.com/openOMSI-Project/openOMSI/pull/1283), an instance given another mesh is updated alone [#1280](https://github.com/openOMSI-Project/openOMSI/pull/1280), the AI vehicles' heaviest scripts each get a job of their own [#1260](https://github.com/openOMSI-Project/openOMSI/pull/1260), traffic light lamps are set again only when what they show changed [#1259](https://github.com/openOMSI-Project/openOMSI/pull/1259), and the instances are culled by blocks of 128 before one by one [#1256](https://github.com/openOMSI-Project/openOMSI/pull/1256).
+- AI cars no longer drive through red lights, and a car put on the road in front of a red light comes in slowly enough to stop [#1253](https://github.com/openOMSI-Project/openOMSI/pull/1253).
+- The outside camera is no longer trapped under buses whose orbit centre lies below the ground clearance [#1246](https://github.com/openOMSI-Project/openOMSI/pull/1246).
+- Crash reports carry the computer, its graphics card and the map, and their title is the error alone [#1225](https://github.com/openOMSI-Project/openOMSI/pull/1225).
+- Dedicated servers: a player who drives a bus the `vehicles` list of `server.cfg` does not allow is sent away and told which buses the server has [#1222](https://github.com/openOMSI-Project/openOMSI/pull/1222) (the vehicle menu offers only those since 0.1.1382).
+- Bus stops put on splines are placed right in the map index before their tiles load, so a duty's stops and the announcements are right from the start [#1208](https://github.com/openOMSI-Project/openOMSI/pull/1208).
+- Terrain holes: the ground's exposed edges along spline and object cuts are closed by walls textured like the ground around them [#1069](https://github.com/openOMSI-Project/openOMSI/pull/1069).
+- Linux: a gear shifter or a button box (a device with buttons only) can be set up [#1059](https://github.com/openOMSI-Project/openOMSI/pull/1059).
+- NVIDIA cards without Resizable BAR (Vulkan): uploads no longer go to the small BAR heap, which made loading take minutes and the game run at a few fps [#905](https://github.com/openOMSI-Project/openOMSI/pull/905).
+- [#1223](https://github.com/openOMSI-Project/openOMSI/pull/1223): the same OpenGL fix (Intel HD 2500, Mali) was already in 0.1.1382.
+
+## 0.1.1382 - 2026-10-04
+
+Bug Fixes & Improvements
+
 ## 0.1.1313 - 2026-10-03
 
 ### Triple screens

@@ -422,9 +422,7 @@ fn bus_sheet(l: &mut Launcher, r: Rect) -> bool {
         .filter(|v| allowed.as_ref().map(|a| a.contains(&norm(&v.file))).unwrap_or(true))
         .map(|v| {
             let mut sub = v.manufacturer.clone();
-            if !v.paints.is_empty() {
-                sub = format!("{sub}{}{} liveries", if sub.is_empty() { "" } else { " · " }, v.paints.len());
-            }
+            sub = format!("{sub}{}{}", if sub.is_empty() { "" } else { " · " }, super::drive::liveries_text(v.paints.len()));
             if !v.missing_packs.is_empty() {
                 sub = format!("{sub} · parts missing");
             }
@@ -577,23 +575,22 @@ fn start_sheet(l: &mut Launcher, r: Rect) -> bool {
     let mut season = seasons.iter().position(|s| *s == l.state.choice.season).unwrap_or(0);
     l.ui.label(Rect::new(inner.x, y, 112.0, ROW), "Season");
     if l.ui.select("ps-season", Rect::new(inner.x + 112.0, y, inner.w - 112.0, ROW), &mut season, &labels) {
-        l.state.choice.season = seasons[season].to_string();
-        if season > 0 {
-            let month = ["", "04", "07", "10", "01"][season];
-            let date = l.state.choice.date.clone();
-            let (yy, dd) = (date.get(0..4).unwrap_or("1989").to_string(), date.get(8..10).unwrap_or("15").to_string());
-            l.state.choice.date = format!("{yy}-{month}-{dd}");
-            l.state.load_lines();
-        }
-        let weather = l.state.choice.weather.clone();
-        if let Some(w) = l.state.weathers.iter().find(|x| x.file == weather).cloned() {
-            if !l.state.weather_fits(&w) {
-                l.state.choice.weather.clear();
-            }
-        }
-        l.state.touched();
+        // (a season: the date goes to its phase's typical day, see `season_phase`)
+        l.state.set_season(seasons[season]);
+        phone_season_weather_fits(l);
     }
     y += ROW + 14.0;
+    // a season chosen: its early, middle or late part
+    if season > 0 {
+        let phases = ["early", "mid", "late"];
+        let mut p = phases.iter().position(|x| *x == l.state.choice.phase).unwrap_or(1);
+        if l.ui.segmented("ps-season-phase", Rect::new(inner.x + 112.0, y - 6.0, inner.w - 112.0, 32.0), &mut p, &["Early", "Mid", "Late"]) {
+            l.state.choice.phase = phases[p].to_string();
+            l.state.season_chosen();
+            phone_season_weather_fits(l);
+        }
+        y += 40.0;
+    }
 
     let mut traffic = l.state.choice.traffic;
     if l.ui.slider("ps-traffic", Rect::new(inner.x, y, inner.w, 36.0), &mut traffic, 0.0, 120.0, 1.0, "Cars around", &|v| format!("{v:.0}")) {
@@ -851,6 +848,7 @@ fn time_sheet(l: &mut Launcher, r: Rect) -> bool {
     if l.ui.date_field("p-date", Rect::new(left.x, left.y + 106.0, left.w, 48.0), &mut d) {
         l.state.choice.date = d;
         l.state.choice.season = "auto".into();
+        l.state.choice.own_date = None;
         l.state.load_lines();
         l.state.touched();
     }
@@ -989,7 +987,7 @@ fn time_sheet(l: &mut Launcher, r: Rect) -> bool {
     let home = super::drive::nearest_airport(&l.state.config.root, &l.state.choice.map);
     let custom = crate::weather_setup::CustomWeather::default().encode();
     let items: Vec<(String, String, String)> = [
-        (String::new(), "The map's weather".to_string(), "As the map sets it".to_string()),
+        (String::new(), "Natural weather".to_string(), "Develops by itself through the day and the season".to_string()),
         (custom, "Custom weather".to_string(), "Visibility, wind, temperature, rain, snow and road state".to_string()),
         (format!("metar:{home}"), "Current weather".to_string(), format!("Real weather from {home} (ICAO can be changed)")),
         ("cycle".to_string(), "Weather cycle".to_string(), "Changes every 25-60 minutes, as the month allows".to_string()),
@@ -1143,7 +1141,7 @@ fn online(l: &mut Launcher, body: Rect) {
 
 fn join(l: &mut Launcher, address: &str) {
     l.state.ask_server(address, 5.0);
-    l.state.join_server(address);
+    l.state.join_server(address, super::state::JoinProto::Auto);
     if l.state.joined_server.as_deref() == Some(address) {
         l.phone.tab = Tab::Play;
         l.go(Page::Drive);
@@ -1202,4 +1200,15 @@ fn embedded(l: &mut Launcher, page: Page, body: Rect, back: bool) {
             l.page_scroll = 0.0;
         }
     }
+}
+
+/// After the season changed: a chosen weather that does not fit it goes, and the duty is saved.
+fn phone_season_weather_fits(l: &mut Launcher) {
+    let weather = l.state.choice.weather.clone();
+    if let Some(w) = l.state.weathers.iter().find(|x| x.file == weather).cloned() {
+        if !l.state.weather_fits(&w) {
+            l.state.choice.weather.clear();
+        }
+    }
+    l.state.touched();
 }

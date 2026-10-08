@@ -429,12 +429,14 @@ pub(crate) fn spawn_player(
         door_buttons: hashbrown::HashMap::new(),
         cam_before_special: None,
         held_keys: Default::default(),
+        held_repeat: Default::default(),
         hand_coupled: 0,
         rail_bound,
         rail: None,
         head: Vec3::ZERO,
         head_vel: Vec3::ZERO,
         head_omega: Vec3::ZERO,
+        head_idle: Default::default(),
         steer_look: 0.0,
         seat: Vec3::ZERO,
         mirror_offsets: crate::settings::mirror_offsets(&vt.def.path),
@@ -444,12 +446,14 @@ pub(crate) fn spawn_player(
         take_change: false,
         toggled_up: Default::default(),
         momentary_gears: crate::settings::Settings::load().momentary_gears,
+        from_keyboard: false,
         auto_shift: crate::settings::Settings::load().auto_shift,
         auto_shift_wait: 0.0,
         auto_shift_idle: 0.0,
         side_lights_by_l: false,
         driver: None,
         ibis_duty: None,
+        blind_pick: None,
         ibis_typist: None,
         duty_typed: false,
         html_next_stop: None,
@@ -479,6 +483,9 @@ pub(crate) fn spawn_player(
         let (numeric, textual) = p
             .vehicle
             .restore_script_state(&args.situation_vars, &args.situation_strvars);
+        if let Some(km) = args.situation_odometer_km {
+            p.vehicle.set_odometer_km(km);
+        }
         log::info!(
             "situation: {numeric} of {} variables and {textual} of {} strings restored",
             args.situation_vars.len(),
@@ -501,7 +508,7 @@ pub(crate) fn spawn_player(
             log::warn!("trigger {name} not found");
         }
     }
-    if omsi_cfg::env::var_os("OMSI_DEBUG_MESHES").is_some() {
+    if omsi_cfg::flags::OMSI_DEBUG_MESHES.is_set() {
         for (i, vm) in p.vehicle.ty.meshes.iter().enumerate() {
             let def = &p.vehicle.ty.model.meshes[vm.def_index];
             let (lo, hi) = vm.data.positions.iter().fold(
@@ -520,7 +527,7 @@ pub(crate) fn spawn_player(
                 .fold(f32::MAX, f32::min);
             log::info!("mesh {i:3} {:40} vp={} tris={:6} bounds {:?}..{:?} uv {:?}..{:?} min|n|={nrm:.2} mats={} anims={} visible={:?}", def.file, def.viewpoint, vm.data.indices.len() / 3, lo, hi, uv0, uv1, vm.materials.len(), def.animations.len(), def.visible);
             // per material slot: which part of its texture the mesh shows (display texts)
-            if omsi_cfg::env::var("OMSI_DEBUG_MESHES")
+            if omsi_cfg::flags::OMSI_DEBUG_MESHES.var()
                 .map(|f| {
                     !f.is_empty()
                         && def
@@ -571,7 +578,7 @@ pub(crate) fn spawn_player(
             }
         }
     }
-    if omsi_cfg::env::var_os("OMSI_DEBUG_PROPS").is_some() {
+    if omsi_cfg::flags::OMSI_DEBUG_PROPS.is_set() {
         for (i, vm) in p.vehicle.ty.meshes.iter().enumerate() {
             let pr = &p.vehicle.mesh_props[i];
             let def = &p.vehicle.ty.model.meshes[vm.def_index];
@@ -628,6 +635,14 @@ pub(crate) fn spawn_player(
         scene,
         matches!(args.view.as_str(), "driver" | "pax"),
     );
+    // The sounds the scripts asked for while the bus was being set up ({init}, the state it
+    // is put in - cold, ready, the situation's) are not played: the first frame played them
+    // all, an engine stopping as every session began (#1198). Omsi.exe puts a bus down silent.
+    if !p.vehicle.host.fired_triggers.is_empty() {
+        log::info!("spawn: sound triggers of the set-up left silent: {:?}", p.vehicle.host.fired_triggers);
+    }
+    p.vehicle.host.fired_triggers.clear();
+    p.vehicle.host.fired_trigger_vars.clear();
     Ok(Some(p))
 }
 

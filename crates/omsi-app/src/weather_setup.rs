@@ -114,6 +114,14 @@ pub(crate) fn custom_weather(text:Option<&str>)->Option<CustomWeather>{text.and_
 
 /// Weather from `--weather`, else the clear-sky default.
 pub(crate) fn load_weather(args: &Args) -> omsi_content::weather::Weather {
+    // no weather chosen, or `natural`: the physical model (weather_model.rs)
+    if crate::weather_model::is_natural(args.weather.as_deref()) {
+        let w = crate::weather_model::start(&crate::situation::start_clock(args));
+        scene::SNOW_WEATHER.store(w.snow, std::sync::atomic::Ordering::Relaxed);
+        omsi_sim::host::set_ambient_weather(w.temp.0, w.temp.1);
+        return w;
+    }
+    crate::weather_model::stop();
     let rel = args
         .weather
         .clone()
@@ -431,6 +439,7 @@ pub(crate) fn weather_lighting(
     let (density, offset) = clouds_of(w, cloud_drift);
     lighting.cloud_density = density;
     lighting.cloud_offset = offset;
+    let model_sky = *crate::weather_model::CURRENT.lock().unwrap_or_else(|e| e.into_inner());
     let (kind, rate) = precip_of(w);
     lights::apply_weather(
         &mut lighting,
@@ -439,6 +448,7 @@ pub(crate) fn weather_lighting(
         rate,
         if w.snow { 1.0 } else { 0.0 },
     );
+    lighting.roads_clear = w.snow && !w.snow_on_road;
     if let Some(custom)=CustomWeather::parse(&w.path.to_string_lossy()){
         let k=custom.brightness;
         lighting.sun_intensity*=k;
@@ -454,10 +464,28 @@ pub(crate) fn weather_lighting(
         }
     }
     lighting.wetness = wetness;
+    // [wind] direction (deg) and speed (m/s): the snowfall drifts with it
+    lighting.wind = glam::Vec3::new(w.wind.0.to_radians().sin() * w.wind.1, w.wind.0.to_radians().cos() * w.wind.1, 0.0);
+    omsi_sim::particles::set_wind(lighting.wind);
     // Omsi.exe hides the sun under an 'ovc' cloud type (the Overcast ones in clouds.cfg) and
     // draws no sun shadows below 350 m visibility
     let overcast = w.clouds.0.trim().to_ascii_lowercase().starts_with("overcast");
     lighting.shadows = shadows && !overcast && w.fog.0 > 350.0;
+    // (a street lamp casts its shadow in any weather)
+    lighting.lamp_shadows = shadows;
+    // the physical model: how much of which cloud there is and what the air holds, which
+    // the enhanced atmosphere turns into light (the `.owt` values above stay for the rest)
+    if let Some(m) = model_sky.filter(|_| lighting.enhanced) {
+        let closed = ((m.deck - 0.85) / 0.15).clamp(0.0, 1.0);
+        if CLOUDS.load(std::sync::atomic::Ordering::Relaxed) {
+            lighting.cloud_density = m.cumulus.max(m.deck * 0.95);
+        }
+        lighting.overcast = m.deck;
+        lighting.sun_intensity = 1.0 - closed;
+        lighting.veil = m.veil;
+        lighting.air = Some([m.haze, m.angstrom, m.aerosol_height]);
+        lighting.shadows = shadows && closed < 0.5 && w.fog.0 > 350.0;
+    }
     lighting
 }
 
@@ -480,6 +508,7 @@ pub(crate) fn apply_weather(
     let (kind, rate) = precip_of(w);
     v.host.precip_type = kind as f32;
     v.host.precip_rate = rate;
+    v.host.wind = crate::rain::weather_wind(w);
     v.host.street_cond = street_condition(w, wetness);
     v.set_var("PrecipType", kind as f32);
     v.set_var("PrecipRate", rate);
@@ -493,8 +522,8 @@ pub(crate) fn apply_weather(
 pub(crate) fn debug_sound_every() -> Option<f32> {
     static EVERY: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *EVERY.get_or_init(|| {
-        omsi_cfg::env::var("OMSI_DEBUG_SOUND")
-            .ok()
+        omsi_cfg::flags::OMSI_DEBUG_SOUND
+            .var()
             .map(|v| v.parse::<f32>().ok().filter(|s| *s > 0.0).unwrap_or(5.0))
     })
 }
@@ -529,7 +558,7 @@ pub(crate) fn metar_airports(root:&std::path::Path)->Vec<(String,String)>{
     static CACHE:std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<std::path::PathBuf,Vec<(String,String)>>>>=std::sync::OnceLock::new();
     let cache=CACHE.get_or_init(||std::sync::Mutex::new(std::collections::HashMap::new()));
     if let Some(v)=cache.lock().unwrap_or_else(|e|e.into_inner()).get(root).cloned(){return v}
-    let text=std::fs::read(omsi_cfg::resolve_path(root,"Weather/ICAO.txt")).map(|b|omsi_cfg::codepage::decode(&b)).unwrap_or_default();
+    let text=omsi_cfg::vfs::read(&omsi_cfg::resolve_path(root,"Weather/ICAO.txt")).map(|b|omsi_cfg::codepage::decode(&b)).unwrap_or_default();
     let mut v:Vec<(String,String)>=text.lines().filter_map(|l|l.split_once(" - ").map(|(c,n)|(c.trim().to_ascii_uppercase(),format!("{} - {}",c.trim(),n.trim()))))
         .filter(|(c,_)|c.len()==4&&c.chars().all(|x|x.is_ascii_alphabetic())).collect();
     if !v.iter().any(|a|a.0=="EDDB"){v.push(("EDDB".into(),"EDDB - Berlin Brandenburg".into()))}
