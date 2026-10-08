@@ -24,6 +24,7 @@
 use std::path::{Path, PathBuf};
 
 pub mod codepage;
+pub mod flags;
 mod keywords;
 pub mod number;
 pub mod vfs;
@@ -1183,6 +1184,10 @@ pub mod env {
         PROFILE_CAPTURE.store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
+    pub(crate) fn profile_capture_enabled() -> bool {
+        PROFILE_CAPTURE.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn cache() -> &'static RwLock<HashMap<String, Option<OsString>>> {
         static C: OnceLock<RwLock<HashMap<String, Option<OsString>>>> = OnceLock::new();
         C.get_or_init(Default::default)
@@ -1211,9 +1216,6 @@ pub mod env {
     }
 
     pub fn var_os(name: &str) -> Option<OsString> {
-        if name == "OMSI_PROFILE" && PROFILE_CAPTURE.load(std::sync::atomic::Ordering::Relaxed) {
-            return Some("1".into());
-        }
         if let Some(v) = LOCAL.with(|l| l.borrow().get(name).cloned()) {
             return v;
         }

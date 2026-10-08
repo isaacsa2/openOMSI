@@ -712,8 +712,10 @@ pub struct WorldInfo {
     pub time: f64,
     /// Weather file, empty for the map's default.
     pub weather: String,
-    /// The season the player chose (`spring`, `summer`, `autumn`, `winter`), empty when
-    /// the date decides as in OMSI.
+    /// The season the player chose (`spring`, `summer`, `autumn`, `winter`), with its
+    /// phase when not the middle (`autumn-late`, `spring-early`: an older version reads
+    /// no season in that and goes by the date, which is the host's phase date), empty
+    /// when the date decides as in OMSI.
     pub season: String,
 }
 
@@ -1459,7 +1461,7 @@ impl LanSession {
             trying: 0.0,
             lost_at: None,
             timed_out: false,
-            join_timeout: std::env::var("OMSI_LAN_JOIN_TIMEOUT")
+            join_timeout: omsi_cfg::flags::OMSI_LAN_JOIN_TIMEOUT.live_var()
                 .ok()
                 .and_then(|v| v.parse::<f32>().ok())
                 .filter(|v| *v > 0.0)
@@ -1585,7 +1587,7 @@ impl LanSession {
                 s.host = None;
                 // `OMSI_BRIDGE_ONLY`: forget the code's own addresses, so that only what the
                 // rendezvous tells is tried (to check that path)
-                if std::env::var_os("OMSI_BRIDGE_ONLY").is_some() {
+                if omsi_cfg::flags::OMSI_BRIDGE_ONLY.live_os().is_some() {
                     s.candidates.clear();
                 }
             }
