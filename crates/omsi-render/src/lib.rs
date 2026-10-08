@@ -2281,6 +2281,9 @@ pub struct RenderOptions {
     /// Mali and Adreno drivers before the first frame, #364, #333, #316, #371). Asked for,
     /// they are built on every device and graphics API; a computer always builds them.
     pub no_enhanced: bool,
+    /// Launcher previews always draw Vanilla, even when the game uses Enhanced+.
+    /// Leave their unused enhanced pipelines and cloud noise out on every platform.
+    pub preview_only: bool,
     /// Enhanced+: the enhanced path with ray-traced sun shadows, ambient occlusion and
     /// reflections, where the device can trace rays (hardware ray queries); elsewhere the
     /// enhanced picture as it is.
@@ -2303,6 +2306,7 @@ impl Default for RenderOptions {
             shadow_blobs: true,
             reflections: true,
             no_enhanced: false,
+            preview_only: false,
             ray_tracing: false,
         }
     }
@@ -3578,11 +3582,11 @@ impl Renderer {
                 },
             ],
         });
-        let (cloud_shape_view, cloud_detail_view, cloud_sampler, cloud_shape_cpu) = cloud_noise_textures(&device, &queue);
+        let (cloud_shape_view, cloud_detail_view, cloud_sampler, cloud_shape_cpu) = cloud_noise_textures(&device, &queue, !options.preview_only);
         log::info!("renderer: compiling the sky and clouds shaders");
         let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sky"),
-            source: wgpu::ShaderSource::Wgsl(sky_shader_source().into()),
+            source: wgpu::ShaderSource::Wgsl(if options.preview_only { [include_str!("colour.wgsl"), include_str!("sky.wgsl")].join("\n") } else { sky_shader_source() }.into()),
         });
         let sky_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sky"),
@@ -3641,7 +3645,7 @@ impl Renderer {
             sky_pipeline: sky_pipeline_for(format, "fs_main"),
         };
         // the enhanced path: its own lighting in all three
-        let leave_out_enhanced = options.no_enhanced && (cfg!(target_os = "android") || adapter_name.to_ascii_lowercase().contains("opengl") || GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed));
+        let leave_out_enhanced = options.preview_only || options.no_enhanced && (cfg!(target_os = "android") || adapter_name.to_ascii_lowercase().contains("opengl") || GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed));
         // (its textures do not fit OpenGL's units here, see `sixteen_texture_units`)
         if sixteen_texture_units() && !options.no_enhanced {
             log::warn!("renderer: the enhanced graphics take more textures than OpenGL has units for on {adapter_name}; drawing vanilla+");
@@ -4312,7 +4316,7 @@ impl Renderer {
                 },
             ],
         });
-        let probe = {
+        let probe = (!options.preview_only).then(|| {
             let tex = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("reflection probe"),
                 size: wgpu::Extent3d {
@@ -4575,7 +4579,7 @@ impl Renderer {
                 cube_eye: None,
                 cube_recapture: false,
             }
-        };
+        });
         let overlay_pipeline_1x = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("overlay 1x"),
             layout: Some(&overlay_pl),
@@ -4774,7 +4778,7 @@ impl Renderer {
             sky_lut,
             sky_lut_view,
             lin_sampler,
-            probe: Some(probe),
+            probe,
             sky_state: None,
             city_glow: None,
             view_lamps: None,
@@ -12264,13 +12268,17 @@ fn lean_scene(src: String) -> String {
 
 /// The enhanced clouds' noise textures (clouds.rs), made once: the shape map (2-D RGBA8)
 /// and the detail volume (3-D R8), both with their mip chains, and a repeating sampler.
-fn cloud_noise_textures(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Sampler, Vec<u8>) {
+fn cloud_noise_textures(device: &wgpu::Device, queue: &wgpu::Queue, enhanced_noise: bool) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Sampler, Vec<u8>) {
     let t0 = std::time::Instant::now();
-    let (shape, detail) = std::thread::scope(|s| {
-        let a = s.spawn(clouds::shape_map);
-        let b = s.spawn(clouds::detail_volume);
-        (a.join().expect("cloud shape"), b.join().expect("cloud detail"))
-    });
+    let (shape, detail) = if enhanced_noise {
+        std::thread::scope(|s| {
+            let a = s.spawn(clouds::shape_map);
+            let b = s.spawn(clouds::detail_volume);
+            (a.join().expect("cloud shape"), b.join().expect("cloud detail"))
+        })
+    } else {
+        (vec![vec![0, 0, 0, 255]], vec![vec![0]])
+    };
     let make = |label: &str, size: u32, dim: wgpu::TextureDimension, format: wgpu::TextureFormat, bpp: u32, levels: &[Vec<u8>]| {
         let depth = if dim == wgpu::TextureDimension::D3 { size } else { 1 };
         let tex = device.create_texture(&wgpu::TextureDescriptor {
@@ -12295,8 +12303,8 @@ fn cloud_noise_textures(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::Te
         }
         tex.create_view(&wgpu::TextureViewDescriptor::default())
     };
-    let shape_view = make("cloud shape", clouds::SHAPE_SIZE, wgpu::TextureDimension::D2, wgpu::TextureFormat::Rgba8Unorm, 4, &shape);
-    let detail_view = make("cloud detail", clouds::DETAIL_SIZE, wgpu::TextureDimension::D3, wgpu::TextureFormat::R8Unorm, 1, &detail);
+    let shape_view = make("cloud shape", if enhanced_noise { clouds::SHAPE_SIZE } else { 1 }, wgpu::TextureDimension::D2, wgpu::TextureFormat::Rgba8Unorm, 4, &shape);
+    let detail_view = make("cloud detail", if enhanced_noise { clouds::DETAIL_SIZE } else { 1 }, wgpu::TextureDimension::D3, wgpu::TextureFormat::R8Unorm, 1, &detail);
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("cloud noise"),
         address_mode_u: wgpu::AddressMode::Repeat,
@@ -15028,6 +15036,19 @@ mod tests {
         assert!(smoke_sprite(&SmokeParticle { ground: Some(30.0 + 3.5 + 0.91), ..p }, ro).is_none());
         assert!(smoke_sprite(&SmokeParticle { ground: Some(30.0 + 3.5 + 0.89), ..p }, ro).is_some());
         assert!(smoke_sprite(&SmokeParticle { alpha: 0.0, ..p }, ro).is_none());
+    }
+
+    #[test]
+    fn launcher_preview_initializes_without_enhanced_or_ray_tracing_resources() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::NOOP;
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+        let instance = wgpu::Instance::new(descriptor);
+        let renderer = pollster::block_on(Renderer::new_with(&instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb), RenderOptions { msaa: 1, preview_only: true, no_enhanced: true, ray_tracing: false, ..Default::default() })).unwrap();
+        assert!(renderer.hdr_pass.is_none());
+        assert!(renderer.probe.is_none());
+        assert!(renderer.rt.is_none());
+        assert!(renderer.cloud_shape_cpu.is_empty());
     }
 
     #[test]
