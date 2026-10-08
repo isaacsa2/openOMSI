@@ -1,0 +1,198 @@
+//! What a surface is drawn with: a material's textures and settings (`Material`,
+//! `MaterialExtra`, `MaterialMaps`), its PBR maps, its alpha mode and how its textures
+//! address outside [0, 1].
+
+use super::{MaterialUniform, TextureId};
+
+/// The maps of a PBR set found beside a diffuse texture (`foo_n.png` and the rest, see
+/// `omsi_texture::pbr`): a tangent-space normal map, and occlusion / roughness / metalness
+/// packed into the red, green and blue of one texture.
+#[derive(Debug, Clone, Copy)]
+pub struct PbrMaps {
+    pub normal: Option<TextureId>,
+    pub orm: Option<TextureId>,
+    /// x normal, y occlusion, z roughness, w metalness (1 = present)
+    pub flags: [f32; 4],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AlphaMode {
+    Opaque,
+    Test,
+    Blend,
+}
+
+/// How a material's textures read outside [0, 1]: Omsi.exe sets the material's
+/// `[matl_texadress_*]` mode as ADDRESSU/ADDRESSV of all eight sampler stages (0x7fff70).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TexAddressing {
+    /// Repeating, Direct3D's default.
+    #[default]
+    Wrap,
+    /// `[matl_texadress_mirror]`: every other repeat mirrored.
+    Mirror,
+    /// `[matl_texadress_clamp]`, and `[matl_texadress_border]` (whose colour the shader
+    /// puts outside, `MaterialExtra::border`).
+    Clamp,
+    /// `[matl_texadress_mirroronce]`: mirrored once about 0, then clamped (the shader takes
+    /// the coordinates' absolute value under the clamping sampler).
+    MirrorOnce,
+}
+
+pub struct Material {
+    pub texture: Option<TextureId>,
+    pub alpha: AlphaMode,
+    pub color: [f32; 4],
+    pub unlit: bool,
+    /// `[matl_noZwrite]`: a blended surface (glass, rain film, dirt) that must not write
+    /// depth, or everything blended behind it is thrown away - which is what punched holes
+    /// into the world seen through a window or a mirror.
+    pub no_z_write: bool,
+    /// See [`MaterialExtra::writes_depth`].
+    pub writes_depth: bool,
+    /// `[matl_noZcheck]`: a decal drawn over the surface it lies on - blended, without
+    /// depth write, with the surfaces' depth bias (see the blended draw items).
+    pub no_z_check: bool,
+    /// `[matl_Zbias]`: a positive bias pulls a decal in front of the coplanar surface
+    /// under it (drawn with the depth bias of the road surfaces).
+    pub z_bias: i32,
+    pub nightmap: Option<TextureId>,
+    pub lightmap: Option<TextureId>,
+    pub envmap: Option<(TextureId, f32)>,
+    /// `[matl_envmap_mask]`: the reflection mask is this texture's alpha instead of the
+    /// diffuse texture's.
+    pub env_mask: Option<TextureId>,
+    /// `[matl_bumpmap]` height map and factor.
+    pub bump: Option<(TextureId, f32)>,
+    pub emissive: [f32; 3],
+    /// `[matl_transmap]` (texture, its alpha channel is used).
+    pub transmap: Option<(TextureId, bool)>,
+    /// Its textures' addressing (`[matl_texadress_*]`).
+    pub(super) address: TexAddressing,
+    /// Keep the exact material parameters so a CTC texture swap can change only the diffuse
+    /// map without losing map lighting, moisture, screen, or other renderer flags.
+    pub(super) uniform: MaterialUniform,
+    pub(super) buf: wgpu::Buffer,
+    pub(super) bind_group: wgpu::BindGroup,
+    /// Materials that draw alike (same textures, sampler and values) share this number.
+    pub(super) look: u32,
+}
+
+impl Material {
+    /// Whether the material samples texture `id`.
+    pub fn uses_texture(&self, id: TextureId) -> bool {
+        self.texture == Some(id)
+            || self.nightmap == Some(id)
+            || self.lightmap == Some(id)
+            || self.envmap.map(|e| e.0) == Some(id)
+            || self.transmap.map(|t| t.0) == Some(id)
+            || self.env_mask == Some(id)
+            || self.bump.map(|b| b.0) == Some(id)
+    }
+
+    /// `[matl_transmap]` was given, its file there or not (the shader's
+    /// `has_transmap_declared`).
+    pub fn transmap_declared(&self) -> bool {
+        (self.uniform.params2[3] + 0.5) as u32 & 2 != 0
+    }
+}
+
+/// The material manager's settings beyond the maps of `add_material_all`: depth handling,
+/// the reflection mask and the o3d material's specular term.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct MaterialExtra {
+    /// `[matl_envmap_mask]`
+    pub env_mask: Option<TextureId>,
+    /// `[matl_noZwrite]`
+    pub no_z_write: bool,
+    /// A slot `no_z_write` marks as a see-through layer (a pane, a dirt film, a sticker
+    /// on a window - for the glass shading and the shadow map) that the model.cfg does not
+    /// give `[matl_noZwrite]`: Omsi.exe draws it with its depth written (0x7fd6c4 sets
+    /// ZWRITEENABLE from that flag alone), and so is it drawn here. Stacked panes of a
+    /// door or a window then hide each other in model order as in the original, instead
+    /// of all being blended over each other whichever is in front (#211).
+    pub writes_depth: bool,
+    /// `[matl_noZcheck]`
+    pub no_z_check: bool,
+    /// `[matl_Zbias]`
+    pub z_bias: i32,
+    /// The D3D material's ambient colour, its share of the ambient light (C); None: the
+    /// diffuse colour's.
+    pub ambient: Option<[f32; 3]>,
+    /// Specular colour (rgb) and power (w) of the D3D material; black = no highlight.
+    pub specular: [f32; 4],
+    /// `[matl_bumpmap]`: a height map (in its alpha, `Image::bump_height_map`) whose slope
+    /// shifts the `[matl_envmap]` lookup, times the factor.
+    pub bump: Option<(TextureId, f32)>,
+    /// A named transparent window layer. This is separate from envmap/transmap because
+    /// stock and add-on buses often use a plain alpha-blended window texture.
+    pub glass: bool,
+    /// The night map is switched by something other than the time of day - a `[matl_item]`'s
+    /// variable, a vehicle mesh's `[visible]`: it glows by day as well (warning lamps,
+    /// dashboard displays), not only at night.
+    pub night_switched: bool,
+    /// A display's text (`[useTextTexture]`): in the enhanced picture it glows a little
+    /// by itself, as a lit matrix does, instead of taking only the light that reaches it
+    /// under the bus's front overhang, where it was hardly readable by day.
+    pub display: bool,
+    /// A screen the bus draws itself - a `[useTextTexture]` or `[useScriptTexture]` slot:
+    /// the IBIS, the matrix displays, the dashboard's LCDs. The enhanced picture's glow
+    /// and FXAA leave it alone (see `MASK_FORMAT`): FXAA took half the contrast out of
+    /// their letters and they read as blurred.
+    pub screen: bool,
+    /// An LED matrix - a display whose lit dots are the `\S:n` script texture's
+    /// (`[matl_transmap]`), the Krueger and K++ destination panels: the dots are the
+    /// panel's own light, so the enhanced picture lets them burn in HDR and blooms them
+    /// (the glow's source keeps them, where the other screens are left out of it -
+    /// something no Direct3D 9 without shaders of its own could do). `MASK_FORMAT`'s g.
+    /// (Only a panel whose `[matl_lightmap]` is white all over: a flipdot carries the same
+    /// mask, but its light map is a picture of the lamps over it, and it does not glow.)
+    pub led: bool,
+    /// The film of water on a window (`[alphascale] Rain_Window_…`): drawn as drops that sit,
+    /// gather and run down the glass instead of the texture sliding down as a whole.
+    pub rain_film: bool,
+    /// The map's water (`texture/water.tga`): Enhanced draws it as water - a smooth surface
+    /// mirroring the sky more the flatter it is seen, rippled by small waves.
+    pub water: bool,
+    /// `[nomaplighting]`: the map's lamps (`[maplight]`) do not light it - a street lamp
+    /// is not lit by its own light.
+    pub no_map_lights: bool,
+    /// A `[tree]`'s leaf cards: the vanilla picture leaves the map's lamps off them, as
+    /// OMSI 2 shows a tree standing right under a street lamp dark; Vanilla+ and Enhanced
+    /// still light them.
+    pub tree: bool,
+    /// 1 when the texture's `.cfg` sidecar carries `[moisture]`/`[puddles]`: the road of a
+    /// junction or crossing object gets wet and collects puddles like a spline's.
+    pub moisture: f32,
+    /// `[matl_transmap]` was given, whether or not its file is there: Omsi.exe raises the
+    /// material's transmap flag before it reads the name (0x7fbbf4), and with it the
+    /// `[matl_envmap]` reflection goes by the texture's alpha instead of the factor.
+    pub transmap_declared: bool,
+    /// `[matl_texadress_border]`: its colour (RGBA, 0..1). Where the (scrolled) texture
+    /// coordinates leave [0, 1] the diffuse texture reads this colour instead of its edge,
+    /// as Direct3D's border addressing does: a roller blind's band that has scrolled away
+    /// vanishes in a transparent border.
+    pub border: Option<[f32; 4]>,
+    /// An opaque, sphere-mapped part of a vehicle that is not its body (a handrail, a
+    /// bumper, a wheel trim): the enhanced picture may make it metal by its `[matl_envmap]`
+    /// factor alone, as the vanilla one shows the sphere map on it - chrome read as a
+    /// faint clear coat there. A body needs a mask of its own for that (a Golf's bonnet).
+    pub metal_ok: bool,
+    /// Windy trees: foliage the wind moves - the height (mesh units) of the pivot where the
+    /// crown leaves the trunk (nothing below it moves), of the crown's top, and how much the
+    /// tree gives to the wind (1 a broadleaf). `None`: not foliage.
+    pub sway: Option<[f32; 3]>,
+}
+
+/// The textures a material's bind group samples.
+#[derive(Clone, Copy)]
+pub(super) struct MaterialMaps {
+    pub(super) texture: Option<TextureId>,
+    pub(super) transmap: Option<(TextureId, bool)>,
+    pub(super) nightmap: Option<TextureId>,
+    pub(super) lightmap: Option<TextureId>,
+    pub(super) envmap: Option<(TextureId, f32)>,
+    pub(super) env_mask: Option<TextureId>,
+    pub(super) bump: Option<(TextureId, f32)>,
+    pub(super) pbr: Option<PbrMaps>,
+}
