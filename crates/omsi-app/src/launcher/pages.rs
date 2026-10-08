@@ -627,6 +627,21 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     let opts: Vec<(&str, &str)> = vec![("0", auto_label.as_str()), ("500", "500 MB"), ("1000", "1 GB"), ("1500", "1.5 GB"), ("2000", "2 GB"), ("3000", "3 GB"), ("4000", "4 GB"), ("6000", "6 GB")];
     sel_setting(ui, s, dirty, "s-texmem", c.row(), "Texture memory", "texture_memory", &opts);
     toggle_setting(ui, s, dirty, c.row(), "Compress textures on loading", "texture_compression");
+    c.section(ui, "Compatibility");
+    sel_setting(
+        ui,
+        s,
+        dirty,
+        "s-gpu-texcomp",
+        c.row(),
+        "GPU texture compression",
+        "gpu_texture_compression",
+        &[
+            ("auto", "Automatic (recommended)"),
+            ("enabled", "Enabled"),
+            ("disabled", "Disabled — decode DXT/BC to RGBA"),
+        ],
+    );
     c.section(ui, "Profiles");
     graphics_profiles_block(ui, s, dirty, &mut c);
     [left, c.used()]
@@ -2739,7 +2754,7 @@ mod settings_tests {
         let mut graphics = vec![
             "s-gp-sel", "s-gp-load", "s-gp-del", "s-gp-name", "s-gp-save",
             "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-night", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "set-windy_trees",
-            "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression",
+            "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression", "s-gpu-texcomp",
         ];
         if !cfg!(target_os = "macos") {
             graphics.push("s-api");
