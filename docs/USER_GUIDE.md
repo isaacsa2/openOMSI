@@ -48,8 +48,9 @@ Everything can also be given on the command line, which then skips both:
 | `--drive-keys wasd` | let W/A/S/D drive instead of the arrow keys |
 | `--autostart` | put the bus into service before the run (as Shift+U does) |
 | `--click x,y[,dx,dy]` | press (and drag) the cockpit switch at that pixel, offscreen |
-| `--season winter` / `--situation x.osn` / `--physics simple` | season override, a saved situation, the kinematic dynamics instead of the rigid body |
+| `--season winter` (`autumn-late`, `spring-early`, …) / `--situation x.osn` / `--physics simple` | season override, a saved situation, the kinematic dynamics instead of the rigid body |
 | `--enhanced` / `--export-glb bus.glb` | the physically based renderer; write the bus as glTF (the launcher's preview) and quit |
+| `--enhanced-plus` | Enhanced+: the physically based renderer with ray-traced shadows, ambient occlusion and reflections |
 | `--launcher` / `--menu` / `--no-menu` | open the launcher (the default without arguments), the in-game menu, or neither |
 
 Keys in the window: **W** throttle, **S** brake, **A**/**D** steering - the arrow keys do the
@@ -89,7 +90,7 @@ release description (GitHub's format; `file://` works, for testing - the game th
 3 s).
 
 **Playing now.** While a session runs the game tells the project's counter (a Cloudflare
-Worker, `services/presence/`) every three minutes that it is being played, and says goodbye
+Worker, `services/presence/`) every ten minutes that it is being played, and says goodbye
 when it ends; the website and the README show how many play right now. What goes out is a
 random id made new for each session, the version and the kind of system - nothing else, and
 the counter keeps no addresses. Settings → General → "Count me in the website's \"playing
@@ -103,6 +104,8 @@ down to the bottom edge the brake. Above 10 km/h the same hand movement turns th
 and less (at 50 km/h a fifth as far), so the wheel feels heavier the faster the bus goes; for
 the first second after switching it on the wheel and the pedals ease towards the cursor.
 Settings → Driving → *Mouse steering sensitivity* makes it more or less sensitive (100 % = OMSI).
+*Mouse pedal strength* sets how much cursor travel is needed to reach full accelerator or
+braking: above 100 % the pedal reaches full sooner and below 100 % it takes more travel.
 Mouse steering works in the driver's, the passenger and the outside view; the wheel follows
 the cursor smoothly (a short easing, no steps). With *Smooth mouse steering* off (Settings →
 Driving) the wheel and the pedals are where the cursor says at once, as in OMSI.
@@ -269,6 +272,10 @@ menu's, the timetable's, the plates under the notes - 0.2 to 1, the texts stayin
 as designed; `navigator_opacity` in older files),
 `navigator_corner` (`bottom-left` default, `bottom-right`, `top-left`, `top-right`),
 `nav_ai` (the other AI vehicles as dots on the navigator and the city map; on by default),
+`ai_wait_timed_stops_only` (an AI timetable bus ahead of its time waits for its departure only
+at its first and last stop, railway stations and the stops the timetable gives a time of their
+own, and drives on from the others once boarding is done; off by default: it waits at every
+stop it serves, as in OMSI),
 `boarding`, `detail_textures`, `exact_fare`, `enhanced`, `fullscreen`, `vsync`, `volume`
 and `drive_keys`, plus `render_scale` (`auto` or a fraction: the picture is drawn smaller
 and upscaled), `post_aa` (`fxaa`, the enhanced renderer's, or `off`), `view_distance` (m,
@@ -282,7 +289,10 @@ the panel's own light, and the glow draws a halo around them), `led_mips` (0..4,
 `\S:n` mask are sampled at the level their screen footprint asks for, never coarser than
 this. 0 point-samples them, the sharpest dots and the worst shimmer; 1.3 keeps a matrix's
 dots a couple of pixels across where the full chain has run them together; 4 is near the
-calm of the full chain), `mouse_sens` (mouse steering,
+calm of the full chain). The bus's own screens in Enhanced (the IBIS, ticket and
+html terminals, the dashboard's LCDs) dim at night as a real dashboard's do, and are never
+lifted over their own colour by the eye's adaptation to the dark cab; the gauges' backlight
+and the destination LED matrices (`led_glow`) are left as they are. `mouse_sens` (mouse steering,
 1 = OMSI's), `mouse_smooth` (0: the mouse's wheel follows the cursor without easing),
 `ui_scale` (the size of the game's interface over the picture - its texts,
 the menu, the timetable, the navigator and the city map - from 0.5 to 2, 1 by default, on
@@ -298,11 +308,26 @@ rest breathes and shifts its weight, and 0 of it is exactly as OMSI; most of it 
 the bus waits at a stop) and `head_idle_pace` (0.5..2: how fast that sway moves, 1 being the
 pace it is designed at), `collision_objects` (walls, poles and bridges stop the bus; off is OMSI's `no_collision`
 option and is taken from OMSI's options when openOMSI starts the first time), `graphics_api`
-(`auto`, `vulkan`, `dx12` on Windows, `gl`: which graphics interface the game asks first -
-with `auto` Vulkan, then DirectX 12, then OpenGL), `ctrl_off` (game controllers switched off
+(`auto`, `vulkan`, `dx12` on Windows, `gl`, `angle` on Windows: which graphics interface the
+game asks first - with `auto` on Windows DirectX 12, then Vulkan, then OpenGL, then ANGLE;
+elsewhere Vulkan, then OpenGL; see *Graphics API* below), `ctrl_off` (game controllers switched off
 on the Controllers page, by name, separated by `|`) and `language` (`ENG`, `DEU`, `FRA`: the language the HUD names cockpit switches
 in). The file also carries a `version`; older files that say
 `boarding=pay` because that was the launcher's old default are read as `auto`.
+With `collision_vehicles` enabled, impacts against AI traffic are delivered to the struck
+vehicle's collision scripts and deform a localized part of its body mesh where the model
+has editable body geometry.
+
+**Graphics API** (Settings → Display, `graphics_api`): the interface named is asked first and
+the others follow, so a machine without it still starts. *ANGLE (DirectX 11)* (Windows) runs
+OpenGL ES through Google's ANGLE on the card's DirectX 11 driver: for graphics chips whose
+DirectX 12, Vulkan and OpenGL drivers are missing or broken (Intel HD Graphics 2000-4000, AMD
+Radeon HD 5000/6000). It is tried last, after the other three failed, and only when
+`libEGL.dll` and `libGLESv2.dll` (Google's ANGLE, BSD licence, with its Direct3D 11 renderer)
+are next to `openomsi.exe`; without them it is skipped (the log says so). The Windows package
+is to ship them, built from ANGLE's own source by
+[angle-openomsi](https://github.com/openOMSI-Project/angle-openomsi); with them the log names the
+adapter `ANGLE (…Direct3D11…)` on the `Gl` backend.
 
 `drive_keys` is a control preset: `simple` (W/S/A/D and the arrow keys drive; the default),
 `wasd`, `arrows`, or `omsi` ("Custom controls") - only the layout of `Inputs/keyboard.cfg`
@@ -318,8 +343,10 @@ Who gets on the player's bus: on a duty (a line and tour, or a trip) with a dest
 the display, the people waiting for a stop the trip calls at later - also where the bus's
 depot file (`.hof`) names the terminus otherwise than the map's timetable does - and those
 whose line record lists the terminus shown; everybody gets off at the trip's last stop. In
-free drive, or with no destination set (or a "not in service" one), nobody waiting gets on;
-the riders aboard still get off at their stops.
+free drive the bus takes whom its destination display takes, as a timetable bus: those
+whose line record lists the terminus shown, and those without one. With no destination set
+(or a "not in service" one) nobody waiting gets on; the riders aboard still get off at their
+stops.
 `exact_fare=0` makes them overpay so that change is due. Rain and snow stay outside the
 player's bus (its `[boundingbox]`), and heavy rain darkens the day enough for the saloon
 lights to matter.
@@ -327,10 +354,41 @@ lights to matter.
 `detail_textures` lays procedural (fractal) grain over the ground and the roads up close,
 in vanilla and enhanced alike. `enhanced=1` (or `--enhanced`) switches to its own
 physically based renderer: high-range lighting with energy-conserving diffuse and GGX
-reflections (roughness from `[matl_envmap]`), a computed sky (Rayleigh/Mie scattering,
-lit cumulus) that also lights the scene, contact-hardening sun shadows, aerial perspective
-and height fog, automatic exposure, a glow only real highlights produce and the PBR
-Neutral tone curve with FXAA (`post_aa`); no light shafts, vignette or grading.
+reflections (roughness from `[matl_envmap]`), a computed atmosphere that also lights the
+scene, contact-hardening sun shadows, aerial perspective and height fog, automatic
+exposure, a glow only real highlights produce and a photographic tone curve with FXAA
+(`post_aa`); no light shafts or grading.
+
+Its light comes from physics, not from colour settings. The atmosphere is computed for the
+moment: Rayleigh scattering, ozone, a boundary layer of aerosol whose amount, particle size
+(Ångström exponent) and depth change with the weather, a stratospheric aerosol layer, and
+light scattered many times over (Hillaire's method) - which is what gives the blue hour its
+depth, the twilight its purple and the sunset its colour, different every evening. Clouds
+are lit by the sun as it reaches their own height, so they glow pink after the sun has set
+for the street; a veil of high cloud dims the sun and spreads it into a white aureole (a
+milky sun, soft pale shadows); a passing cumulus takes the sun away from the street, and
+the clouds themselves brighten the sky light. The moon stands where it really is with its
+real phase and lights the night through the same atmosphere; the stars show where the sky
+is dark enough, and a city's lamps light its own haze and clouds (brightest on an overcast
+night). The camera exposes like one: for daylight, part of the way towards the light of the
+moment, with a camera's middle-tone contrast; street lamps are bright points with a little
+glare in clear air and wide halos in mist and rain.
+
+`graphics=enhanced_plus` (Enhanced+ in the launcher, `--enhanced-plus`) is Enhanced with
+hardware ray tracing, where the graphics card traces rays (Apple M3/M4 and newer, RTX and
+RDNA 2 cards and newer through Vulkan and Direct3D 12; elsewhere it draws as Enhanced, and
+should a driver refuse the ray tracing it falls back to Enhanced as well). Every solid mesh within
+420 m of the camera goes into an acceleration structure each frame, and the window's
+picture traces the sun's shadow per pixel (soft away from its caster, crisp at the
+contact; cut-out leaves and fences keep the shadow map, whose texels they need), the
+sky's occlusion within two metres, and reflections: wet roads, water, glass, envmapped
+and lacquered paint mirror what really stands around them, off the screen too, and the
+sky where nothing does. Its shadows, occlusion and reflections cannot be switched off
+apart. It shares Enhanced's tone curve, with the light a shade warmer and a light
+vignette.
+`OMSI_NO_RT=1` opens no ray queries, `OMSI_NO_RT_GRADE=1` leaves its grade out,
+`OMSI_RT_REFL_HALF=1` traces the reflections at half size, `OMSI_DEBUG_RT=n` (see
+`crates/omsi-render/src/rt.rs`) shows its buffers.
 
 Vanilla, Vanilla+ and Enhanced reflect buses, buildings and scenery in wet road puddles
 when `reflections=1`, each using its own lighting. Depth-aware filtering softens the image;
@@ -409,7 +467,10 @@ Under **Seat position**, **Head pitch** adjusts the driver's neutral view angle 
 (-45° to +45°). It applies to the driver's view with any display setup, not just triple
 screens, and is included when taking offscreen screenshots. Manual looking and head tracking
 remain relative to this setting; **Reset the seat position** resets it along with the seat
-offsets.
+offsets. The seat set in the game menu is kept for each bus on its own (`seats.cfg` in the
+`.openomsi` folder): fitted to one bus, the others keep the views their `.bus` files give
+(or the seat of the launcher's settings, for a bus never fitted), and resetting it puts
+that bus's views back as its file has them.
 
 In Settings → Camera, **Right stick turns the view** switches automatic gamepad
 camera movement on or off. It is on by default. Switch it off to keep using the
@@ -425,6 +486,11 @@ installation - `Vehicles`, `maps`, `Sceneryobjects`, `Splines`, `Texture`, `Font
 folder (`omsi_cfg::content_roots`): whatever a mod puts there is found exactly as if it had
 been copied into OMSI 2, and a file of the same name replaces the stock one. The original
 installation is never written to. `OMSI_CONTENT=/some/dir` moves the content folder.
+
+Depot files can also be placed in a top-level `HOFs/` folder. Every vehicle can use those
+`.hof` files without keeping a separate copy in each `Vehicles/<bus>/` folder. If a
+vehicle folder and `HOFs/` contain the same file name, the vehicle's own copy takes
+priority (the launcher's depot list shows the shared ones after the bus's own).
 
 Installing a mod: the launcher's **Mods** page opens the system's folder / file picker
 (Finder, Explorer, GTK) for a mod folder or a `.zip`, `.7z` or `.rar` archive and sorts it
@@ -452,13 +518,39 @@ and buses inside the archives.
 ## Season and weather
 
 The launcher's Departure card has a **Season** choice (spring / summer / autumn / winter,
-or by the date as in the original). Choosing one moves the date into that season, so the
-timetable and holidays follow, passes `--season` to the game (which picks the map's
-seasonal texture folder), and the weather list only offers what fits: snowfall and frost
-only in winter, no cold presets in summer.
+or by the date as in the original), and under a chosen season its **Early / Mid / Late**
+part. The phases are the meteorological season's three months (northern spring: March,
+April, May; half a year later on a map south of the equator), and choosing one moves the
+date to a typical day of it (10th, 15th, 20th; the year and the time of day stay), so the
+sun, the length of the day, the natural weather's temperature and snow, the street lamps,
+the timetable and holidays all follow. `--season autumn-late` does the same from the
+command line (`--season autumn` is the middle; a `--date` already in the phase's month is
+kept). The map's seasonal textures follow the phase - early spring still bare (`Winter`),
+late summer dry (`SummerDry`), early autumn green, mid autumn coloured (`Fall`), late
+autumn bare - and the trees and bushes are mixed between the two looks the phase lies
+between: in early autumn a quarter of them have turned, in mid autumn four in five, in
+late autumn most stand bare and some still carry their leaves (each plant by its own
+number, the same every time and for every LAN player). The weather list only offers what
+fits: snowfall and frost only in winter, no cold presets in summer.
 
 Weather presets (`Weather/*.owt`) change the light: overcast takes the sun away, rain and
 fog thicken the air, a snow preset puts any map into its winter textures with snow cover.
+
+**Natural weather** (no weather chosen, or `--weather natural`) is a physical weather
+model instead of one fixed state: a column of the atmosphere over the map that runs with
+the clock. Highs and lows pass through (falling pressure brings rising air: first a veil of
+cirrus, then a grey deck, then rain; behind a low the air sinks and clears); the sun warms
+the ground through the clouds and the ground cools by radiation at night (far more under a
+clear sky); the day's heat mixes the air up from the ground, and where it reaches the
+condensation level cumulus forms, to dissolve again in the evening; a calm clear night
+cools the air to its dew point and leaves fog that the morning sun burns off; rain washes
+the dust out of the air and a still high collects it, and humid air swells it into a milky
+haze. So one day is grey from morning to night, the next opens up after a foggy morning,
+an afternoon brings showers and a clear blue evening follows - each following from the day
+before (the model starts three days back), with the season's and the latitude's climate.
+It sets everything a weather sets - visibility, wind, temperature, rain or snow, the wet
+road - for every graphics mode; Enhanced and Enhanced+ also take its cloud amounts and its
+air. `OMSI_DAY_AIR=haze,angstrom[,height,strat]` fixes the air for comparisons.
 
 ## Radio
 
@@ -599,7 +691,7 @@ Environment variables, all off unless set. The useful ones:
 | `OMSI_PARKED_PULL_OUT=p` | the chance per population pass (about 2 s) that a parked car drives off (0.035 by default), with a log of why one does not |
 | `OMSI_NO_BRIDGE=1` | a LAN host leaves the internet alone (no UPnP port forward, no address posting) - for tests |
 | `OMSI_NO_LAN_MODS=1` | a LAN host serves no mods and a joining game fetches none |
-| `OMSI_BACKEND=vulkan\|dx12\|gl` | the graphics interface to ask first (the log lists every adapter each one offers) |
+| `OMSI_BACKEND=vulkan\|dx12\|gl\|angle` | the graphics interface to ask first (the log lists every adapter each one offers; `angle`, also `dx11`/`d3d11`: OpenGL ES on ANGLE over DirectX 11, Windows, with ANGLE's DLLs beside the game) |
 | `OMSI_GPU_LIMITS=default\|downlevel` | pretend the graphics card can only do this much (tests of old cards) |
 | `OMSI_GPU_ARRAYS=textures\|nostorage` | read the scene's arrays from textures, as on OpenGL chips without storage buffers in the vertex shader (or without any: no per-pixel lamp light) - tests of old cards |
 | `OMSI_GL_TEXTURE_UNITS=1` | with `OMSI_GPU_ARRAYS`, keep to the sixteen texture units OpenGL has there, as such a chip does: the enhanced graphics are left out (vanilla+ is drawn) |
@@ -677,6 +769,18 @@ and keeps the downloads for the next time (`~/.openomsi/lan-store`). Listing a b
 takes the host a while after it starts (Novi Sad, 27 000 files: 20 s on a fast computer); a joining game waits
 for it. Maps installed straight into the OMSI 2 folder are not passed on: both players need
 them.
+
+The host's mods are for playing the session, not for keeping: they travel encrypted (a key
+agreement of every connection's own, bound to the session, then ChaCha20-Poly1305), and the
+joining game never writes them to the disk in plain form. `~/.openomsi/lan-store` holds each
+file sealed with the store's key (a fresh nonce per file) and named by a keyed hash, and the
+game reads them decrypted into memory only; copying them out of the game's folders gives
+noise, and so does listening on the network. Both players need this version (an older game
+is told to update). Honestly, that is all it does: openOMSI is open source and the
+decryption runs on the player's own computer, so a changed build or a dump of the game's
+memory still gets the files, and the store's key lies on the same computer (sealed by
+Windows for the user's account, elsewhere a file only the user can read: obfuscation, not a
+lock). The host's own copy is the host's mod folder, unprotected as ever.
 
 **One world.** The host simulates the AI traffic, the timetable buses, the people on the
 pavements and at the stops, the riders of the timetable buses and the traffic lights for

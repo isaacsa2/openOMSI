@@ -45,6 +45,9 @@ struct CoronaOut {
     // a smoke puff's: how high this point is over the ground it fades into (m), and how
     // high the fade reaches (0: not faded)
     @location(6) ground: vec2<f32>,
+    // precipitation (Enhanced, see `precip_light`): the particle's place, w 1 for rain, 2
+    // for snow, 0 for anything else
+    @location(7) wpos: vec4<f32>,
 };
 
 @vertex
@@ -181,7 +184,9 @@ fn vs_main(in: CoronaIn) -> CoronaOut {
     let to_cam = camera.cam_pos.xyz - in.pos;
     let dist = length(to_cam);
     let view_dir = to_cam / max(dist, 0.001);
-    let streak = in.dir.w < -1.5;
+    // (a cone of -2 marks a raindrop, of -3 a snowflake: rain.rs)
+    let streak = in.dir.w < -1.5 && in.dir.w > -2.5;
+    let flake = in.dir.w <= -2.5;
     let directed = length(in.dir.xyz) > 0.5 && !streak;
     var brightness = in.color.a;
     if (directed) {
@@ -191,6 +196,13 @@ fn vs_main(in: CoronaIn) -> CoronaOut {
         let outer = acos(clamp(in.dir.w, -1.0, 1.0));
         let inner = select(0.0, acos(clamp(in.extra.x, -1.0, 1.0)), in.extra.x >= -1.0);
         brightness = brightness * clamp((outer - ang) / max(outer - inner, 0.0001), 0.0, 1.0);
+    }
+    // the light that reaches the eye through the fog: Beer-Lambert's exp(-density x
+    // distance), the same law the scene's own fog follows (`shader.wgsl`). Left out, the
+    // street lamps and signals shone at full strength to the end of the view in a fog that
+    // had hidden their poles 50 m away, a fan of dots at the horizon (#1212).
+    if (!streak) {
+        brightness = brightness * exp(-dist * max(camera.fog.w, 0.0));
     }
     // a star grows with the light's strength; every sprite's strength stops at 1
     let star_sprite = (u32(in.extra.z + 0.5) & 8u) != 0u && !streak;
@@ -220,14 +232,20 @@ fn vs_main(in: CoronaIn) -> CoronaOut {
         }
     }
     // coronas keep a minimum on-screen size in the distance like the original;
-    // precipitation particles (cone < -1.5) are thin vertical streaks.
+    // precipitation particles (cone < -1.5) follow their motion relative to the eye.
     // A sprite's radius, from the light's size (its diameter) and that distance floor. The
     // 0.9 is measured against Omsi.exe: at the size the game files ask for, every glow reads
     // a shade too wide beside the original, which draws the sprite a little inside the
     // diameter its `size` names. (Streaks keep their size: they are rain, not a light.)
     let size = select(max(in.size * grow, dist * 0.002) * 0.9, in.size, streak);
     let stretch = select(vec2<f32>(1.0, 1.0), vec2<f32>(0.06, 4.0), streak);
-    let upv = select(up, vec3<f32>(0.0, 0.0, 1.0), streak);
+    var upv = up;
+    if (streak) {
+        upv = vec3<f32>(0.0, 0.0, 1.0);
+        if (length(in.dir.xyz) > 0.5) { upv = normalize(in.dir.xyz); }
+        let across = cross(upv, view_dir);
+        if (length(across) > 0.001) { right = normalize(across); }
+    }
     // the spot moved towards the viewer by its z offset, so that a lamp inside its housing
     // shows (without one: half its size, at most half a metre)
     let pull = select(min(size * 0.5, 0.5), in.extra.y, in.extra.y >= 0.0);
@@ -236,6 +254,7 @@ fn vs_main(in: CoronaIn) -> CoronaOut {
     out.uv = c * 0.5 + 0.5;
     out.color = vec4<f32>(in.color.rgb, brightness);
     out.kind = select(0.0, 1.0, streak);
+    out.wpos = vec4<f32>(in.pos, select(select(0.0, 2.0, flake), 1.0, streak));
     out.star = 0.0;
     out.beam = 0.0;
     out.cone = vec2<f32>(0.0, 0.0);
@@ -288,9 +307,33 @@ fn fs_main(in: CoronaOut) -> @location(0) vec4<f32> {
 // glow filter picks it up; precipitation streaks keep the vanilla level.
 @fragment
 fn fs_enhanced(in: CoronaOut) -> @location(0) vec4<f32> {
+    if (in.wpos.w > 0.5) {
+        let to_eye = normalize(camera.cam_pos.xyz - in.wpos.xyz);
+        let l = precip_light(in.wpos.xyz, to_eye, in.wpos.w > 1.5);
+        return vec4<f32>(in.color.rgb * corona_shape(in) * in.color.a * l * enh.exposure.x, 1.0);
+    }
     // (a fog cone is lit fog, not glare: it keeps the scene's level too)
     let scale = select(enh.exposure.w, enh.exposure.y, in.kind > 0.5);
-    return vec4<f32>(in.color.rgb * corona_shape(in) * in.color.a * scale, 1.0);
+    var shape = corona_shape(in);
+    // (taken here, in uniform control flow: how much of the sprite one pixel spans)
+    let r = length(in.uv - vec2<f32>(0.5)) * 2.0;
+    let px = fwidth(r);
+    if (in.kind < 0.5 && in.beam < 0.5) {
+        // A lamp seen through clear air is a small, very bright core with a faint ring of
+        // glare round it, not a lit disc as wide as its sprite (OMSI's glow bitmaps are
+        // flat discs with soft rims): a narrow core bright enough for the glow pass to
+        // spread it the way a lens does, a short falloff of glare, and a dim trace of the
+        // bitmap (which keeps a star's rays and a streak's shape). Mist, fog and rain
+        // scatter the light round the lamp, and there the full halo comes back.
+        let wet = clamp(enh.fog.x * 400.0 + enh.weather.z * 0.7, 0.0, 1.0);
+        // (the core never narrower than a pixel and a half: a far lamp stays a point of
+        // light, as the sprite's distance floor keeps it on the screen)
+        let lit = textureSampleLevel(t_corona, s_corona, vec2<f32>(0.5, 0.5), 0.0).rgb;
+        let w = max(0.1, px * 1.5);
+        let core = exp(-r * r / (w * w)) * 3.0 + exp(-r * 9.0) * 0.35;
+        shape = mix(core * max(lit, shape) + shape * 0.22, shape, wet);
+    }
+    return vec4<f32>(in.color.rgb * shape * in.color.a * scale, 1.0);
 }
 
 // Smoke ([smoke] particles): the smoke texture tinted with the particle's colour, lit by the

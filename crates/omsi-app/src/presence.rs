@@ -4,7 +4,7 @@
 //!
 //! What goes out is a random id made for this session alone (not kept anywhere, a new one
 //! every start), the game's version and the kind of system (windows, macos, linux,
-//! android) - no name, no map, nothing of the computer. The service keeps an id for ten
+//! android) - no name, no map, nothing of the computer. The service keeps an id for 25
 //! minutes after its last word and stores no addresses.
 //!
 //! Setting `presence` (on by default; the launcher's Settings → General: "Count me on the
@@ -17,8 +17,12 @@ use std::time::Duration;
 
 /// The project's presence service (`services/presence/`, deployed with wrangler).
 pub(crate) const SERVICE: &str = "https://openomsi.savvabestbrother.workers.dev";
-/// How often a running game says it is still there (the service forgets one after 10 min).
-const EVERY: Duration = Duration::from_secs(180);
+/// How often a running game says it is still there (the service forgets one after 25 min).
+/// (Every three minutes, a few hundred players used up the free plan's 100 000 requests a
+/// day by the evening, and the counter answered nobody until midnight UTC.)
+const EVERY: Duration = Duration::from_secs(600);
+/// How long a game stays quiet when the service says it has too many requests (429).
+const BACK_OFF: Duration = Duration::from_secs(1800);
 
 /// The presence of this session: dropping it says goodbye.
 pub(crate) struct Presence {
@@ -56,15 +60,35 @@ fn system() -> &'static str {
 
 /// Whether the player lets the game be counted (`presence`, on unless switched off).
 fn allowed() -> bool {
-    if omsi_cfg::env::var_os("OMSI_NO_PRESENCE").is_some() {
+    if omsi_cfg::flags::OMSI_NO_PRESENCE.is_set() {
         return false;
     }
     let text = std::fs::read_to_string(omsi_launcher_lib::data_dir().join("settings.cfg")).ok();
     omsi_launcher_lib::settings_from_text(text.as_deref()).get("presence").and_then(|v| v.as_bool()).unwrap_or(true)
 }
 
-fn post(agent: &ureq::Agent, url: &str, body: &serde_json::Value) -> bool {
-    agent.post(url).set("Content-Type", "application/json").send_string(&body.to_string()).is_ok()
+/// What a post came to.
+#[derive(PartialEq, Clone, Copy)]
+enum Sent {
+    Ok,
+    /// the service is over its request limit: wait long before asking again
+    Limited,
+    Failed,
+}
+
+fn post(agent: &ureq::Agent, url: &str, body: &serde_json::Value) -> Sent {
+    match agent.post(url).set("Content-Type", "application/json").send_string(&body.to_string()) {
+        Ok(_) => Sent::Ok,
+        Err(ureq::Error::Status(429, _)) => Sent::Limited,
+        Err(_) => Sent::Failed,
+    }
+}
+
+/// A session's own offset into the ping period (0..60 s, from its id): the games started
+/// together after an update do not all ping in the same second.
+fn jitter(id: &str) -> Duration {
+    let n = u64::from_str_radix(&id[..8.min(id.len())], 16).unwrap_or(0);
+    Duration::from_secs(n % 60)
 }
 
 impl Presence {
@@ -74,7 +98,7 @@ impl Presence {
             log::info!("presence: not counted on the website (setting presence=0)");
             return None;
         }
-        let base = omsi_cfg::env::var("OMSI_PRESENCE_URL").unwrap_or_else(|_| SERVICE.to_string());
+        let base = omsi_cfg::flags::OMSI_PRESENCE_URL.var().map(str::to_string).unwrap_or_else(|| SERVICE.to_string());
         let base = base.trim_end_matches('/').to_string();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
@@ -89,15 +113,23 @@ impl Presence {
                 let id = session_id();
                 let hello = serde_json::json!({ "id": id, "v": crate::updater::current_version(), "os": system() });
                 let mut said = false;
+                let mut first = true;
                 while !flag.load(Ordering::Relaxed) {
-                    let ok = post(&agent, &format!("{base}/ping"), &hello);
-                    if ok != said || !said {
-                        log::info!("presence: {}", if ok { "counted as playing" } else { "the service did not answer (tried again later)" });
+                    let sent = post(&agent, &format!("{base}/ping"), &hello);
+                    let ok = sent == Sent::Ok;
+                    if ok != said || first {
+                        log::info!("presence: {}", match sent {
+                            Sent::Ok => "counted as playing",
+                            Sent::Limited => "the service is over its request limit (asking again in half an hour)",
+                            Sent::Failed => "the service did not answer (tried again later)",
+                        });
                     }
                     said = ok;
-                    // (a second at a time: the goodbye must not wait three minutes)
+                    let wait = if sent == Sent::Limited { BACK_OFF } else if first { EVERY + jitter(&id) } else { EVERY };
+                    first = false;
+                    // (a second at a time: the goodbye must not wait ten minutes)
                     let mut slept = Duration::ZERO;
-                    while slept < EVERY && !flag.load(Ordering::Relaxed) {
+                    while slept < wait && !flag.load(Ordering::Relaxed) {
                         std::thread::sleep(Duration::from_secs(1));
                         slept += Duration::from_secs(1);
                     }
@@ -139,16 +171,16 @@ mod tests {
     #[test]
     #[ignore = "needs the presence service running at OMSI_PRESENCE_URL"]
     fn a_session_is_counted_while_it_runs() {
-        let base = std::env::var("OMSI_PRESENCE_URL").expect("OMSI_PRESENCE_URL");
+        let base = omsi_cfg::flags::OMSI_PRESENCE_URL.live_var().expect("OMSI_PRESENCE_URL");
         let count = || ureq::get(&format!("{base}/players")).call().unwrap().into_string().map(|t| serde_json::from_str::<serde_json::Value>(&t).unwrap()).unwrap()["players"].as_u64().unwrap();
         let before = count();
         let p = super::Presence::start().expect("presence allowed");
         std::thread::sleep(std::time::Duration::from_secs(2));
-        // (the counter's answer is cached for half a minute)
-        std::thread::sleep(std::time::Duration::from_secs(31));
+        // (the counter's answer is cached for two minutes)
+        std::thread::sleep(std::time::Duration::from_secs(121));
         assert_eq!(count(), before + 1);
         drop(p);
-        std::thread::sleep(std::time::Duration::from_secs(31));
+        std::thread::sleep(std::time::Duration::from_secs(121));
         assert_eq!(count(), before);
     }
 }

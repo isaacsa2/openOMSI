@@ -106,6 +106,7 @@ pub use wire::{
 /// 7: vehicle identity, paint identity, fleet number and registration in INFO. The identity
 /// lets another game find the same locally installed bus even when its folder was renamed.
 pub const PROTOCOL: u32 = 7;
+/// (omsi-plugin's `MULTIPLAYER_PORTS` keeps `omsi.send` off this one and the `PORT_RANGE` after it.)
 pub const DEFAULT_PORT: u16 = 27015;
 /// Ports a host tries after the default one when that is taken (a second session on the
 /// same machine).
@@ -713,8 +714,10 @@ pub struct WorldInfo {
     pub time: f64,
     /// Weather file, empty for the map's default.
     pub weather: String,
-    /// The season the player chose (`spring`, `summer`, `autumn`, `winter`), empty when
-    /// the date decides as in OMSI.
+    /// The season the player chose (`spring`, `summer`, `autumn`, `winter`), with its
+    /// phase when not the middle (`autumn-late`, `spring-early`: an older version reads
+    /// no season in that and goes by the date, which is the host's phase date), empty
+    /// when the date decides as in OMSI.
     pub season: String,
 }
 
@@ -907,6 +910,8 @@ pub struct Pose {
     /// The sender's clock when the state left (ms, wrapping), for drawing the others'
     /// buses between two states as they were sent rather than as they arrived; 0 unknown.
     pub sent_ms: u32,
+    /// The driver is keying the map-wide bus radio (GreenTeaSpeak voice); see `voice`.
+    pub radio_keyed: bool,
 }
 
 /// A player on foot: where, facing where, how fast, and whether sitting in some bus.
@@ -1392,6 +1397,10 @@ pub struct LanSession {
     pub connected: bool,
     /// The host turned us away (the reason), or the target cannot be reached at all.
     pub rejected: Option<String>,
+    /// The host's own word that we are not to play there: sent away (`KICK`, a ban too) or
+    /// turned away at the door (`REJECT`), with its message. Unlike a lost connection
+    /// (`rejected` alone, the game plays on and may `/reconnect`), the game ends on it.
+    pub turned_away: Option<String>,
     /// What the host said when it let us in (the latest welcome after a reconnect).
     pub welcome: Option<Welcome>,
     /// Counts the welcomes after which the connection was (re)made: the game takes the
@@ -1459,7 +1468,7 @@ pub struct LanSession {
     /// keeps their number and is "back", not a newcomer.
     gone_lately: Vec<(Option<u64>, String, u32, Instant)>,
     /// Players the host sent away (host): their nonces, so they are not let in again.
-    banned: Vec<u64>,
+    banned: Vec<(u64, String)>,
     /// Commands for this game (`command`): (from, text).
     commands: Vec<(u32, String)>,
     /// How fast the session's clock runs (the host's time speed; a client: the host's as
@@ -1487,7 +1496,7 @@ impl LanSession {
             trying: 0.0,
             lost_at: None,
             timed_out: false,
-            join_timeout: std::env::var("OMSI_LAN_JOIN_TIMEOUT")
+            join_timeout: omsi_cfg::flags::OMSI_LAN_JOIN_TIMEOUT.live_var()
                 .ok()
                 .and_then(|v| v.parse::<f32>().ok())
                 .filter(|v| *v > 0.0)
@@ -1511,6 +1520,7 @@ impl LanSession {
             place_acc: 1.0,
             connected: role == Role::Host,
             rejected: None,
+            turned_away: None,
             welcome: None,
             welcomes: 0,
             warnings: Vec::new(),
@@ -1612,7 +1622,7 @@ impl LanSession {
                 s.host = None;
                 // `OMSI_BRIDGE_ONLY`: forget the code's own addresses, so that only what the
                 // rendezvous tells is tried (to check that path)
-                if std::env::var_os("OMSI_BRIDGE_ONLY").is_some() {
+                if omsi_cfg::flags::OMSI_BRIDGE_ONLY.live_os().is_some() {
                     s.candidates.clear();
                 }
             }
@@ -1902,18 +1912,20 @@ impl LanSession {
         }
     }
 
-    /// Host: send player `id` away (`ban`: for the rest of the session).
+    /// Host: send player `id` away (`ban`: for the rest of the session, the same reason given
+    /// at the door when it comes back).
     pub fn kick(&mut self, id: u32, reason: &str, ban: bool) {
         if self.role != Role::Host {
             return;
         }
         let Some(p) = self.peers.remove(&id) else { return };
+        let reason = clean_text(reason, 200);
         if let Some(a) = p.addr {
-            self.send(format!("KICK|{}", clean_text(reason, 200)).as_bytes(), a);
+            self.send(format!("KICK|{reason}").as_bytes(), a);
         }
         if ban {
             if let Some(n) = p.nonce {
-                self.banned.push(n);
+                self.banned.push((n, reason.clone()));
             }
         }
         self.broadcast(format!("BYE|{id}").as_bytes(), None);
@@ -2371,6 +2383,7 @@ impl LanSession {
             return false;
         }
         self.rejected = None;
+        self.turned_away = None;
         self.timed_out = false;
         self.connected = false;
         self.other_reject = None;
@@ -2607,6 +2620,12 @@ impl LanSession {
                             "the host turned us away: {reason}"
                         )));
                     }
+                    // (the game ends on a door closed before it ever played there, or on a ban;
+                    // a reconnect refused for now - the session full, say - leaves it playing
+                    // on to `/reconnect` later)
+                    if self.welcomes == 0 || reason.contains("sent you away") {
+                        self.turned_away = Some(reason.clone());
+                    }
                     self.rejected = Some(reason);
                     self.connected = false;
                 }
@@ -2645,6 +2664,7 @@ impl LanSession {
                     log::warn!("LAN: the host sent us away: {reason}");
                     self.events.push(LanEvent::Notice(format!("the host sent you away: {reason}")));
                     self.rejected = Some(format!("the host sent you away: {reason}"));
+                    self.turned_away = Some(reason);
                     self.connected = false;
                 }
                 ("WANT", Role::Host) | ("CLAIM", Role::Host) => {
@@ -3058,8 +3078,9 @@ impl LanSession {
                 );
                 return;
             }
-            None if nonce.is_some_and(|n| self.banned.contains(&n)) => {
-                self.reject(from, "the host has sent you away from this session");
+            None if nonce.is_some_and(|n| self.banned.iter().any(|b| b.0 == n)) => {
+                let why = self.banned.iter().find(|b| Some(b.0) == nonce).map(|b| b.1.clone()).unwrap_or_default();
+                self.reject(from, &if why.is_empty() { "the host has sent you away from this session".to_string() } else { format!("the host has sent you away from this session: {why}") });
                 return;
             }
             None => {
@@ -3161,9 +3182,9 @@ impl LanSession {
         let was_timed_out = self.timed_out;
         let proto = field(parts, 1).parse::<u32>().unwrap_or(1);
         if proto != PROTOCOL {
-            self.rejected = Some(format!(
-                "the host runs LAN protocol {proto}, this game protocol {PROTOCOL}"
-            ));
+            let why = format!("the host runs LAN protocol {proto}, this game protocol {PROTOCOL}");
+            self.turned_away = Some(why.clone());
+            self.rejected = Some(why);
             return;
         }
         let Some(id) = field(parts, 2)

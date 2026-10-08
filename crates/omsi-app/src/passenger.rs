@@ -90,17 +90,17 @@ fn pulse(vehicle: &mut VehicleInstance, event: &str) -> bool {
 
 impl App {
     fn passenger_sounds(&mut self, sounds: &[String]) {
-        let Some(lan) = self.lan.as_mut() else { return };
+        let Some(lan) = self.net.lan.as_mut() else { return };
         for event in sounds.iter().take(8) {
             lan.command(0, &format!("passenger-sound {event}"));
         }
     }
 
     fn passenger_send(&mut self, owner: u32, action: Action) {
-        let Some(lan) = self.lan.as_mut().filter(|l| l.connected) else { return };
+        let Some(lan) = self.net.lan.as_mut().filter(|l| l.connected) else { return };
         let now = Instant::now();
-        if self.remotes.passenger_actions.get(&0).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(1)) { return; }
-        self.remotes.passenger_actions.insert(0, now);
+        if self.net.remotes.passenger_actions.get(&0).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(1)) { return; }
+        self.net.remotes.passenger_actions.insert(0, now);
         lan.command(owner, &action.command());
         self.service_msg = Some(("Passenger request sent".into(), 3.0));
     }
@@ -133,7 +133,7 @@ impl App {
         let BusId::Ai(id) = self.foot_bus()? else { return None };
         let owner = crate::humans::remote_bus_player(id)?;
         let (eye, direction, spread) = self.cursor_ray_now()?;
-        let remote = self.remotes.remotes.get(&owner).filter(|r| !r.stand_in)?;
+        let remote = self.net.remotes.remotes.get(&owner).filter(|r| !r.stand_in)?;
         let vehicle = remote.vehicle();
         let hit = crate::player::pick_in(vehicle, eye, direction, spread)
             .map(|i| (0, vehicle.ty.meshes[i].def_index))
@@ -158,7 +158,7 @@ impl App {
 
     pub(crate) fn passenger_command(&mut self, from: u32, text: &str) -> bool {
         if let Some(event) = text.strip_prefix("passenger-sound ") {
-            if let Some(remote) = self.remotes.remotes.get_mut(&from) { remote.passenger_sound(event); }
+            if let Some(remote) = self.net.remotes.remotes.get_mut(&from) { remote.passenger_sound(event); }
             return true;
         }
         if let Some(result) = text.strip_prefix("passenger-result ") {
@@ -175,16 +175,16 @@ impl App {
         }
         let Some(command) = text.strip_prefix("passenger ") else { return false };
         let Some(action) = Action::parse(command) else { return true };
-        let Some(lan) = self.lan.as_ref() else { return true };
+        let Some(lan) = self.net.lan.as_ref() else { return true };
         let aboard = lan.peers().find(|p| p.pose.id == from)
             .and_then(|p| passenger_aboard(&p.pose, lan.my_id));
         let mut sounds = Vec::new();
         let result = if let Some(aboard) = aboard {
             let now = Instant::now();
-            if self.remotes.passenger_actions.get(&from).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(1)) { return true; }
-            self.remotes.passenger_actions.insert(from, now);
+            if self.net.remotes.passenger_actions.get(&from).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(1)) { return true; }
+            self.net.remotes.passenger_actions.insert(from, now);
             let local = Vec3::from_array(aboard.local);
-            let eye = self.humans.as_ref().and_then(|h| h.cabin_world(BusId::Player, local)).map(|w| w.0)
+            let eye = self.session.humans.as_ref().and_then(|h| h.cabin_world(BusId::Player, local)).map(|w| w.0)
                 .or_else(|| self.player.as_ref().map(|p| p.vehicle.position + p.vehicle.body_rotation().transform_point3(local).as_dvec3()))
                 .map(|feet| feet + DVec3::Z * 1.4);
             let accepted = self.player.as_mut().is_some_and(|p| {
@@ -202,7 +202,7 @@ impl App {
             if accepted { "ok" } else { "unsupported" }
         } else { "outside" };
         if result == "ok" { self.passenger_sounds(&sounds); }
-        if let Some(lan) = self.lan.as_mut() { lan.command(from, &format!("passenger-result {result}")); }
+        if let Some(lan) = self.net.lan.as_mut() { lan.command(from, &format!("passenger-result {result}")); }
         true
     }
 }

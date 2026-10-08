@@ -32,9 +32,14 @@ pub(crate) fn steering_view_yaw(current: f32, steering: f32, dt: f32, enabled: b
     current + (target - current) * (1.0 - (-dt.max(0.0) / response.clamp(0.05, 1.0)).exp())
 }
 
-pub(crate) fn driver_head_look(look: (f32, f32), view: &str, pitch_deg: f32) -> (f32, f32) {
+pub(crate) fn driver_head_look(
+    look: (f32, f32),
+    view: &str,
+    pitch_deg: f32,
+    vr_on: bool,
+) -> (f32, f32) {
     if view == "driver" {
-        (look.0, look.1 + pitch_deg)
+        (look.0, look.1 + if vr_on { 0.0 } else { pitch_deg })
     } else {
         look
     }
@@ -45,19 +50,21 @@ mod driver_head_look_tests {
     use super::driver_head_look;
 
     #[test]
-    fn head_pitch_adjusts_driver_view_in_any_display_mode_only() {
-        assert_eq!(driver_head_look((4.0, 2.0), "driver", 10.0), (4.0, 12.0));
-        assert_eq!(driver_head_look((4.0, 2.0), "pax", 10.0), (4.0, 2.0));
-        assert_eq!(driver_head_look((4.0, 2.0), "outside", 10.0), (4.0, 2.0));
+    fn head_pitch_adjusts_only_non_vr_driver_view() {
+        assert_eq!(
+            driver_head_look((4.0, 2.0), "driver", 10.0, false),
+            (4.0, 12.0)
+        );
+        assert_eq!(
+            driver_head_look((4.0, 2.0), "driver", 10.0, true),
+            (4.0, 2.0)
+        );
+        assert_eq!(driver_head_look((4.0, 2.0), "pax", 10.0, false), (4.0, 2.0));
+        assert_eq!(
+            driver_head_look((4.0, 2.0), "outside", 10.0, false),
+            (4.0, 2.0)
+        );
     }
-}
-
-fn is_manual_gate_action(name: &str) -> bool {
-    let Some(gate) = name.get(..5).filter(|p| p.eq_ignore_ascii_case("kw_s_")).and_then(|_| name.get(5..)) else {
-        return false;
-    };
-    let gate = gate.strip_suffix("_fest").unwrap_or(gate);
-    gate.eq_ignore_ascii_case("r") || gate.eq_ignore_ascii_case("n") || gate.parse::<u32>().is_ok()
 }
 
 /// The vehicle actions of the keys held whose `Inputs/keyboard.cfg` entry has the "held"
@@ -180,8 +187,11 @@ pub(crate) struct Player {
     pub(crate) take_change: bool,
     /// Keys whose `_toggle` this bus does as `_up`/`_down` (see `action`): turned up last.
     pub(crate) toggled_up: hashbrown::HashSet<String>,
-    /// H-pattern actions act as momentary gear buttons when this is enabled.
+    /// H-pattern actions act as momentary gear buttons when this is enabled - those of a
+    /// controller (an H shifter) only: a key stays in its gear as in OMSI (#1440).
     pub(crate) momentary_gears: bool,
+    /// The actions now firing come from the keyboard (`key`).
+    pub(crate) from_keyboard: bool,
     /// The settings' automated manual (#713): a gear lever's gates are worked by the
     /// engine speed (see [`Player::tick_auto_shift`]).
     pub(crate) auto_shift: bool,
@@ -708,21 +718,8 @@ impl Player {
         self.action(action, false);
     }
 
-    /// Some stock roller-blind scripts keep a ratchet position with `max`.  The original
-    /// engine resets that ratchet while the hand is moving; without that small engine-side
-    /// detail a blind lowered once is immediately snapped back down on every frame.
     pub(crate) fn repair_roller_blind(&mut self, event: &str) {
-        let e = event.to_ascii_lowercase();
-        if !e.contains("rollo") {
-            return;
-        }
-        if e.ends_with("retract") {
-            self.vehicle.set_var("cp_rollo_rastpos", 0.0);
-        } else if e.ends_with("drag") {
-            if let Some(pos) = self.vehicle.var("cp_rollo_pos") {
-                self.vehicle.set_var("cp_rollo_rastpos", pos);
-            }
-        }
+        repair_roller_blind(&mut self.vehicle, event);
     }
 
     /// Fire a keyboard action as a script trigger, falling back to the names the stock
@@ -738,10 +735,10 @@ impl Player {
             return true;
         }
         let suffix = if pressed { "" } else { "_off" };
-        let release_gear = !pressed
-            && self.momentary_gears
-            && self.vehicle.ty.program.manual_gearbox()
-            && is_manual_gate_action(name);
+        if let Some(gate) = crate::hpattern::resolve(&self.vehicle.ty.program, name) {
+            if pressed { self.clutch_for_gate(&gate); }
+            if let Some(done) = crate::hpattern::action(&mut self.vehicle, &gate, pressed, self.momentary_gears && !self.from_keyboard) { return done; }
+        }
         // the ticket key of Inputs/keyboard.cfg (T): sell the ticket the passenger at the
         // desk asked for, on buses whose script has no ticket printer
         if let Some(n) = door_action(name) {
@@ -777,9 +774,6 @@ impl Player {
         let headlights = pressed && name.eq_ignore_ascii_case("kw_scheinwerfer_toggle");
         let lamps_before = if headlights { self.outside_lamps_lit() } else { 0 };
         if self.vehicle.trigger(&format!("{name}{suffix}")) {
-            if release_gear {
-                self.select_neutral();
-            }
             self.repair_roller_blind(&format!("{name}{suffix}"));
             if headlights {
                 self.headlights_with_side_lights(lamps_before);
@@ -789,9 +783,6 @@ impl Player {
         // a key whose press reached the script's own trigger releases as Omsi.exe does, with
         // `<name>_off` only: an alias's `_off` (parking_brake_mouse_off) would undo it (#420)
         if !pressed && self.vehicle.ty.program.trigger(name).is_some() {
-            if release_gear {
-                self.select_neutral();
-            }
             return true;
         }
         let Some((_, aliases)) = ACTION_ALIASES
@@ -802,29 +793,12 @@ impl Player {
         };
         for alias in *aliases {
             if self.vehicle.trigger(&format!("{alias}{suffix}")) {
-                if release_gear {
-                    self.select_neutral();
-                }
                 self.repair_roller_blind(&format!("{alias}{suffix}"));
                 return true;
             }
         }
         let done = self.toggle_as_steps(name, pressed);
-        if release_gear {
-            self.select_neutral();
-        }
         done
-    }
-
-    /// A held gate is released into OMSI's neutral trigger; the usual action release still
-    /// runs first so buses with an explicit gate-off script retain their own behavior.
-    fn select_neutral(&mut self) {
-        for name in ["kw_s_N", "kw_s_N_fest"] {
-            if self.vehicle.ty.program.trigger(name).is_some() && self.vehicle.trigger(name) {
-                self.vehicle.trigger(&format!("{name}_off"));
-                break;
-            }
-        }
     }
 
     /// OMSI's automatic clutch for a gear lever whose scripts only take a gear with the
@@ -1048,6 +1022,7 @@ impl Player {
                     .collect(),
             }
         };
+        self.from_keyboard = true;
         for name in names {
             if let Some(a) = omsi_sim::engine_action(&name) {
                 self.axes.set(a, pressed);
@@ -1055,6 +1030,7 @@ impl Player {
                 self.action(&name, pressed);
             }
         }
+        self.from_keyboard = false;
     }
 
     /// Start the whole bus by itself (Shift+U): everything a driver does to put it into
@@ -1185,17 +1161,31 @@ impl Player {
     }
 
     /// A page moved the duty to stop `stop` of `trip` (`omsi.setNextStop`): the IBIS follows,
-    /// forwards or backwards, by `IBIS_busstop` (its keys only count up, so the typist cannot
-    /// do this). Without a route in the IBIS there is nothing to move.
+    /// forwards or backwards, by `IBIS_busstop` / `ibox_busstop` (its keys only count up, so
+    /// the typist cannot do this). Without a route in the IBIS there is nothing to move.
     pub(crate) fn ibis_to_stop(&mut self, trip: &schedule::PlannedTrip, stop: usize) {
         let Some(hof) = self.vehicle.host.hof.clone() else { return };
-        let Some(route) = self.vehicle.var("IBIS_RouteIndex").filter(|r| *r >= 0.0) else { return };
-        if self.vehicle.var("IBIS_busstop").is_none() {
+        let Some(route) = self
+            .vehicle
+            .var("IBIS_RouteIndex")
+            .or_else(|| self.vehicle.var("ibox_routenindex"))
+            .filter(|r| *r >= 0.0)
+        else {
+            return;
+        };
+        if self.vehicle.var("IBIS_busstop").is_none() && self.vehicle.var("ibox_busstop").is_none() {
             return;
         }
         let Some(name) = trip.stops.get(stop).map(|s| s.name.clone()) else { return };
         if let Some(i) = schedule::ibis_stop_index(&hof, route.round() as usize, &name, stop) {
-            self.vehicle.set_var("IBIS_busstop", i as f32);
+            for var in ["IBIS_busstop", "ibox_busstop"] {
+                if self.vehicle.var(var).is_some() {
+                    self.vehicle.set_var(var, i as f32);
+                }
+            }
+            if self.vehicle.var("ibox_TTBusstopIndexLAST").is_some() {
+                self.vehicle.set_var("ibox_TTBusstopIndexLAST", stop as f32);
+            }
         }
     }
 
@@ -1585,7 +1575,7 @@ impl Player {
         }
         // OMSI_SUSP_TRACE_WINDOW=<csv>: each wheel's travel every frame of a window run
         // (the offscreen run has OMSI_SUSP_TRACE)
-        if let Some(path) = omsi_cfg::env::var_os("OMSI_SUSP_TRACE_WINDOW") {
+        if let Some(path) = omsi_cfg::flags::OMSI_SUSP_TRACE_WINDOW.os() {
             use std::io::Write;
             static TRACE: std::sync::Mutex<Option<(std::fs::File, f64)>> = std::sync::Mutex::new(None);
             let mut g = TRACE.lock().unwrap_or_else(|e| e.into_inner());
@@ -1891,6 +1881,15 @@ impl Player {
             log::info!("mouse event {ev}");
             let plain = self.vehicle.trigger(&ev);
             self.repair_roller_blind(&ev);
+            // Momentary `[mouseevent]` buttons (Aachen ibox / ticket printer, #744) set a
+            // flag in the press trigger and clear it in `_drag` / `_off`. The frame script
+            // is what acts on the flag. Run that frame now, before the next redraw's
+            // `_drag` (or a quick `_off`) zeroes it and the click does nothing.
+            self.vehicle.update_scripts_only(0.0);
+            // Clear the press flag immediately after the frame consumed it. Otherwise a
+            // held click can be processed again on the next `tick` (digit keys append
+            // twice: `1`→`11`, and ibox `0`/`D11` becomes `1`→`10`→`100`).
+            self.clear_momentary_mouse_flag(&ev);
             self.pressed_mesh = Some(i);
             self.press_info = (plain, 0.0);
             self.auto_drag = None;
@@ -1905,8 +1904,34 @@ impl Player {
         log::info!("trailer mouse event {ev} (part {ti})");
         self.vehicle.trigger(&ev);
         self.repair_roller_blind(&ev);
+        self.vehicle.update_scripts_only(0.0);
+        self.clear_momentary_mouse_flag(&ev);
         self.pressed_trailer_mesh = Some((ti, i));
         Some(i)
+    }
+
+    /// Aachen ibox / ticket-printer style: press sets a flag, `_drag` / `_off` clear it.
+    fn clear_momentary_mouse_flag(&mut self, ev: &str) {
+        let drag = format!("{ev}_drag");
+        if self.vehicle.ty.program.trigger(&drag).is_none()
+            && self
+                .vehicle
+                .trailers
+                .iter()
+                .all(|t| t.ty.program.trigger(&drag).is_none())
+        {
+            return;
+        }
+        let low = ev.to_ascii_lowercase();
+        // Only flag-style momentary keys (ibox `*_taste_*`, ticket printer). Rotary knobs
+        // also have `_drag` but use mouse deltas; a zero `_drag` right after press would
+        // disturb them.
+        if !(low.contains("taste") || low.contains("ibox") || low.contains("ticket")) {
+            return;
+        }
+        self.vehicle.host.mouse = (0.0, 0.0);
+        self.vehicle.trigger(&drag);
+        self.vehicle.host.mouse = (0.0, 0.0);
     }
 
     /// Mouse moved with the button down on a switch: OMSI fires `<event>_drag` with the
@@ -1985,7 +2010,7 @@ impl Player {
                 // other end (a click opened the NL/NG driver's door by the mouse's jitter
                 // and a second click never shut it again)
                 let anim = def.animations.first().map(|a| a.variable.clone()).filter(|v| !v.trim().is_empty() && v.trim().parse::<f32>().is_err());
-                if let (false, true, Some(var)) = (self.press_info.0, self.press_info.1 < 4.0, anim) {
+                if let (true, Some(var)) = (auto_drag_click(&ev, self.press_info.0, self.press_info.1), anim) {
                     let now = self.vehicle.var(&var).unwrap_or(0.0);
                     let target = if now > 0.5 { 0.0 } else { 1.0 };
                     log::info!("mouse event {ev}: a click on a drag control, {var} {now:.2} -> {target}");
@@ -2000,6 +2025,269 @@ impl Player {
                 .clone()
             {
                 self.vehicle.trigger(&format!("{ev}_off"));
+            }
+        }
+    }
+}
+
+/// A sun blind can be left at any position, including after a very short drag. Treating
+/// its drag-only click spot as a toggle turned a small adjustment into full travel.
+fn auto_drag_click(event: &str, plain: bool, movement: f32) -> bool {
+    let event = event.to_ascii_lowercase().replace(['_', '-'], "");
+    !plain
+        && movement < 4.0
+        && !["rollo", "sunblind", "sonnenblende"]
+            .iter()
+            .any(|name| event.contains(*name))
+}
+
+/// Keep the ratchet of the blind the drag script actually moved. Mods number either the
+/// blind (`cp_rollo1_pos`) or its position (`cp_rollo_pos1`); the event name alone cannot
+/// identify the variable. Retraction already updates the ratchet in the frame script.
+fn repair_roller_blind(vehicle: &mut omsi_sim::VehicleInstance, event: &str) {
+    let event = event.to_ascii_lowercase();
+    if !event.contains("rollo") || !event.ends_with("_drag") {
+        return;
+    }
+    let program = &vehicle.ty.program;
+    let Some(block) = program.trigger(&event) else {
+        return;
+    };
+    fn walk(
+        program: &omsi_script::Program,
+        block: omsi_script::BlockId,
+        seen: &mut hashbrown::HashSet<omsi_script::BlockId>,
+        pairs: &mut Vec<(omsi_script::VarId, omsi_script::VarId)>,
+    ) {
+        if !seen.insert(block) || seen.len() > 64 {
+            return;
+        }
+        let Some(block) = program.blocks.get(block as usize) else {
+            return;
+        };
+        for op in &block.ops {
+            match op {
+                omsi_script::Op::Store(pos) => {
+                    let Some(name) = program.var_names.get(*pos as usize) else {
+                        continue;
+                    };
+                    let name = name.to_ascii_lowercase();
+                    let Some((blind, number)) = name.rsplit_once("_pos") else {
+                        continue;
+                    };
+                    if !blind.contains("rollo") || !number.chars().all(|c| c.is_ascii_digit()) {
+                        continue;
+                    }
+                    let Some(ratchet) = program.var(&format!("{blind}_rastpos{number}")) else {
+                        continue;
+                    };
+                    if !pairs.contains(&(*pos, ratchet)) {
+                        pairs.push((*pos, ratchet));
+                    }
+                }
+                omsi_script::Op::Macro(block) => walk(program, *block, seen, pairs),
+                _ => {}
+            }
+        }
+    }
+    let mut pairs = Vec::new();
+    walk(program, block, &mut hashbrown::HashSet::new(), &mut pairs);
+    for (pos, ratchet) in pairs {
+        vehicle.state.vars[ratchet as usize] = vehicle.state.vars[pos as usize];
+    }
+}
+
+#[cfg(test)]
+mod roller_blind_tests {
+    include!("../../../tools/test-support/original_root.rs");
+    use super::{auto_drag_click, repair_roller_blind};
+    use crate::schedule::tests::script_test_vehicle;
+
+    fn blinds() -> omsi_sim::VehicleInstance {
+        // Synthetic controls with both numbering conventions, deliberately different
+        // from their event names. The simple frame stands in for a retaining ratchet.
+        script_test_vehicle(
+            "{trigger:cp_rollo_drag}\n\
+                (L.L.cp_rollo_pos) (L.S.mouse_y) 100 / + (S.L.cp_rollo_pos)\n\
+             {end}\n\
+             {trigger:cp_rollo1_drag}\n(M.L.side)\n{end}\n\
+             {macro:side}\n\
+                (L.L.cp_rollo_pos1) (L.S.mouse_y) 100 / + (S.L.cp_rollo_pos1)\n\
+             {end}\n\
+             {trigger:cp_rollo2_drag}\n\
+                (L.L.cp_rollo2_pos) (L.S.mouse_y) 100 / + (S.L.cp_rollo2_pos)\n\
+             {end}\n\
+             {trigger:window_drag}\n\
+                (L.L.window_pos) (L.S.mouse_y) 100 / + (S.L.window_pos)\n\
+             {end}\n\
+             {frame}\n\
+                (L.L.cp_rollo_rastpos) (L.L.cp_rollo_pos) max (S.L.cp_rollo_pos)\n\
+                (L.L.cp_rollo_rastpos1) (L.L.cp_rollo_pos1) max (S.L.cp_rollo_pos1)\n\
+                (L.L.cp_rollo2_rastpos) (L.L.cp_rollo2_pos) max (S.L.cp_rollo2_pos)\n\
+             {end}\n",
+            "cp_rollo_pos\ncp_rollo_rastpos\ncp_rollo_pos1\ncp_rollo_rastpos1\n\
+             cp_rollo2_pos\ncp_rollo2_rastpos\nwindow_pos\n",
+            "",
+        )
+    }
+
+    fn drag(vehicle: &mut omsi_sim::VehicleInstance, event: &str, dy: f32) {
+        vehicle.host.mouse = (0.0, dy);
+        assert!(vehicle.trigger(event));
+        repair_roller_blind(vehicle, event);
+        vehicle.host.mouse = (0.0, 0.0);
+    }
+
+    #[test]
+    fn numbered_blind_keeps_partial_position_without_moving_another_blind() {
+        for (event, pos, ratchet) in [
+            ("CP_ROLLO1_DRAG", "cp_rollo_pos1", "cp_rollo_rastpos1"),
+            ("cp_rollo2_drag", "cp_rollo2_pos", "cp_rollo2_rastpos"),
+        ] {
+            let mut vehicle = blinds();
+            vehicle.set_var("cp_rollo_pos", 0.4);
+            vehicle.set_var("cp_rollo_rastpos", 0.7);
+            vehicle.set_var(pos, 0.8);
+            vehicle.set_var(ratchet, 0.8);
+            drag(&mut vehicle, event, -30.0);
+            assert!((vehicle.var(pos).unwrap() - 0.5).abs() < 1e-6);
+            assert_eq!(vehicle.var(ratchet), vehicle.var(pos));
+            assert_eq!(vehicle.var("cp_rollo_pos"), Some(0.4));
+            assert_eq!(vehicle.var("cp_rollo_rastpos"), Some(0.7));
+            // Pausing the hand delivers another drag with no movement.
+            drag(&mut vehicle, event, 0.0);
+            vehicle.update_scripts_only(0.0);
+            assert!((vehicle.var(pos).unwrap() - 0.5).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn canonical_blind_still_keeps_its_position() {
+        let mut vehicle = blinds();
+        vehicle.set_var("cp_rollo_pos", 0.8);
+        vehicle.set_var("cp_rollo_rastpos", 0.8);
+        vehicle.set_var("cp_rollo_pos1", 0.3);
+        vehicle.set_var("cp_rollo_rastpos1", 0.6);
+        drag(&mut vehicle, "cp_rollo_drag", -30.0);
+        assert_eq!(vehicle.var("cp_rollo_rastpos"), vehicle.var("cp_rollo_pos"));
+        assert_eq!(vehicle.var("cp_rollo_rastpos1"), Some(0.6));
+        vehicle.update_scripts_only(0.0);
+        assert!((vehicle.var("cp_rollo_pos").unwrap() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn retract_and_unrelated_events_leave_ratchets_to_their_scripts() {
+        let mut vehicle = blinds();
+        vehicle.set_var("cp_rollo_pos", 0.2);
+        vehicle.set_var("cp_rollo_rastpos", 0.6);
+        vehicle.set_var("cp_rollo_rastpos1", 0.8);
+        for event in [
+            "cp_rollo_retract",
+            "cp_rollo_retract1",
+            "cp_rollo1_retract",
+            "cp_rollo1_retract_off",
+            "cp_rollo1_off",
+            "missing_rollo_drag",
+        ] {
+            repair_roller_blind(&mut vehicle, event);
+            assert_eq!(vehicle.var("cp_rollo_rastpos"), Some(0.6));
+            assert_eq!(vehicle.var("cp_rollo_rastpos1"), Some(0.8));
+        }
+        drag(&mut vehicle, "window_drag", 20.0);
+        assert_eq!(vehicle.var("window_pos"), Some(0.2));
+        assert_eq!(vehicle.var("cp_rollo_rastpos"), Some(0.6));
+        assert_eq!(vehicle.var("cp_rollo_rastpos1"), Some(0.8));
+    }
+
+    #[test]
+    fn a_short_blind_gesture_does_not_become_full_travel() {
+        for event in [
+            "cp_rollo",
+            "cp_rollo1",
+            "CP_ROLLO2",
+            "cp_sun_blind",
+            "cp_Sun-Blind1-1",
+            "C2_CP_Sonnenblende_Seite",
+        ] {
+            assert!(!auto_drag_click(event, false, 0.0));
+            assert!(!auto_drag_click(event, false, 3.9));
+        }
+        assert!(auto_drag_click("cp_Fahrertuer", false, 0.0));
+        assert!(!auto_drag_click("cp_Fahrertuer", false, 4.0));
+        assert!(!auto_drag_click("cp_Fahrertuer", true, 0.0));
+        assert!(auto_drag_click("C2_CP_Stop_Blind", false, 0.0));
+    }
+
+    #[test]
+    #[ignore = "needs the original OMSI 2 install (OMSI_ROOT)"]
+    fn original_blinds_keep_small_upward_adjustments_after_release() {
+        let root = original_root();
+        let buses: [(&str, &[(&str, &str, &str)]); 3] = [
+            (
+                "Vehicles/Urbino_II/SU_18_V.bus",
+                &[
+                    ("cp_rollo1", "cp_rollo_pos1", "cp_rollo_rastpos1"),
+                    ("cp_rollo2", "cp_rollo_pos2", "cp_rollo_rastpos2"),
+                ],
+            ),
+            (
+                "Vehicles/Solaris BVG/Urbino 18 Main.bus",
+                &[
+                    ("cp_rollo", "cp_rollo_pos", "cp_rollo_rastpos"),
+                    ("cp_rollo1", "cp_rollo1_pos", "cp_rollo1_rastpos"),
+                ],
+            ),
+            (
+                "Vehicles/MAN_NL_NG/MAN_EN92_main.bus",
+                &[("cp_rollo", "cp_rollo_pos", "cp_rollo_rastpos")],
+            ),
+        ];
+        for (path, blinds) in buses {
+            let bus = root.join(path);
+            if !bus.exists() {
+                eprintln!("skipped: no {}", bus.display());
+                continue;
+            }
+            let ty = std::sync::Arc::new(omsi_sim::VehicleType::load(&root, &bus).expect(path));
+            let mut vehicle = omsi_sim::VehicleInstance::new(
+                ty,
+                omsi_sim::VehicleHost::new(Default::default()),
+            );
+            vehicle.host.clock.timegap = 1.0 / 60.0;
+            let program = vehicle.ty.program.clone();
+            for &(blind, pos, ratchet) in blinds {
+                for &(_, other_pos, other_ratchet) in blinds {
+                    assert!(vehicle.set_var(other_pos, 0.3));
+                    assert!(vehicle.set_var(other_ratchet, 0.3));
+                }
+                assert!(vehicle.set_var(pos, 0.6));
+                assert!(vehicle.set_var(ratchet, 0.6));
+                let event = format!("{blind}_drag");
+                drag(&mut vehicle, &event, -2.0);
+                let adjusted = vehicle.var(pos).unwrap();
+                assert!(adjusted < 0.6 && adjusted > 0.59, "{path}: {blind}");
+                drag(&mut vehicle, &event, 0.0);
+                assert!(vehicle.trigger(&format!("{blind}_off")));
+                for _ in 0..60 {
+                    vehicle
+                        .vm
+                        .run_frame(&program, &mut vehicle.state, &mut vehicle.host);
+                }
+                assert!(
+                    (vehicle.var(pos).unwrap() - adjusted).abs() < 1e-6,
+                    "{path}: {blind}"
+                );
+                assert!(
+                    (vehicle.var(ratchet).unwrap() - adjusted).abs() < 1e-6,
+                    "{path}: {blind}"
+                );
+                for &(other, other_pos, other_ratchet) in blinds {
+                    if other != blind {
+                        assert!((vehicle.var(other_pos).unwrap() - 0.3).abs() < 1e-6);
+                        assert!((vehicle.var(other_ratchet).unwrap() - 0.3).abs() < 1e-6);
+                    }
+                }
+                assert!(!auto_drag_click(blind, false, 2.0));
             }
         }
     }
@@ -2055,6 +2343,7 @@ impl Player {
         let step = 900.0 * dt.min(0.05) * a.sign;
         self.vehicle.host.mouse = if a.axis == 0 { (step, 0.0) } else { (0.0, step) };
         let exists = self.vehicle.trigger(&format!("{}_drag", a.ev));
+        self.repair_roller_blind(&format!("{}_drag", a.ev));
         self.vehicle.host.mouse = (0.0, 0.0);
         if exists {
             self.auto_drag = Some(a);
@@ -2065,6 +2354,11 @@ impl Player {
     /// 1 = visible from outside, 2 = visible from inside, 4 = visible on AI vehicles; 0 = always.
     pub(crate) fn sync_transforms(&mut self, renderer: &Renderer, scene: &mut Scene, inside: bool) {
         sync_vehicle_transforms(renderer, scene, &mut self.vehicle, &mut self.render, &mut self.trailer_renders, inside);
+        if self.render.window_wipers.is_none() {
+            self.render.window_wipers = Some(crate::window_wipers::WindowWipers::new(renderer, scene, &self.vehicle, &self.render));
+        }
+        let wipers = self.render.window_wipers.as_mut().unwrap();
+        wipers.update(renderer, scene, &self.vehicle, &self.render.instances);
     }
 
     /// Pose and place the driver at the wheel; `show` false hides the figure (the `driver`
@@ -2427,23 +2721,93 @@ pub(crate) fn pick_in(vehicle: &omsi_sim::VehicleInstance, origin: DVec3, dir: V
         (!tris.is_empty()).then_some((i, xf, tris))
     }).collect();
     for dirs in &rings {
-        let mut best: Option<(f32, usize)> = None;
+        // Collect every hit in this ring, then among surfaces within a depth band of the
+        // nearest prefer the mesh whose centre the ray aims at. Aachen ibox D10/D11/D12 are
+        // tilted, overlap by ~6 mm, and sit ~16 mm apart along Z — a 2 mm depth-only pick
+        // let backspace (D10) steal digit 0 (D11) whenever both boxes were hit.
+        let mut hits: Vec<(f32, f32, usize)> = Vec::new();
         for (i, xf, tris) in &candidates {
             let (i, xf) = (*i, *xf);
             let vm = &vehicle.ty.meshes[i];
+            let lateral = vehicle
+                .ty
+                .mesh_bounds
+                .get(i)
+                .map(|&(c, _)| {
+                    let p = xf.transform_point3(c) - o;
+                    let along = p.dot(dir);
+                    (p - dir * along).length_squared()
+                })
+                .unwrap_or(0.0);
             for d in dirs {
                 if let Some(t) = omsi_geometry::ray_triangles(o, *d, &vm.data, &xf, tris) {
-                    if best.map(|(bt, _)| t < bt).unwrap_or(true) {
-                        best = Some((t, i));
-                    }
+                    hits.push((t, lateral, i));
                 }
             }
         }
-        if let Some((_, i)) = best {
+        if let Some(i) = best_mouseevent_hit(&hits) {
             return Some(i);
         }
     }
     None
+}
+
+/// Depth band (m) inside which overlapping cockpit `[mouseevent]` meshes are disambiguated
+/// by aim (lateral distance to the mesh centre) rather than by which face is a hair closer.
+/// Sized for the Aachen ibox digit row (D10/D11/D12 centres ~16 mm apart on a tilted pad).
+pub(crate) const MOUSEEVENT_PICK_DEPTH_BAND: f32 = 0.03;
+
+/// Among ray hits `(t, lateral², id)`, pick the aimed mesh: nearest surface first, then the
+/// smallest lateral distance among hits within [`MOUSEEVENT_PICK_DEPTH_BAND`] of that nearest.
+pub(crate) fn best_mouseevent_hit(hits: &[(f32, f32, usize)]) -> Option<usize> {
+    let min_t = hits.iter().map(|h| h.0).fold(f32::INFINITY, f32::min);
+    if !min_t.is_finite() {
+        return None;
+    }
+    hits.iter()
+        .filter(|h| h.0 <= min_t + MOUSEEVENT_PICK_DEPTH_BAND)
+        .min_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        })
+        .map(|h| h.2)
+}
+
+#[cfg(test)]
+mod mouseevent_pick_tests {
+    use super::{best_mouseevent_hit, MOUSEEVENT_PICK_DEPTH_BAND};
+
+    #[test]
+    fn aachen_ibox_d11_wins_when_d10_is_closer_but_off_aim() {
+        // Realistic AC O530 digit row: D10 (backspace) ~12 mm closer along the ray than
+        // D11 (digit 0), but the cursor aims at D11's centre (lateral ≈ 0).
+        let d10 = 0usize;
+        let d11 = 1usize;
+        let d12 = 2usize;
+        let hits = [
+            (0.488, 0.012_f32.powi(2), d10),
+            (0.500, 0.001_f32.powi(2), d11),
+            (0.512, 0.015_f32.powi(2), d12),
+        ];
+        assert!(
+            (hits[1].0 - hits[0].0) > 0.002,
+            "fixture must exceed the old 2 mm tie window"
+        );
+        assert!((hits[1].0 - hits[0].0) < MOUSEEVENT_PICK_DEPTH_BAND);
+        assert_eq!(best_mouseevent_hit(&hits), Some(d11));
+    }
+
+    #[test]
+    fn clearly_nearer_surface_still_wins_outside_the_band() {
+        let hits = [(0.40, 0.02_f32.powi(2), 0usize), (0.50, 0.0, 1usize)];
+        assert_eq!(best_mouseevent_hit(&hits), Some(0));
+    }
+
+    #[test]
+    fn empty_hits_yield_none() {
+        assert_eq!(best_mouseevent_hit(&[]), None);
+    }
 }
 
 /// The page of an `[htmltexture]` a ray lands on: its script texture index and the place on it
@@ -2526,22 +2890,33 @@ pub(crate) fn pick_trailer_in(vehicle: &omsi_sim::VehicleInstance, origin: DVec3
         })
     }).collect();
     for dirs in &rings {
-        let mut best: Option<(f32, usize, usize)> = None;
+        let mut hits: Vec<(f32, f32, usize)> = Vec::new();
+        let mut id_of: Vec<(usize, usize)> = Vec::new();
         for (ti, i, xf, tris) in &candidates {
             let (ti, i, xf) = (*ti, *i, *xf);
             let trailer = &vehicle.trailers[ti];
             let o = (origin - trailer.position).as_vec3();
             let vm = &trailer.ty.meshes[i];
+            let lateral = trailer
+                .ty
+                .mesh_bounds
+                .get(i)
+                .map(|&(c, _)| {
+                    let p = xf.transform_point3(c) - o;
+                    let along = p.dot(dir);
+                    (p - dir * along).length_squared()
+                })
+                .unwrap_or(0.0);
             for d in dirs {
                 if let Some(t) = omsi_geometry::ray_triangles(o, *d, &vm.data, &xf, tris) {
-                    if best.map(|(bt, _, _)| t < bt).unwrap_or(true) {
-                        best = Some((t, ti, i));
-                    }
+                    let id = id_of.len();
+                    id_of.push((ti, i));
+                    hits.push((t, lateral, id));
                 }
             }
         }
-        if let Some((_, ti, i)) = best {
-            return Some((ti, i));
+        if let Some(id) = best_mouseevent_hit(&hits) {
+            return Some(id_of[id]);
         }
     }
     None
@@ -2562,8 +2937,10 @@ pub(crate) fn keep_wheel(p: Option<&mut Player>) {
 /// window is the steering from full left to full right lock, divided by the speed in tens of
 /// km/h once the bus is faster than 10 km/h (going backwards counts as standing). At 50 km/h
 /// the same movement of the hand turns the wheels a fifth as far: the wheel "gets heavier".
+/// The mouse's point may lie past the window's edges (app_impl/mouse_grab.rs): the caller
+/// holds the result at the full lock.
 pub(crate) fn mouse_steering(cursor_x: f32, width: f32, kmh: f32) -> f32 {
-    let x = (2.0 * cursor_x / width.max(1.0) - 1.0).clamp(-1.0, 1.0);
+    let x = 2.0 * cursor_x / width.max(1.0) - 1.0;
     x / (kmh / 10.0).max(1.0)
 }
 
@@ -2580,6 +2957,10 @@ pub(crate) fn mouse_follow(fade: f32, dt: f32, smooth: bool) -> f32 {
     } else {
         0.0
     }
+}
+
+pub(crate) fn mouse_pedal_target(input: f32, strength: f32) -> f32 {
+    (input.clamp(0.0, 1.0) * strength.clamp(0.25, 4.0)).min(1.0)
 }
 
 /// A mouse pedal following the cursor, `k` of the way left behind each frame. The last bit
@@ -2629,7 +3010,7 @@ mod orbit_pivot_tests {
 
 #[cfg(test)]
 mod mouse_tests {
-    use super::{mouse_follow, mouse_pedal, mouse_steering};
+    use super::{mouse_follow, mouse_pedal, mouse_pedal_target, mouse_steering};
 
     /// The mouse's wheel eases after the cursor by default; with the smoothing off it is where
     /// the cursor says the same frame, as in OMSI (#1092) - only the first second after
@@ -2666,6 +3047,15 @@ mod mouse_tests {
         let k = (-(1.0 / 60.0f32) / 0.06).exp();
         let t = mouse_pedal(0.0, 1.0, k);
         assert!(t > 0.2 && t < 0.3, "{t}");
+    }
+
+    #[test]
+    fn mouse_pedal_strength_moves_the_full_pedal_threshold() {
+        assert_eq!(mouse_pedal_target(0.5, 1.0), 0.5);
+        assert_eq!(mouse_pedal_target(0.5, 2.0), 1.0);
+        assert_eq!(mouse_pedal_target(1.0, 0.5), 0.5);
+        assert_eq!(mouse_pedal_target(1.0, 2.0), 1.0);
+        assert_eq!(mouse_pedal_target(0.5, 0.5), 0.25);
     }
 
     #[test]

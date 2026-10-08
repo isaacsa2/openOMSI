@@ -24,6 +24,7 @@
 use std::path::{Path, PathBuf};
 
 pub mod codepage;
+pub mod flags;
 mod keywords;
 pub mod number;
 pub mod vfs;
@@ -888,11 +889,12 @@ pub fn missing_original_essentials(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// The folders an OMSI 2 installation has (as the original spells them). A content
-/// folder of openOMSI is laid out the same way, so a mod is installed by putting its
-/// folders here - and the game finds them exactly as the original would.
+/// The top-level content folders openOMSI recognises. Most use OMSI 2's original spelling;
+/// `HOFs` is an openOMSI extension for depot files shared by every vehicle. A content
+/// folder is laid out with these names, so the mod installer and mounted archives can merge
+/// them into the same virtual installation.
 pub const CONTENT_FOLDERS: &[&str] = &[
-    "Vehicles", "maps", "Sceneryobjects", "Splines", "Texture", "Fonts", "Plugins", "TicketPacks", "Drivers", "Weather", "Announcements", "Humans", "Money", "Scripts", "Trains", "Situations", "Inputs", "Sound",
+    "Vehicles", "HOFs", "maps", "Sceneryobjects", "Splines", "Texture", "Fonts", "Plugins", "TicketPacks", "Drivers", "Weather", "Announcements", "Humans", "Money", "Scripts", "Trains", "Situations", "Inputs", "Sounds",
 ];
 
 /// Marker file of an openOMSI content folder (so it is never mistaken for the OMSI 2
@@ -984,6 +986,13 @@ pub fn is_writable(dir: &Path) -> bool {
 /// Create the content folder layout at `dir` (idempotent).
 pub fn ensure_content_layout(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
+    // (versions up to 0.2.9 made it `Sound`; OMSI 2's folder is `Sounds`)
+    let (old, new) = (dir.join("Sound"), dir.join("Sounds"));
+    if old.is_dir() && !new.exists() {
+        let _ = std::fs::rename(&old, &new);
+    } else if old.is_dir() {
+        let _ = std::fs::remove_dir(&old); // only when empty
+    }
     for f in CONTENT_FOLDERS {
         std::fs::create_dir_all(dir.join(f))?;
     }

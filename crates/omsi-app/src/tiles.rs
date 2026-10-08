@@ -365,7 +365,7 @@ impl MapIndex {
                 checked += 1;
                 let ours = ((acc - d) / interval + 1e-6).ceil().max(0.0) as usize;
                 agree += (ours == *first) as usize;
-                if ours != *first && omsi_cfg::env::var_os("OMSI_DEBUG_REPEATERS").is_some() {
+                if ours != *first && omsi_cfg::flags::OMSI_DEBUG_REPEATERS.is_set() {
                     log::info!("repeater {:?} on spline {spline}: the map says object {first}, the chain {ours} (chain {acc:.2} m, start {d:.2} m, interval {interval} m: the map's first at {:.2} m, ours at {:.2} m)", key, d + *first as f64 * interval - acc, d + ours as f64 * interval - acc);
                 }
             }
@@ -683,7 +683,11 @@ fn place_on(att: &SplineAttachment, spline: &MapSpline, origin: DVec2, index: Op
     // past the end stands at the end
     let far = if backwards { spline.prev_id } else { spline.next_id };
     let chain_ends = index.map(|ix| !ix.splines.contains_key(&far)).unwrap_or(far == 0);
-    let end = len + if chain_ends { CHAIN_END_TOLERANCE } else { 1e-6 };
+    // (only an object on its own - a buffer stop - stands at the end from a little past it:
+    // a row's next post due 0.75 m past a dead end was put at the end, in the carriageway
+    // of Thüringer Wald's road to Haselbach, #1693)
+    let single = interval <= 0.0 || range < interval;
+    let end = len + if chain_ends && single { CHAIN_END_TOLERANCE } else { 1e-6 };
     let mut out = Vec::new();
     loop {
         if interval > 0.0 && j as f64 * interval > range + 1e-6 {
@@ -709,8 +713,11 @@ fn place_on(att: &SplineAttachment, spline: &MapSpline, origin: DVec2, index: Op
             // spline's pitch/bank to the object's Euler angles instead tilts a
             // sideways railing across the road, and a reversed object downhill.
             // The half turn of a backwards chain belongs to that same local frame.
+            // The row's own matrix uses bank, then pitch, then heading (Omsi.exe
+            // 0x79dd20..0x79de02), unlike a plain map object's pitch-first matrix.
+            // Two quarter turns otherwise laid retaining blocks across the street.
             let rot = omsi_geometry::object_rotation([curve.heading_at(u), pitch, bank])
-                * omsi_geometry::object_rotation(own);
+                * omsi_geometry::object_rotation_ypr(own);
             out.push(RowObject { index: j, pose: Pose { pos, rot } });
         }
         if interval <= 0.0 {
@@ -1117,18 +1124,18 @@ impl Streamer {
             self.world.compact_slots(renderer, scene);
             crate::release_free_memory();
         }
-        if self.last_summary.elapsed().as_secs_f32() >= 10.0 && omsi_cfg::env::var_os("OMSI_PROFILE").is_some() {
+        if self.last_summary.elapsed().as_secs_f32() >= 10.0 && omsi_cfg::flags::OMSI_PROFILE.is_set() {
             self.last_summary = std::time::Instant::now();
             let at: Vec<String> = centers.iter().map(|c| format!("({:.0}, {:.0})", c.x, c.y)).collect();
             log::info!("tile streaming at {}: {} loaded / {} unloaded so far; {}", at.join(" "), self.loaded_total, self.unloaded_total, self.world.gpu_summary(scene));
-            if omsi_cfg::env::var_os("OMSI_PROFILE").is_some() {
+            if omsi_cfg::flags::OMSI_PROFILE.is_set() {
                 log::info!("  {}", self.world.cpu_summary());
             }
         }
         let total = t0.elapsed();
         if self.initial.is_none() && total.as_secs_f64() * 1000.0 > 16.0 {
             self.slow_frames += 1;
-            if omsi_cfg::env::var_os("OMSI_PROFILE").is_some() {
+            if omsi_cfg::flags::OMSI_PROFILE.is_set() {
                 log::info!("tile streaming: {:.0} ms this frame ({uploaded} uploaded in {:.0} ms, {unloaded} unloaded in {:.0} ms, lists {:.0} ms)", total.as_secs_f64() * 1000.0, t_upload.as_secs_f64() * 1000.0, (t_unload - t_upload).as_secs_f64() * 1000.0, (total - t_unload).as_secs_f64() * 1000.0);
             }
         }
@@ -1224,6 +1231,7 @@ impl Streamer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("../../../tools/test-support/original_root.rs");
 
     #[test]
     fn first_area_stall_log_is_delayed_and_rate_limited() {
@@ -1440,9 +1448,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires OMSI_ROOT with the stock Grundorf map"]
+    #[ignore = "needs the original OMSI 2 install (OMSI_ROOT)"]
     fn grundorf_traffic_light_parents_exclude_gaussdorf() {
-        let root = PathBuf::from(std::env::var_os("OMSI_ROOT").expect("OMSI_ROOT"));
+        let root = original_root();
         let map_dir = root.join("maps/Grundorf");
         let global = omsi_map::GlobalCfg::load(&map_dir.join("global.cfg")).expect("Grundorf");
         let tiles = global.tiles.iter().map(|t| (t.index, t.x, t.y, map_dir.join(&t.file))).collect::<Vec<_>>();
@@ -1544,6 +1552,21 @@ mod tests {
     }
 
     #[test]
+    fn compound_row_rotation_keeps_retaining_posts_out_of_the_street() {
+        // A mod uses a 5 m fence post laid on its side as a retaining block.
+        // Its two quarter turns must send the post's long axis to the right of
+        // the spline, rather than along the road as the reversed order did.
+        let s = MapSpline { heading: 26.0, ..spline(1, 0, 0, 10.0) };
+        let att = SplineAttachment { rot: [0.0, 90.0, -90.0], ..row(0.0, 0.0, 2.0, None) };
+        let pose = row_objects(&att, &s, DVec2::ZERO, None)[0].pose;
+        let right = SplineCurve::dir(s.heading + 90.0).as_vec2().extend(0.0);
+        let tip = pose.rot.transform_vector3(Vec3::Z * 5.0);
+        assert!((tip - right * 5.0).length() < 1e-5,
+            "a horizontal retaining post must extend into the bank, not the carriageway: {tip:?}");
+        assert!(tip.z.abs() < 1e-5);
+    }
+
+    #[test]
     fn tangential_row_keeps_its_frame_when_the_spline_runs_backwards() {
         let s = MapSpline { heading: 31.0, grad_start: 12.0, grad_end: 12.0,
             cant_start: 5.0, cant_end: 5.0, ..spline(1, 0, 0, 80.0) };
@@ -1568,7 +1591,7 @@ mod tests {
             cant_start: 20.0, cant_end: 20.0, ..spline(1, 0, 0, 80.0) };
         let att = SplineAttachment { rot: [90.0, 3.0, -2.0], ..row(0.0, 0.0, 20.0, None) };
         let upright = row_objects(&att, &s, DVec2::ZERO, None)[0].pose;
-        let expected = omsi_geometry::object_rotation([155.0, -3.0, 2.0]);
+        let expected = omsi_geometry::object_rotation_ypr([155.0, -3.0, 2.0]);
         for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
             assert!((upright.rot.transform_vector3(axis) - expected.transform_vector3(axis)).length() < 1e-6);
         }
@@ -1631,6 +1654,22 @@ mod tests {
         ring.splines.insert(2, IndexedSpline { length: 20.0, map_chain_offset: None, prev: 1, next: 3 });
         ring.splines.insert(3, IndexedSpline { length: 30.0, map_chain_offset: None, prev: 2, next: 1 });
         assert_eq!(chain_offset(&ring, 1), 50.0);
+    }
+
+    /// A row's post due 0.75 m past a dead end is not put at the end (Thüringer Wald's
+    /// fence post in the carriageway, #1693); a single object a little past it still is.
+    #[test]
+    fn a_row_stops_at_a_dead_end_a_single_object_stands_there() {
+        let mut ix = MapIndex::default();
+        ix.splines.insert(5, IndexedSpline { length: 12.0, map_chain_offset: Some(91.01), prev: 0, next: 0 });
+        let end = MapSpline { map_chain_offset: Some(91.01), ..spline(5, 0, 0, 12.0) };
+        // posts every 3 m from 100.76 m of the chain over 7 m: 100.76 (9.75 m along) fits,
+        // 103.76 is 0.75 m past the chain's end at 103.01
+        let posts = row_objects(&row(3.0, 7.0, 100.7586, None), &end, DVec2::ZERO, Some(&ix));
+        assert_eq!(posts.len(), 1, "{:?}", posts.iter().map(|o| o.pose.pos.y).collect::<Vec<_>>());
+        let stop = row_objects(&row(10.0, 0.0, 103.5, None), &end, DVec2::ZERO, Some(&ix));
+        assert_eq!(stop.len(), 1);
+        assert!((stop[0].pose.pos.y - 12.0).abs() < 1e-6, "{:?}", stop[0].pose.pos);
     }
 
     #[test]
