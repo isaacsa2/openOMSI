@@ -1986,11 +1986,21 @@ fn dedicated_vram_mb(info: &wgpu::AdapterInfo) -> Option<u64> {
             }
             // DXGI still knows the card's name. Use it only if it identifies exactly
             // one adapter; never borrow another card's budget on a multi-GPU PC.
+            let dxgi_name = String::from_utf16_lossy(&d.Description);
+            let dxgi_name = dxgi_name.trim_end_matches('\0').trim();
+            // ANGLE wraps the GPU name and embeds the PCI device ID as
+            // "(0x00006613)". Check both the name and that ID, when present.
+            let angle_device = info.name
+                .split("(0x")
+                .nth(1)
+                .and_then(|s| s.split(')').next())
+                .and_then(|s| u32::from_str_radix(s, 16).ok());
+            let angle_matches = info.name.starts_with("ANGLE (")
+                && info.name.contains(dxgi_name)
+                && angle_device == Some(d.DeviceId)
+                && (info.vendor == 0 || info.vendor == d.VendorId);
             if (info.vendor == 0 || info.device == 0)
-                && String::from_utf16_lossy(&d.Description)
-                    .trim_end_matches('\0')
-                    .trim()
-                    .eq_ignore_ascii_case(info.name.trim())
+                && (dxgi_name.eq_ignore_ascii_case(info.name.trim()) || angle_matches)
             {
                 if name_match.replace(mb).is_some() {
                     ambiguous_name = true;
