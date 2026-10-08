@@ -545,3 +545,14 @@ fn fs_sky_cube(in: FsIn) -> @location(0) vec4<f32> {
     col = col * a.a + a.rgb;
     return vec4<f32>(col / max(enh.ground.w, 1e-8), c.a);
 }
+
+// Low-quality clouds keep the same cube cache and reflections, but draw the flat texture
+// layer instead of marching through the volume. Scene materials keep the selected mode.
+@fragment
+fn fs_low_sky_cube(in: FsIn) -> @location(0) vec4<f32> {
+    let uv = in.clip.xy / probe.p.z * 2.0 - vec2<f32>(1.0);
+    let d = cube_to_world(face_dir(i32(probe.p.x), uv.x, uv.y));
+    eye_off = enh.eye.xyz;
+    let col = vanilla_sky(VsOut(in.clip, d)).rgb;
+    return vec4<f32>(col / max(enh.exposure.x * enh.ground.w, 1e-8), 0.0);
+}

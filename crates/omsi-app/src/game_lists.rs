@@ -2144,6 +2144,7 @@ fn same_value(a: &str, b: &str) -> bool {
 
 fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
     match key {
+        "cloud_quality" => vec![("auto", "Automatic"), ("low", "Low (textured)"), ("high", "High (volumetric)")],
         "graphics" => vec![("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")],
         "msaa" => vec![("1", "Off"), ("2", "2x MSAA"), ("4", "4x MSAA"), ("8", "8x MSAA")],
         "render_scale" => vec![("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")],
@@ -2293,6 +2294,7 @@ fn options_pages(app: &App) -> Vec<Page> {
         slider_row(app, "led_mips", "LED mask mipmaps", "Keep the mip chain of the LED masks (smoother from a distance).", &|v| format!("{v:.2}")),
         switch_row(app, "reflections", "Reflection maps (paint, chrome, glass)", later).filter(|_| !app.settings.ray_tracing()),
         switch_row(app, "clouds", "Clouds", later),
+        pick("cloud_quality", "Cloud quality", later),
         switch_row(app, "windy_trees", "Windy trees", "The trees' leaves bend and sway in the wind and its gusts; with no wind they stand still"),
     ]
         .into_iter()

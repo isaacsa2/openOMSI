@@ -593,6 +593,7 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
         toggle_setting(ui, s, dirty, c.row(), "Reflection maps (paint, chrome, glass)", "reflections");
     }
     toggle_setting(ui, s, dirty, c.row(), "Clouds", "clouds");
+    sel_setting(ui, s, dirty, "s-cloud-quality", c.row(), "Cloud quality", "cloud_quality", &[("auto", "Automatic"), ("low", "Low (textured)"), ("high", "High (volumetric)")]);
     toggle_setting(ui, s, dirty, c.row(), "Windy trees", "windy_trees");
     let left = c.used();
     let mut c = Col::new(ui, cols[1], "Display");
@@ -2738,7 +2739,7 @@ mod settings_tests {
     fn by_tab() -> Vec<Vec<&'static str>> {
         let mut graphics = vec![
             "s-gp-sel", "s-gp-load", "s-gp-del", "s-gp-name", "s-gp-save",
-            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-night", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "set-windy_trees",
+            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-night", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "s-cloud-quality", "set-windy_trees",
             "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression",
         ];
         if !cfg!(target_os = "macos") {
@@ -2860,6 +2861,38 @@ mod settings_tests {
             }
             assert_eq!(ui.drawn.len(), names.len(), "the {} tab has a clickable thing more than the list names", SETTINGS_TABS[tab]);
         }
+    }
+
+    #[test]
+    fn mobile_stacked_graphics_exposes_and_saves_cloud_quality() {
+        let mut ui = Ui::new();
+        let mut s = all_rows();
+        let mut out = outside();
+        ui.begin(Vec2::new(430.0, 1600.0), 1.0, 1.0 / 60.0);
+        let mut dirty = 0.0;
+        settings_tab(
+            &mut ui,
+            0,
+            &mut s,
+            &mut dirty,
+            &mut out,
+            [
+                Rect::new(12.0, 0.0, 406.0, 760.0),
+                Rect::new(12.0, 780.0, 406.0, 760.0),
+            ],
+        );
+        assert!(
+            ui.drawn.contains_key(&id_of("s-cloud-quality")),
+            "mobile/stacked Graphics must expose cloud quality"
+        );
+
+        s["cloud_quality"] = json!("high");
+        let saved = core::settings_to_text(&s, None);
+        let roundtrip = core::settings_from_text(Some(&saved));
+        assert_eq!(roundtrip["cloud_quality"], "high");
+
+        let game = crate::settings::Settings::from_text(&saved);
+        assert_eq!(game.cloud_quality, "high");
     }
 
     #[test]
