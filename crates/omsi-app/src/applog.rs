@@ -13,6 +13,7 @@ pub(crate) struct LogState {
     t: f32,
     frames: u32,
     worst_dt: f32,
+    support_recorded: bool,
 }
 
 /// The machine, the program and its settings, once at the start.
@@ -31,7 +32,7 @@ pub(crate) fn log_system(settings: &crate::settings::Settings) {
     log::info!("all settings: {settings:?}");
 }
 
-fn os_version() -> String {
+pub(crate) fn os_version() -> String {
     #[cfg(target_os = "macos")]
     {
         if let Ok(o) = std::process::Command::new("sw_vers").arg("-productVersion").output() {
@@ -58,6 +59,10 @@ fn os_version() -> String {
 impl App {
     /// Once a frame: what changed on the screen, and every minute where things stand.
     pub(crate) fn log_frame(&mut self, dt: f32) {
+        if !self.log_state.support_recorded && self.renderer.is_some() {
+            crate::support_bundle::record(self);
+            self.log_state.support_recorded = true;
+        }
         let msg = self.service_msg.as_ref().map(|m| m.0.clone());
         if msg.is_some() && msg != self.log_state.last_msg {
             log::info!("on screen: {}", msg.as_deref().unwrap_or_default());
@@ -82,6 +87,7 @@ impl App {
         s.t = 0.0;
         s.frames = 0;
         s.worst_dt = 0.0;
+        crate::support_bundle::record(self);
         let bus = self.player.as_ref().map(|p| {
             let v = &p.vehicle;
             format!("bus at ({:.1}, {:.1}, {:.1}) heading {:.0}, {:.0} km/h", v.position.x, v.position.y, v.position.z, v.heading, v.physics.velocity_kmh())
