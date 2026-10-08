@@ -1,5 +1,6 @@
 //! wgpu renderer.
 
+pub mod angle;
 pub mod atmosphere;
 pub mod clouds;
 mod gpu_memory;
@@ -1672,8 +1673,8 @@ fn sixteen_texture_units() -> bool {
 
 /// The camera group's entries on a device whose arrays take `path`, without the enhanced
 /// path's textures where `omit_enhanced`: on the sixteen-texture-unit path (see
-/// `sixteen_texture_units`) and in the launcher's preview, which has no enhanced pipeline
-/// or reflection probe (`RenderOptions::preview_only`).
+/// `sixteen_texture_units`) and whenever no enhanced pipelines or reflection probe are
+/// prepared (the launcher's preview, or the vanilla GL path).
 fn camera_layout_entries(path: ArrayPath, omit_enhanced: bool) -> Vec<wgpu::BindGroupLayoutEntry> {
     let mut camera_entries = vec![
             wgpu::BindGroupLayoutEntry {
@@ -2251,10 +2252,11 @@ pub struct RenderOptions {
     /// The materials' reflection maps (`[matl_envmap]`: the shine of paint, chrome and
     /// glass). Off, nothing mirrors the sky photo - some players find it too strong.
     pub reflections: bool,
-    /// Enhanced graphics are not asked for: a phone or OpenGL then leaves their pipelines
-    /// out (they would never be drawn, and compiling the ray-marched clouds' sky killed
+    /// Enhanced graphics are not asked for: a phone or OpenGL then leaves their pipelines,
+    /// sky shader, cloud noise and probe out (compiling the ray-marched clouds' sky killed
     /// Mali and Adreno drivers before the first frame, #364, #333, #316, #371). Asked for,
-    /// they are built on every device and graphics API; a computer always builds them.
+    /// they are built where the texture layout supports them. Native desktop backends
+    /// keep them available for switching modes in-game.
     pub no_enhanced: bool,
     /// The launcher's preview (the showroom), which always draws Vanilla+ (see
     /// `showroom::lighting_for`): no enhanced pipelines, reflection probe or cloud noise
@@ -2490,7 +2492,7 @@ impl Renderer {
         let mem = adapter.memory_info();
         let vram = adapter_vram_mb(&adapter, &info, mem.as_ref());
         let guess_mb = gpu_memory::texture_allowance_mb(&info, vram);
-        ADAPTER_TEXTURE_MB.store(guess_mb, std::sync::atomic::Ordering::Relaxed);
+                ADAPTER_TEXTURE_MB.store(guess_mb, std::sync::atomic::Ordering::Relaxed);
         let discrete_vram = vram.filter(|_| info.device_type == wgpu::DeviceType::DiscreteGpu).unwrap_or(0);
         ADAPTER_VRAM_MB.store(discrete_vram, std::sync::atomic::Ordering::Relaxed);
         *ADAPTER_INFO.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
@@ -2538,8 +2540,7 @@ impl Renderer {
                 || (info.device_type == wgpu::DeviceType::IntegratedGpu && info.backend != wgpu::Backend::Metal)
                 || vram.is_some_and(|v| v <= 2560));
         let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
-        // The GL SSAO shader path is not supported even on powerful GPUs (#422).
-        // Do not conflate this API limitation with a low-VRAM card.
+        // SSAO shaders are unsupported on the OpenGL path (#422), regardless of VRAM.
         let options = if info.backend == wgpu::Backend::Gl {
             RenderOptions { ssao: false, ..options }
         } else {
@@ -2816,7 +2817,12 @@ impl Renderer {
             let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
             let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
             let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let renderer = Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
+            let build = || Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
+            let renderer = if cfg!(windows) && info.backend == wgpu::Backend::Gl && info.name.contains("ANGLE") {
+                angle::compile(build)
+            } else {
+                build()
+            };
             // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
             #[cfg(feature = "test-hooks")]
             if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
@@ -2858,16 +2864,20 @@ impl Renderer {
         let (msaa, shadow_size) = (options.msaa, options.shadow_size);
         RT_GBUF.store(options.ray_tracing, std::sync::atomic::Ordering::Relaxed);
         let errors = errors::install(&device, format, &options);
-        let scene = scene::SceneBase::new(&device, sixteen_texture_units() || options.preview_only);
+        let leave_out_enhanced = passes::leave_out_enhanced(&options, &adapter_name);
+        if sixteen_texture_units() && !options.no_enhanced && !options.preview_only {
+            log::warn!("renderer: the enhanced graphics take more textures than OpenGL has units for on {adapter_name}; drawing vanilla+");
+        }
+        let scene = scene::SceneBase::new(&device, leave_out_enhanced);
         let hdr_format = wgpu::TextureFormat::Rgba16Float;
         let shadows = shadows::build(&device, &scene, shadow_size);
         let defaults = defaults::build(&device, &queue, options.anisotropy);
         let (coronas, corona_texture) = coronas::Coronas::new(&device, &queue, &scene);
         let snow = coronas::Snow::new(&device, &scene.camera_layout);
         drop(corona_texture);
-        let sky = sky::SkyBase::new(&device, &queue, &scene.camera_layout, options.preview_only);
+        let sky = sky::SkyBase::new(&device, &queue, &scene.camera_layout, !leave_out_enhanced);
         let passes = passes::PassKit { device: &device, scene: &scene, coronas: &coronas, snow: &snow, sky: &sky, msaa }
-            .build(format, hdr_format, &options, &adapter_name);
+            .build(format, hdr_format, leave_out_enhanced);
         let (sky_sampler, sky_mesh) = sky::dome(&device, &queue);
         let overlays = overlays::Overlays::new(&device, format, msaa);
         let gl = GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed);
@@ -2876,7 +2886,7 @@ impl Renderer {
         let prepass = scene::prepass(&device, &scene, msaa);
         let mip = mip::build(&device);
         let post = post::build(&device, format, hdr_format, &defaults.white_texture);
-        let enhanced = enhanced::build(&device, &queue, hdr_format, &defaults.camera_buf, &sky, !options.preview_only);
+        let enhanced = enhanced::build(&device, &queue, hdr_format, &defaults.camera_buf, &sky, !leave_out_enhanced);
         let (overlay_pipeline_1x, xr_ui_pipeline) = overlays.single_sampled(&device, format);
         let upscale = upscale::build(&device, format);
         let gpu_timers = [GpuTimers::new(&device), GpuTimers::new(&device)];
@@ -10984,6 +10994,62 @@ mod tests {
             },
         ));
         assert!(res.is_ok(), "renderer should initialize on noop backend: {:?}", res.err());
+    }
+
+    /// The GL fallback must omit probe resources and match its camera bind group to the
+    /// vanilla pipelines. Exercise the full build and a frame, rather than the policy alone.
+    #[test]
+    fn vanilla_gl_build_omits_unused_enhanced_resources() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::NOOP;
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+        let instance = wgpu::Instance::new(descriptor);
+        let base = pollster::block_on(Renderer::new_with(
+            &instance,
+            None,
+            Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            RenderOptions {
+                msaa: 1,
+                shadow_size: 256,
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        let mut renderer = Renderer::build(
+            base.device.clone(),
+            base.queue.clone(),
+            "OpenGL regression adapter".into(),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            RenderOptions {
+                msaa: 1,
+                shadow_size: 256,
+                no_enhanced: true,
+                ..Default::default()
+            },
+        );
+        assert!(renderer.hdr_pass.is_none());
+        assert!(renderer.probe.is_none());
+        assert!(renderer.cloud_shape_cpu.is_empty());
+        let mut scene = renderer.new_scene();
+        let camera = Camera {
+            position: DVec3::new(0.0, -35.0, 30.0),
+            yaw: 0.0,
+            pitch: -40.0,
+            roll: 0.0,
+            fov_deg: 60.0,
+            near: 0.1,
+            far: 1000.0,
+        };
+        let scope = renderer
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        renderer
+            .render_to_image(&mut scene, 16, 16, &camera, &Lighting::default())
+            .unwrap();
+        assert!(pollster::block_on(scope.pop()).is_none());
+        // A desktop's native backend still prepares Enhanced for changing modes in-game.
+        assert!(base.hdr_pass.is_some());
+        assert!(base.probe.is_some());
     }
 
     #[test]
