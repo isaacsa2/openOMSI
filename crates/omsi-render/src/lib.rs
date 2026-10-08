@@ -2525,36 +2525,9 @@ impl Renderer {
         } else {
             options
         };
-        // A small or shared graphics chip (the processor's graphics outside a Mac, a phone,
-        // a card of up to 2.5 GB, anything on OpenGL) gets a lighter picture whatever the
-        // settings ask: no SSAO and no multisampling, smaller shadow maps; a card of up to
-        // 4 GB no SSAO and at most 2x. (The settings' "High" on such a machine ran out of
-        // memory or at a dozen frames a second.) OMSI_FULL_GPU=1 asks for the settings as
-        // they are.
+        // a small or shared graphics chip gets a lighter picture (see `lighter_picture`)
         GL_BACKEND.store(info.backend == wgpu::Backend::Gl, std::sync::atomic::Ordering::Relaxed);
-        let full = omsi_cfg::flags::OMSI_FULL_GPU.is_set();
-        let weak = !full
-            && ((info.backend == wgpu::Backend::Gl && vram.is_none())
-                // (a phone's chip, whatever type its driver reports: some say "other")
-                || cfg!(target_os = "android")
-                || (info.device_type == wgpu::DeviceType::IntegratedGpu && info.backend != wgpu::Backend::Metal)
-                || vram.is_some_and(|v| v <= 2560));
-        let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
-        // SSAO shaders are unsupported on the OpenGL path (#422), regardless of VRAM.
-        let options = if info.backend == wgpu::Backend::Gl {
-            RenderOptions { ssao: false, ..options }
-        } else {
-            options
-        };
-        let options = if weak {
-            log::warn!("{}: a small or shared graphics chip - no SSAO, no MSAA, shadow maps of at most 1024 (OMSI_FULL_GPU=1 keeps the settings)", info.name);
-            RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), ..options }
-        } else if modest {
-            log::info!("{}: {} MB of its own - no SSAO, at most 2x MSAA and 2048 shadow maps (OMSI_FULL_GPU=1 keeps the settings)", info.name, vram.unwrap_or(0));
-            RenderOptions { msaa: options.msaa.min(2), ssao: false, shadow_size: options.shadow_size.min(2048), ..options }
-        } else {
-            options
-        };
+        let (options, lighter) = gpu_memory::lighter_picture(&info, vram, options);
         let shadow_size = options
             .shadow_size
             .clamp(512, if intel_vulkan_safe { 2048 } else { 8192 });
@@ -2691,7 +2664,7 @@ impl Renderer {
                 // left hundreds of MB reserved and unused, and 2 GB cards lost the device to
                 // "Out of memory" in the first frames with the textures well under budget,
                 // #332, #295)
-                memory_hints: if weak || modest || vram.is_some_and(|v| v <= 4200) { wgpu::MemoryHints::MemoryUsage } else { wgpu::MemoryHints::Performance },
+                memory_hints: if lighter || vram.is_some_and(|v| v <= 4200) { wgpu::MemoryHints::MemoryUsage } else { wgpu::MemoryHints::Performance },
                 // (the ray queries are still an experimental feature of wgpu)
                 experimental_features: if ray_query { unsafe { wgpu::ExperimentalFeatures::enabled() } } else { wgpu::ExperimentalFeatures::disabled() },
                 ..Default::default()

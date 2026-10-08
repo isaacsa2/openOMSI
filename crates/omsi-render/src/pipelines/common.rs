@@ -3,61 +3,35 @@
 use crate::DEPTH_FORMAT;
 
 /// A native compiler can abort before wgpu returns an error. Record both sides of each
-/// operation so the last unfinished one identifies the module/entry point, not just "sky".
-pub(crate) fn compile_shader(
-    device: &wgpu::Device,
-    descriptor: wgpu::ShaderModuleDescriptor<'_>,
-) -> wgpu::ShaderModule {
+/// operation so the last unfinished one identifies the module/entry point, not just "sky"
+/// (at info level on OpenGL, where that happened; the texts are only made when logged).
+fn logged<T>(begin: impl FnOnce() -> String, end: impl FnOnce() -> String, op: impl FnOnce() -> T) -> T {
+    let level = if crate::gl_backend() { log::Level::Info } else { log::Level::Debug };
+    if !log::log_enabled!(level) {
+        return op();
+    }
     let thread = std::thread::current();
-    let level = if crate::gl_backend() {
-        log::Level::Info
-    } else {
-        log::Level::Debug
-    };
-    let label = descriptor.label.unwrap_or("unnamed");
     let started = std::time::Instant::now();
-    log::log!(
-        level,
-        "renderer: shader begin {label}, thread {:?} ({})",
-        thread.id(),
-        thread.name().unwrap_or("unnamed")
-    );
-    let shader = device.create_shader_module(descriptor);
-    log::log!(
-        level,
-        "renderer: shader end {label}, thread {:?}, {:.1} ms",
-        thread.id(),
-        started.elapsed().as_secs_f64() * 1000.0
-    );
-    shader
+    log::log!(level, "renderer: {}, thread {:?} ({})", begin(), thread.id(), thread.name().unwrap_or("unnamed"));
+    let done = op();
+    log::log!(level, "renderer: {}, thread {:?}, {:.1} ms", end(), thread.id(), started.elapsed().as_secs_f64() * 1000.0);
+    done
 }
 
-pub(crate) fn compile_pipeline(
-    device: &wgpu::Device,
-    descriptor: &wgpu::RenderPipelineDescriptor<'_>,
-) -> wgpu::RenderPipeline {
+pub(crate) fn compile_shader(device: &wgpu::Device, descriptor: wgpu::ShaderModuleDescriptor<'_>) -> wgpu::ShaderModule {
+    let label = descriptor.label.unwrap_or("unnamed").to_string();
+    logged(|| format!("shader begin {label}"), || format!("shader end {label}"), || device.create_shader_module(descriptor))
+}
+
+pub(crate) fn compile_pipeline(device: &wgpu::Device, descriptor: &wgpu::RenderPipelineDescriptor<'_>) -> wgpu::RenderPipeline {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let thread = std::thread::current();
-    let level = if crate::gl_backend() {
-        log::Level::Info
-    } else {
-        log::Level::Debug
-    };
     let fragment = descriptor.fragment.as_ref();
-    let started = std::time::Instant::now();
-    log::log!(level, "renderer: pipeline begin #{id} {}, vs {}, fs {}, {}x MSAA, constants {:?}, thread {:?} ({})",
+    let begin = || format!("pipeline begin #{id} {}, vs {}, fs {}, {}x MSAA, constants {:?}",
         descriptor.label.unwrap_or("unnamed"), descriptor.vertex.entry_point.unwrap_or("auto"),
         fragment.and_then(|f| f.entry_point).unwrap_or("none"), descriptor.multisample.count,
-        fragment.map(|f| f.compilation_options.constants), thread.id(), thread.name().unwrap_or("unnamed"));
-    let pipeline = device.create_render_pipeline(descriptor);
-    log::log!(
-        level,
-        "renderer: pipeline end #{id}, thread {:?}, {:.1} ms",
-        thread.id(),
-        started.elapsed().as_secs_f64() * 1000.0
-    );
-    pipeline
+        fragment.map(|f| f.compilation_options.constants));
+    logged(begin, || format!("pipeline end #{id}"), || device.create_render_pipeline(descriptor))
 }
 
 /// A pipeline that draws without vertex buffers (a triangle over the screen, or quads the

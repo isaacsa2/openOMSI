@@ -14,6 +14,13 @@ fn dedicated_vram_mb(info: &wgpu::AdapterInfo) -> Option<u64> {
         let mut i = 0;
         let mut name_match = None;
         let mut ambiguous_name = false;
+        // ANGLE wraps the GPU name and embeds the PCI device ID as "(0x00006613)":
+        // check both the name and that ID, when present.
+        let angle_device = info.name
+            .split("(0x")
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .and_then(|s| u32::from_str_radix(s, 16).ok());
         while let Ok(a) = f.EnumAdapters1(i) {
             i += 1;
             let Ok(d) = a.GetDesc1() else { continue };
@@ -32,13 +39,6 @@ fn dedicated_vram_mb(info: &wgpu::AdapterInfo) -> Option<u64> {
             // one adapter; never borrow another card's budget on a multi-GPU PC.
             let dxgi_name = String::from_utf16_lossy(&d.Description);
             let dxgi_name = dxgi_name.trim_end_matches('\0').trim();
-            // ANGLE wraps the GPU name and embeds the PCI device ID as
-            // "(0x00006613)". Check both the name and that ID, when present.
-            let angle_device = info.name
-                .split("(0x")
-                .nth(1)
-                .and_then(|s| s.split(')').next())
-                .and_then(|s| u32::from_str_radix(s, 16).ok());
             let angle_matches = info.name.starts_with("ANGLE (")
                 && info.name.contains(dxgi_name)
                 && angle_device == Some(d.DeviceId)
@@ -132,5 +132,73 @@ pub(super) fn texture_allowance_mb(info: &wgpu::AdapterInfo, vram: Option<u64>) 
         wgpu::DeviceType::IntegratedGpu if info.backend == wgpu::Backend::Metal => 3000,
         wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu => 1000,
         _ => discrete_allowance(800),
+    }
+}
+
+/// How much lighter than the settings ask a chip draws.
+#[derive(Debug, PartialEq)]
+enum Picture {
+    /// a small or shared chip: no SSAO, no MSAA, shadow maps of at most 1024
+    Weak,
+    /// a card of up to 4 GB: no SSAO, at most 2x MSAA and 2048 shadow maps
+    Modest,
+    AsAsked,
+}
+
+/// A small or shared graphics chip (the processor's graphics outside a Mac, a phone, a
+/// card of up to 2.5 GB, OpenGL whose memory nothing tells) is a weak one; a card of up
+/// to 4 GB a modest one. (The settings' "High" on such a machine ran out of memory or
+/// at a dozen frames a second.)
+fn picture(backend: wgpu::Backend, device_type: wgpu::DeviceType, vram: Option<u64>) -> Picture {
+    let weak = (backend == wgpu::Backend::Gl && vram.is_none())
+        // (a phone's chip, whatever type its driver reports: some say "other")
+        || cfg!(target_os = "android")
+        || (device_type == wgpu::DeviceType::IntegratedGpu && backend != wgpu::Backend::Metal)
+        || vram.is_some_and(|v| v <= 2560);
+    if weak {
+        Picture::Weak
+    } else if vram.is_some_and(|v| v <= 4200) {
+        Picture::Modest
+    } else {
+        Picture::AsAsked
+    }
+}
+
+/// The settings `options` lightened for this chip (see [`picture`]), and whether they
+/// were; SSAO is off on OpenGL whatever its memory (#422). OMSI_FULL_GPU=1 keeps the
+/// settings as they are.
+pub(super) fn lighter_picture(info: &wgpu::AdapterInfo, vram: Option<u64>, options: RenderOptions) -> (RenderOptions, bool) {
+    let options = RenderOptions { ssao: options.ssao && info.backend != wgpu::Backend::Gl, ..options };
+    if omsi_cfg::flags::OMSI_FULL_GPU.is_set() {
+        return (options, false);
+    }
+    match picture(info.backend, info.device_type, vram) {
+        Picture::Weak => {
+            log::warn!("{}: a small or shared graphics chip - no SSAO, no MSAA, shadow maps of at most 1024 (OMSI_FULL_GPU=1 keeps the settings)", info.name);
+            (RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), ..options }, true)
+        }
+        Picture::Modest => {
+            log::info!("{}: {} MB of its own - no SSAO, at most 2x MSAA and 2048 shadow maps (OMSI_FULL_GPU=1 keeps the settings)", info.name, vram.unwrap_or(0));
+            (RenderOptions { msaa: options.msaa.min(2), ssao: false, shadow_size: options.shadow_size.min(2048), ..options }, true)
+        }
+        Picture::AsAsked => (options, false),
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod tests {
+    use super::{picture, Picture};
+    use wgpu::{Backend, DeviceType};
+
+    /// OpenGL and ANGLE report a discrete card as "other": its memory, once DXGI tells
+    /// it, decides, as on Vulkan; unknown memory on OpenGL stays the weak profile.
+    #[test]
+    fn opengl_card_with_known_memory_is_not_taken_for_a_weak_chip() {
+        assert_eq!(picture(Backend::Gl, DeviceType::Other, None), Picture::Weak);
+        assert_eq!(picture(Backend::Gl, DeviceType::Other, Some(4076)), Picture::Modest);
+        assert_eq!(picture(Backend::Vulkan, DeviceType::DiscreteGpu, Some(4076)), Picture::Modest);
+        assert_eq!(picture(Backend::Gl, DeviceType::Other, Some(16304)), Picture::AsAsked);
+        assert_eq!(picture(Backend::Gl, DeviceType::Other, Some(2048)), Picture::Weak);
+        assert_eq!(picture(Backend::Dx12, DeviceType::IntegratedGpu, Some(8192)), Picture::Weak);
     }
 }
