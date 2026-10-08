@@ -216,14 +216,12 @@ fn rt_at(frag: vec2<f32>, world: vec3<f32>) -> vec4<f32> {
     var best = vec4<f32>(1.0, 0.0, -1.0, 0.0);
     var best_d = tol;
     for (var k = 0; k < 5; k = k + 1) {
-        var o = vec2<i32>(0, 0);
-        switch k {
-            case 1: { o = vec2<i32>(1, 0); }
-            case 2: { o = vec2<i32>(-1, 0); }
-            case 3: { o = vec2<i32>(0, 1); }
-            case 4: { o = vec2<i32>(0, -1); }
-            default: {}
-        }
+        // the pixel, then (1, 0), (-1, 0), (0, 1), (0, -1): worked out, not a `switch`,
+        // whose case jumps inside this loop sent the D3D compiler (fxc, under ANGLE) into
+        // endless recursion in CProgram::CheckAssertion_Group (#197)
+        let axis = (k + 1) / 2;
+        let step = select(-1, 1, (k & 1) == 1);
+        let o = vec2<i32>(select(0, step, axis == 1), select(0, step, axis == 2));
         let s = textureLoad(t_ao, clamp(px + o, vec2<i32>(0), size - vec2<i32>(1)), 0);
         let d = abs(s.g - z);
         if (s.g > 0.0 && d < best_d) {
