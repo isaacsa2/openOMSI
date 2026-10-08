@@ -263,13 +263,25 @@ impl LaneBuilder {
     /// Sample an arc/straight lane: start position, heading (deg), length, radius (0 = straight,
     /// > 0 right turn), height change over the length.
     pub fn arc(start: DVec3, heading_deg: f64, length: f64, radius: f64, dz: f64, kind: LaneKind, width: f32) -> Lane {
+        Self::sample_arc(start, heading_deg, length, radius, kind, width, |s| dz * s / length.max(1e-6))
+    }
+
+    /// Object-path gradients are rise per metre, not a total height change. Integrate
+    /// the gradient between the ends so the lane meets the next path on a slope.
+    pub fn arc_with_gradients(start: DVec3, heading_deg: f64, length: f64, radius: f64, grad_start: f64, grad_end: f64, kind: LaneKind, width: f32) -> Lane {
+        Self::sample_arc(start, heading_deg, length, radius, kind, width, |s| {
+            grad_start * s + (grad_end - grad_start) * s * s / (2.0 * length.max(1e-6))
+        })
+    }
+
+    fn sample_arc(start: DVec3, heading_deg: f64, length: f64, radius: f64, kind: LaneKind, width: f32, height: impl Fn(f64) -> f64) -> Lane {
         let n = ((length / 2.0).ceil() as usize).clamp(1, 400);
         let mut points = Vec::with_capacity(n + 1);
         let mut headings = Vec::with_capacity(n + 1);
         for i in 0..=n {
             let s = length * i as f64 / n as f64;
             let (p, h) = arc_point(start, heading_deg, s, radius);
-            points.push(DVec3::new(p.x, p.y, start.z + dz * s / length.max(1e-6)));
+            points.push(DVec3::new(p.x, p.y, start.z + height(s)));
             headings.push(h as f32);
         }
         let k = if radius.abs() < 1e-6 { 0.0 } else { (1.0 / radius) as f32 };
@@ -595,7 +607,13 @@ impl Network {
     /// street passes each stop twice, once from the other side, and the bus stopped at the
     /// stop across the road on its way out. Falls back to the nearest point.
     pub fn project_stop_on_route(&self, route: &[usize], p: DVec3, reach: Option<f64>, from: usize) -> Option<(usize, f32, f32)> {
-        // (index, s, distance, lateral) of the best on the kerb side, and of any
+        self.project_stop_on_route_side(route, p, reach, from, 0)
+    }
+
+    /// The same for a platform opposite the usual kerb (1), or either side (2).
+    /// The side is the stop object's OMSI value, relative to the map's traffic hand.
+    pub fn project_stop_on_route_side(&self, route: &[usize], p: DVec3, reach: Option<f64>, from: usize, side: u8) -> Option<(usize, f32, f32)> {
+        // (index, s, distance, lateral) of the best on the platform side, and of any
         let mut kerb: Option<(usize, f32, f64, f32)> = None;
         let mut any: Option<(usize, f32, f64, f32)> = None;
         for (ri, &li) in route.iter().enumerate().skip(from.min(route.len())) {
@@ -614,7 +632,8 @@ impl Network {
                 let rel = (p - q).truncate();
                 let lateral = (rel.x * dir.y - rel.y * dir.x) as f32;
                 let cand = (ri, l.dist[k] + (l.dist[k + 1] - l.dist[k]) * t as f32, d, lateral);
-                let kerb_side = if self.left_hand { lateral < -0.3 } else { lateral > 0.3 };
+                let left = self.left_hand != (side == 1);
+                let kerb_side = side == 2 || if left { lateral < -0.3 } else { lateral > 0.3 };
                 if kerb_side && kerb.map(|b| d < b.2).unwrap_or(true) {
                     kerb = Some(cand);
                 }
@@ -625,7 +644,7 @@ impl Network {
         }
         match kerb.or(any) {
             Some((ri, s, _, lat)) => Some((ri, s, lat)),
-            None if from > 0 => self.project_stop_on_route(route, p, reach, 0),
+            None if from > 0 => self.project_stop_on_route_side(route, p, reach, 0, side),
             None => None,
         }
     }
@@ -915,7 +934,7 @@ impl Network {
                     }
                 }
             }
-            if found.is_empty() && omsi_cfg::env::var_os("OMSI_DEBUG_UNLINKED").is_some() {
+            if found.is_empty() && omsi_cfg::flags::OMSI_DEBUG_UNLINKED.is_set() {
                 // a lane end with a start of its kind near it that was not taken
                 for dx in -1..=1 {
                     for dy in -1..=1 {
@@ -1482,9 +1501,9 @@ pub struct TrafficLightController {
     pub request: Vec<bool>,
     /// The clock waits at a stop point.
     pub held: bool,
-    /// A stop point the clock has just been let past without moving (it is not asked again
-    /// at the same instant).
-    passed: Option<usize>,
+    /// Points already let past at this instant. Remember all of them so coincident
+    /// inactive points cannot keep making one another eligible again.
+    passed: Vec<usize>,
     /// A short backwards jump has replayed its stretch once. Do not take it again before
     /// the clock has moved past its source time.
     rewound: Option<usize>,
@@ -1494,7 +1513,7 @@ pub struct TrafficLightController {
 impl TrafficLightController {
     pub fn new(lights: Vec<Vec<(i32, f32)>>, cycle: f32) -> TrafficLightController {
         let n = lights.len();
-        TrafficLightController { lights, cycle, offset: 0.0, approach: vec![None; n], stops: Vec::new(), time: 0.0, request: vec![false; n], held: false, passed: None, rewound: None, started: false }
+        TrafficLightController { lights, cycle, offset: 0.0, approach: vec![None; n], stops: Vec::new(), time: 0.0, request: vec![false; n], held: false, passed: Vec::new(), rewound: None, started: false }
     }
 
     /// From the `[traffic_light]` program of a crossing object: (per light: name, phases
@@ -1549,8 +1568,9 @@ impl TrafficLightController {
                 this.rewound = None;
             }
         };
-        // a handful of points per frame at most (a jump may land just before another one)
-        for _ in 0..16 {
+        // Allow every coincident inactive point without losing this frame's time,
+        // but still bound authored jump loops.
+        for _ in 0..16 + self.stops.len() {
             let mut best: Option<(usize, f64)> = None;
             for (k, p) in self.stops.iter().enumerate() {
                 if self.rewound == Some(k) {
@@ -1558,7 +1578,7 @@ impl TrafficLightController {
                 }
                 let d = (p.time as f64 - self.time).rem_euclid(cycle);
                 let d = if d > cycle - 1e-6 { 0.0 } else { d };
-                if d < 1e-6 && self.passed == Some(k) {
+                if d < 1e-6 && self.passed.contains(&k) {
                     continue;
                 }
                 if d <= left && best.map(|b| d < b.1).unwrap_or(true) {
@@ -1568,13 +1588,13 @@ impl TrafficLightController {
             let Some((k, d)) = best else {
                 if left > 0.0 {
                     clear_rewind(self, left);
-                    self.passed = None;
+                    self.passed.clear();
                 }
                 self.time = (self.time + left).rem_euclid(cycle);
                 return;
             };
             if d > 1e-6 {
-                self.passed = None;
+                self.passed.clear();
             }
             clear_rewind(self, d);
             self.time = (self.time + d).rem_euclid(cycle);
@@ -1583,16 +1603,20 @@ impl TrafficLightController {
             let asked = self.request.get(p.light).copied().unwrap_or(false);
             let active = if p.if_request { !asked } else { asked };
             if !active {
-                self.passed = Some(k);
+                self.passed.push(k);
                 continue;
             }
             match p.jump_to {
                 Some(to) => {
-                    // A jump a couple of seconds back extends the current phase. It is not
-                    // a loop: after replaying that small stretch, continue through it.
-                    self.rewound = (to > 1e-6 && to < p.time - 1e-6).then_some(k);
+                    // A jump a couple of seconds back while somebody asks extends the
+                    // current phase. It is not a loop: after replaying that small stretch,
+                    // continue through it. One taken while nobody asks is the program's
+                    // rest: the main road stays green round it until a request comes
+                    // (Winsenburg's win-4: replayed once, it ran through yellow and red
+                    // with nobody waiting and flickered between green and yellow, #1722).
+                    self.rewound = (!p.if_request && to > 1e-6 && to < p.time - 1e-6).then_some(k);
                     self.time = (to as f64).rem_euclid(cycle);
-                    self.passed = None;
+                    self.passed.clear();
                     if left <= 0.0 {
                         return;
                     }
@@ -1600,7 +1624,7 @@ impl TrafficLightController {
                 None => {
                     self.time = p.time as f64;
                     self.held = true;
-                    self.passed = None;
+                    self.passed.clear();
                     return;
                 }
             }
@@ -2021,8 +2045,9 @@ impl AiState {
     fn choose_after(&mut self, net: &Network, lane: usize) -> Option<usize> {
         let l = &net.lanes[lane];
         // (a car of a traffic pool - the trucks of a map that keeps them to its port roads -
-        // takes the ways its pool may go, as it was put on one; where none of them does, the
-        // ways open to cars, then any: it does not stand at the junction for ever)
+        // takes only the ways its pool may go, as it was put on one. A forbidden exit
+        // remains forbidden even if every exit is closed; normal end-of-route handling
+        // must deal with that, rather than driving into a pedestrian or restricted lane.)
         let open_to = |pooled: bool| -> Vec<usize> {
             l.next
                 .iter()
@@ -2037,10 +2062,10 @@ impl AiState {
                 })
                 .collect()
         };
-        let pooled = self.traffic_pool.is_some().then(|| open_to(true)).filter(|o| !o.is_empty());
+        let pooled = self.traffic_pool.is_some().then(|| open_to(true));
         let weighted = pooled.is_some();
         let open = pooled.unwrap_or_else(|| open_to(false));
-        let mut choices = if open.is_empty() { l.next.clone() } else { open };
+        let mut choices = open;
         // and a way that goes on rather than into the end of the network, where there is
         // the choice (the map's edge is where OMSI takes its cars away; a village like
         // Grundorf had a queue of twenty growing at the end of its one outbound road)
@@ -2584,6 +2609,72 @@ impl AiState {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn platform_side_selects_the_correct_visit_on_a_two_way_route() {
+        let out = LaneBuilder::polyline(
+            vec![DVec3::new(0.0, 0.0, 0.0), DVec3::new(100.0, 0.0, 0.0)],
+            LaneKind::Street,
+            3.0,
+        );
+        let back = LaneBuilder::polyline(
+            vec![DVec3::new(100.0, 6.0, 0.0), DVec3::new(0.0, 6.0, 0.0)],
+            LaneKind::Street,
+            3.0,
+        );
+        let mut net = Network {
+            lanes: vec![out, back],
+            ..Default::default()
+        };
+        // North of both lanes: right of the westbound lane, left of the eastbound.
+        let stop = DVec3::new(50.0, 8.0, 0.0);
+        let at = |net: &Network, side| {
+            net.project_stop_on_route_side(&[0, 1], stop, Some(25.0), 0, side)
+                .unwrap()
+                .0
+        };
+        assert_eq!(at(&net, 0), 1);
+        assert_eq!(at(&net, 1), 0);
+        assert_eq!(at(&net, 2), 1);
+        net.left_hand = true;
+        assert_eq!(at(&net, 0), 0);
+        assert_eq!(at(&net, 1), 1);
+        assert_eq!(at(&net, 2), 1);
+        assert_eq!(
+            net.project_stop_on_route_side(&[0, 1], stop, Some(25.0), 2, 1)
+                .unwrap()
+                .0,
+            1
+        );
+        // A central platform is left of both directions: choose the nearest lane.
+        let central = DVec3::new(50.0, 2.0, 0.0);
+        net.left_hand = false;
+        for side in [1, 2] {
+            assert_eq!(
+                net.project_stop_on_route_side(&[0, 1], central, Some(25.0), 0, side)
+                    .unwrap()
+                    .0,
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn platform_side_uses_the_local_tangent_on_a_curve() {
+        let lane = LaneBuilder::arc(DVec3::ZERO, 0.0, 30.0, 40.0, 0.0, LaneKind::Street, 3.0);
+        let (point, heading) = lane.at(15.0);
+        let h = (heading as f64).to_radians();
+        let right = DVec3::new(h.cos(), -h.sin(), 0.0);
+        let net = Network {
+            lanes: vec![lane],
+            ..Default::default()
+        };
+        let (_, s, lat) = net
+            .project_stop_on_route_side(&[0], point - right * 4.0, Some(25.0), 0, 1)
+            .unwrap();
+        assert!((s - 15.0).abs() < 1.0);
+        assert!((lat + 4.0).abs() < 0.2);
+    }
+
+    #[test]
     fn a_stop_is_matched_to_the_lane_it_stands_beside() {
         // out along y = 0 (east), back along y = 6 (west); the stop stands north of the
         // way back: on its right, across the road from the way out
@@ -2602,6 +2693,22 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn arc_height_change_and_object_gradients_have_distinct_units() {
+        let start = DVec3::new(3.0, 4.0, 5.0);
+        let linear = LaneBuilder::arc(start, 20.0, 20.0, 30.0, 0.2, LaneKind::Street, 3.0);
+        assert!((linear.points[5].z - 5.1).abs() < 1e-12);
+        assert!((linear.end().z - 5.2).abs() < 1e-12);
+        let graded = LaneBuilder::arc_with_gradients(start, 20.0, 20.0, 30.0, 0.06, -0.04, LaneKind::Street, 3.0);
+        assert!((graded.points[5].z - 5.35).abs() < 1e-12);
+        assert!((graded.end().z - 5.2).abs() < 1e-12);
+        assert_eq!(linear.headings, graded.headings);
+        assert_eq!(linear.curvature, graded.curvature);
+        for (a, b) in linear.points.iter().zip(&graded.points) {
+            assert_eq!(a.truncate(), b.truncate());
+        }
+    }
 
     /// A straight lane of 60 m running north, then a right-hand bend of radius 14 m over
     /// 60°, then straight on again.
@@ -2630,6 +2737,39 @@ mod tests {
     }
 
     #[test]
+    fn no_legal_exit_does_not_fall_back_to_a_forbidden_lane() {
+        let mut net = junction();
+        let mut car = AiState::new(0, 0.0, 7);
+        net.lanes[1].no_cars = true;
+        assert_eq!(car.choose_after(&net, 0), None);
+        net.lanes[1].no_cars = false;
+        net.lanes[1].density = 0.0;
+        assert_eq!(car.choose_after(&net, 0), None);
+        net.lanes[1].density = 1.0;
+        car.veh_type = 3;
+        assert_eq!(car.choose_after(&net, 0), None);
+        net.lanes[1].rule_trucks = true;
+        assert_eq!(car.choose_after(&net, 0), Some(1));
+        // Explicit timetable paths retain their original OMSI semantics.
+        car.veh_type = -1;
+        car.route = vec![0, 1];
+        net.lanes[1].density = 0.0;
+        car.plan_next(&net);
+        assert_eq!(car.planned_next, Some(1));
+    }
+
+    #[test]
+    fn pool_closed_exits_cannot_fall_back_to_general_traffic() {
+        let mut net = junction();
+        let mut car = AiState::new(0, 0.0, 7);
+        car.traffic_pool = Some((2, vec![1, 1, 1].into()));
+        net.lanes[1].group_density = vec![(2, 0.0)];
+        assert_eq!(car.choose_after(&net, 0), None);
+        net.lanes[1].group_density = vec![(2, 0.5)];
+        assert_eq!(car.choose_after(&net, 0), Some(1));
+    }
+
+    #[test]
     fn slows_down_for_a_bend() {
         let net = junction();
         assert_eq!(net.lanes[0].next, vec![1]);
@@ -2653,6 +2793,7 @@ mod tests {
         let v = entered.expect("reached the bend");
         assert!(v < 7.5, "entered the bend at {v} m/s");
     }
+
 
     /// A pull-out started a few metres before the car's lane ends (a road of short spline
     /// pieces) carries on across the joint and ends on the lane beside's next piece, without
@@ -2808,6 +2949,33 @@ mod tests {
     }
 
     #[test]
+    fn a_rest_loop_holds_while_nobody_asks() {
+        // win-4.sco (#1722): main green 2-12 s, jumping back from 12 to 2 while no bus
+        // asks at the bus light; a bus sends it on through yellow.
+        let mut c = TrafficLightController::from_program(
+            vec![
+                (vec![(3, 2.0), (6, 10.0), (9, 3.0), (0, 7.0), (9, 3.0), (0, 1.0)], None),
+                (vec![(0, 16.0), (6, 6.0), (0, 1.0)], None),
+            ],
+            Some(37.0),
+            &[],
+            &[[1.0, 12.0, 1.0, 2.0], [1.0, 22.0, 1.0, 2.0], [1.0, 22.0, 0.0, 18.0], [1.0, 2.0, 0.0, 12.0], [1.0, 7.0, 0.0, 12.0]],
+        );
+        c.time = 3.0;
+        for _ in 0..1200 {
+            c.advance(0.1);
+            assert_eq!(c.state(0), 6, "the main road left its green at {:.1} s with nobody asking", c.time);
+        }
+        c.request[1] = true;
+        let mut saw_bus_green = false;
+        for _ in 0..300 {
+            c.advance(0.1);
+            saw_bus_green |= c.state(1) == 6;
+        }
+        assert!(saw_bus_green, "a bus asking gets its green");
+    }
+
+    #[test]
     fn a_backwards_jump_replays_its_phase_once() {
         // win-wit.sco and similar crossings use a small rewind to extend a green. Taking
         // that jump again on every pass locked the whole program in that stretch.
@@ -2823,6 +2991,86 @@ mod tests {
             c.advance(0.1);
         }
         assert_eq!(c.state(0), 9, "the clock left the replayed green");
+    }
+
+    #[test]
+    fn simultaneous_inactive_events_do_not_stall_the_cycle() {
+        let mut c = TrafficLightController::from_program(
+            vec![(vec![(0, 4.0), (6, 16.0)], None); 2],
+            Some(20.0),
+            &[[0.0, 4.0, 0.0]],
+            &[[1.0, 4.0, 0.0, 12.0]],
+        );
+        c.start(0.0);
+        c.advance(5.0);
+        assert_eq!(c.time, 5.0);
+        assert_eq!(c.state(0), 6);
+        for _ in 0..40 {
+            c.advance(1.0);
+        }
+        assert_eq!(c.time, 5.0, "the clock completes later cycles too");
+        assert!(!c.held);
+    }
+
+    #[test]
+    fn simultaneous_inactive_events_do_not_hide_a_later_active_jump() {
+        let mut c = TrafficLightController::from_program(
+            vec![(vec![(0, 4.0), (6, 16.0)], None); 3],
+            Some(20.0),
+            &[[0.0, 4.0, 0.0]],
+            &[[1.0, 4.0, 0.0, 9.0], [2.0, 4.0, 0.0, 12.0]],
+        );
+        c.request[2] = true;
+        c.start(0.0);
+        c.advance(5.0);
+        assert_eq!(c.time, 13.0, "take the jump and consume the remaining second");
+        assert!(!c.held);
+    }
+
+    #[test]
+    fn simultaneous_stops_release_and_are_checked_on_the_next_cycle() {
+        let mut c = TrafficLightController::from_program(
+            vec![(vec![(0, 4.0), (6, 16.0)], None); 3],
+            Some(20.0),
+            &[[0.0, 4.0, 0.0], [1.0, 4.0, 0.0], [2.0, 4.0, 0.0]],
+            &[],
+        );
+        c.request[2] = true;
+        c.start(0.0);
+        c.advance(5.0);
+        assert_eq!(c.time, 4.0);
+        assert!(c.held);
+        c.advance(1.0);
+        assert_eq!(c.time, 4.0, "an active stop remains held next frame");
+        c.request[2] = false;
+        c.advance(1.0);
+        assert_eq!(c.time, 5.0);
+        assert!(!c.held);
+        c.advance(16.0);
+        assert_eq!(c.time, 1.0);
+        c.request[2] = true;
+        c.advance(4.0);
+        assert_eq!(c.time, 4.0, "the released stop is evaluated after wrapping");
+        assert!(c.held);
+    }
+
+    #[test]
+    fn many_simultaneous_inactive_events_consume_the_frame_time() {
+        let mut c = TrafficLightController::new(vec![vec![(0, 4.0), (6, 16.0)]], 20.0);
+        c.stops = vec![
+            LightStop {
+                light: 0,
+                time: 4.0,
+                if_request: false,
+                jump_to: None,
+            };
+            33
+        ];
+        c.start(4.0);
+        c.advance(0.25);
+        assert_eq!(c.time, 4.25, "the inactive group must not exhaust the event budget");
+        assert_eq!(c.state(0), 6);
+        assert!(!c.held);
     }
 
     #[test]

@@ -30,8 +30,12 @@ Players reach it two ways:
   That is what a free Cloudflare quick tunnel carries (`tunnel = 1` starts `cloudflared
   tunnel --url http://127.0.0.1:<web_port>` and prints the `https://….trycloudflare.com`
   address). The same port answers `GET /status` (JSON: name, motd, map, players,
-  max_players, time, weather, version, protocol) and `GET /icon.png`, which the launcher's
-  Multiplayer → Servers list shows. With an `admin_password` it also takes `POST /admin`
+  max_players, time, weather, version, protocol, vehicles, and on a dedicated server `world`:
+  its AI cars, buses, cars asleep, parked cars, people walking, waiting and aboard, the
+  traffic density) and `GET /icon.png`, which the launcher's Multiplayer → Servers list
+  shows. `vehicles` is the server's `vehicles` list (else every bus it has): a joining
+  player's launcher offers only those, and so do the game menu's *Place a vehicle* and *Swap*
+  once the game has joined. With an `admin_password` it also takes `POST /admin`
   from the machine itself: one admin command a line (`clock 30600`, `weather set
   Weather/#CAVOK.owt`, `say …`, `kick 3`, as the Administration menu sends them), the
   password in `X-Admin-Password`; five wrong ones in two minutes close it for a while. A
@@ -60,12 +64,15 @@ the player into the channel `voice_channel` (its id or its name, with
 `voice_channel_password`) and renames them `<name> #<player id>` - the name every other
 game of the session gives them there - and the game tells it ten times a second where the
 camera is and where everybody else is. A player who is speaking has "speaking" under their
-name tag. A player hosting by code names the voice server in `~/.openomsi/voice.cfg` with
-the same keys. Settings → General → *Voice chat through GreenTeaSpeak* switches it off.
-`voice_channel_password` is sent to every player who joins (their game needs it to enter
-the channel): it keeps strangers on the voice server out of the channel, not the server's
-own players. The three settings together must fit a chat command (160 characters after
-encoding), or the server says so in its log and has no voice chat.
+name tag. With `voice_radio` on (the default), a driver is put on a map-wide **bus radio**
+automatically: hold the bindable *Multiplayer: bus radio* key (Controls; X by default) to
+transmit to every other driver on the map while proximity voice still reaches people next
+to the bus; their name tag shows "radio". A player hosting by code names the voice server in
+`~/.openomsi/voice.cfg` with the same keys. Settings → General → *Voice chat through
+GreenTeaSpeak* switches it off. `voice_channel_password` is sent to every player who joins
+(their game needs it to enter the channel): it keeps strangers on the voice server out of
+the channel, not the server's own players. The settings together must fit a chat command
+(160 characters after encoding), or the server says so in its log and has no voice chat.
 
 The same gateway and tunnel open for a player hosting by **code** (Connect by Code): its
 address goes to the rendezvous topic, and a joining game that gets no answer from the

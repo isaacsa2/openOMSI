@@ -46,8 +46,8 @@ const MIN_FILL: f32 = 0.25;
 pub fn debug_level() -> u32 {
     static ON: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
-        omsi_cfg::env::var("OMSI_DEBUG_CAMERA")
-            .ok()
+        omsi_cfg::flags::OMSI_DEBUG_CAMERA
+            .var()
             .map(|v| v.trim().parse().unwrap_or(1))
             .unwrap_or(0)
     })
@@ -389,6 +389,16 @@ fn ray_triangle(o: Vec3, d: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     }
     let t = e2.dot(q) * inv;
     (t > 0.0).then_some(t)
+}
+
+/// The outside camera's orbit centre, raised to [`GROUND_CLEARANCE`] over the ground where a
+/// bus's `[camera_outside_center]` lies lower than that: from under it every ray of
+/// [`free_length`] met the ground at once and the camera stayed trapped under the bus (#702).
+pub fn lift_pivot(world: &World, pivot: DVec3) -> DVec3 {
+    match world.camera_ground(pivot.x, pivot.y, pivot.z + GROUND_CLEARANCE) {
+        Some(g) if pivot.z < g + GROUND_CLEARANCE => DVec3::new(pivot.x, pivot.y, g + GROUND_CLEARANCE),
+        _ => pivot,
+    }
 }
 
 /// How far the camera may go from `pivot` along the unit vector `dir` (at most `want`):
