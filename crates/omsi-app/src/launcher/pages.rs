@@ -521,15 +521,26 @@ fn graphics_profiles_block(ui: &mut Ui, s: &mut Value, dirty: &mut f32, c: &mut 
 /// How the game looks and how fast it runs.
 fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) -> [f32; 2] {
     let mut c = Col::new(ui, cols[0], "Graphics");
-    // Quality presets, first: they set most of what follows. (OMSI's own
-    // option_presets/*.oop are named after the PCs of their day - "PC 2006", "X10 high",
-    // "Chicago Recommended" - which read as random words here.)
-    let presets: [(&str, serde_json::Value); 4] = [
-        ("Low", json!({"msaa": 1, "anisotropy": 2, "shadow_size": 1024, "ssao": false, "shadows": false, "detail_textures": false, "clouds": false, "view_distance": "600", "min_obj_size": 0.03, "max_obj_dist": "500", "mirror_size": 128, "mirror_refresh": "eco", "render_scale": "0.75", "texture_memory": 800})),
-        ("Medium", json!({"msaa": 2, "anisotropy": 4, "shadow_size": 2048, "ssao": false, "shadows": true, "detail_textures": true, "clouds": true, "view_distance": "900", "min_obj_size": 0.02, "max_obj_dist": "750", "mirror_size": 256, "mirror_refresh": "eco", "render_scale": "auto", "texture_memory": 1200})),
-        ("High", json!({"msaa": 4, "anisotropy": 8, "shadow_size": 2048, "ssao": true, "shadows": true, "detail_textures": true, "clouds": true, "view_distance": "auto", "min_obj_size": 0.013, "max_obj_dist": "auto", "mirror_size": 256, "mirror_refresh": "full", "render_scale": "auto", "texture_memory": 0})),
-        ("Ultra", json!({"msaa": 4, "anisotropy": 8, "shadow_size": 4096, "ssao": true, "shadows": true, "detail_textures": true, "clouds": true, "view_distance": "2000", "min_obj_size": 0.005, "max_obj_dist": "1500", "mirror_size": 512, "mirror_refresh": "full", "render_scale": "auto", "texture_memory": 0})),
-    ];
+    // Choose the renderer first; quality presets tune that mode without replacing it.
+    sel_setting(
+        ui,
+        s,
+        dirty,
+        "s-graphics",
+        c.row(),
+        "Graphics",
+        "graphics",
+        &[
+            ("vanilla", "Vanilla (as OMSI 2)"),
+            ("vanilla_plus", "Vanilla+"),
+            ("enhanced", "Enhanced"),
+            ("enhanced_plus", "Enhanced+"),
+        ],
+    );
+    // OMSI's own option_presets/*.oop are named after the PCs of their day.
+    let presets = omsi_launcher_lib::graphics_presets_for(
+        get(s, "graphics").as_str().unwrap_or("vanilla_plus"),
+    );
     {
         // the preset the settings match now, else "Custom"
         let matches = |p: &serde_json::Value| p.as_object().map(|o| o.iter().all(|(k, v)| {
@@ -550,7 +561,6 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
             }
         }
     }
-    sel_setting(ui, s, dirty, "s-graphics", c.row(), "Graphics", "graphics", &[("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")]);
     // Vanilla draws what OMSI 2 draws: no sun shadows, ambient occlusion or detail grain
     let classic = get(s, "graphics").as_str() == Some("vanilla");
     let traced = get(s, "graphics").as_str() == Some("enhanced_plus");
@@ -627,6 +637,21 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     let opts: Vec<(&str, &str)> = vec![("0", auto_label.as_str()), ("500", "500 MB"), ("1000", "1 GB"), ("1500", "1.5 GB"), ("2000", "2 GB"), ("3000", "3 GB"), ("4000", "4 GB"), ("6000", "6 GB")];
     sel_setting(ui, s, dirty, "s-texmem", c.row(), "Texture memory", "texture_memory", &opts);
     toggle_setting(ui, s, dirty, c.row(), "Compress textures on loading", "texture_compression");
+    c.section(ui, "Compatibility");
+    sel_setting(
+        ui,
+        s,
+        dirty,
+        "s-gpu-texcomp",
+        c.row(),
+        "GPU texture compression",
+        "gpu_texture_compression",
+        &[
+            ("auto", "Automatic (recommended)"),
+            ("enabled", "Enabled"),
+            ("disabled", "Disabled — decode DXT/BC to RGBA"),
+        ],
+    );
     c.section(ui, "Profiles");
     graphics_profiles_block(ui, s, dirty, &mut c);
     [left, c.used()]
@@ -2739,7 +2764,7 @@ mod settings_tests {
         let mut graphics = vec![
             "s-gp-sel", "s-gp-load", "s-gp-del", "s-gp-name", "s-gp-save",
             "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-night", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "set-windy_trees",
-            "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression",
+            "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression", "s-gpu-texcomp",
         ];
         if !cfg!(target_os = "macos") {
             graphics.push("s-api");
@@ -2860,6 +2885,38 @@ mod settings_tests {
             }
             assert_eq!(ui.drawn.len(), names.len(), "the {} tab has a clickable thing more than the list names", SETTINGS_TABS[tab]);
         }
+    }
+
+    #[test]
+    fn mobile_stacked_graphics_exposes_and_saves_gpu_texture_compatibility() {
+        let mut ui = Ui::new();
+        let mut s = all_rows();
+        let mut out = outside();
+        ui.begin(Vec2::new(430.0, 1600.0), 1.0, 1.0 / 60.0);
+        let mut dirty = 0.0;
+        settings_tab(
+            &mut ui,
+            0,
+            &mut s,
+            &mut dirty,
+            &mut out,
+            [
+                Rect::new(12.0, 0.0, 406.0, 760.0),
+                Rect::new(12.0, 780.0, 406.0, 760.0),
+            ],
+        );
+        assert!(
+            ui.drawn.contains_key(&id_of("s-gpu-texcomp")),
+            "mobile/stacked Graphics must expose GPU texture compatibility"
+        );
+
+        s["gpu_texture_compression"] = json!("disabled");
+        let saved = core::settings_to_text(&s, None);
+        let roundtrip = core::settings_from_text(Some(&saved));
+        assert_eq!(roundtrip["gpu_texture_compression"], "disabled");
+
+        let game = crate::settings::Settings::from_text(&saved);
+        assert_eq!(game.gpu_texture_compression, "disabled");
     }
 
     #[test]

@@ -1,0 +1,156 @@
+name: Hardware compatibility report
+description: Report whether openOMSI starts and runs on a GPU, driver or mobile device combination
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a **hardware/backend compatibility result**, including successful tests.
+        For an ordinary reproducible gameplay bug that is not hardware-specific, use the Bug Report form instead.
+
+        Please do not include credentials, private chat, IP addresses, hardware serial numbers or unrelated personal paths.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you start
+      options:
+        - label: I identified the exact openOMSI release or PR test build I used.
+          required: true
+        - label: I checked existing issues for this GPU/device and driver combination.
+          required: true
+        - label: I removed private or unrelated personal information from anything attached.
+          required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - PASS — standard test completed without a compatibility workaround
+        - DEGRADED — usable only with a fallback/workaround or known limitation
+        - FAIL — crash, device loss, black screen or another blocking fault
+        - UNTESTED — hardware information only; standard test incomplete
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: openOMSI version
+      description: Release version or PR test-build version shown by the launcher.
+      placeholder: e.g. 0.2.15 or 0.2.15-pr1234
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Android
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: e.g. Windows 11 25H2, Android 15, macOS 26
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device / CPU / SoC
+      description: On Android include the phone/tablet model and SoC; on desktop include the CPU when known.
+      placeholder: e.g. Moto G22 — MediaTek Helio G37
+    validations:
+      required: false
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      placeholder: e.g. PowerVR GE8320, Radeon RX 6600, Intel UHD 630
+    validations:
+      required: true
+
+  - type: input
+    id: driver
+    attributes:
+      label: Graphics driver
+      description: Driver package/version when the OS exposes it. Write Unknown if it cannot be obtained.
+      placeholder: e.g. Mesa 26.x, Adreno driver version, NVIDIA 6xx.xx
+    validations:
+      required: true
+
+  - type: dropdown
+    id: api
+    attributes:
+      label: Graphics API selected
+      options:
+        - Automatic
+        - Vulkan
+        - DirectX 12
+        - Metal
+        - OpenGL / OpenGL ES
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: fallback
+    attributes:
+      label: Actual API / fallback
+      description: If openOMSI automatically changed backend, say which API actually ran. Otherwise write Same as selected.
+      placeholder: Same as selected
+    validations:
+      required: false
+
+  - type: dropdown
+    id: graphics-mode
+    attributes:
+      label: Graphics mode
+      options:
+        - Vanilla
+        - Vanilla+
+        - Enhanced
+        - Enhanced+
+        - Unknown / not reached
+    validations:
+      required: false
+
+  - type: textarea
+    id: standard-test
+    attributes:
+      label: Standard test completed
+      description: Follow docs/HARDWARE_COMPATIBILITY.md where possible. State what was tested and the first step that failed.
+      placeholder: |
+        - Launcher cold start: pass
+        - Stock map + stock bus: pass
+        - 10 minute drive: pass
+        - Doors/mirrors: pass
+        - Time/weather change: fail — device lost
+        - Second session: not reached
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround or fallback
+      description: Required for DEGRADED results. Include the exact backend/setting change that made it usable.
+    validations:
+      required: false
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Logs / diagnostics / notes
+      description: Paste only the relevant log excerpt, or attach a diagnostics ZIP if your test build provides one and you have inspected it.
+    validations:
+      required: false
