@@ -1892,6 +1892,13 @@ impl App {
     /// Show one of the menu's lists in the chooser (see `game_lists`).
     pub(crate) fn open_list(&mut self, kind: crate::game_lists::ListKind) {
         crate::game_lists::forget_page_titles();
+        if self.list_kind.as_ref() != Some(&kind) {
+            self.menu_search.clear();
+            if self.menu_edit_search {
+                self.menu_edit = None;
+                self.menu_edit_search = false;
+            }
+        }
         self.dropdown = None;
         self.admin_list = Some(crate::game_lists::items(self, &kind));
         self.list_kind = Some(kind);
@@ -2000,6 +2007,32 @@ impl App {
         self.refresh_list();
     }
 
+    fn search_edit_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Escape => {
+                self.menu_edit = None;
+                self.menu_edit_search = false;
+            }
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                self.menu_search = self.menu_edit.take().unwrap_or_default();
+                self.menu_edit_search = false;
+            }
+            KeyCode::Backspace | KeyCode::Delete => {
+                if let Some(text) = self.menu_edit.as_mut() {
+                    text.pop();
+                }
+            }
+            _ => {
+                if let Some(c) = route_char(code) {
+                    self.route_edit_text(&c.to_string());
+                    return;
+                }
+            }
+        }
+        self.refresh_list();
+        self.chooser = Some(0);
+    }
+
     /// A key while a route number is typed in the destination list (#836). Printable
     /// text comes through `route_edit_text` so keyboard layouts and symbols are preserved;
     /// physical key codes remain a fallback for platforms that do not provide text.
@@ -2032,6 +2065,17 @@ impl App {
     /// Text entered in OMSI's free route-number field. It is intentionally not restricted
     /// to letters and digits: add-on displays use values such as `-10` and other symbols.
     pub(crate) fn route_edit_text(&mut self, text: &str) {
+        if self.menu_edit_search {
+            if let Some(query) = self.menu_edit.as_mut() {
+                for c in text.chars().filter(|c| !c.is_control()) {
+                    if query.chars().count() >= 80 { break; }
+                    query.push(c);
+                }
+            }
+            self.refresh_list();
+            self.chooser = Some(0);
+            return;
+        }
         if !matches!(self.list_kind, Some(crate::game_lists::ListKind::RouteNumbers)) || self.menu_edit.is_none() {
             return;
         }
@@ -2135,6 +2179,8 @@ impl App {
         self.dropdown = None;
         if self.menu_edit_icao { if let Some(w)=self.window.as_ref(){w.set_ime_allowed(false);} }
         self.menu_edit_icao=false;
+        self.menu_edit_search = false;
+        self.menu_search.clear();
         self.menu_edit = None;
         self.chooser = None;
         self.admin_list = None;
@@ -2233,7 +2279,9 @@ impl App {
             return;
         }
         if self.menu_edit.is_some() {
-            if self.menu_edit_icao {
+            if self.menu_edit_search {
+                self.search_edit_key(code);
+            } else if self.menu_edit_icao {
                 self.icao_edit_key(code);
             } else if matches!(self.list_kind, Some(crate::game_lists::ListKind::RouteNumbers)) {
                 self.route_edit_key(code);
@@ -2444,13 +2492,8 @@ impl App {
         let paint = p.vehicle.host.paint_scheme.flatten().and_then(|i| p.vehicle.ty.paint_schemes.get(i)).map(|s| s.name.clone());
         // (the depot file by its file name, as `find_hof` looks for it)
         let hof = p.vehicle.host.hof.as_ref().and_then(|h| h.path.file_stem().map(|s| s.to_string_lossy().to_string()).or_else(|| Some(h.name.clone())));
-        let before = p.uid;
         self.swap_pending = true;
         self.place_vehicle(&bus, paint, hof);
-        if let Some(p) = self.player.as_ref().filter(|p| p.uid != before) {
-            let name = format!("{} {}", p.vehicle.ty.def.manufacturer, p.vehicle.ty.def.type_name);
-            self.service_msg = Some((format!("Reloaded from its files: {}", name.trim()), 4.0));
-        }
     }
 
     /// `q` (just spawned where the driven vehicle stands) becomes the one driven, and the
@@ -2481,6 +2524,11 @@ impl App {
     }
 
     pub(crate) fn place_vehicle(&mut self, bus: &str, paint: Option<String>, hof: Option<String>) {
+        if self.pending_placement.is_some() {
+            self.swap_pending = false;
+            self.service_msg = Some(("A vehicle is still loading".into(), 4.0));
+            return;
+        }
         // (in the driven vehicle's place, see `swap_pending`)
         let swap = std::mem::take(&mut self.swap_pending) && self.player.is_some();
         let name = self.vehicle_list.iter().find(|v| v.1 == bus).map(|v| v.0.clone()).unwrap_or_else(|| bus.to_string());
@@ -2491,7 +2539,7 @@ impl App {
             return;
         }
         let bus = bus.to_string();
-        let (Some(w), Some(r), Some(scene), Some(cam)) = (self.world.clone(), self.renderer.as_ref(), self.scene.as_mut(), self.camera.as_ref()) else { return };
+        let (Some(w), Some(r), Some(cam)) = (self.world.clone(), self.renderer.as_ref(), self.camera.as_ref()) else { return };
         let (x, y, heading) = match (self.view.as_str(), self.player.as_ref()) {
             (_, Some(p)) if swap => (p.vehicle.position.x, p.vehicle.position.y, p.vehicle.heading),
             ("free", _) | (_, None) => {
@@ -2522,21 +2570,75 @@ impl App {
             hof: hof.or(self.args.hof.clone()),
             ..self.args.clone()
         };
-        match spawn_player(&one, &w, r, scene) {
-            Ok(Some(q)) if swap => {
-                log::info!("{bus} takes the driven vehicle's place at ({x:.1}, {y:.1})");
+        let prefetch = w.placement_prefetch(r);
+        let worker_args = one.clone();
+        let (tx, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new().name("vehicle-placement".into()).spawn(move || {
+            let start = Instant::now();
+            let result = crate::spawn::PreparedPlayer::load(&worker_args).map(|mut prepared| {
+                prepared.prefetch(prefetch, worker_args.paint.as_deref());
+                prepared
+            });
+            log::info!("vehicle placement: preparation {:.3} s", start.elapsed().as_secs_f64());
+            let _ = tx.send(result);
+        });
+        match worker {
+            Ok(_) => {
+                self.pending_placement = Some(crate::spawn::PendingPlacement {
+                    receiver, world: w, args: one, name,
+                    replace: self.player.as_ref().filter(|_| swap).map(|p| p.uid), heading,
+                });
+                self.service_msg = Some(("Loading vehicle...".into(), 4.0));
+            }
+            Err(e) => self.service_msg = Some((format!("Could not place {name}: {e}"), 5.0)),
+        }
+    }
+
+    /// Poll once per redraw, including paused frames. No waiting or joining on the
+    /// event thread: a failed/disconnected worker leaves the current bus intact.
+    pub(crate) fn poll_vehicle_placement(&mut self) {
+        use std::sync::mpsc::TryRecvError;
+        let Some(mut pending) = self.pending_placement.take() else { return };
+        let prepared = match pending.receiver.try_recv() {
+            Err(TryRecvError::Empty) => {
+                self.pending_placement = Some(pending);
+                return;
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.service_msg = Some(("Vehicle loading stopped unexpectedly".into(), 5.0));
+                return;
+            }
+            Ok(Err(e)) => {
+                self.service_msg = Some((format!("Could not place {}: {e:#}", pending.name), 5.0));
+                return;
+            }
+            Ok(Ok(prepared)) => prepared,
+        };
+        if self.world.as_ref().is_none_or(|w| !Arc::ptr_eq(w, &pending.world)) {
+            return;
+        }
+        if let Some(uid) = pending.replace {
+            let Some(p) = self.player.as_ref().filter(|p| p.uid == uid) else { return };
+            // The original bus may have moved while its replacement was read.
+            pending.args.spawn = Some(format!("{},{},{},{}", p.vehicle.position.x, p.vehicle.position.y, p.vehicle.heading, p.vehicle.position.z));
+        }
+        let (Some(r), Some(scene)) = (self.renderer.as_ref(), self.scene.as_mut()) else { return };
+        let start = Instant::now();
+        let result = crate::spawn::spawn_player_prepared(&pending.args, &pending.world, r, scene, prepared);
+        log::info!("vehicle placement: scene/VM commit {:.3} s", start.elapsed().as_secs_f64());
+        match result {
+            Ok(Some(q)) if pending.replace.is_some() => {
                 self.replace_driven_vehicle(q);
+                self.service_msg = Some(("Vehicle loaded".into(), 4.0));
             }
             Ok(Some(q)) => {
-                log::info!("placed {bus} at ({x:.1}, {y:.1})");
                 let uid = q.uid;
                 self.placed.push(q);
-                // (then put down with the mouse, where the player wants it)
-                self.begin_placing(uid, heading);
-                let _ = name;
+                self.begin_placing(uid, pending.heading);
+                self.service_msg = Some(("Vehicle loaded".into(), 4.0));
             }
             Ok(None) => {}
-            Err(e) => self.service_msg = Some((format!("Could not place {name}: {e:#}"), 5.0)),
+            Err(e) => self.service_msg = Some((format!("Could not place {}: {e:#}", pending.name), 5.0)),
         }
     }
 

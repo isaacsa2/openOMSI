@@ -56,8 +56,17 @@ pub(crate) fn load_coupled_parts(
     root: &Path,
     vehicle: &mut omsi_sim::VehicleInstance,
 ) -> Vec<Arc<omsi_sim::VehicleType>> {
+    let loaded = load_coupled_types(root, vehicle.ty.clone());
+    attach_coupled_types(vehicle, loaded)
+}
+
+/// Read a consist without running its VMs or touching a live scene. Placement workers
+/// use the same path resolution and eight-part bound as synchronous startup.
+fn load_coupled_types(
+    root: &Path,
+    mut lead: Arc<omsi_sim::VehicleType>,
+) -> Vec<(Arc<omsi_sim::VehicleType>, bool)> {
     let mut parts = Vec::new();
-    let mut lead = vehicle.ty.clone();
     let mut lead_rev = false;
     for _ in 0..8 {
         let Some((path, reversed)) = next_coupled(&lead.def, lead_rev, true) else {
@@ -77,8 +86,7 @@ pub(crate) fn load_coupled_parts(
                     t.meshes.len(),
                     if reversed { ", reversed" } else { "" }
                 );
-                vehicle.attach_trailer_ex(t.clone(), reversed);
-                parts.push(t.clone());
+                parts.push((t.clone(), reversed));
                 lead = t;
                 lead_rev = reversed;
             }
@@ -93,6 +101,51 @@ pub(crate) fn load_coupled_parts(
         }
     }
     parts
+}
+
+fn attach_coupled_types(
+    vehicle: &mut omsi_sim::VehicleInstance,
+    loaded: Vec<(Arc<omsi_sim::VehicleType>, bool)>,
+) -> Vec<Arc<omsi_sim::VehicleType>> {
+    loaded.into_iter().map(|(ty, reversed)| {
+        vehicle.attach_trailer_ex(ty.clone(), reversed);
+        ty
+    }).collect()
+}
+
+pub(crate) struct PreparedPlayer {
+    pub(crate) ty: Arc<omsi_sim::VehicleType>,
+    parts: Vec<(Arc<omsi_sim::VehicleType>, bool)>,
+    staged: Option<scene::VehiclePrefetch>,
+}
+
+impl PreparedPlayer {
+    pub(crate) fn load(args: &Args) -> Result<Self> {
+        let bus = args.bus.as_deref().context("no vehicle selected")?;
+        let path = player_bus_path(&args.root, bus)?;
+        let ty = Arc::new(omsi_sim::VehicleType::load(&args.root, &path)?);
+        let parts = load_coupled_types(&args.root, ty.clone());
+        Ok(Self { ty, parts, staged: None })
+    }
+
+    pub(crate) fn prefetch(&mut self, prefetch: scene::VehiclePrefetch, paint: Option<&str>) {
+        let scheme = paint_scheme(&self.ty, paint);
+        prefetch.prefetch(&self.ty, scheme);
+        for (ty, _) in &self.parts {
+            prefetch.prefetch(ty, scheme.filter(|i| *i < ty.paint_schemes.len()));
+        }
+        self.staged = Some(prefetch);
+    }
+}
+
+/// At most one placement worker per app; it never holds a mutable scene or event loop.
+pub(crate) struct PendingPlacement {
+    pub(crate) receiver: std::sync::mpsc::Receiver<Result<PreparedPlayer>>,
+    pub(crate) world: Arc<World>,
+    pub(crate) args: Args,
+    pub(crate) name: String,
+    pub(crate) replace: Option<u64>,
+    pub(crate) heading: f64,
 }
 
 /// Choose the player's fleet number and registration before the script VM runs `{init}`.
@@ -162,11 +215,23 @@ pub(crate) fn spawn_player(
     renderer: &Renderer,
     scene: &mut Scene,
 ) -> Result<Option<Player>> {
-    let Some(bus) = &args.bus else {
+    if args.bus.is_none() {
         return Ok(None);
-    };
-    let path = player_bus_path(&args.root, bus)?;
-    let vt = Arc::new(omsi_sim::VehicleType::load(&args.root, &path)?);
+    }
+    spawn_player_prepared(args, world, renderer, scene, PreparedPlayer::load(args)?)
+}
+
+pub(crate) fn spawn_player_prepared(
+    args: &Args,
+    world: &World,
+    renderer: &Renderer,
+    scene: &mut Scene,
+    mut prepared: PreparedPlayer,
+) -> Result<Option<Player>> {
+    if let Some(staged) = prepared.staged.take() {
+        world.accept_placement_prefetch(staged);
+    }
+    let vt = prepared.ty;
     log::info!(
         "vehicle {} {}: {} meshes, {} script blocks, {} variables",
         vt.def.manufacturer,
@@ -302,7 +367,7 @@ pub(crate) fn spawn_player(
     }
     let render = world.add_vehicle(renderer, scene, &vt, scheme);
     // coupled rear sections / trailers
-    let trailer_renders: Vec<scene::VehicleRender> = load_coupled_parts(&args.root, &mut vehicle)
+    let trailer_renders: Vec<scene::VehicleRender> = attach_coupled_types(&mut vehicle, prepared.parts)
         .iter()
         .map(|t| {
             world.add_vehicle_part(
@@ -674,4 +739,40 @@ pub(crate) fn recorded_entry_pos(ep: &omsi_map::global::EntryPoint, object: DVec
     let s = omsi_map::tile_size();
     let (tx, ty) = ((object.x / s).floor(), (object.y / s).floor());
     ep.pos.iter().all(|v| v.is_finite()).then(|| DVec3::new(tx * s + ep.pos[0], ty * s + ep.pos[1], ep.pos[2]))
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_consist_follows_reversed_front_couplings_without_running_init() {
+        let dir = std::env::temp_dir().join(format!("omsi-placement-consist-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _cleanup = Cleanup(dir.clone());
+        for (file, body) in [
+            ("lead.bus", "[friendlyname]\nSynthetic\nLead\nTest\n[couple_back]\nfirst.bus\ntrue\n"),
+            ("first.bus", "[friendlyname]\nSynthetic\nFirst\nTest\n[couple_front]\nlast.bus\nfalse\n"),
+            ("last.bus", "[friendlyname]\nSynthetic\nLast\nTest\n"),
+        ] {
+            std::fs::write(dir.join(file), format!("{body}[model]\nempty.cfg\n")).unwrap();
+        }
+        std::fs::write(dir.join("empty.cfg"), "").unwrap();
+        let args = Args::parse_from(["omsi", "--root", dir.to_str().unwrap(), "--bus", "lead.bus"]);
+        let prepared = PreparedPlayer::load(&args).unwrap();
+        assert_eq!(prepared.parts.len(), 2);
+        assert!(prepared.parts.iter().all(|(_, reversed)| *reversed));
+        assert_eq!(prepared.parts[0].0.def.path.file_name().unwrap(), "first.bus");
+        assert_eq!(prepared.parts[1].0.def.path.file_name().unwrap(), "last.bus");
+        // A worker carries definitions only. Init and script sharing still happen
+        // once, when the prepared types are attached to the live instance.
+        let mut vehicle = omsi_sim::VehicleInstance::new(prepared.ty, omsi_sim::VehicleHost::new(start_clock(&args)));
+        let types = attach_coupled_types(&mut vehicle, prepared.parts);
+        assert_eq!(vehicle.trailers.len(), types.len());
+        assert!(vehicle.trailers.iter().all(|part| part.reversed));
+    }
 }
