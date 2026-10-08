@@ -30,7 +30,7 @@ checklist. It is updated as each step lands.
 | Fork | `isaacsa2/openOMSI`, `main` at the same commit |
 | Toolchain used for the checks | rustc 1.99.0 on Linux x86_64 (`Cargo.lock` needs 1.97.1 or newer) |
 
-Upstream is fetched again before every step (still `c85b2e0` up to R9b). The commit each step is based on is recorded in
+Upstream is fetched again before every step (still `c85b2e0` up to R11e). The commit each step is based on is recorded in
 its pull request.
 
 ## Baseline (upstream `c85b2e0`, before any step)
@@ -79,12 +79,26 @@ in this order.
 | R8 | GPU pass timers | `gpu_timers.rs` | PR #188 |
 | R9a | Fitting textures to the chip's size limit | `texture_fit.rs` | PR #189 |
 | R9b | Texture upload (prepared on worker threads, or the game's own pictures) | `texture_upload.rs` | PR #190 |
+| R10 | GPU waits on OpenGL, worker turns at the GL context, the device poll thread | `gpu_wait.rs` | PR #191 |
+| R11a | `Camera` | `camera.rs` | PR #192 |
+| R11b | `PointLight`, `LightMode`, `Corona` | `lights.rs` | PR #193 |
+| R11c | `Lighting` | `lighting.rs` | PR #194 |
+| R11d | Material types (`Material`, `MaterialExtra`, `PbrMaps`, `AlphaMode`, `TexAddressing`, `MaterialMaps`) | `material.rs` | PR #195 |
+| R11e | `Scene`, `Instance`, `RenderPhase` and the culling bounds | `scene.rs` | PR #196 (conflicts with #106, #144, #154, #159: one added field, resolution in the PR) |
+| R11f | GPU resources (`GpuMesh`, `GpuTexture`, ids, `BindKey`, `texture_bytes`, `next_gen`) | planned | |
+| R11g | Smoke particles and coronas on the GPU (`SmokeParticle`, `smoke_sprite`, `GpuCorona`) | planned | |
 | R4 | Bind group layouts of the camera and material groups, with `sixteen_texture_units` | `layouts.rs` | postponed: #106 and #143 change `camera_layout_entries` |
-| R10 | GPU waits on OpenGL (`wait_gpu`, `gl_worker_turn`) and the device poller | planned | |
-| R11 | Public scene types (camera, lighting, lights, materials, instances, scene), re-exported from the crate root | `types/` | planned |
-| R12 | `impl Renderer` split by responsibility (creation, resources, upload, frame) | `renderer/` | planned |
+| R12 | `impl Renderer` split by responsibility (creation and pipelines, resources, upload and bounds, lights, the frame) | `renderer/` | planned |
 
-`lib.rs` went from 15 830 to about 14 090 lines after R9b.
+`lib.rs` went from 15 830 to about 13 300 lines after R11e.
+
+Checkpoint at R11d (`76861b8`): `cargo test --locked --workspace --no-fail-fast` 1317 passed,
+0 failed, 36 ignored (same as the baseline); `cargo build --locked --release` passes. Each step
+also ran `cargo test -p omsi-render`, a workspace build, a Windows `cargo check`, `cargo doc`
+and trial merges with the open pull requests. In the fork's CI, `omsi-plugin --test lua`
+fails intermittently on Linux x64, also on branches that do not touch it; #171 addresses it.
+
+**Next step:** R11f, from the head of R11e (`refactor/render-scene-types-upstream-0.2.16`).
 
 ### omsi-app
 
@@ -104,18 +118,11 @@ in this order.
 
 ## Checklist
 
-- [x] R1 shader source (PR #168)
-- [x] R2 device capabilities (PR #170)
-- [x] R3 GPU arrays (PR #172)
-- [x] R5 mesh pages (PR #173)
-- [x] R6 batching (PR #175)
-- [x] R7 enhanced light model (PR #187)
-- [x] R8 GPU timers (PR #188)
-- [x] R9a texture fitting (PR #189)
-- [x] R9b texture upload (PR #190)
+- [x] R1–R3, R5–R10 (PRs #168, #170, #172, #173, #175, #187–#191)
+- [x] R11a–R11e public types: camera, lights, lighting, materials, scene (PRs #192–#196)
+- [ ] R11f GPU resources
+- [ ] R11g smoke and coronas on the GPU
 - [ ] R4 bind group layouts (postponed)
-- [ ] R10 GPU waits and device poller
-- [ ] R11 public scene types
 - [ ] R12 `impl Renderer` split
 - [ ] A1–A5 `omsi-app`
 - [ ] S1 `omsi-sim`
@@ -130,3 +137,5 @@ in this order.
   `lib.rs` after step R2.
 * Off the lanes, the traffic asks every lane of the map for its traffic light each frame
   (`omsi-app/src/traffic.rs`, the depot gate requests); about 0.4 ms with 60 000 lanes.
+* `omsi-plugin --test lua` (`panels_clicks_and_focus_through_omsi_ui`) fails intermittently in
+  CI on Linux x64: the fixture is rewritten within the same mtime (fix proposed in #171).
