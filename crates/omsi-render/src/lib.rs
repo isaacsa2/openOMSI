@@ -2492,7 +2492,7 @@ impl Renderer {
         let mem = adapter.memory_info();
         let vram = adapter_vram_mb(&adapter, &info, mem.as_ref());
         let guess_mb = gpu_memory::texture_allowance_mb(&info, vram);
-                ADAPTER_TEXTURE_MB.store(guess_mb, std::sync::atomic::Ordering::Relaxed);
+        ADAPTER_TEXTURE_MB.store(guess_mb, std::sync::atomic::Ordering::Relaxed);
         let discrete_vram = vram.filter(|_| info.device_type == wgpu::DeviceType::DiscreteGpu).unwrap_or(0);
         ADAPTER_VRAM_MB.store(discrete_vram, std::sync::atomic::Ordering::Relaxed);
         *ADAPTER_INFO.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
