@@ -2970,6 +2970,21 @@ impl Humans {
         }
     }
 
+    /// Any reported passenger/animation state makes the script authoritative, including
+    /// buses whose front door is not an entry. Only wholly unreported AI doors use a timer.
+    fn reports_doors(v: &VehicleInstance, n_entry: usize, n_exit: usize) -> bool {
+        let base = if n_entry <= 1 { 1 } else { 2 };
+        [("Entry", n_entry, 0), ("Exit", n_exit, base)]
+            .into_iter()
+            .any(|(kind, count, offset)| {
+                (0..count).any(|i| {
+                    Self::script_reports(v, &format!("PAX_{kind}{i}_Open"))
+                        || v.var(&format!("door_{}", offset + i)).is_some()
+                        || v.var(&format!("door{}", offset + i)).is_some()
+                })
+            })
+    }
+
     /// `PAX_Entry<i>_Open` / `PAX_Exit<i>_Open` as the bus script reports them. A bus whose
     /// script never sets them (or only sets some of them) falls back to its physical `door_<i>`
     /// or `door<i>` animations; an entry or exit past the eighth without variables of its own
@@ -3002,7 +3017,7 @@ impl Humans {
             out
         };
         let entry = states("Entry", n_entry, &door_val);
-        let exit = states("Exit", n_exit, &|i| door_val((exit_door_base + i).min(7)));
+        let exit = states("Exit", n_exit, &|i| door_val(exit_door_base + i));
         (entry, exit)
     }
 
@@ -3217,7 +3232,7 @@ impl Humans {
                     vec![false; cabin.exits.len()],
                 );
                 if open {
-                    if Self::script_reports(&c.vehicle, "PAX_Entry0_Open") || c.vehicle.var("door_0").is_some() || c.vehicle.var("door0").is_some() {
+                    if Self::reports_doors(&c.vehicle, cabin.entries.len(), cabin.exits.len()) {
                         let (e, x) =
                             Self::doors_open(&c.vehicle, cabin.entries.len(), cabin.exits.len());
                         entry_open = e;
@@ -6180,6 +6195,43 @@ mod tests {
         assert!((p.y - 7.0).abs() < 1e-6);
         assert!((h - 180.0).abs() < 1e-6);
         assert!((back.project(&net, DVec3::new(0.3, 5.0, 0.0), 2.5) - 3.0).abs() < 0.11);
+    }
+
+    #[test]
+    fn articulated_exits_do_not_share_the_last_front_animation() {
+        let dir = std::env::temp_dir().join(format!("omsi-articulated-doors-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("test.bus"),
+            "[model]\nmodel.cfg\n[varnamelist]\n1\nvars.txt\n[script]\n1\nmain.osc\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("model.cfg"), "").unwrap();
+        std::fs::write(
+            dir.join("vars.txt"),
+            "door_7\ndoor_8\ndoor_9\nPAX_Exit7_Open\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("main.osc"), "{init}\n{end}\n").unwrap();
+        let ty = Arc::new(omsi_sim::VehicleType::load(&dir, &dir.join("test.bus")).unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+        let mut v = VehicleInstance::new(ty, omsi_sim::VehicleHost::new(Default::default()));
+        assert!(
+            Humans::reports_doors(&v, 2, 8),
+            "rear-only state must disable the AI timer fallback"
+        );
+        v.set_var("door_7", 1.0);
+        let (_, exits) = Humans::doors_open(&v, 2, 8);
+        assert!(exits[5]);
+        assert!(!exits[6], "door_8 is still closed");
+        assert!(!exits[7], "explicit PAX exit state is closed");
+        v.set_var("door_8", 1.0);
+        v.set_var("door_9", 1.0);
+        let (_, exits) = Humans::doors_open(&v, 2, 8);
+        assert!(exits[6]);
+        assert!(!exits[7], "PAX state overrides the physical animation");
+        v.set_var("PAX_Exit7_Open", 1.0);
+        assert!(Humans::doors_open(&v, 2, 8).1[7]);
     }
 
     #[test]
