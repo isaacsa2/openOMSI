@@ -2864,6 +2864,38 @@ mod settings_tests {
     }
 
     #[test]
+    fn mobile_stacked_graphics_exposes_and_saves_cloud_quality() {
+        let mut ui = Ui::new();
+        let mut s = all_rows();
+        let mut out = outside();
+        ui.begin(Vec2::new(430.0, 1600.0), 1.0, 1.0 / 60.0);
+        let mut dirty = 0.0;
+        settings_tab(
+            &mut ui,
+            0,
+            &mut s,
+            &mut dirty,
+            &mut out,
+            [
+                Rect::new(12.0, 0.0, 406.0, 760.0),
+                Rect::new(12.0, 780.0, 406.0, 760.0),
+            ],
+        );
+        assert!(
+            ui.drawn.contains_key(&id_of("s-cloud-quality")),
+            "mobile/stacked Graphics must expose cloud quality"
+        );
+
+        s["cloud_quality"] = json!("high");
+        let saved = core::settings_to_text(&s, None);
+        let roundtrip = core::settings_from_text(Some(&saved));
+        assert_eq!(roundtrip["cloud_quality"], "high");
+
+        let game = crate::settings::Settings::from_text(&saved);
+        assert_eq!(game.cloud_quality, "high");
+    }
+
+    #[test]
     fn right_stick_look_switch_toggles_and_saves_from_the_camera_tab() {
         let mut s = all_rows();
         assert_eq!(s["right_stick_look"], json!(true));
