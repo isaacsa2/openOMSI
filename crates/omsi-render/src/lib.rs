@@ -3582,7 +3582,7 @@ impl Renderer {
                 },
             ],
         });
-        let (cloud_shape_view, cloud_detail_view, cloud_sampler, cloud_shape_cpu) = cloud_noise_textures(&device, &queue);
+        let (cloud_shape_view, cloud_detail_view, cloud_sampler, cloud_shape_cpu) = cloud_noise_textures(&device, &queue, options.cloud_quality != 1);
         log::info!("renderer: compiling the sky and clouds shaders");
         let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sky"),
@@ -12285,13 +12285,17 @@ fn lean_scene(src: String) -> String {
 
 /// The enhanced clouds' noise textures (clouds.rs), made once: the shape map (2-D RGBA8)
 /// and the detail volume (3-D R8), both with their mip chains, and a repeating sampler.
-fn cloud_noise_textures(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Sampler, Vec<u8>) {
+fn cloud_noise_textures(device: &wgpu::Device, queue: &wgpu::Queue, enhanced_noise: bool) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Sampler, Vec<u8>) {
     let t0 = std::time::Instant::now();
-    let (shape, detail) = std::thread::scope(|s| {
-        let a = s.spawn(clouds::shape_map);
-        let b = s.spawn(clouds::detail_volume);
-        (a.join().expect("cloud shape"), b.join().expect("cloud detail"))
-    });
+    let (shape, detail) = if enhanced_noise {
+        std::thread::scope(|s| {
+            let a = s.spawn(clouds::shape_map);
+            let b = s.spawn(clouds::detail_volume);
+            (a.join().expect("cloud shape"), b.join().expect("cloud detail"))
+        })
+    } else {
+        (vec![vec![0, 0, 0, 255]], vec![vec![0]])
+    };
     let make = |label: &str, size: u32, dim: wgpu::TextureDimension, format: wgpu::TextureFormat, bpp: u32, levels: &[Vec<u8>]| {
         let depth = if dim == wgpu::TextureDimension::D3 { size } else { 1 };
         let tex = device.create_texture(&wgpu::TextureDescriptor {
@@ -12316,8 +12320,8 @@ fn cloud_noise_textures(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::Te
         }
         tex.create_view(&wgpu::TextureViewDescriptor::default())
     };
-    let shape_view = make("cloud shape", clouds::SHAPE_SIZE, wgpu::TextureDimension::D2, wgpu::TextureFormat::Rgba8Unorm, 4, &shape);
-    let detail_view = make("cloud detail", clouds::DETAIL_SIZE, wgpu::TextureDimension::D3, wgpu::TextureFormat::R8Unorm, 1, &detail);
+    let shape_view = make("cloud shape", if enhanced_noise { clouds::SHAPE_SIZE } else { 1 }, wgpu::TextureDimension::D2, wgpu::TextureFormat::Rgba8Unorm, 4, &shape);
+    let detail_view = make("cloud detail", if enhanced_noise { clouds::DETAIL_SIZE } else { 1 }, wgpu::TextureDimension::D3, wgpu::TextureFormat::R8Unorm, 1, &detail);
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("cloud noise"),
         address_mode_u: wgpu::AddressMode::Repeat,
@@ -15061,6 +15065,7 @@ mod tests {
             let mut renderer = pollster::block_on(Renderer::new_with(&instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb), RenderOptions { msaa: 1, ssao: false, cloud_quality, ..Default::default() })).unwrap();
             assert!(renderer.sky_mirror_pipeline.is_some());
             assert!(renderer.probe.is_some());
+            assert_eq!(renderer.cloud_shape_cpu.is_empty(), cloud_quality == 1);
             let mut scene = renderer.new_scene();
             let sky = renderer.add_texture(&mut scene, &omsi_texture::Image { width: 2, height: 2, rgba: vec![180; 16], has_alpha: true }, true);
             renderer.set_sky_textures_photographic_clouds(&mut scene, [sky; 3], Some(sky), Some(sky));
