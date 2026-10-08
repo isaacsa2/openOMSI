@@ -48,7 +48,7 @@ Everything can also be given on the command line, which then skips both:
 | `--drive-keys wasd` | let W/A/S/D drive instead of the arrow keys |
 | `--autostart` | put the bus into service before the run (as Shift+U does) |
 | `--click x,y[,dx,dy]` | press (and drag) the cockpit switch at that pixel, offscreen |
-| `--season winter` / `--situation x.osn` / `--physics simple` | season override, a saved situation, the kinematic dynamics instead of the rigid body |
+| `--season winter` (`autumn-late`, `spring-early`, …) / `--situation x.osn` / `--physics simple` | season override, a saved situation, the kinematic dynamics instead of the rigid body |
 | `--enhanced` / `--export-glb bus.glb` | the physically based renderer; write the bus as glTF (the launcher's preview) and quit |
 | `--enhanced-plus` | Enhanced+: the physically based renderer with ray-traced shadows, ambient occlusion and reflections |
 | `--launcher` / `--menu` / `--no-menu` | open the launcher (the default without arguments), the in-game menu, or neither |
@@ -104,6 +104,8 @@ down to the bottom edge the brake. Above 10 km/h the same hand movement turns th
 and less (at 50 km/h a fifth as far), so the wheel feels heavier the faster the bus goes; for
 the first second after switching it on the wheel and the pedals ease towards the cursor.
 Settings → Driving → *Mouse steering sensitivity* makes it more or less sensitive (100 % = OMSI).
+*Mouse pedal strength* sets how much cursor travel is needed to reach full accelerator or
+braking: above 100 % the pedal reaches full sooner and below 100 % it takes more travel.
 Mouse steering works in the driver's, the passenger and the outside view; the wheel follows
 the cursor smoothly (a short easing, no steps). With *Smooth mouse steering* off (Settings →
 Driving) the wheel and the pedals are where the cursor says at once, as in OMSI.
@@ -270,6 +272,10 @@ menu's, the timetable's, the plates under the notes - 0.2 to 1, the texts stayin
 as designed; `navigator_opacity` in older files),
 `navigator_corner` (`bottom-left` default, `bottom-right`, `top-left`, `top-right`),
 `nav_ai` (the other AI vehicles as dots on the navigator and the city map; on by default),
+`ai_wait_timed_stops_only` (an AI timetable bus ahead of its time waits for its departure only
+at its first and last stop, railway stations and the stops the timetable gives a time of their
+own, and drives on from the others once boarding is done; off by default: it waits at every
+stop it serves, as in OMSI),
 `boarding`, `detail_textures`, `exact_fare`, `enhanced`, `fullscreen`, `vsync`, `volume`
 and `drive_keys`, plus `render_scale` (`auto` or a fraction: the picture is drawn smaller
 and upscaled), `post_aa` (`fxaa`, the enhanced renderer's, or `off`), `view_distance` (m,
@@ -302,11 +308,26 @@ rest breathes and shifts its weight, and 0 of it is exactly as OMSI; most of it 
 the bus waits at a stop) and `head_idle_pace` (0.5..2: how fast that sway moves, 1 being the
 pace it is designed at), `collision_objects` (walls, poles and bridges stop the bus; off is OMSI's `no_collision`
 option and is taken from OMSI's options when openOMSI starts the first time), `graphics_api`
-(`auto`, `vulkan`, `dx12` on Windows, `gl`: which graphics interface the game asks first -
-with `auto` Vulkan, then DirectX 12, then OpenGL), `ctrl_off` (game controllers switched off
+(`auto`, `vulkan`, `dx12` on Windows, `gl`, `angle` on Windows: which graphics interface the
+game asks first - with `auto` on Windows DirectX 12, then Vulkan, then OpenGL, then ANGLE;
+elsewhere Vulkan, then OpenGL; see *Graphics API* below), `ctrl_off` (game controllers switched off
 on the Controllers page, by name, separated by `|`) and `language` (`ENG`, `DEU`, `FRA`: the language the HUD names cockpit switches
 in). The file also carries a `version`; older files that say
 `boarding=pay` because that was the launcher's old default are read as `auto`.
+With `collision_vehicles` enabled, impacts against AI traffic are delivered to the struck
+vehicle's collision scripts and deform a localized part of its body mesh where the model
+has editable body geometry.
+
+**Graphics API** (Settings → Display, `graphics_api`): the interface named is asked first and
+the others follow, so a machine without it still starts. *ANGLE (DirectX 11)* (Windows) runs
+OpenGL ES through Google's ANGLE on the card's DirectX 11 driver: for graphics chips whose
+DirectX 12, Vulkan and OpenGL drivers are missing or broken (Intel HD Graphics 2000-4000, AMD
+Radeon HD 5000/6000). It is tried last, after the other three failed, and only when
+`libEGL.dll` and `libGLESv2.dll` (Google's ANGLE, BSD licence, with its Direct3D 11 renderer)
+are next to `openomsi.exe`; without them it is skipped (the log says so). The Windows package
+is to ship them, built from ANGLE's own source by
+[angle-openomsi](https://github.com/openOMSI-Project/angle-openomsi); with them the log names the
+adapter `ANGLE (…Direct3D11…)` on the `Gl` backend.
 
 `drive_keys` is a control preset: `simple` (W/S/A/D and the arrow keys drive; the default),
 `wasd`, `arrows`, or `omsi` ("Custom controls") - only the layout of `Inputs/keyboard.cfg`
@@ -497,10 +518,20 @@ and buses inside the archives.
 ## Season and weather
 
 The launcher's Departure card has a **Season** choice (spring / summer / autumn / winter,
-or by the date as in the original). Choosing one moves the date into that season, so the
-timetable and holidays follow, passes `--season` to the game (which picks the map's
-seasonal texture folder), and the weather list only offers what fits: snowfall and frost
-only in winter, no cold presets in summer.
+or by the date as in the original), and under a chosen season its **Early / Mid / Late**
+part. The phases are the meteorological season's three months (northern spring: March,
+April, May; half a year later on a map south of the equator), and choosing one moves the
+date to a typical day of it (10th, 15th, 20th; the year and the time of day stay), so the
+sun, the length of the day, the natural weather's temperature and snow, the street lamps,
+the timetable and holidays all follow. `--season autumn-late` does the same from the
+command line (`--season autumn` is the middle; a `--date` already in the phase's month is
+kept). The map's seasonal textures follow the phase - early spring still bare (`Winter`),
+late summer dry (`SummerDry`), early autumn green, mid autumn coloured (`Fall`), late
+autumn bare - and the trees and bushes are mixed between the two looks the phase lies
+between: in early autumn a quarter of them have turned, in mid autumn four in five, in
+late autumn most stand bare and some still carry their leaves (each plant by its own
+number, the same every time and for every LAN player). The weather list only offers what
+fits: snowfall and frost only in winter, no cold presets in summer.
 
 Weather presets (`Weather/*.owt`) change the light: overcast takes the sun away, rain and
 fog thicken the air, a snow preset puts any map into its winter textures with snow cover.
@@ -660,7 +691,7 @@ Environment variables, all off unless set. The useful ones:
 | `OMSI_PARKED_PULL_OUT=p` | the chance per population pass (about 2 s) that a parked car drives off (0.035 by default), with a log of why one does not |
 | `OMSI_NO_BRIDGE=1` | a LAN host leaves the internet alone (no UPnP port forward, no address posting) - for tests |
 | `OMSI_NO_LAN_MODS=1` | a LAN host serves no mods and a joining game fetches none |
-| `OMSI_BACKEND=vulkan\|dx12\|gl` | the graphics interface to ask first (the log lists every adapter each one offers) |
+| `OMSI_BACKEND=vulkan\|dx12\|gl\|angle` | the graphics interface to ask first (the log lists every adapter each one offers; `angle`, also `dx11`/`d3d11`: OpenGL ES on ANGLE over DirectX 11, Windows, with ANGLE's DLLs beside the game) |
 | `OMSI_GPU_LIMITS=default\|downlevel` | pretend the graphics card can only do this much (tests of old cards) |
 | `OMSI_GPU_ARRAYS=textures\|nostorage` | read the scene's arrays from textures, as on OpenGL chips without storage buffers in the vertex shader (or without any: no per-pixel lamp light) - tests of old cards |
 | `OMSI_GL_TEXTURE_UNITS=1` | with `OMSI_GPU_ARRAYS`, keep to the sixteen texture units OpenGL has there, as such a chip does: the enhanced graphics are left out (vanilla+ is drawn) |
@@ -726,6 +757,18 @@ and keeps the downloads for the next time (`~/.openomsi/lan-store`). Listing a b
 takes the host a while after it starts (Novi Sad, 27 000 files: 20 s on a fast computer); a joining game waits
 for it. Maps installed straight into the OMSI 2 folder are not passed on: both players need
 them.
+
+The host's mods are for playing the session, not for keeping: they travel encrypted (a key
+agreement of every connection's own, bound to the session, then ChaCha20-Poly1305), and the
+joining game never writes them to the disk in plain form. `~/.openomsi/lan-store` holds each
+file sealed with the store's key (a fresh nonce per file) and named by a keyed hash, and the
+game reads them decrypted into memory only; copying them out of the game's folders gives
+noise, and so does listening on the network. Both players need this version (an older game
+is told to update). Honestly, that is all it does: openOMSI is open source and the
+decryption runs on the player's own computer, so a changed build or a dump of the game's
+memory still gets the files, and the store's key lies on the same computer (sealed by
+Windows for the user's account, elsewhere a file only the user can read: obfuscation, not a
+lock). The host's own copy is the host's mod folder, unprotected as ever.
 
 **One world.** The host simulates the AI traffic, the timetable buses, the people on the
 pavements and at the stops, the riders of the timetable buses and the traffic lights for
