@@ -30,7 +30,7 @@ checklist. It is updated as each step lands.
 | Fork | `isaacsa2/openOMSI`, `main` at the same commit |
 | Toolchain used for the checks | rustc 1.99.0 on Linux x86_64 (`Cargo.lock` needs 1.97.1 or newer) |
 
-Upstream is fetched again before every step. The commit each step is based on is recorded in
+Upstream is fetched again before every step (still `c85b2e0` at R2). The commit each step is based on is recorded in
 its pull request.
 
 ## Baseline (upstream `c85b2e0`, before any step)
@@ -68,9 +68,9 @@ Order: `omsi-render` first, then the `omsi-app` subsystems, then the rest.
 | # | Step | Moves to | State |
 | --- | --- | --- | --- |
 | R1 | Shader source assembly (WGSL text and its adaptation to the device) | `shader_source.rs` | PR #168 |
-| R2 | Device capabilities: backend, array path, feature flags, adapter memory, the per-adapter fallback file | `device_caps.rs` | in progress |
+| R2 | Device capabilities: backend, array path, feature flags, adapter memory, the per-adapter fallback file | `device_caps.rs` | PR #170 (on #168) |
 | R3 | GPU arrays (storage buffer or texture) and their texture spans | `gpu_array.rs` | planned |
-| R4 | Bind group layouts of the camera and material groups | `layouts.rs` | planned |
+| R4 | Bind group layouts of the camera and material groups, with `sixteen_texture_units` | `layouts.rs` | planned |
 | R5 | Mesh pages and mesh/texture preparation on worker threads | `mesh_pages.rs`, `prepare.rs` | planned |
 | R6 | Draw batching and recording (`DrawItem`, `Batch`, `batch_items`, `encode_batches*`) | `batching.rs` | planned |
 | R7 | Exposure, sky light and fog maths of the enhanced path | `sky_light.rs` | planned |
@@ -97,7 +97,7 @@ Order: `omsi-render` first, then the `omsi-app` subsystems, then the rest.
 ## Checklist
 
 - [x] R1 shader source (PR #168)
-- [ ] R2 device capabilities
+- [x] R2 device capabilities (PR #170)
 - [ ] R3 GPU arrays
 - [ ] R4 bind group layouts
 - [ ] R5 mesh pages and preparation
@@ -115,5 +115,7 @@ Order: `omsi-render` first, then the `omsi-app` subsystems, then the rest.
 * `Cargo.lock` needs rustc 1.97.1 or newer (`reedsolomon-rs`); `docs/BUILDING.md` names no
   minimum Rust version.
 * `snow_shader_source` and `corona_shader_source` repeat the same no-storage replacement.
+* `RT_GBUF`'s comment ("the two above") points at `GBUF_FORMAT`/`AUX_FORMAT`, which stay in
+  `lib.rs` after step R2.
 * Off the lanes, the traffic asks every lane of the map for its traffic light each frame
   (`omsi-app/src/traffic.rs`, the depot gate requests); about 0.4 ms with 60 000 lanes.
