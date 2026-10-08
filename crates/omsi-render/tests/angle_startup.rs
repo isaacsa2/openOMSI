@@ -7,6 +7,48 @@
 #[test]
 #[ignore = "requires Windows and the packaged ANGLE DLLs"]
 fn angle_d3d11_compiles_and_draws_on_warp() {
+    // Flags and the remembered fallback are process-global. Each combination gets a
+    // fresh process; a native abort in one case must not hide the others' results.
+    if let Ok(case) = std::env::var("ANGLE_STARTUP_CASE") {
+        let (basic, no_enhanced) = case.split_once(':').expect("test case");
+        let basic = basic == "true";
+        let no_enhanced = no_enhanced == "true";
+        std::thread::Builder::new()
+            .name("ANGLE WARP renderer".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || run_case(basic, no_enhanced))
+            .expect("renderer thread")
+            .join()
+            .expect("renderer thread failed");
+        return;
+    }
+    let mut failures = Vec::new();
+    for basic in [false, true] {
+        for no_enhanced in [true, false] {
+            let case = format!("{basic}:{no_enhanced}");
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.args([
+                "--exact",
+                "angle_d3d11_compiles_and_draws_on_warp",
+                "--ignored",
+                "--nocapture",
+            ]);
+            command.env("ANGLE_STARTUP_CASE", &case);
+            if basic {
+                command.env("OMSI_BASIC_PIPELINES", "1");
+            } else {
+                command.env_remove("OMSI_BASIC_PIPELINES");
+            }
+            let status = command.status().expect("ANGLE regression process");
+            if !status.success() {
+                failures.push(format!("{case}: {status}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "ANGLE startup failures: {failures:?}");
+}
+
+fn run_case(basic: bool, no_enhanced: bool) {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .try_init();
     let directory = std::env::var("ANGLE_TEST_LIBRARY_DIRECTORY").expect("ANGLE DLL directory");
@@ -16,12 +58,11 @@ fn angle_d3d11_compiles_and_draws_on_warp() {
     }
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::GL;
-    descriptor.backend_options.gl.platform = wgpu::GlPlatform::Angle;
     descriptor.backend_options.gl.angle.device_type = wgpu::AngleDeviceType::Warp;
     descriptor.backend_options.gl.angle.library_directory =
         Some(directory.to_string_lossy().into_owned());
     descriptor.backend_options.gl.context_lock_timeout = Some(std::time::Duration::from_secs(30));
-    let instance = wgpu::Instance::new(descriptor);
+    let instance = omsi_render::angle::instance(descriptor);
     let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL));
     assert!(!adapters.is_empty(), "ANGLE/WARP did not expose an adapter");
     for adapter in &adapters {
@@ -31,57 +72,48 @@ fn angle_d3d11_compiles_and_draws_on_warp() {
         assert!(info.name.contains("ANGLE"), "expected ANGLE: {info:?}");
         assert_eq!(info.device_type, wgpu::DeviceType::Cpu, "expected WARP");
     }
-    for basic in [false, true] {
-        if basic {
-            std::env::set_var("OMSI_BASIC_PIPELINES", "1");
-        } else {
-            std::env::remove_var("OMSI_BASIC_PIPELINES");
-        }
-        for no_enhanced in [true, false] {
-            eprintln!("ANGLE WARP: basic={basic}, no_enhanced={no_enhanced}");
-            let mut renderer = pollster::block_on(omsi_render::Renderer::new_with(
-                &instance,
-                None,
-                Some(wgpu::TextureFormat::Rgba8UnormSrgb),
-                omsi_render::RenderOptions {
-                    msaa: 1,
-                    shadow_size: 256,
-                    no_enhanced,
-                    ..Default::default()
-                },
-            ))
-            .expect("ANGLE renderer");
-            if !basic {
-                assert!(
-                    !omsi_render::basic_pipelines(),
-                    "full pipeline set silently fell back to basic"
-                );
-            }
-            let scope = renderer
-                .device
-                .push_error_scope(wgpu::ErrorFilter::Validation);
-            let mut scene = renderer.new_scene();
-            let camera = omsi_render::Camera {
-                position: glam::DVec3::new(0.0, -35.0, 30.0),
-                yaw: 0.0,
-                pitch: -40.0,
-                roll: 0.0,
-                fov_deg: 60.0,
-                near: 0.1,
-                far: 1000.0,
-            };
-            let pixels = renderer
-                .render_to_image(
-                    &mut scene,
-                    16,
-                    16,
-                    &camera,
-                    &omsi_render::Lighting::default(),
-                )
-                .expect("ANGLE first frame and readback");
-            assert_eq!(pixels.len(), 16 * 16 * 4);
-            assert!(pollster::block_on(scope.pop()).is_none());
-            assert!(renderer.device_lost().is_none());
-        }
+    eprintln!("ANGLE WARP: basic={basic}, no_enhanced={no_enhanced}");
+    let mut renderer = pollster::block_on(omsi_render::Renderer::new_with(
+        &instance,
+        None,
+        Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        omsi_render::RenderOptions {
+            msaa: 1,
+            shadow_size: 256,
+            no_enhanced,
+            ..Default::default()
+        },
+    ))
+    .expect("ANGLE renderer");
+    if !basic {
+        assert!(
+            !omsi_render::basic_pipelines(),
+            "full pipeline set silently fell back to basic"
+        );
     }
+    let scope = renderer
+        .device
+        .push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut scene = renderer.new_scene();
+    let camera = omsi_render::Camera {
+        position: glam::DVec3::new(0.0, -35.0, 30.0),
+        yaw: 0.0,
+        pitch: -40.0,
+        roll: 0.0,
+        fov_deg: 60.0,
+        near: 0.1,
+        far: 1000.0,
+    };
+    let pixels = renderer
+        .render_to_image(
+            &mut scene,
+            16,
+            16,
+            &camera,
+            &omsi_render::Lighting::default(),
+        )
+        .expect("ANGLE first frame and readback");
+    assert_eq!(pixels.len(), 16 * 16 * 4);
+    assert!(pollster::block_on(scope.pop()).is_none());
+    assert!(renderer.device_lost().is_none());
 }

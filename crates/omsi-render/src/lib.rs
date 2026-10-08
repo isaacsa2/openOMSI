@@ -1,5 +1,6 @@
 //! wgpu renderer.
 
+pub mod angle;
 pub mod atmosphere;
 pub mod clouds;
 mod passes;
@@ -2899,7 +2900,12 @@ impl Renderer {
             let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
             let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
             let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let renderer = Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
+            let build = || Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
+            let renderer = if cfg!(windows) && info.backend == wgpu::Backend::Gl && info.name.contains("ANGLE") {
+                angle::compile(build)
+            } else {
+                build()
+            };
             // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
             #[cfg(feature = "test-hooks")]
             if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
