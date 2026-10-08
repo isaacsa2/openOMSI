@@ -1,6 +1,10 @@
 //! The launcher's other pages: the driver's profile, the settings, the key bindings, the
 //! running games, the mods and where things are.
 
+mod storage;
+pub use storage::StorageView;
+use storage::storage_tab;
+
 use super::state::{fmt_bytes, hhmm, short_map};
 use super::theme::*;
 use super::ui::{id_of, matches, ButtonKind, Ui};
@@ -33,94 +37,6 @@ pub struct PagesView {
     pub storage: StorageView,
     pub pads: PadsView,
     pub tt: super::timetable::TimetableView,
-}
-
-enum StorageEvent {
-    Progress(String),
-    Done(std::result::Result<crate::asset_storage::StorageReport, String>),
-}
-
-#[derive(Default)]
-pub struct StorageView {
-    root: String,
-    report: Option<crate::asset_storage::StorageReport>,
-    message: String,
-    job: Option<std::sync::mpsc::Receiver<StorageEvent>>,
-    confirm_restore: bool,
-}
-
-impl StorageView {
-    fn busy(&self) -> bool {
-        self.job.is_some()
-    }
-
-    fn refresh_root(&mut self, root: &std::path::Path) {
-        let key = root.to_string_lossy().to_string();
-        if self.root == key || self.busy() {
-            return;
-        }
-        self.root = key;
-        self.report = if root.as_os_str().is_empty() { None } else { Some(crate::asset_storage::quick_status(root)) };
-        self.message.clear();
-        self.confirm_restore = false;
-    }
-
-    fn poll(&mut self) {
-        let mut finished = false;
-        if let Some(rx) = self.job.as_ref() {
-            loop {
-                match rx.try_recv() {
-                    Ok(StorageEvent::Progress(m)) => self.message = m,
-                    Ok(StorageEvent::Done(Ok(r))) => {
-                        self.report = Some(r);
-                        self.message = "Done.".into();
-                        self.confirm_restore = false;
-                        finished = true;
-                        break;
-                    }
-                    Ok(StorageEvent::Done(Err(e))) => {
-                        self.message = e;
-                        finished = true;
-                        break;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.message = "The storage task stopped unexpectedly.".into();
-                        finished = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if finished {
-            self.job = None;
-        }
-    }
-
-    fn start(&mut self, root: PathBuf, mode: crate::asset_storage::Mode) {
-        if self.busy() || root.as_os_str().is_empty() {
-            return;
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.job = Some(rx);
-        self.confirm_restore = false;
-        self.message = match mode {
-            crate::asset_storage::Mode::Analyze => "Analyzing content…",
-            crate::asset_storage::Mode::Compress => "Compressing content…",
-            crate::asset_storage::Mode::Restore => "Restoring original files…",
-        }
-        .into();
-        let _ = std::thread::Builder::new()
-            .name("content compression".into())
-            .spawn(move || {
-                let progress_tx = tx.clone();
-                let result = crate::asset_storage::execute(&root, mode, |m| {
-                    let _ = progress_tx.send(StorageEvent::Progress(m));
-                })
-                .map_err(|e| format!("{e:#}"));
-                let _ = tx.send(StorageEvent::Done(result));
-            });
-    }
 }
 
 /// The game controllers tab: the devices `gamectrler.cfg` sets up, the ones connected now,
@@ -665,6 +581,11 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
         }
         sel_setting(ui, s, dirty, "s-casters", c.row(), "Shadows cast by", "shadow_casters", &[("all", "Every solid mesh"), ("omsi", "[shadow] meshes, as OMSI")]);
         toggle_setting(ui, s, dirty, c.row(), "Detail texturing up close", "detail_textures");
+        let mut night = get(s, "night_brightness").as_f64().unwrap_or(0.0) as f32;
+        if ui.slider("s-night", c.row(), &mut night, 0.0, 3.0, 0.25, "Night brightness", &|v| if v < 0.01 { "Off".to_string() } else { format!("+{v:.2}") }) {
+            s["night_brightness"] = json!((night / 0.25).round() * 0.25);
+            *dirty = 0.3;
+        }
         // (an LED panel's dots are its own light: how bright they burn, and how much of the
         // mip chain the panel's picture and its mask are held at - 0 point-samples them,
         // the sharpest dots and the worst shimmer; higher holds them at the level the
@@ -697,9 +618,10 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     toggle_setting(ui, s, dirty, c.row(), "V-sync", "vsync");
     sel_setting(ui, s, dirty, "s-fps", c.row(), "Frame limit", "max_fps", &[("0", "Screen refresh rate"), ("30", "30 fps"), ("45", "45 fps"), ("60", "60 fps"), ("120", "120 fps"), ("144", "144 fps"), ("1000", "Unlimited")]);
     // (a Mac has Metal only; elsewhere a driver's Vulkan that misbehaves, or a card without
-    // it, is got round here)
+    // it, is got round here; on Windows also OpenGL ES on ANGLE over DirectX 11, for a chip
+    // with none of the others - it is tried only when the package has ANGLE's DLLs)
     if cfg!(windows) {
-        sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("dx12", "DirectX 12"), ("gl", "OpenGL")]);
+        sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("dx12", "DirectX 12"), ("gl", "OpenGL"), ("angle", "ANGLE (DirectX 11)")]);
     } else if !cfg!(target_os = "macos") {
         sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("gl", "OpenGL")]);
     }
@@ -739,11 +661,35 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
         s["mouse_sens"] = json!((ms * 100.0).round() / 100.0);
         *dirty = 0.3;
     }
+    let mut mouse_pedal = get(s, "mouse_pedal_strength")
+        .as_f64()
+        .unwrap_or(1.0) as f32;
+    if ui.slider(
+        "s-mouse-pedal",
+        c.row(),
+        &mut mouse_pedal,
+        0.5,
+        2.0,
+        0.05,
+        "Mouse pedal strength",
+        &|v| {
+            if (v - 1.0).abs() < 0.01 {
+                "OMSI".to_string()
+            } else {
+                format!("{:.0}%", v * 100.0)
+            }
+        },
+    ) {
+        s["mouse_pedal_strength"] = json!((mouse_pedal * 100.0).round() / 100.0);
+        *dirty = 0.3;
+    }
     toggle_setting(ui, s, dirty, c.row(), "Smooth mouse steering (off: the wheel follows the cursor at once, as in OMSI)", "mouse_smooth");
     toggle_setting(ui, s, dirty, c.row(), "A right click ends the mouse steering (as in OMSI)", "mouse_right_off");
     toggle_setting(ui, s, dirty, c.row(), "Indicators cancel themselves (as the bus's script does)", "blinker_cancel");
     toggle_setting(ui, s, dirty, c.row(), "The keyboard brake stays on until the throttle (as in OMSI)", "brake_hold");
     toggle_setting(ui, s, dirty, c.row(), "Automatic clutch (manual gearboxes)", "auto_clutch");
+    // (it was in the game's menu only, #1780)
+    toggle_setting(ui, s, dirty, c.row(), "Automated manual gearbox (shifts a manual gearbox for you by the engine speed)", "auto_shift");
     if ui.button("s-go-keys", c.row(), "Change the keys", Some("keyboard"), ButtonKind::Normal) {
         out.controls = Some(0);
     }
@@ -891,7 +837,61 @@ fn camera_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, co
     toggle_setting(ui, s, dirty, c.row(), "Camera collisions (outside view)", "camera_collision");
     toggle_setting(ui, s, dirty, c.row(), "Driver at the wheel (outside views)", "driver");
     c.section(ui, "Head tracking");
-    toggle_setting(ui, s, dirty, c.row(), "Head tracking (TrackIR and others through opentrack, UDP 4242)", "head_tracking");
+    toggle_setting(ui, s, dirty, c.row(), "Head tracking (native TrackIR / OpenTrack)", "head_tracking");
+
+    // TrackIR axis controls. Values are stored as user-facing percentages:
+    // 0% disables an axis; 100% (the default) is 1:1.
+    c.section(ui, "Rotation");
+    for (key, id, label) in [
+        ("head_tracking_yaw_sens", "s-trackir-yaw", "Yaw sensitivity (left / right)"),
+        ("head_tracking_pitch_sens", "s-trackir-pitch", "Pitch sensitivity (up / down)"),
+        ("head_tracking_roll_sens", "s-trackir-roll", "Roll sensitivity"),
+    ] {
+        let mut v = get(s, key).as_f64().unwrap_or(100.0) as f32;
+        if ui.slider(id, c.row(), &mut v, 0.0, 100.0, 1.0, label, &|v| {
+            if v <= 0.0 { "Off".to_string() } else { format!("{v:.0}%") }
+        }) {
+            s[key] = json!(v.round().clamp(0.0, 100.0));
+            *dirty = 0.3;
+        }
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Invert yaw", "head_tracking_invert_yaw");
+    toggle_setting(ui, s, dirty, c.row(), "Invert pitch", "head_tracking_invert_pitch");
+    toggle_setting(ui, s, dirty, c.row(), "Invert roll", "head_tracking_invert_roll");
+
+    c.section(ui, "Position");
+    for (key, id, label) in [
+        ("head_tracking_x_sens", "s-trackir-x", "X sensitivity (left / right)"),
+        ("head_tracking_y_sens", "s-trackir-y", "Y sensitivity (up / down)"),
+        ("head_tracking_z_sens", "s-trackir-z", "Z sensitivity (forward / back)"),
+    ] {
+        let mut v = get(s, key).as_f64().unwrap_or(100.0) as f32;
+        if ui.slider(id, c.row(), &mut v, 0.0, 100.0, 1.0, label, &|v| {
+            if v <= 0.0 { "Off".to_string() } else { format!("{v:.0}%") }
+        }) {
+            s[key] = json!(v.round().clamp(0.0, 100.0));
+            *dirty = 0.3;
+        }
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Invert X", "head_tracking_invert_x");
+    toggle_setting(ui, s, dirty, c.row(), "Invert Y", "head_tracking_invert_y");
+    toggle_setting(ui, s, dirty, c.row(), "Invert Z", "head_tracking_invert_z");
+
+    if ui.button("s-trackir-reset", c.row(), "Reset head-tracking axes", Some("restart_alt"), ButtonKind::Normal) {
+        for key in [
+            "head_tracking_yaw_sens", "head_tracking_pitch_sens", "head_tracking_roll_sens",
+            "head_tracking_x_sens", "head_tracking_y_sens", "head_tracking_z_sens",
+        ] {
+            s[key] = json!(15.0);
+        }
+        for key in [
+            "head_tracking_invert_yaw", "head_tracking_invert_pitch", "head_tracking_invert_roll",
+            "head_tracking_invert_x", "head_tracking_invert_y", "head_tracking_invert_z",
+        ] {
+            s[key] = json!(false);
+        }
+        *dirty = 0.3;
+    }
     c.section(ui, "Triple screen");
     toggle_setting(
         ui,
@@ -1101,6 +1101,8 @@ fn gameplay_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     sel_setting(ui, s, dirty, "s-unsched", c.row(), "Random traffic", "ai_unsched_factor", &[("25", "25%"), ("50", "50%"), ("75", "75%"), ("100", "100%"), ("150", "150%"), ("200", "200%")]);
     sel_setting(ui, s, dirty, "s-maxsched", c.row(), "Timetable vehicles", "ai_max_scheduled", &[("0", "All"), ("10", "At most 10"), ("25", "At most 25"), ("50", "At most 50")]);
     sel_setting(ui, s, dirty, "s-maxpark", c.row(), "Parked cars", "ai_max_parked", &[("-1", "None"), ("0", "Every space"), ("35", "At most 35"), ("100", "At most 100"), ("250", "At most 250")]);
+    // (off: an early bus waits at every stop, as in OMSI)
+    toggle_setting(ui, s, dirty, c.row(), "Timetable buses ahead of time wait only at timed stops", "ai_wait_timed_stops_only");
     let left = c.used();
     // OMSI's own options (options.cfg)
     let mut c = Col::new(ui, cols[1], "Simulation");
@@ -1262,163 +1264,6 @@ fn mb(v: i64) -> String {
 /// Lossless on-disk compression of legacy content. This is an operation, not a graphics
 /// setting: off means ordinary files; on means the VFS is transparently reading `.omc`
 /// sidecars. Nothing is changed until the player explicitly enables it.
-fn storage_tab(ui: &mut Ui, storage: &mut StorageView, out: &mut Outside, cols: [Rect; 2]) -> [f32; 2] {
-    let report = storage.report.clone().unwrap_or_default();
-
-    let mut c = Col::new(ui, cols[0], "Content compression");
-    let mut enabled = report.active && !storage.confirm_restore;
-    let before = enabled;
-    if ui.toggle("storage-compression", c.row(), &mut enabled, "Compress supported content") && !storage.busy() {
-        if storage.confirm_restore && enabled {
-            storage.confirm_restore = false;
-        } else if !report.active && enabled {
-            out.storage_action = Some(crate::asset_storage::Mode::Compress);
-        } else if report.active && !enabled {
-            storage.confirm_restore = true;
-        }
-    }
-    c.y += ui.paragraph(
-        "Off by default. When enabled, supported files are compressed losslessly on disk; the game still opens them by their original names.",
-        Vec2::new(c.inner.x, c.y),
-        c.inner.w,
-        12.5,
-        Weight::Regular,
-        TEXT_DIM,
-    ) + 8.0;
-
-    if storage.busy() {
-        c.y += ui.paragraph(
-            if storage.message.is_empty() { "Working…" } else { &storage.message },
-            Vec2::new(c.inner.x, c.y),
-            c.inner.w,
-            13.0,
-            Weight::Bold,
-            ACCENT,
-        ) + 10.0;
-    } else {
-        if ui.button("storage-analyze", c.row(), "Analyze installation", Some("search"), ButtonKind::Normal) {
-            out.storage_action = Some(crate::asset_storage::Mode::Analyze);
-        }
-        if !storage.message.is_empty() && storage.message != "Done." {
-            c.y += ui.paragraph(&storage.message, Vec2::new(c.inner.x, c.y), c.inner.w, 12.5, Weight::Regular, TEXT_DIM) + 8.0;
-        }
-    }
-
-    if storage.confirm_restore {
-        c.section(ui, "Restore original files");
-        let needed = report.restore_required_bytes;
-        let free = report.free_bytes;
-        let text = match free {
-            Some(f) => format!(
-                "This reverses the operation and removes the compressed sidecars. Up to {} of free space is needed while restoring; {} is available.",
-                fmt_bytes(needed),
-                fmt_bytes(f)
-            ),
-            None => format!(
-                "This reverses the operation and removes the compressed sidecars. Up to {} of free space may be needed while restoring.",
-                fmt_bytes(needed)
-            ),
-        };
-        c.y += ui.paragraph(&text, Vec2::new(c.inner.x, c.y), c.inner.w, 12.5, Weight::Regular, TEXT_DIM) + 8.0;
-        let r = c.row();
-        let half = (r.w - GAP) * 0.5;
-        if ui.button("storage-restore-cancel", Rect::new(r.x, r.y, half, r.h), "Keep compressed", None, ButtonKind::Normal) {
-            storage.confirm_restore = false;
-        }
-        if ui.button("storage-restore", Rect::new(r.x + half + GAP, r.y, half, r.h), "Restore originals", Some("restart_alt"), ButtonKind::Danger) {
-            out.storage_action = Some(crate::asset_storage::Mode::Restore);
-        }
-    }
-
-    let left = c.used();
-    let mut c = Col::new(ui, cols[1], "Storage");
-    if report.active {
-        c.y += ui.paragraph(
-            &format!(
-                "Active · {} files\n{} → {} · {} saved",
-                report.compressed_files,
-                fmt_bytes(report.current_original_bytes),
-                fmt_bytes(report.current_stored_bytes),
-                fmt_bytes(report.current_saved_bytes())
-            ),
-            Vec2::new(c.inner.x, c.y),
-            c.inner.w,
-            13.0,
-            Weight::Bold,
-            TEXT,
-        ) + 10.0;
-    } else {
-        c.y += ui.paragraph(
-            "Disabled · the installation is stored normally.",
-            Vec2::new(c.inner.x, c.y),
-            c.inner.w,
-            13.0,
-            Weight::Bold,
-            TEXT,
-        ) + 10.0;
-    }
-
-    if report.eligible_files > 0 {
-        c.section(ui, "Last analysis");
-        c.y += ui.paragraph(
-            &format!(
-                "{} eligible files · {}\nEstimated stored size: {}\nEstimated saving: {}",
-                report.eligible_files,
-                fmt_bytes(report.eligible_bytes),
-                fmt_bytes(report.estimated_stored_bytes),
-                fmt_bytes(report.estimated_saved_bytes())
-            ),
-            Vec2::new(c.inner.x, c.y),
-            c.inner.w,
-            12.5,
-            Weight::Regular,
-            TEXT_SOFT,
-        ) + 8.0;
-        for k in &report.kinds {
-            c.y += ui.paragraph(
-                &format!("{} · {} files · {}", k.name, k.files, fmt_bytes(k.original_bytes)),
-                Vec2::new(c.inner.x, c.y),
-                c.inner.w,
-                11.5,
-                Weight::Regular,
-                TEXT_DIM,
-            ) + 3.0;
-        }
-    }
-
-    c.section(ui, "What is eligible");
-    c.y += ui.paragraph(
-        "WAV audio; O3D and X models; BMP and TGA textures; and only uncompressed RGB/RGBA DDS. DXT/BC DDS, PNG, JPG, OGG, MP3, ZIP, RAR and 7z stay untouched.",
-        Vec2::new(c.inner.x, c.y),
-        c.inner.w,
-        12.5,
-        Weight::Regular,
-        TEXT_DIM,
-    ) + 8.0;
-    c.y += ui.paragraph(
-        &format!(
-            "Files below {} are skipped. A file is kept raw unless compression saves at least {}%. There is no quality loss.",
-            fmt_bytes(crate::asset_storage::MIN_FILE_BYTES),
-            crate::asset_storage::MIN_SAVING_PERCENT
-        ),
-        Vec2::new(c.inner.x, c.y),
-        c.inner.w,
-        12.5,
-        Weight::Regular,
-        TEXT_DIM,
-    ) + 8.0;
-    c.y += ui.paragraph(
-        "The original OMSI 2 executable cannot read .omc sidecars. Use Restore originals before opening the same installation in OMSI 2.",
-        Vec2::new(c.inner.x, c.y),
-        c.inner.w,
-        12.5,
-        Weight::Medium,
-        DANGER.lighten(0.25),
-    ) + 8.0;
-
-    [left, c.used()]
-}
-
 // --- controls ---------------------------------------------------------------------------------
 
 /// The game's own actions a controller's button can be given, besides the bus's: the doors
@@ -2936,14 +2781,14 @@ mod settings_tests {
     fn by_tab() -> Vec<Vec<&'static str>> {
         let mut graphics = vec![
             "s-gp-sel", "s-gp-load", "s-gp-del", "s-gp-name", "s-gp-save",
-            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "set-windy_trees",
+            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-night", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "set-windy_trees",
             "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression",
         ];
         if !cfg!(target_os = "macos") {
             graphics.push("s-api");
         }
         let driving = vec![
-            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-momentary_gears", "s-go-keys",
+            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "s-mouse-pedal", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-auto_shift", "set-momentary_gears", "s-go-keys",
             "s-wrange", "s-wlock", "s-pad-steer-smooth", "set-pad_steer_linear", "set-arrows_switch_cams", "s-pedt", "s-pedb", "set-ff_enabled", "set-ff_invert", "s-ffroad", "s-ffeng", "s-fffade", "s-wreset", "s-go-pads",
         ];
         let mut camera = vec![
@@ -2969,6 +2814,11 @@ mod settings_tests {
             "set-camera_collision",
             "set-driver",
             "set-head_tracking",
+            "s-trackir-yaw", "s-trackir-pitch", "s-trackir-roll",
+            "set-head_tracking_invert_yaw", "set-head_tracking_invert_pitch", "set-head_tracking_invert_roll",
+            "s-trackir-x", "s-trackir-y", "s-trackir-z",
+            "set-head_tracking_invert_x", "set-head_tracking_invert_y", "set-head_tracking_invert_z",
+            "s-trackir-reset",
             "set-triple_screen",
             "set-triple_span",
             "set-triple_hud_center",
@@ -2985,7 +2835,7 @@ mod settings_tests {
         // (the radio stations: one, see `frame`)
         let sound = vec!["s-vol", "s-volai", "s-volsc", "set-doppler", "s-voices", "radio-name-0", "radio-url-0", "radio-del-0", "radio-add"];
         let gameplay = vec![
-            "s-board", "set-exact_fare", "s-pax", "set-get_up", "s-unsched", "s-maxsched", "s-maxpark",
+            "s-board", "set-exact_fare", "s-pax", "set-get_up", "s-unsched", "s-maxsched", "s-maxpark", "set-ai_wait_timed_stops_only",
             "s-maint", "set-collision_vehicles", "set-collision_objects", "set-collision_pedestrians", "set-use_real_time", "set-use_real_date", "set-time_sync", "set-metar_sync", "s-timespeed",
         ];
         let general = vec![

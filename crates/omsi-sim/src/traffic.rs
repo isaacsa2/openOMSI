@@ -934,7 +934,7 @@ impl Network {
                     }
                 }
             }
-            if found.is_empty() && omsi_cfg::env::var_os("OMSI_DEBUG_UNLINKED").is_some() {
+            if found.is_empty() && omsi_cfg::flags::OMSI_DEBUG_UNLINKED.is_set() {
                 // a lane end with a start of its kind near it that was not taken
                 for dx in -1..=1 {
                     for dy in -1..=1 {
@@ -1608,9 +1608,13 @@ impl TrafficLightController {
             }
             match p.jump_to {
                 Some(to) => {
-                    // A jump a couple of seconds back extends the current phase. It is not
-                    // a loop: after replaying that small stretch, continue through it.
-                    self.rewound = (to > 1e-6 && to < p.time - 1e-6).then_some(k);
+                    // A jump a couple of seconds back while somebody asks extends the
+                    // current phase. It is not a loop: after replaying that small stretch,
+                    // continue through it. One taken while nobody asks is the program's
+                    // rest: the main road stays green round it until a request comes
+                    // (Winsenburg's win-4: replayed once, it ran through yellow and red
+                    // with nobody waiting and flickered between green and yellow, #1722).
+                    self.rewound = (!p.if_request && to > 1e-6 && to < p.time - 1e-6).then_some(k);
                     self.time = (to as f64).rem_euclid(cycle);
                     self.passed.clear();
                     if left <= 0.0 {
@@ -2790,6 +2794,7 @@ mod tests {
         assert!(v < 7.5, "entered the bend at {v} m/s");
     }
 
+
     /// A pull-out started a few metres before the car's lane ends (a road of short spline
     /// pieces) carries on across the joint and ends on the lane beside's next piece, without
     /// a jump: it used to be finished at the joint, the car moved sideways in one frame.
@@ -2941,6 +2946,33 @@ mod tests {
         c.advance(3.0);
         assert!((c.time - 53.0).abs() < 1e-3);
         assert_eq!(c.state(0), 3, "the bus gets its phase");
+    }
+
+    #[test]
+    fn a_rest_loop_holds_while_nobody_asks() {
+        // win-4.sco (#1722): main green 2-12 s, jumping back from 12 to 2 while no bus
+        // asks at the bus light; a bus sends it on through yellow.
+        let mut c = TrafficLightController::from_program(
+            vec![
+                (vec![(3, 2.0), (6, 10.0), (9, 3.0), (0, 7.0), (9, 3.0), (0, 1.0)], None),
+                (vec![(0, 16.0), (6, 6.0), (0, 1.0)], None),
+            ],
+            Some(37.0),
+            &[],
+            &[[1.0, 12.0, 1.0, 2.0], [1.0, 22.0, 1.0, 2.0], [1.0, 22.0, 0.0, 18.0], [1.0, 2.0, 0.0, 12.0], [1.0, 7.0, 0.0, 12.0]],
+        );
+        c.time = 3.0;
+        for _ in 0..1200 {
+            c.advance(0.1);
+            assert_eq!(c.state(0), 6, "the main road left its green at {:.1} s with nobody asking", c.time);
+        }
+        c.request[1] = true;
+        let mut saw_bus_green = false;
+        for _ in 0..300 {
+            c.advance(0.1);
+            saw_bus_green |= c.state(1) == 6;
+        }
+        assert!(saw_bus_green, "a bus asking gets its green");
     }
 
     #[test]
