@@ -34,6 +34,18 @@ pub(crate) struct Passes {
     pub leave_out_enhanced: bool,
 }
 
+/// Decide before making shader modules and cloud/probe resources, not only before the
+/// draw pipelines: WGSL validation still processes unused entry points, and the probe's
+/// unused pipelines would invoke the native shader compiler.
+pub(crate) fn leave_out_enhanced(options: &RenderOptions, adapter_name: &str) -> bool {
+    options.preview_only
+        || sixteen_texture_units()
+        || (options.no_enhanced
+            && (cfg!(target_os = "android")
+                || adapter_name.to_ascii_lowercase().contains("opengl")
+                || gl_backend()))
+}
+
 impl PassKit<'_> {
     fn pass(&self, f: wgpu::TextureFormat, fs: PassShaders) -> PassPipelines {
         let device = self.device;
@@ -47,16 +59,8 @@ impl PassKit<'_> {
         }
     }
 
-    pub(crate) fn build(&self, format: wgpu::TextureFormat, hdr_format: wgpu::TextureFormat, options: &RenderOptions, adapter_name: &str) -> Passes {
+    pub(crate) fn build(&self, format: wgpu::TextureFormat, hdr_format: wgpu::TextureFormat, leave_out_enhanced: bool) -> Passes {
         let pass = self.pass(format, PassShaders { scene: "fs_main", corona: "fs_main", corona_blend: SCREEN, smoke: "fs_smoke", snow: "fs_snow", sky: "fs_main" });
-        // the enhanced path: its own lighting in all three
-        // (and the launcher's preview, which always draws Vanilla+, leaves it out everywhere)
-        let leave_out_enhanced = options.preview_only || (options.no_enhanced && (cfg!(target_os = "android") || adapter_name.to_ascii_lowercase().contains("opengl") || GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed)));
-        // (its textures do not fit OpenGL's units here, see `sixteen_texture_units`)
-        if sixteen_texture_units() && !options.no_enhanced {
-            log::warn!("renderer: the enhanced graphics take more textures than OpenGL has units for on {adapter_name}; drawing vanilla+");
-        }
-        let leave_out_enhanced = leave_out_enhanced || sixteen_texture_units();
         let sky_mirror_pipeline = (!leave_out_enhanced).then(|| self.sky.pipeline(self.device, format, "fs_enhanced_mirror", self.msaa));
         let hdr_pass = (!leave_out_enhanced).then(|| {
             self.pass(hdr_format, PassShaders { scene: "fs_enhanced", corona: "fs_enhanced", corona_blend: ADDITIVE, smoke: "fs_smoke_enhanced", snow: "fs_snow_enhanced", sky: "fs_enhanced" })
