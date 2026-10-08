@@ -22,6 +22,15 @@ fn angle_d3d11_compiles_and_draws_on_warp() {
         Some(directory.to_string_lossy().into_owned());
     descriptor.backend_options.gl.context_lock_timeout = Some(std::time::Duration::from_secs(30));
     let instance = wgpu::Instance::new(descriptor);
+    let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL));
+    assert!(!adapters.is_empty(), "ANGLE/WARP did not expose an adapter");
+    for adapter in &adapters {
+        let info = adapter.get_info();
+        eprintln!("ANGLE WARP adapter: {info:?}");
+        assert_eq!(info.backend, wgpu::Backend::Gl);
+        assert!(info.name.contains("ANGLE"), "expected ANGLE: {info:?}");
+        assert_eq!(info.device_type, wgpu::DeviceType::Cpu, "expected WARP");
+    }
     for basic in [false, true] {
         if basic {
             std::env::set_var("OMSI_BASIC_PIPELINES", "1");

@@ -32,5 +32,10 @@ windows = { workspace = true, features = ["Win32_Graphics_Dxgi", "Win32_Foundati
 naga = { workspace = true, features = ["spv-out", "glsl-out", "hlsl-out"] }
 env_logger.workspace = true
 
+[target.'cfg(windows)'.dev-dependencies.wgpu]
+# Standalone renderer tests do not inherit omsi-app's ANGLE feature.
+workspace = true
+features = ["angle"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
 ash = "0.38"
