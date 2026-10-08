@@ -4,6 +4,8 @@
 //! Everything slow runs on a thread of its own and comes back as a [`Msg`]; the window
 //! drains them at the start of each frame, so it never waits.
 
+mod benchmark;
+
 use omsi_launcher_lib as core;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -112,6 +114,10 @@ pub struct Choice {
     pub date: String,
     /// "auto", spring, summer, autumn, winter.
     pub season: String,
+    /// The season's phase: early, mid, late (with a season chosen).
+    pub phase: String,
+    /// The player's own date from before a season moved it ("By date" gives it back).
+    pub own_date: Option<String>,
     pub weather: String,
     pub traffic: f32,
     pub passengers: bool,
@@ -144,6 +150,8 @@ impl Default for Choice {
             start_trip: None,
             date: "1989-05-30".into(),
             season: "auto".into(),
+            phase: "mid".into(),
+            own_date: None,
             weather: String::new(),
             traffic: 30.0,
             passengers: true,
@@ -183,6 +191,11 @@ impl Choice {
         // (older launchers took a vehicle line of a broken ailists.cfg for the map's depot)
         if c.hof.to_ascii_lowercase().contains(".bus") || c.hof.to_ascii_lowercase().contains(".ovh") {
             c.hof.clear();
+        }
+        // a season chosen: the date in its phase, as the game will have it (older launchers
+        // kept the day of the month; the date may have followed the computer's since)
+        if let Some(d) = crate::season_phase::launcher_date(&c.season, &c.phase, &c.date, &c.map, true) {
+            c.date = d;
         }
         c
     }
@@ -614,46 +627,6 @@ impl State {
         self.queued_launch = Some(d);
     }
 
-    pub fn benchmark(&mut self) {
-        if !self.save_pending_settings() {
-            return;
-        }
-        let root = std::path::Path::new(&self.config.root);
-        if !omsi_cfg::missing_original_essentials(root).is_empty() {
-            self.set_status("The benchmark needs the original OMSI 2: choose its folder under Setup first.", true);
-            return;
-        }
-        let required = [
-            "maps/Grundorf/global.cfg",
-            "Vehicles/MAN_SD200/MAN_SD80.bus",
-        ];
-        let missing: Vec<_> = required
-            .iter()
-            .filter(|rel| !root.join(rel).is_file())
-            .copied()
-            .collect();
-        if !missing.is_empty() {
-            self.set_status(
-                format!("Benchmark cannot start: stock OMSI 2 content is missing: {}", missing.join(", ")),
-                true,
-            );
-            return;
-        }
-        self.set_status("Starting stock Grundorf performance benchmark…", false);
-        self.queued_launch = Some(core::Duty {
-            benchmark: true,
-            map: "maps/Grundorf/global.cfg".into(),
-            bus: "Vehicles/MAN_SD200/MAN_SD80.bus".into(),
-            time: "09:00".into(),
-            date: Some("1989-05-30".into()),
-            traffic: Some(20),
-            passengers: Some(true),
-            schedule: Some(true),
-            autostart: Some(true),
-            ..Default::default()
-        });
-    }
-
     /// The duty as the backend takes it.
     pub fn duty(&self) -> core::Duty {
         let c = &self.choice;
@@ -672,6 +645,7 @@ impl State {
             .and_then(|k| self.server_info.get(&k).and_then(|x| x.1.as_ref().ok()).map(|i| i.map.trim().replace('\\', "/")))
             .filter(|m| m.to_ascii_lowercase().contains("maps/"));
         core::Duty {
+            benchmark: false,
             map: host_map.unwrap_or_else(|| c.map.clone()),
             bus: c.bus.clone(),
             paint: Some(c.paint.clone()).filter(|p| !p.is_empty()),
@@ -694,7 +668,7 @@ impl State {
             profile: Some(self.config.profile.clone()).filter(|p| !p.is_empty()),
             lan: Some(lan),
             lan_name: None,
-            season: Some(c.season.clone()).filter(|s| s != "auto"),
+            season: Some(c.season.clone()).filter(|s| s != "auto").map(|s| crate::season_phase::launcher_choice(&s, &c.phase).map(|x| x.word()).unwrap_or(s)),
             tutorial: None,
             situation: None,
         }
@@ -791,6 +765,8 @@ impl State {
     fn follow_clock(&mut self) {
         let on = |k: &str| self.settings.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
         let (time, date, year) = (on("use_real_time"), on("use_real_date"), on("use_real_year"));
+        // (a season chosen sets the date: its phase's, see `season_chosen`)
+        let date = date && self.choice.season == "auto";
         if !time && !date {
             return;
         }
@@ -849,8 +825,8 @@ impl State {
     fn handle(&mut self, m: Msg) {
         match m {
             Msg::Diagnostics(result) => match result {
-                Ok(path) => self.set_status(format!("Support package saved: {}", path.display()), false),
-                Err(why) => self.set_status(format!("Could not export diagnostics: {why}"), true),
+                Ok(path) => self.set_status(omsi_ui::tr("Support package saved: {}").replacen("{}", &path.display().to_string(), 1), false),
+                Err(why) => self.set_status(omsi_ui::tr("Could not export diagnostics: {why}").replacen("{why}", &why.to_string(), 1), true),
             },
             Msg::Crashed(why) => {
                 log::error!("launcher: a background job stopped: {why}");

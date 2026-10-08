@@ -159,7 +159,7 @@ pub(crate) fn snapshot(
 
 /// Retain the last session's safe metadata even if the game cannot be reopened.
 pub(crate) fn record(app: &crate::App) {
-    let mut value = snapshot(app.renderer.as_ref(), &app.settings, app.controllers.as_ref().map(|c| c.connected()),
+    let mut value = snapshot(app.renderer.as_ref(), &app.settings, app.input.controllers.as_ref().map(|c| c.connected()),
         Some((&app.args.map, app.args.bus.as_deref(), app.args.line.as_deref(), app.args.tour.as_deref())), "game");
     if let (Some(r), Some(scene)) = (app.renderer.as_ref(), app.scene.as_ref()) {
         value["gpu_memory_bytes"] = json!({"textures": r.texture_bytes(scene), "meshes": r.mesh_bytes(scene)});

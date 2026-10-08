@@ -8,6 +8,9 @@ pub(crate) const DEFAULT_SIZE: &str = "1600x900";
 #[derive(Parser, Debug, Clone)]
 #[command(name = "openomsi", version = crate::startup::VERSION, about = "openOMSI")]
 pub(crate) struct Args {
+    /// Write a privacy-filtered ZIP for a GitHub issue without starting the game.
+    #[arg(long)]
+    pub(crate) export_diagnostics: Option<PathBuf>,
     /// Run the reproducible stock-content benchmark (Grundorf + MAN SD80 + stock AI).
     /// It fixes the simulation scene, seed, viewport and pacing, then records a bounded
     /// performance capture. The selected graphics quality/backend is deliberately preserved.
@@ -22,9 +25,6 @@ pub(crate) struct Args {
     /// Warm-up after the world is loaded, in seconds.
     #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u32).range(0..=300))]
     pub(crate) profile_delay: u32,
-    /// Write a privacy-filtered ZIP for a GitHub issue without starting the game.
-    #[arg(long)]
-    pub(crate) export_diagnostics: Option<PathBuf>,
     /// OMSI 2 installation root (the folder that contains `maps`, `Vehicles`, …).
     /// Found by itself when left out: $OMSI_ROOT, the folder remembered from last time,
     /// a folder next to this program, or the usual Steam locations.
@@ -91,7 +91,11 @@ pub(crate) struct Args {
     /// Your name as the other players see it.
     #[arg(long, default_value = "Driver")]
     pub(crate) lan_name: String,
-    /// Season override: spring, summer, autumn or winter (else the date decides, as in OMSI).
+    /// Season: spring, summer, autumn or winter, with its phase `-early`, `-mid` (the
+    /// default) or `-late` (`autumn-late`), else the date decides, as in OMSI. The date
+    /// moves into the phase's month (its typical day; a --date already in that month stays,
+    /// the year and the time of day stay), half a year later south of the equator; the
+    /// plants are mixed between the two texture seasons the phase lies between.
     #[arg(long)]
     pub(crate) season: Option<String>,
     /// Fire script triggers after spawning: name[@seconds],… (times apply during --drive).
@@ -228,6 +232,10 @@ pub(crate) struct Args {
     /// launcher's "Automatic") instead of `--entry`.
     #[arg(long)]
     pub(crate) auto_entry: bool,
+    /// With a duty: the clock stays at `--time` however late its first trip leaves (the
+    /// launcher's start at the real time).
+    #[arg(long)]
+    pub(crate) keep_time: bool,
     /// OMSI's tutorial 1..4 (its situation, and its pages beside the picture).
     #[arg(long)]
     pub(crate) tutorial: Option<usize>,

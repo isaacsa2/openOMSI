@@ -59,24 +59,24 @@ pub(crate) fn os_version() -> String {
 impl App {
     /// Once a frame: what changed on the screen, and every minute where things stand.
     pub(crate) fn log_frame(&mut self, dt: f32) {
-        if !self.log_state.support_recorded && self.renderer.is_some() {
+        if !self.perf.log_state.support_recorded && self.renderer.is_some() {
             crate::support_bundle::record(self);
-            self.log_state.support_recorded = true;
+            self.perf.log_state.support_recorded = true;
         }
         let msg = self.service_msg.as_ref().map(|m| m.0.clone());
-        if msg.is_some() && msg != self.log_state.last_msg {
+        if msg.is_some() && msg != self.perf.log_state.last_msg {
             log::info!("on screen: {}", msg.as_deref().unwrap_or_default());
         }
-        self.log_state.last_msg = msg;
-        if self.view != self.log_state.last_view {
+        self.perf.log_state.last_msg = msg;
+        if self.view != self.perf.log_state.last_view {
             log::info!("view: {}", self.view);
-            self.log_state.last_view = self.view.clone();
+            self.perf.log_state.last_view = self.view.clone();
         }
-        if self.paused != self.log_state.last_paused {
+        if self.paused != self.perf.log_state.last_paused {
             log::info!("{}", if self.paused { "paused" } else { "resumed" });
-            self.log_state.last_paused = self.paused;
+            self.perf.log_state.last_paused = self.paused;
         }
-        let s = &mut self.log_state;
+        let s = &mut self.perf.log_state;
         s.t += dt;
         s.frames += 1;
         s.worst_dt = s.worst_dt.max(dt);
@@ -93,7 +93,7 @@ impl App {
             format!("bus at ({:.1}, {:.1}, {:.1}) heading {:.0}, {:.0} km/h", v.position.x, v.position.y, v.position.z, v.heading, v.physics.velocity_kmh())
         });
         let cam = self.camera.as_ref().map(|c| format!("camera at ({:.0}, {:.0}, {:.0})", c.position.x, c.position.y, c.position.z));
-        let traffic = self.traffic.as_ref().map(|t| t.cars.len()).unwrap_or(0);
+        let traffic = self.session.traffic.as_ref().map(|t| t.cars.len()).unwrap_or(0);
         let time = self.clock.time;
         let gpu = match (self.renderer.as_ref(), self.scene.as_ref()) {
             (Some(r), Some(sc)) => format!(", GPU memory: textures {:.0} MB, meshes {:.0} MB", r.texture_bytes(sc) as f64 / 1e6, r.mesh_bytes(sc) as f64 / 1e6),
