@@ -126,6 +126,9 @@ pub struct BusService {
     /// more than `EARLY_STOP_SHORT` early (`schedule::TripTimes::kinds`).
     pub always: Vec<i64>,
     pub serve_early: Vec<i64>,
+    /// Exact station visits requiring a timetable hold (types 3/4 and the terminal).
+    /// None preserves the legacy policy for services without an authored stop profile.
+    pub wait_stops: Option<Vec<(i64, f64)>>,
 }
 
 /// The side the bus pulls out towards: left (1) from a bay on the right, else right (2).
@@ -253,6 +256,7 @@ impl BusService {
             last_stop: None,
             always: Vec::new(),
             serve_early: Vec::new(),
+            wait_stops: None,
         }
     }
 
@@ -332,6 +336,12 @@ impl BusService {
         self.phase_t = 0.0;
     }
 
+    fn waits_at(&self, stop: &Stop) -> bool {
+        self.wait_stops
+            .as_ref()
+            .is_none_or(|visits| visits.contains(&(stop.id, stop.depart)))
+    }
+
     /// A stop it serves whoever wants it or not: the trip's first (a layover) and last, the
     /// ones its timetable says it always serves, and any stop it would reach more than
     /// `EARLY_STOP` early (`EARLY_STOP_SHORT` at a stop marked for it).
@@ -339,9 +349,9 @@ impl BusService {
         let last = (self.stops.len() == 1 && !self.route_open) || self.last_stop == Some(stop.id);
         let early = stop.depart - day_time;
         last || self.layover
-            || early > EARLY_STOP
+            || (early > EARLY_STOP && self.waits_at(stop))
             || self.always.contains(&stop.id)
-            || (early > EARLY_STOP_SHORT && self.serve_early.contains(&stop.id))
+            || (early > EARLY_STOP_SHORT && self.waits_at(stop) && self.serve_early.contains(&stop.id))
     }
 
     /// Arrived at the front stop: what now.
@@ -351,7 +361,8 @@ impl BusService {
         }
         let layover = std::mem::take(&mut self.layover);
         let rail = ctx.net.lanes.get(at.0).is_some_and(|l| l.kind == LaneKind::Rail);
-        let wait = early_wait(depart, ctx.day_time, layover, rail);
+        let waits = layover || rail || self.stops.front().is_some_and(|stop| self.waits_at(stop));
+        let wait = if waits { early_wait(depart, ctx.day_time, layover, rail) } else { 0.0 };
         self.leave_at = ctx.day_time + wait;
         self.arrived_at = ctx.day_time;
         self.boarding = boarding_time(ctx.id);
@@ -722,6 +733,59 @@ mod tests {
         assert_eq!(early_wait(400.0, 500.0, false, false), 0.0);
         // a layover: to the departure itself
         assert_eq!(early_wait(400.0, 100.0, true, false), 300.0);
+    }
+
+    #[test]
+    fn ordinary_stops_do_not_hold_but_timepoints_and_the_terminal_do() {
+        let stop = |id, depart| Stop::from_tuple((0, 0.0, 0.0, depart, id, 0.0));
+        let ordinary = stop(1, 300.0);
+        let timepoint = stop(2, 600.0);
+        let terminal = stop(1, 900.0); // a later visit to the same object
+        let mut service = BusService::new(vec![ordinary, timepoint, terminal]);
+        service.route_open = true;
+        service.wait_stops = Some(vec![(2, 600.0), (1, 900.0)]);
+        assert!(!service.waits_at(&ordinary));
+        assert!(
+            !service.must_serve(&ordinary, 0.0),
+            "early alone is not demand at an ordinary stop"
+        );
+        assert!(service.waits_at(&timepoint));
+        assert!(service.must_serve(&timepoint, 0.0));
+        assert!(service.waits_at(&terminal));
+        let net = Network::default();
+        let ctx = Ctx {
+            net: &net,
+            way: &[],
+            day_time: 0.0,
+            dt: 0.1,
+            id: 1,
+            stopped: 0.0,
+            passing: false,
+            kerb_swerve: None,
+            wanted: Some(true),
+            debug: false,
+        };
+        service.arrive(&ctx, ordinary.depart, (0, 0.0));
+        assert_eq!(service.phase, Phase::Boarding);
+        assert_eq!(service.leave_at, 0.0);
+        assert!(service.boarding > 0.0, "passenger dwell is retained");
+        service.stops.pop_front();
+        service.arrive(&ctx, timepoint.depart, (0, 0.0));
+        assert_eq!(
+            service.leave_at, 580.0,
+            "the timepoint retains OMSI's 20-second tolerance"
+        );
+        service.layover = true;
+        service.arrive(&ctx, timepoint.depart, (0, 0.0));
+        assert_eq!(
+            service.leave_at, 600.0,
+            "a layover waits until its actual departure"
+        );
+        service.wait_stops = None;
+        assert!(
+            service.waits_at(&ordinary),
+            "services without profile metadata retain their old policy"
+        );
     }
 
     #[test]
