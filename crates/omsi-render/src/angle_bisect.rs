@@ -12,20 +12,11 @@ const CASE: &str = "ANGLE_BISECT_VARIANT";
 
 /// Rewrites of the scene WGSL tried as variants of their own ("patch:<name>"): each a
 /// hypothesis about which construct the compiler cannot take.
-const PATCHES: &[(&str, &str, &str)] = &[
-    ("rt_all_taps", "if (!(d < tol * 0.3)) {", "if (true) {"),
-    ("rt_centre_only", "if (!(d < tol * 0.3)) {", "if (false) {"),
-    (
-        "rt_no_fetch",
-        "let s = textureLoad(t_ao, clamp(p, vec2<i32>(0), size - vec2<i32>(1)), 0);",
-        "let s = vec4<f32>(vec2<f32>(p), 0.5, 1.0);",
-    ),
-    (
-        "finite_by_compare",
-        "return all(e != vec3<u32>(0x7f800000u));",
-        "return all(abs(v) <= vec3<f32>(3.4e38)) && all(e == e);",
-    ),
-];
+const PATCHES: &[(&str, &str, &str)] = &[(
+    "finite_by_compare",
+    "return all(e != vec3<u32>(0x7f800000u));",
+    "return all(abs(v) <= vec3<f32>(3.4e38)) && all(e == e);",
+)];
 
 /// `vs_main` and `fs_main` as the OpenGL backend gets them on ANGLE (no storage buffers),
 /// with the scene WGSL rewritten by `patch` (see `PATCHES`).

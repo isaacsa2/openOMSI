@@ -215,30 +215,26 @@ fn rt_at(frag: vec2<f32>, world: vec3<f32>) -> vec4<f32> {
     let px = vec2<i32>(frag);
     var best = vec4<f32>(1.0, 0.0, -1.0, 0.0);
     var best_d = tol;
-    // The pixel, then its four neighbours unless the pixel itself is at this depth. Written
-    // out, not as a loop with an early `break`: that loop, in the same module as
-    // `all_finite`, sent the D3D compiler (fxc, under ANGLE) into endless recursion in
-    // CProgram::CheckAssertion_Group (#197).
-    let d = rt_tap(px, size, z, &best, &best_d);
-    if (!(d < tol * 0.3)) {
-        rt_tap(px + vec2<i32>(1, 0), size, z, &best, &best_d);
-        rt_tap(px + vec2<i32>(-1, 0), size, z, &best, &best_d);
-        rt_tap(px + vec2<i32>(0, 1), size, z, &best, &best_d);
-        rt_tap(px + vec2<i32>(0, -1), size, z, &best, &best_d);
+    for (var k = 0; k < 5; k = k + 1) {
+        var o = vec2<i32>(0, 0);
+        switch k {
+            case 1: { o = vec2<i32>(1, 0); }
+            case 2: { o = vec2<i32>(-1, 0); }
+            case 3: { o = vec2<i32>(0, 1); }
+            case 4: { o = vec2<i32>(0, -1); }
+            default: {}
+        }
+        let s = textureLoad(t_ao, clamp(px + o, vec2<i32>(0), size - vec2<i32>(1)), 0);
+        let d = abs(s.g - z);
+        if (s.g > 0.0 && d < best_d) {
+            best_d = d;
+            best = vec4<f32>(s.r, s.g, s.b, 1.0);
+        }
+        if (k == 0 && d < tol * 0.3) {
+            break;
+        }
     }
     return best;
-}
-
-// One texel of `rt_at`: taken as the `best` when it lies at depth `z`, closer than `best_d`.
-// Returns its distance in depth.
-fn rt_tap(p: vec2<i32>, size: vec2<i32>, z: f32, best: ptr<function, vec4<f32>>, best_d: ptr<function, f32>) -> f32 {
-    let s = textureLoad(t_ao, clamp(p, vec2<i32>(0), size - vec2<i32>(1)), 0);
-    let d = abs(s.g - z);
-    if (s.g > 0.0 && d < *best_d) {
-        *best_d = d;
-        *best = vec4<f32>(s.r, s.g, s.b, 1.0);
-    }
-    return d;
 }
 
 // The ambient occlusion at a pixel of the full picture. It is worked out at half size, and
