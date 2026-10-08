@@ -26,7 +26,7 @@ fn depth_reading_layout(device: &wgpu::Device, label: &str) -> wgpu::BindGroupLa
 pub(crate) fn ssao(device: &wgpu::Device, gl: bool) -> Ssao {
     // ambient occlusion: a depth prepass with the camera projection, then the AO and a blur
     log::info!("renderer: compiling the SSAO shaders");
-    let ssao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+    let ssao_shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
         label: Some("ssao"),
         source: wgpu::ShaderSource::Wgsl(include_str!("../ssao.wgsl").into()),
     });
@@ -58,7 +58,7 @@ pub(crate) fn fog_lamps(device: &wgpu::Device, camera_layout: &wgpu::BindGroupLa
     let fog_lamps_buf = uniform_buffer(device, "fog lamps params", std::mem::size_of::<FogLampUniform>() as u64);
     let fog_lamps_pipeline = (!gl && array_path() != ArrayPath::NoStorage && !basic_pipelines()).then(|| {
         log::info!("renderer: compiling the lamps in the fog shaders");
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let module = compile_shader(device, wgpu::ShaderModuleDescriptor {
             label: Some("fog lamps"),
             source: wgpu::ShaderSource::Wgsl(fog_lamps_shader_source().into()),
         });
