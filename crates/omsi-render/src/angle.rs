@@ -41,10 +41,10 @@ pub fn instance(mut descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
     wgpu::Instance::new(descriptor)
 }
 
-/// The compiler thread's stack. Translating and compiling the scene pipeline (77
-/// functions in its fragment stage, inlined by HLSL) overflowed 32 MB on WARP.
+/// The compiler thread's stack. (256 MB overflowed on WARP as fast as 32 MB did, in the
+/// scene pipeline: a larger stack does not help that crash.)
 #[cfg(windows)]
-const COMPILER_STACK_MB: usize = 256;
+const COMPILER_STACK_MB: usize = 32;
 
 /// A single worker for the entire pipeline build, not one thread per pipeline. With
 /// ANGLE's native jobs disabled, translation and D3D compilation inherit this stack.
