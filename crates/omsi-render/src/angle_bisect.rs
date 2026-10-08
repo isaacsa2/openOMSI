@@ -10,9 +10,33 @@ use wgpu::naga;
 #[cfg(windows)]
 const CASE: &str = "ANGLE_BISECT_VARIANT";
 
-/// `vs_main` and `fs_main` as the OpenGL backend gets them on ANGLE (no storage buffers).
-fn stages() -> [String; 2] {
-    let src = crate::arrays_as_textures(&crate::scene_shader_text(true), crate::ArrayPath::NoStorage);
+/// Rewrites of the scene WGSL tried as variants of their own ("patch:<name>"): each a
+/// hypothesis about which construct the compiler cannot take.
+const PATCHES: &[(&str, &str, &str)] = &[
+    ("rt_all_taps", "if (!(d < tol * 0.3)) {", "if (true) {"),
+    ("rt_centre_only", "if (!(d < tol * 0.3)) {", "if (false) {"),
+    (
+        "rt_no_fetch",
+        "let s = textureLoad(t_ao, clamp(p, vec2<i32>(0), size - vec2<i32>(1)), 0);",
+        "let s = vec4<f32>(vec2<f32>(p), 0.5, 1.0);",
+    ),
+    (
+        "finite_by_compare",
+        "return all(e != vec3<u32>(0x7f800000u));",
+        "return all(abs(v) <= vec3<f32>(3.4e38)) && all(e == e);",
+    ),
+];
+
+/// `vs_main` and `fs_main` as the OpenGL backend gets them on ANGLE (no storage buffers),
+/// with the scene WGSL rewritten by `patch` (see `PATCHES`).
+fn stages_patched(patch: Option<&str>) -> [String; 2] {
+    let mut wgsl = crate::scene_shader_text(true);
+    if let Some(name) = patch {
+        let (_, from, to) = PATCHES.iter().find(|p| p.0 == name).expect("patch");
+        assert!(wgsl.contains(from), "patch {name}: text not found");
+        wgsl = wgsl.replace(from, to);
+    }
+    let src = crate::arrays_as_textures(&wgsl, crate::ArrayPath::NoStorage);
     let module = naga::front::wgsl::parse_str(&src).expect("scene WGSL");
     let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
         .validate(&module)
@@ -34,6 +58,10 @@ fn stages() -> [String; 2] {
             .expect("GLSL ES");
         out
     })
+}
+
+fn stages() -> [String; 2] {
+    stages_patched(None)
 }
 
 /// The functions defined in `glsl`: (name, return type, line of the header).
@@ -73,8 +101,9 @@ fn stubbed(glsl: &str, name: &str) -> String {
 /// Compiles and links one variant ("full", "vs:<fn>" or "fs:<fn>") through ANGLE on WARP.
 fn link_variant(variant: &str) {
     use glow::HasContext;
-    let [mut vs, mut fs] = stages();
-    if let Some((stage, name)) = variant.split_once(':') {
+    let patch = variant.strip_prefix("patch:");
+    let [mut vs, mut fs] = stages_patched(patch);
+    if let Some((stage, name)) = variant.split_once(':').filter(|_| patch.is_none()) {
         let target = if stage == "vs" { &mut vs } else { &mut fs };
         *target = stubbed(target, name);
     }
@@ -122,6 +151,7 @@ fn angle_scene_shader_bisect() {
     }
     let [vs, fs] = stages();
     let mut variants = vec!["full".to_string()];
+    variants.extend(PATCHES.iter().map(|p| format!("patch:{}", p.0)));
     for (stage, glsl) in [("vs", &vs), ("fs", &fs)] {
         variants.extend(functions(glsl).into_iter().map(|(name, _, _)| format!("{stage}:{name}")));
     }
@@ -160,5 +190,14 @@ fn every_scene_function_can_be_stubbed() {
             let after: Vec<_> = functions(&stubbed(&glsl, name)).into_iter().map(|f| f.0).collect();
             assert_eq!(after, names, "stubbing {name}");
         }
+    }
+}
+
+/// Every patch still applies to the scene shader and leaves it valid.
+#[test]
+fn every_patch_applies() {
+    for (name, _, _) in PATCHES {
+        let [vs, fs] = stages_patched(Some(name));
+        assert!(vs.contains("void main") && fs.contains("void main"), "{name}");
     }
 }
