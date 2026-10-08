@@ -66,6 +66,7 @@ pub(crate) struct App {
     pub(crate) profile: std::collections::BTreeMap<&'static str, f64>,
     /// `profile` as it was at the start of the last frame: what a slow frame spent where.
     pub(crate) profile_prev: std::collections::BTreeMap<&'static str, f64>,
+    pub(crate) capture: Option<crate::performance_capture::Capture>,
     pub(crate) first_populate: bool,
     pub(crate) envir: Option<omsi_content::Envir>,
     pub(crate) weather: Option<omsi_content::weather::Weather>,
