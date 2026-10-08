@@ -871,12 +871,6 @@ mod tests {
         v.set_server(Some(VoiceServer { server_uid: "UID".into(), channel: "7".into(), password: String::new(), range: 20.0, radio: true }));
         v.tick(0.1, ("Max", 1), None, &[]);
         let (mut conn, _) = listener.accept().unwrap();
-        // Read the game's hello before closing: unread TCP data can turn the close
-        // into a reset on Windows and discard the refusal we are testing.
-        conn.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        let mut hello = String::new();
-        BufReader::new(conn.try_clone().unwrap()).read_line(&mut hello).unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&hello).unwrap()["type"], "hello");
         // Follow the plugin protocol: read hello before refusing. Closing with the
         // client's unread hello can reset the TCP connection on Windows and discard
         // the refusal before the game sees it.

@@ -275,7 +275,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("passenger.cfg");
         std::fs::write(&path, "[sound]\ncampainha.wav\n1\n[noloop]\n[conditionSingle]\nhaltewunsch\n1\n1\n[conditionSingle]\ndoor_handsteuerung\n0\n1\n").unwrap();
-        std::sync::Arc::get_mut(&mut vehicle.ty).unwrap().def.sound = Some(path.to_string_lossy().into_owned());
+        // Vehicle definitions refer to sound files relative to the vehicle directory.
+        let def = &mut std::sync::Arc::get_mut(&mut vehicle.ty).unwrap().def;
+        def.path = dir.join("passenger.bus");
+        def.sound = Some("passenger.cfg".into());
         let table = crate::lan::SyncTable::new(&vehicle.ty, &[]);
         for name in ["haltewunsch", "door_handsteuerung"] {
             assert!(table.values.iter().any(|(n, _)| n == name), "{name}");
