@@ -1632,9 +1632,10 @@ fn sixteen_texture_units() -> bool {
     array_path() != ArrayPath::Storage && (gl_backend() || omsi_cfg::env::var_os("OMSI_GL_TEXTURE_UNITS").is_some())
 }
 
-/// The camera group's entries on a device whose arrays take `path`, without the enhanced
-/// path's textures where it has `sixteen` texture units (see `sixteen_texture_units`).
-fn camera_layout_entries(path: ArrayPath, sixteen: bool) -> Vec<wgpu::BindGroupLayoutEntry> {
+/// The camera group's entries on a device whose arrays take `path`. Enhanced-only
+/// textures are omitted on the sixteen-texture-unit path and in launcher previews, where
+/// no enhanced pipeline or reflection probe is created.
+fn camera_layout_entries(path: ArrayPath, omit_enhanced: bool) -> Vec<wgpu::BindGroupLayoutEntry> {
     let mut camera_entries = vec![
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -1765,7 +1766,7 @@ fn camera_layout_entries(path: ArrayPath, sixteen: bool) -> Vec<wgpu::BindGroupL
         camera_entries.push(array_layout_entry_on(path, 3, wgpu::ShaderStages::FRAGMENT, true));
         camera_entries.push(array_layout_entry_on(path, 4, wgpu::ShaderStages::FRAGMENT, false));
     }
-    if sixteen {
+    if omit_enhanced {
         camera_entries.retain(|e| !ENHANCED_CAMERA_TEXTURES.contains(&e.binding));
     }
     camera_entries
@@ -2943,7 +2944,10 @@ impl Renderer {
                 array_layout_entry(10, wgpu::ShaderStages::VERTEX, false),
             ],
         });
-        let camera_entries = camera_layout_entries(array_path(), sixteen_texture_units());
+        let camera_entries = camera_layout_entries(
+            array_path(),
+            sixteen_texture_units() || options.preview_only,
+        );
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("camera"),
             entries: &camera_entries,
@@ -7778,24 +7782,8 @@ impl Renderer {
                     resource: self.enh_buf.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 12,
-                    resource: wgpu::BindingResource::TextureView(
-                        &self.probe.as_ref().expect("reflection probe").view,
-                    ),
-                },
-                wgpu::BindGroupEntry {
                     binding: 13,
                     resource: wgpu::BindingResource::Sampler(&self.lin_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 14,
-                    resource: wgpu::BindingResource::TextureView(&self.sky_lut_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 17,
-                    resource: wgpu::BindingResource::TextureView(
-                        &self.probe.as_ref().expect("reflection probe").cube_view,
-                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 18,
@@ -7811,8 +7799,27 @@ impl Renderer {
             entries.push(wgpu::BindGroupEntry { binding: 3, resource: light_buf.binding() });
             entries.push(wgpu::BindGroupEntry { binding: 4, resource: grid_buf.binding() });
         }
-        if sixteen_texture_units() {
-            entries.retain(|e| !ENHANCED_CAMERA_TEXTURES.contains(&e.binding));
+        // Launcher previews deliberately have no reflection probe or enhanced pipelines.
+        // Keep their camera group consistent with the reduced layout instead of unwrapping
+        // a resource that does not exist. The OpenGL sixteen-texture path omits the same
+        // enhanced-only bindings.
+        if !sixteen_texture_units() {
+            if let Some(probe) = self.probe.as_ref() {
+                entries.extend([
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::TextureView(&probe.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: wgpu::BindingResource::TextureView(&self.sky_lut_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 17,
+                        resource: wgpu::BindingResource::TextureView(&probe.cube_view),
+                    },
+                ]);
+            }
         }
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera"),
@@ -15049,6 +15056,16 @@ mod tests {
         assert!(renderer.probe.is_none());
         assert!(renderer.rt.is_none());
         assert!(renderer.cloud_shape_cpu.is_empty());
+        let bindings: Vec<u32> = camera_layout_entries(ArrayPath::Storage, true)
+            .into_iter()
+            .map(|e| e.binding)
+            .collect();
+        for binding in ENHANCED_CAMERA_TEXTURES {
+            assert!(
+                !bindings.contains(&binding),
+                "preview camera layout must omit enhanced binding {binding}"
+            );
+        }
     }
 
     #[test]
