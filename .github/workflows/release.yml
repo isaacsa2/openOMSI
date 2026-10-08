@@ -146,8 +146,18 @@ jobs:
           $symbols = "srv*$env:RUNNER_TEMP\symbols*https://msdl.microsoft.com/download/symbols"
           foreach ($dump in Get-ChildItem $dumps -Filter *.dmp | Select-Object -First 2) {
             Write-Output "===== $($dump.Name)"
-            & $cdb.FullName -z $dump.FullName -y $symbols -c ".ecxr; kn 120; lm; q"
+            & $cdb.FullName -z $dump.FullName -y $symbols -c ".ecxr; kn 12; q"
+            # the frames outside the recursion: which compiler pass, called from where
+            & $cdb.FullName -z $dump.FullName -y $symbols -c ".ecxr; kn 0n200000; q" |
+              Select-String -NotMatch "CheckAssertion_Group" | Select-Object -Last 60
           }
+      - name: ANGLE scene shader bisection
+        if: failure() && matrix.arch == 'x64' && github.event_name == 'pull_request'
+        timeout-minutes: 30
+        shell: pwsh
+        env:
+          ANGLE_TEST_LIBRARY_DIRECTORY: ${{ github.workspace }}/dist/windows
+        run: cargo test --locked --release --target x86_64-pc-windows-msvc -p omsi-render --lib angle_bisect::angle_scene_shader_bisect -- --exact --ignored --nocapture
       - name: Upload the ANGLE crash dumps
         if: failure() && matrix.arch == 'x64' && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v7
