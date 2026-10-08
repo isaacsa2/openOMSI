@@ -6952,7 +6952,7 @@ impl Renderer {
         clock.stage(self, "shadow items", "mirror.shadow items");
         let visible = self.cull_view(scene, &f, &mut clock);
         let mut plan = self.batch_draws(scene, &f, &visible, list);
-        self.count_draws(scene, with_overlays, visible.len(), &plan, &shadow_batches);
+        self.count_draws(scene, f.with_overlays || f.xr_view, visible.len(), &plan, &shadow_batches);
         clock.stage(self, "items", "mirror.items");
         plan.split_rain(scene, f.glass_on);
         self.upload_draw_list(scene, &plan.list);
@@ -8643,15 +8643,15 @@ impl PipelineCount {
     }
 }
 
-fn pipeline_counts<'a>(batches: impl Iterator<Item = &'a Batch>) -> [PipelineCount; 5] {
-    let mut out = [PipelineCount::default(); 5];
+fn pipeline_counts<'a>(batches: impl Iterator<Item = &'a Batch>) -> [PipelineCount; PIPE_KINDS as usize] {
+    let mut out = [PipelineCount::default(); PIPE_KINDS as usize];
     for batch in batches {
         out[(batch.pipe / 4) as usize].add(batch);
     }
     out
 }
 
-const PIPE_COUNT_KEYS: [[&str; 3]; 5] = [
+const PIPE_COUNT_KEYS: [[&str; 3]; PIPE_KINDS as usize] = [
     [
         "pipe opaque batches",
         "pipe opaque draws",
@@ -8673,8 +8673,9 @@ const PIPE_COUNT_KEYS: [[&str; 3]; 5] = [
         "pipe surface-depth draws",
         "pipe surface-depth ktris",
     ],
+    ["pipe terrain-paint batches", "pipe terrain-paint draws", "pipe terrain-paint ktris"],
 ];
-const MIRROR_PIPE_COUNT_KEYS: [[&str; 3]; 5] = [
+const MIRROR_PIPE_COUNT_KEYS: [[&str; 3]; PIPE_KINDS as usize] = [
     [
         "mirror pipe opaque batches",
         "mirror pipe opaque draws",
@@ -8700,6 +8701,7 @@ const MIRROR_PIPE_COUNT_KEYS: [[&str; 3]; 5] = [
         "mirror pipe surface-depth draws",
         "mirror pipe surface-depth ktris",
     ],
+    ["mirror pipe terrain-paint batches", "mirror pipe terrain-paint draws", "mirror pipe terrain-paint ktris"],
 ];
 
 /// Turn draw items into batches, appending their entries to `list`. `sort`: the order does
@@ -9680,6 +9682,7 @@ mod tests {
             batch(PIPE_OPAQUE, true, false, 6, 0..3),
             batch(PIPE_ALPHA_TEST, false, true, 9, 3..5),
             batch(PIPE_BLEND, true, true, 6, 5..6),
+            batch(PIPE_TERRAIN_PAINT, false, true, 9, 10..11),
         ];
         let cab = [
             batch(PIPE_OPAQUE, false, true, 3, 6..7),
@@ -9727,9 +9730,10 @@ mod tests {
                 triangles: 2
             }
         );
+        assert_eq!(counts[PIPE_TERRAIN_PAINT as usize], PipelineCount { batches: 1, draws: 1, triangles: 3 });
         assert_eq!(
             pipeline_counts(std::iter::empty()),
-            [PipelineCount::default(); 5]
+            [PipelineCount::default(); PIPE_KINDS as usize]
         );
     }
 
