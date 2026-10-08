@@ -3,7 +3,8 @@
 //! storage buffers (`ArrayPath`), the lean scene for phones (`basic_pipelines`), the
 //! reflection targets of Enhanced+ (`rt_gbuf`) and OpenGL's one sampler per texture.
 
-use super::{array_path, basic_pipelines, rt_gbuf, ArrayPath, ARRAY_TEX_WIDTH};
+use super::device_caps::{array_path, basic_pipelines, rt_gbuf, ArrayPath};
+use super::ARRAY_TEX_WIDTH;
 
 /// The scene shader: the vanilla path and the enhanced fragment shader in one module.
 ///
