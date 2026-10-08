@@ -116,3 +116,21 @@ pub(super) fn adapter_vram_mb(adapter: &wgpu::Adapter, info: &wgpu::AdapterInfo,
         _ => dedicated_vram_mb(info).or_else(|| vulkan_vram_mb(adapter)),
     }
 }
+
+/// Conservative texture allowance in MB, distinct from physical VRAM.
+/// Low-memory discrete GPUs need room for render targets and driver allocations.
+pub(super) fn texture_allowance_mb(info: &wgpu::AdapterInfo, vram: Option<u64>) -> u64 {
+    let discrete_allowance = |fallback| {
+        vram.filter(|v| *v >= 512).map_or(fallback, |v| {
+            if v <= 2560 { v * 35 / 100 }
+            else if v <= 6144 { (v / 2).min(1600) }
+            else { v * 3 / 10 }
+        })
+    };
+    match info.device_type {
+        wgpu::DeviceType::DiscreteGpu => discrete_allowance(1600),
+        wgpu::DeviceType::IntegratedGpu if info.backend == wgpu::Backend::Metal => 3000,
+        wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu => 1000,
+        _ => discrete_allowance(800),
+    }
+}
