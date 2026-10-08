@@ -1,6 +1,6 @@
-# Pacote experimental — 07/10/2026
+# Pacote experimental — 08/10/2026
 
-Base oficial: `3d875f2465c89b8ad91dbeeb85857a34e997bf70`, main após o commit de versão 0.2.13.
+Base oficial: `5f409baf5a3cd8d57874f08f2ab0a7ea00d9aafe`, main 0.2.17 com a modularização oficial.
 Pacote: [fork PR #106](https://github.com/isaacsa2/openOMSI/pull/106), branch `test/ai-passengers-traffic-0.2`.
 
 ## Correções aceitas upstream
@@ -28,7 +28,7 @@ Não reaplicamos esses patches sobre a main: o pacote usa a implementação ofic
 | [#110](https://github.com/isaacsa2/openOMSI/pull/110) — `fix/articulated-walk-entry` | Busca de ônibus perto do pedestre inclui módulos e posições reais de portas; antes dependia somente da origem do módulo frontal. | Corrige detecção perto da traseira. Não confirma nem resolve todo defeito de colisão do interior de um mod desconhecido. |
 | [#111](https://github.com/isaacsa2/openOMSI/pull/111) — `fix/balanced-graphics-presets` | Launcher e jogo usam quatro níveis próprios para cada modo: Vanilla, Vanilla+ (padrão), Enhanced e Enhanced+. O nível preserva o modo; perfis Enhanced têm MSAA/escala mais conservadores. Memória de textura automática e configurações personalizadas preservadas. [Valores completos](GRAPHICS_PRESETS_PTBR.md). | Nenhum benchmark de FPS ou garantia para todos os PCs. Limites e fallbacks existentes do renderer preservados. Reiniciar para opções dependentes da inicialização. |
 | [#112](https://github.com/isaacsa2/openOMSI/pull/112) — `feat/ingame-vehicle-hof-search` | Busca no jogo por modelo/pacote, HOF e destino; Enter confirma e Esc cancela; mantém a identidade da seleção. | Testes sintéticos de filtro; interação visual ainda precisa de teste. Letras/símbolos de linha já têm suporte na main e precisam validação com scripts reais. |
-| [#113](https://github.com/isaacsa2/openOMSI/pull/113) — `fix/ai-timetable-stop-waits` | Perfil selecionado determina espera por objeto e horário da visita. Paradas comuns liberam após passageiros; tipos 3/4 e terminal mantêm a espera. Antes a espera antecipada era aplicada indiscriminadamente. | Preserva tolerância existente dos pontos de horário e política ferroviária. Validar horários, repetição da mesma parada, streaming e troca de tour. |
+| Espera nos pontos — implementação oficial | A main incorporou a política de pontos de horário. A opção `ai_wait_timed_stops_only` é desligada por padrão; somente quando ativada os pontos comuns liberam após passageiros. | #113 substituída pelo upstream. Preservar o padrão oficial e testar ambos os estados da opção. |
 | [`fix-duty-reselect-current-trip`](https://github.com/isaacsa2/openOMSI/tree/fix-duty-reselect-current-trip) | A seleção/reseleção de uma viagem e parada inicializa o turno com a hora atual do jogo, em vez do horário da primeira partida do tour. A escolha explícita de viagem/parada continua prevalecendo. | Integração sem conflito com busca e espera nos pontos. Testar seleção de uma viagem posterior à primeira e verificar horário, papel e destino após a seleção. |
 
 ## Diagnóstico dos 13 relatos originais
@@ -37,8 +37,8 @@ Não reaplicamos esses patches sobre a main: o pacote usa a implementação ofic
 
 | Problema | Reproduzido / evidência | Causa confirmada ou provável | Engine ou conteúdo/configuração | Subsistema | Risco / correção e relação |
 | --- | --- | --- | --- | --- | --- |
-| 1. `schedule_active` falso | Betatesters relataram letreiro, paradas e portas funcionando. Falhas de lifecycle cobertas por regressões sintéticas. | Inicialização e progressão de timetable corrigidas; espera em todo ponto era um problema distinto. | Falhas específicas da engine confirmadas; não explica automaticamente todo veículo. | `schedule.rs`, `bus_service.rs`, scripts | Médio: #100 já upstream; #113 aguarda teste. |
-| 2. Embarque/desembarque AI | Testes dos usuários positivos em geral; relato de saída pela porta fechada no terceiro módulo. | Identidade de parada e heurísticas de portas têm falhas confirmadas no código. | Engine nesses casos; scripts do biarticulado ainda não examinados. | `humans.rs`, passageiros, scripts PAX | Médio: #101 upstream, #109; testar estados de todas as portas. |
+| 1. `schedule_active` falso | Betatesters relataram letreiro, paradas e portas funcionando. Falhas de lifecycle cobertas por regressões sintéticas. | Inicialização e progressão de timetable corrigidas; espera em todo ponto era um problema distinto. | Falhas específicas da engine confirmadas; não explica automaticamente todo veículo. | `omsi-sim::timetable_run`, `ai_traffic::bus_service`, scripts | Médio: #100 já upstream; #113 substituída; testar a opção oficial. |
+| 2. Embarque/desembarque AI | Testes dos usuários positivos em geral; relato de saída pela porta fechada no terceiro módulo. | Identidade de parada e heurísticas de portas têm falhas confirmadas no código. | Engine nesses casos; scripts do biarticulado ainda não examinados. | `omsi-sim::people`, passageiros, scripts PAX | Médio: #101 upstream, #109; testar estados de todas as portas. |
 | 3. Portas esquerdas/BRT | Betatesters validaram plataformas elevadas dos dois lados; Recife e curvas não testados. Curitiba direita ainda falha. | Lado autorado, visita exata e centro da bounding box corrigidos. Causa residual de Curitiba não confirmada. | Correção geral da engine; geometry/asset residual desconhecido. | `bus_service.rs`, `schedule.rs`, bounding geometry | Médio: #99 upstream. Não forçar AI sempre para a direita. |
 | 4. Rotatórias/interseções presas | Sem caso reproduzível ou log de crash. | Main já possui proteção de reservas; deadlock residual e crashes não isolados. | Indeterminado. | Reservas, blockers, occupancy, path progression | Alto: obter mapa/log; nenhuma correção nova de teleporte/despawn. |
 | 5. Trajetória/calçada | Relacionado ao alinhamento; invasão da plataforma direita ainda relatada. | Possível relação com baia/geometry; steering independente não demonstrado. | Indeterminado no caso residual. | Track visit, offset, axles, articulação | Alto: testar curvas, veículos diferentes e plataforma exata. |
@@ -53,19 +53,17 @@ Não reaplicamos esses patches sobre a main: o pacote usa a implementação ofic
 
 Também permanece aberto o relato de zero tráfego em certos mapas: é necessário identificar o mapa, pool de tráfego, restrições e log de carregamento. Densidade descontrolada e ausência total de tráfego são problemas diferentes.
 
-## Validação
+## Validação desta adaptação
 
-- Antes da sincronização para 0.2.13, `cargo check --locked -p omsi-app -p omsi-launcher-core --all-targets` e clippy passaram na nuvem. Os cinco PRs tiveram CI de testes/build verde nessa base 0.2.11.
-- Após a sincronização, merges dos cinco PRs não tiveram conflitos. No pacote, dois testes acrescentados no mesmo local de `humans.rs` precisaram ser concatenados; ambos foram preservados.
-- `git diff --check` passou nos cinco PRs e no pacote. O fmt global já falhava na base oficial; não foi aplicada reformatação geral. Não há Rust instalado no ambiente retomado para repetir os checks locais.
-- Pushes desta atualização disparam novos checks/builds. A validação anterior não substitui o resultado do novo commit ou do pacote combinado. Não aguardamos CI em loop.
-- Adicionado `fix-duty-reselect-current-trip`, commit de origem `2bc2d3c`: aplicação sem conflito, helper removido sem referências restantes e `git diff --check` aprovado. Busca no jogo e espera nos pontos preservadas; execução do caso real e testes/build do novo pacote dependem de validação adicional.
-- Presets por modo: quatro regressões isoladas passaram usando as funções reais de presets, leitura/escrita de configurações e reconhecimento no jogo. Cobrem os 16 pares modo/nível, efeitos coerentes com o modo, preservação da API/idioma/densidade e indicação de personalizado. Clippy da extração passou com avisos; helpers/testes novos formatados com rustfmt. A execução no crate completo foi bloqueada pela falta de pkg-config/Wayland no ambiente; o CI completo continua necessário. Na integração, preservados os testes de busca e de presets que foram adicionados no mesmo local.
-- Nenhuma classificação nova como “bug do asset/configuração” foi confirmada sem os arquivos. Não houve benchmark de desempenho nem execução dos mapas do relato nesta máquina.
+- Base oficial 0.2.17. Passageiros e timetable foram adaptados aos módulos de simulação; renderização usa os novos pipelines e passes; a aplicação usa os estados tipados.
+- Preservadas ANGLE, as opções novas de configuração, a correção oficial do teste Lua e o comportamento padrão da espera de AI.
+- PRs temáticas permanecem isoladas; #106 é integração para teste e não uma proposta única para merge upstream.
+- Os checks anteriores não comprovam esta base. A validação local e os novos resultados de CI devem ser conferidos no head atualizado de cada PR.
+- Não houve benchmark com instalação original, execução de mapas/mods, nem validação física de Windows, Android, Steam Deck ou VR neste ambiente.
 
 ## Mensagem para os betatesters
 
-Pessoal, atualizei o pacote experimental pra main atual do openOMSI, já com as mudanças da 0.2.13. Oito correções nossas entraram na versão oficial: passageiros, timetable, paradas, alinhamento de plataformas, restrições, semáforos, desvio de carros estacionados e limpeza de perfil.
+Pessoal, atualizei o pacote experimental pra main atual do openOMSI, já com as mudanças da 0.2.17. Oito correções nossas entraram na versão oficial: passageiros, timetable, paradas, alinhamento de plataformas, restrições, semáforos, desvio de carros estacionados e limpeza de perfil.
 
 O pacote acrescenta ajustes nas portas traseiras e na entrada a pé de articulados, na espera do ônibus AI nos pontos, presets gráficos mais leves e busca de veículos/HOF/destinos dentro do jogo. Também inclui um ajuste ao escolher ou reselecionar uma viagem do turno: usa a hora atual do jogo e mantém a viagem/parada escolhida.
 
@@ -74,7 +72,7 @@ Quando o build da plataforma terminar, usem o artifact da PR #106: https://githu
 Queria que vocês testassem principalmente:
 
 - Passageiros com densidade normal e alta: quantidade nas paradas, embarque, desembarque e crescimento sem controle.
-- Ônibus AI: viagem ativa, portas, letreiro, paradas e troca pra próxima viagem. Ponto comum deve liberar depois dos passageiros; ponto de horário e final de linha mantêm a espera prevista.
+- Ônibus AI: viagem ativa, portas, letreiro, paradas e troca pra próxima viagem. Testem o padrão oficial e a opção `ai_wait_timed_stops_only`: com ela ativada, ponto comum libera depois dos passageiros; ponto de horário e final de linha mantêm a espera prevista.
 - Biarticulados: portas do último módulo fechadas não devem permitir saída. Tentem entrar a pé pela traseira e avisem se a colisão do interior continuar falhando.
 - Carros, táxis, caminhões e ônibus em faixas com restrições. Avisem também se algum veículo ficar preso ou se um mapa ficar sem tráfego.
 - Semáforos: aproximação no vermelho, transições e cruzamentos seguidos. Principalmente pista dupla e faixa esquerda. Se alguém furar, gravem desde a aproximação.
@@ -88,4 +86,4 @@ Queria que vocês testassem principalmente:
 
 Se der problema, mandem versão do build, mapa e veículo com versões, local, horário, linha/tour, configurações de AI/passageiros, vídeo curto e log. Se aparecer uma quantidade de “milhões”, mostrem onde esse número aparece também. Para crashes com fila de tráfego, guardem o log logo depois do fechamento.
 
-Os cinco ajustes separados passaram nos testes automatizados antes desta sincronização. A atualização e o pacote junto estão entrando no CI; ainda precisamos validar o comportamento nos mapas e veículos de vocês.
+Os resultados anteriores não substituem os checks dos novos commits. A adaptação está sendo validada nesta base; ainda precisamos validar o comportamento nos mapas e veículos de vocês.

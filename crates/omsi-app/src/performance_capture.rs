@@ -167,18 +167,18 @@ fn write_pair(dir: &Path, summary: &Summary, value: &serde_json::Value) -> anyho
 
 impl crate::App {
     pub(crate) fn capture_performance(&mut self, dt: f64) {
-        let Some(mut capture) = self.capture.take() else { return };
-        if self.world.is_none() || self.starting.is_some() {
+        let Some(mut capture) = self.perf.capture.take() else { return };
+        if self.world.is_none() || self.cam.starting.is_some() {
             capture.ready_at = None;
-            self.capture = Some(capture);
+            self.perf.capture = Some(capture);
             return;
         }
         let ready = capture.ready_at.get_or_insert_with(Instant::now);
         if ready.elapsed().as_secs_f64() < capture.delay as f64 {
-            self.capture = Some(capture);
+            self.perf.capture = Some(capture);
             return;
         }
-        let mut totals: Stages = self.profile.iter().map(|(&k, &v)| (k.to_string(), v)).collect();
+        let mut totals: Stages = self.perf.profile.iter().map(|(&k, &v)| (k.to_string(), v)).collect();
         if let Some(r) = &self.renderer {
             totals.extend(r.stats.borrow().iter().map(|(&k, &v)| (format!("render.{k}"), v)));
         }
@@ -192,14 +192,14 @@ impl crate::App {
             }
             log::info!("performance capture started ({} s)", capture.seconds);
         }
-        let done = capture.sample(self.total_frames, dt, totals);
+        let done = capture.sample(self.perf.total_frames, dt, totals);
         if let (Some(frame), Some(r)) = (capture.frames.last_mut(), self.renderer.as_ref()) {
             frame.graphics = Some(Graphics { msaa: r.options.msaa, ssao: r.options.ssao,
                 render_scale: r.options.render_scale, shadows: self.settings.shadows,
-                mirror_refresh: self.settings.mirror_refresh.clone(), lan_active: self.lan.is_some() });
+                mirror_refresh: self.settings.mirror_refresh.clone(), lan_active: self.net.lan.is_some() });
         }
         if !done {
-            self.capture = Some(capture);
+            self.perf.capture = Some(capture);
             return;
         }
         let gpu = self.renderer.as_ref().map(|r| r.gpu_pass_times()).unwrap_or_default();
@@ -207,7 +207,7 @@ impl crate::App {
         let out = capture.output.clone();
         omsi_cfg::env::set_profile_capture(false);
         if let Some(r) = self.renderer.as_mut() {
-            r.set_profiling(omsi_cfg::env::var_os("OMSI_PROFILE").is_some());
+            r.set_profiling(omsi_cfg::flags::OMSI_PROFILE.is_set());
         }
         // Writing a large JSON file is outside the measured frame and off the UI thread.
         std::thread::spawn(move || match capture.write(gpu, memory) {

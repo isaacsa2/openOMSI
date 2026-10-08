@@ -614,9 +614,10 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     toggle_setting(ui, s, dirty, c.row(), "V-sync", "vsync");
     sel_setting(ui, s, dirty, "s-fps", c.row(), "Frame limit", "max_fps", &[("0", "Screen refresh rate"), ("30", "30 fps"), ("45", "45 fps"), ("60", "60 fps"), ("120", "120 fps"), ("144", "144 fps"), ("1000", "Unlimited")]);
     // (a Mac has Metal only; elsewhere a driver's Vulkan that misbehaves, or a card without
-    // it, is got round here)
+    // it, is got round here; on Windows also OpenGL ES on ANGLE over DirectX 11, for a chip
+    // with none of the others - it is tried only when the package has ANGLE's DLLs)
     if cfg!(windows) {
-        sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("dx12", "DirectX 12"), ("gl", "OpenGL")]);
+        sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("dx12", "DirectX 12"), ("gl", "OpenGL"), ("angle", "ANGLE (DirectX 11)")]);
     } else if !cfg!(target_os = "macos") {
         sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("gl", "OpenGL")]);
     }
@@ -669,6 +670,28 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
     let mut ms = get(s, "mouse_sens").as_f64().unwrap_or(1.0) as f32;
     if ui.slider("s-mouse", c.row(), &mut ms, 0.1, 3.0, 0.05, "Mouse steering sensitivity (O)", &|v| if (v - 1.0).abs() < 0.01 { "OMSI".to_string() } else { format!("{:.0}%", v * 100.0) }) {
         s["mouse_sens"] = json!((ms * 100.0).round() / 100.0);
+        *dirty = 0.3;
+    }
+    let mut mouse_pedal = get(s, "mouse_pedal_strength")
+        .as_f64()
+        .unwrap_or(1.0) as f32;
+    if ui.slider(
+        "s-mouse-pedal",
+        c.row(),
+        &mut mouse_pedal,
+        0.5,
+        2.0,
+        0.05,
+        "Mouse pedal strength",
+        &|v| {
+            if (v - 1.0).abs() < 0.01 {
+                "OMSI".to_string()
+            } else {
+                format!("{:.0}%", v * 100.0)
+            }
+        },
+    ) {
+        s["mouse_pedal_strength"] = json!((mouse_pedal * 100.0).round() / 100.0);
         *dirty = 0.3;
     }
     toggle_setting(ui, s, dirty, c.row(), "Smooth mouse steering (off: the wheel follows the cursor at once, as in OMSI)", "mouse_smooth");
@@ -1089,6 +1112,8 @@ fn gameplay_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     sel_setting(ui, s, dirty, "s-unsched", c.row(), "Random traffic", "ai_unsched_factor", &[("25", "25%"), ("50", "50%"), ("75", "75%"), ("100", "100%"), ("150", "150%"), ("200", "200%")]);
     sel_setting(ui, s, dirty, "s-maxsched", c.row(), "Timetable vehicles", "ai_max_scheduled", &[("0", "All"), ("10", "At most 10"), ("25", "At most 25"), ("50", "At most 50")]);
     sel_setting(ui, s, dirty, "s-maxpark", c.row(), "Parked cars", "ai_max_parked", &[("-1", "None"), ("0", "Every space"), ("35", "At most 35"), ("100", "At most 100"), ("250", "At most 250")]);
+    // (off: an early bus waits at every stop, as in OMSI)
+    toggle_setting(ui, s, dirty, c.row(), "Timetable buses ahead of time wait only at timed stops", "ai_wait_timed_stops_only");
     let left = c.used();
     // OMSI's own options (options.cfg)
     let mut c = Col::new(ui, cols[1], "Simulation");
@@ -2781,7 +2806,7 @@ mod settings_tests {
             graphics.push("s-api");
         }
         let driving = vec![
-            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-auto_shift", "set-momentary_gears", "s-go-keys",
+            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "s-mouse-pedal", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-auto_shift", "set-momentary_gears", "s-go-keys",
             "s-wrange", "s-wlock", "s-pad-steer-smooth", "set-pad_steer_linear", "set-arrows_switch_cams", "s-pedt", "s-pedb", "set-ff_enabled", "set-ff_invert", "s-ffroad", "s-ffeng", "s-fffade", "s-wreset", "s-go-pads",
         ];
         let mut camera = vec![
@@ -2828,7 +2853,7 @@ mod settings_tests {
         // (the radio stations: one, see `frame`)
         let sound = vec!["s-vol", "s-volai", "s-volsc", "set-doppler", "s-voices", "radio-name-0", "radio-url-0", "radio-del-0", "radio-add"];
         let gameplay = vec![
-            "s-board", "set-exact_fare", "s-pax", "set-get_up", "s-unsched", "s-maxsched", "s-maxpark",
+            "s-board", "set-exact_fare", "s-pax", "set-get_up", "s-unsched", "s-maxsched", "s-maxpark", "set-ai_wait_timed_stops_only",
             "s-maint", "set-collision_vehicles", "set-collision_objects", "set-collision_pedestrians", "set-use_real_time", "set-use_real_date", "set-time_sync", "set-metar_sync", "s-timespeed",
         ];
         let general = vec![
@@ -2899,7 +2924,7 @@ mod settings_tests {
     }
 
     #[test]
-    fn mobile_stacked_graphics_exposes_and_saves_cloud_and_gpu_texture_compatibility() {
+    fn mobile_stacked_graphics_exposes_and_saves_cloud_quality() {
         let mut ui = Ui::new();
         let mut s = all_rows();
         let mut out = outside();
@@ -2920,20 +2945,45 @@ mod settings_tests {
             ui.drawn.contains_key(&id_of("s-cloud-quality")),
             "mobile/stacked Graphics must expose cloud quality"
         );
+
+        s["cloud_quality"] = json!("high");
+        let saved = core::settings_to_text(&s, None);
+        let roundtrip = core::settings_from_text(Some(&saved));
+        assert_eq!(roundtrip["cloud_quality"], "high");
+
+        let game = crate::settings::Settings::from_text(&saved);
+        assert_eq!(game.cloud_quality, "high");
+    }
+
+    #[test]
+    fn mobile_stacked_graphics_exposes_and_saves_gpu_texture_compatibility() {
+        let mut ui = Ui::new();
+        let mut s = all_rows();
+        let mut out = outside();
+        ui.begin(Vec2::new(430.0, 1600.0), 1.0, 1.0 / 60.0);
+        let mut dirty = 0.0;
+        settings_tab(
+            &mut ui,
+            0,
+            &mut s,
+            &mut dirty,
+            &mut out,
+            [
+                Rect::new(12.0, 0.0, 406.0, 760.0),
+                Rect::new(12.0, 780.0, 406.0, 760.0),
+            ],
+        );
         assert!(
             ui.drawn.contains_key(&id_of("s-gpu-texcomp")),
             "mobile/stacked Graphics must expose GPU texture compatibility"
         );
 
-        s["cloud_quality"] = json!("high");
         s["gpu_texture_compression"] = json!("disabled");
         let saved = core::settings_to_text(&s, None);
         let roundtrip = core::settings_from_text(Some(&saved));
-        assert_eq!(roundtrip["cloud_quality"], "high");
         assert_eq!(roundtrip["gpu_texture_compression"], "disabled");
 
         let game = crate::settings::Settings::from_text(&saved);
-        assert_eq!(game.cloud_quality, "high");
         assert_eq!(game.gpu_texture_compression, "disabled");
     }
 
