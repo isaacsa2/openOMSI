@@ -5286,8 +5286,32 @@ impl Humans {
 
     /// The buses of the last tick within `r` of `at`, the own first.
     pub fn bus_ids_near(&self, at: DVec3, r: f64) -> Vec<BusId> {
-        let mut v: Vec<(BusId, f64)> = self.last_buses.iter().map(|b| (b.id, (b.pos - at).truncate().length())).filter(|x| x.1 < r).collect();
-        v.sort_by(|a, b| (a.0 != BusId::Player).cmp(&(b.0 != BusId::Player)).then(a.1.total_cmp(&b.1)));
+        let mut v: Vec<(BusId, f64)> = self
+            .last_buses
+            .iter()
+            .map(|b| {
+                // The front origin can be more than 25 m from the last section of a biarticulated
+                // bus. Use each section and the actual transformed doors, including on curves.
+                let distance = std::iter::once(b.pos)
+                    .chain(b.trailers.iter().map(|part| part.pos))
+                    .chain(
+                        b.cabin
+                            .entries
+                            .iter()
+                            .chain(&b.cabin.exits)
+                            .map(|door| b.world(door.outside)),
+                    )
+                    .map(|pos| (pos - at).truncate().length())
+                    .fold(f64::INFINITY, f64::min);
+                (b.id, distance)
+            })
+            .filter(|x| x.1 < r)
+            .collect();
+        v.sort_by(|a, b| {
+            (a.0 != BusId::Player)
+                .cmp(&(b.0 != BusId::Player))
+                .then(a.1.total_cmp(&b.1))
+        });
         v.into_iter().map(|x| x.0).collect()
     }
 
@@ -6180,6 +6204,73 @@ mod tests {
         assert!((p.y - 7.0).abs() < 1e-6);
         assert!((h - 180.0).abs() < 1e-6);
         assert!((back.project(&net, DVec3::new(0.3, 5.0, 0.0), 2.5) - 3.0).abs() < 0.11);
+    }
+
+    #[test]
+    fn walking_can_find_a_biarticulated_bus_at_its_last_section() {
+        let dir = std::env::temp_dir().join(format!("omsi-walk-long-bus-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("test.bus"),
+            "[passengercabin]\ncabin.cfg\n[paths]\npaths.cfg\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("paths.cfg"), "[pathpnt]\n0\n0\n0.5\n").unwrap();
+        std::fs::write(dir.join("cabin.cfg"), "[entry]\n0\n").unwrap();
+        let def = omsi_vehicle::Vehicle::load(&dir.join("test.bus")).unwrap();
+        let cabin = Arc::new(Cabin::load_train(&[(&def, Vec3::ZERO, f32::INFINITY)]).unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+        let part = |pos, offset, joint_y| PartFrame {
+            pos,
+            offset,
+            joint_y,
+            rot: Mat4::IDENTITY,
+            heading: 0.0,
+            half: DVec2::new(1.25, 6.0),
+            centre: DVec2::ZERO,
+        };
+        let bus = BusNow {
+            id: BusId::Ai(42),
+            cabin,
+            pos: DVec3::ZERO,
+            rot: Mat4::IDENTITY,
+            heading: 0.0,
+            speed: 0.0,
+            entry_open: vec![true],
+            exit_open: Vec::new(),
+            walk_open: None,
+            interior: 0.0,
+            air: CabinAir::default(),
+            half: DVec2::new(1.25, 6.0),
+            centre: DVec2::ZERO,
+            accel: DVec2::ZERO,
+            trailers: vec![
+                part(
+                    DVec3::new(0.0, -16.0, 0.0),
+                    Vec3::new(0.0, -16.0, 0.0),
+                    -8.0,
+                ),
+                part(
+                    DVec3::new(8.0, -32.0, 0.0),
+                    Vec3::new(0.0, -32.0, 0.0),
+                    -24.0,
+                ),
+            ],
+            terminus: None,
+            takes: Takes::Terminus,
+            next_stop: None,
+            places_off: Vec::new(),
+            served: None,
+        };
+        let mut humans = Humans::new(Path::new("/nonexistent"));
+        humans.last_buses.push(bus);
+        let at_rear = DVec3::new(9.0, -34.0, 0.0);
+        assert!(at_rear.truncate().length() > 25.0);
+        assert_eq!(humans.bus_ids_near(at_rear, 25.0), [BusId::Ai(42)]);
+        assert!(humans
+            .bus_ids_near(DVec3::new(100.0, -34.0, 0.0), 25.0)
+            .is_empty());
+        assert_eq!(humans.bus_ids_near(DVec3::ZERO, 25.0), [BusId::Ai(42)]);
     }
 
     #[test]
