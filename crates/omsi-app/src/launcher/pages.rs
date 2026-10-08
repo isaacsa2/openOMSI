@@ -2501,6 +2501,15 @@ pub fn mods(l: &mut Launcher, area: Rect) {
 
 pub fn setup(l: &mut Launcher, area: Rect) {
     let body = l.page_title(area, "Setup", "Where the original game and this one are.");
+    let support = Rect::new(body.x, body.y + 316.0, body.w.min(820.0), 42.0);
+    if l.ui.button("export-diagnostics", support, "Export diagnostics", Some("download"), ButtonKind::Normal) {
+        let c = &l.state.choice;
+        let snapshot = crate::support_bundle::snapshot(l.renderer.as_ref(), &crate::settings::Settings::load(),
+            l.pages.pads.io.as_ref().map(|d| d.connected()), Some((&c.map, Some(&c.bus), c.line.as_deref(), c.tour.as_deref())), "launcher_selection");
+        let out = crate::support_bundle::default_output();
+        l.state.spawn(move || super::state::Msg::Diagnostics(
+            crate::support_bundle::export(&out, &snapshot).map(|_| out).map_err(|e| format!("{e:#}"))));
+    }
     let r = Rect::new(body.x, body.y, body.w.min(820.0), 300.0);
     l.ui.panel(r);
     let inner = l.ui.heading(Rect::new(r.x + 20.0, r.y + 16.0, r.w - 40.0, r.h - 32.0), "Folders", Some("folder_open"));

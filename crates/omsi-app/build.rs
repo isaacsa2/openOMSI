@@ -10,6 +10,10 @@ fn main() {
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
     let hash = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let commit = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_secs()).unwrap_or(0);
+    println!("cargo:rustc-env=OMSI_BUILD_COMMIT={commit}");
+    println!("cargo:rustc-env=OMSI_BUILD_TIMESTAMP={stamp}");
     let date = git(&["log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M"]).unwrap_or_default();
     let dirty = git(&["status", "--porcelain"]).map(|s| !s.trim().is_empty()).unwrap_or(false);
     println!("cargo:rustc-env=OMSI_BUILD={hash}{} {date}", if dirty { "+" } else { "" });
