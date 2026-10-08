@@ -339,4 +339,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | Name | Type | Default | Read | Crates | Description |
 |---|---|---|---|---|---|
 | `OMSI_BUILD` | text | - | build | app | Compile-time (env!): the commit the binary was built from, set by build.rs. Not read at runtime. |
+| `OMSI_BUILD_COMMIT` | text | unknown | build | app | Compile-time commit SHA for support metadata, set by build.rs. Not read at runtime. |
+| `OMSI_BUILD_TIMESTAMP` | num | 0 | build | app | Compile-time Unix timestamp for support metadata, set by build.rs. Not read at runtime. |
 
