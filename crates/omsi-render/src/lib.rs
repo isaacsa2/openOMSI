@@ -1968,14 +1968,36 @@ fn dedicated_vram_mb(info: &wgpu::AdapterInfo) -> Option<u64> {
         use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
         let f: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
         let mut i = 0;
+        let mut name_match = None;
+        let mut ambiguous_name = false;
         while let Ok(a) = f.EnumAdapters1(i) {
             i += 1;
             let Ok(d) = a.GetDesc1() else { continue };
-            if d.VendorId == info.vendor && d.DeviceId == info.device {
-                return Some(d.DedicatedVideoMemory as u64 >> 20);
+            let mb = d.DedicatedVideoMemory as u64 >> 20;
+            if mb == 0 {
+                continue;
+            }
+            // OpenGL/ANGLE often report vendor/device as 0 even on a discrete GPU.
+            // Prefer matching PCI IDs when they are available.
+            if info.vendor != 0 && info.device != 0
+                && d.VendorId == info.vendor && d.DeviceId == info.device
+            {
+                return Some(mb);
+            }
+            // DXGI still knows the card's name. Use it only if it identifies exactly
+            // one adapter; never borrow another card's budget on a multi-GPU PC.
+            if (info.vendor == 0 || info.device == 0)
+                && String::from_utf16_lossy(&d.Description)
+                    .trim_end_matches('\0')
+                    .trim()
+                    .eq_ignore_ascii_case(info.name.trim())
+            {
+                if name_match.replace(mb).is_some() {
+                    ambiguous_name = true;
+                }
             }
         }
-        None
+        if ambiguous_name { None } else { name_match }
     }
     #[cfg(target_os = "linux")]
     {
@@ -2577,7 +2599,7 @@ impl Renderer {
             wgpu::DeviceType::DiscreteGpu => vram.filter(|v| *v >= 512).map_or(1600, |v| if v <= 2560 { v * 35 / 100 } else if v <= 6144 { (v / 2).min(1600) } else { v * 3 / 10 }),
             wgpu::DeviceType::IntegratedGpu if info.backend == wgpu::Backend::Metal => 3000,
             wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu => 1000,
-            _ => 800,
+            _ => vram.filter(|v| *v >= 512).map_or(800, |v| if v <= 2560 { v * 35 / 100 } else if v <= 6144 { (v / 2).min(1600) } else { v * 3 / 10 }),
         };
         ADAPTER_TEXTURE_MB.store(guess_mb, std::sync::atomic::Ordering::Relaxed);
         let discrete_vram = vram.filter(|_| info.device_type == wgpu::DeviceType::DiscreteGpu).unwrap_or(0);
@@ -2621,12 +2643,19 @@ impl Renderer {
         GL_BACKEND.store(info.backend == wgpu::Backend::Gl, std::sync::atomic::Ordering::Relaxed);
         let full = omsi_cfg::flags::OMSI_FULL_GPU.is_set();
         let weak = !full
-            && (info.backend == wgpu::Backend::Gl
+            && ((info.backend == wgpu::Backend::Gl && vram.is_none())
                 // (a phone's chip, whatever type its driver reports: some say "other")
                 || cfg!(target_os = "android")
                 || (info.device_type == wgpu::DeviceType::IntegratedGpu && info.backend != wgpu::Backend::Metal)
                 || vram.is_some_and(|v| v <= 2560));
         let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
+        // The GL SSAO shader path is not supported even on powerful GPUs (#422).
+        // Do not conflate this API limitation with a low-VRAM card.
+        let options = if info.backend == wgpu::Backend::Gl {
+            RenderOptions { ssao: false, ..options }
+        } else {
+            options
+        };
         let options = if weak {
             log::warn!("{}: a small or shared graphics chip - no SSAO, no MSAA, shadow maps of at most 1024 (OMSI_FULL_GPU=1 keeps the settings)", info.name);
             RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), ..options }
