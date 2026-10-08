@@ -209,10 +209,13 @@ pub(crate) fn setup_sky(
     let typed = cloud_texture(&args.root, &kind);
     let cover = typed.or_else(|| omsi_texture::decode_file(&omsi_cfg::resolve_path(&args.root, "Texture\\clouds.tga")).ok());
     let t = std::time::Instant::now();
-    let field = cloud_field(cover.as_ref());
+    let coverage = cover.as_ref().map(cloud_coverage_image);
+    let field = cloud_field(coverage.as_ref());
     log::debug!("cloud field made in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
     let clouds = Some(renderer.add_texture(scene, &field, true));
-    renderer.set_sky_textures_clouds(scene, [ids[0], ids[1], ids[2]], clouds);
+    let sky = [ids[0], ids[1], ids[2]];
+    let photo = cover.as_ref().filter(|img| img.width > 0 && img.height > 0).map(|img| renderer.add_texture(scene, img, true));
+    renderer.set_sky_textures_photographic_clouds(scene, sky, clouds, photo);
 }
 
 /// Edge of the cloud field texture (texels); it tiles.
@@ -353,19 +356,23 @@ fn cloud_texture(root: &Path, kind: &str) -> Option<omsi_texture::Image> {
         }
     }
     let file = file?;
-    let mut img = omsi_texture::decode_file(&omsi_cfg::resolve_path(&omsi_cfg::resolve_path(&root, "Texture"), &file)).ok()?;
-    if img.has_alpha {
-        for px in img.rgba.chunks_mut(4) {
-            let a = px[3];
-            px[0] = a;
-            px[1] = a;
-            px[2] = a;
-            px[3] = 255;
-        }
-        img.has_alpha = false;
-    }
+    let img = omsi_texture::decode_file(&omsi_cfg::resolve_path(&omsi_cfg::resolve_path(&root, "Texture"), &file)).ok()?;
     log::info!("clouds: {kind} ({file})");
     Some(img)
+}
+
+/// The procedural path uses alpha as coverage, while the textured path keeps the original
+/// RGB shading and transparency. Never destroy the photograph to build the shape field.
+fn cloud_coverage_image(image: &omsi_texture::Image) -> omsi_texture::Image {
+    let mut cover = image.clone();
+    if cover.has_alpha {
+        for px in cover.rgba.chunks_mut(4) {
+            let alpha = px[3];
+            px.copy_from_slice(&[alpha, alpha, alpha, 255]);
+        }
+        cover.has_alpha = false;
+    }
+    cover
 }
 
 /// Cloud cover of a weather file: `[clouds] type density`, type -1 = clear, density up to
@@ -633,4 +640,19 @@ pub(crate) fn from_report(s: &str) -> Option<omsi_content::weather::Weather> {
     let mut w = omsi_content::weather::from_metar(icao, raw);
     w.path = std::path::PathBuf::from(format!("metar:{icao}"));
     Some(w)
+}
+#[cfg(test)]
+mod photographic_cloud_tests {
+    use super::*;
+
+    #[test]
+    fn photograph_retains_rgb_and_alpha_while_procedural_path_reads_coverage() {
+        let image = omsi_texture::Image { width: 2, height: 1, rgba: vec![30, 60, 90, 0, 80, 100, 120, 192], has_alpha: true };
+        let coverage = cloud_coverage_image(&image);
+        assert_eq!(coverage.rgba, vec![0, 0, 0, 255, 192, 192, 192, 255]);
+        assert!(!coverage.has_alpha);
+        assert_eq!(image.rgba, vec![30, 60, 90, 0, 80, 100, 120, 192]);
+        let opaque = omsi_texture::Image { has_alpha: false, ..image };
+        assert_eq!(cloud_coverage_image(&opaque).rgba, opaque.rgba);
+    }
 }
