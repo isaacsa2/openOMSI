@@ -12266,11 +12266,8 @@ fn lean_scene(src: String) -> String {
 /// and the detail volume (3-D R8), both with their mip chains, and a repeating sampler.
 fn cloud_noise_textures(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Sampler, Vec<u8>) {
     let t0 = std::time::Instant::now();
-    let (shape, detail) = std::thread::scope(|s| {
-        let a = s.spawn(clouds::shape_map);
-        let b = s.spawn(clouds::detail_volume);
-        (a.join().expect("cloud shape"), b.join().expect("cloud detail"))
-    });
+    let noise = clouds::noise();
+    let (shape, detail) = (&noise.shape, &noise.detail);
     let make = |label: &str, size: u32, dim: wgpu::TextureDimension, format: wgpu::TextureFormat, bpp: u32, levels: &[Vec<u8>]| {
         let depth = if dim == wgpu::TextureDimension::D3 { size } else { 1 };
         let tex = device.create_texture(&wgpu::TextureDescriptor {
