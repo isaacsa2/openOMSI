@@ -3,7 +3,7 @@
 
 use super::state::{fmt_bytes, hhmm, short_map};
 use super::theme::*;
-use super::ui::{id_of, ButtonKind, Ui};
+use super::ui::{id_of, matches, ButtonKind, Ui};
 use super::{Launcher, Page};
 use glam::Vec2;
 use omsi_launcher_lib as core;
@@ -18,6 +18,8 @@ pub struct PagesView {
     /// The "reset every setting" dialog is open.
     pub confirm_reset: bool,
     pub kb_filter: [String; 2],
+    /// The OMSI-style "Add event..." browser is open for a keyboard section.
+    pub kb_events: [bool; 2],
     /// (section, index) of the binding waiting for a key.
     pub capturing: Option<(usize, usize)>,
     pub drop_hover: bool,
@@ -49,6 +51,8 @@ pub struct PadsView {
     /// The button last pressed on the shown device and when: its line is lit, so that one
     /// sees which it is and what it does, and can give it an action there.
     pub last_pressed: Option<(usize, std::time::Instant)>,
+    /// "Remove this device" clicked once, and when: a second click removes it.
+    confirm_remove: Option<std::time::Instant>,
 }
 
 /// The set-up assistant of a device: the player lets go of everything, then turns the wheel
@@ -74,6 +78,13 @@ impl PadsView {
                 test.fail("The test was interrupted. Please try again.");
             }
         }
+    }
+
+    /// Give every controller handle up before handing the hardware to the game. The normal
+    /// controller list uses non-exclusive DirectInput too, not only the force-feedback test.
+    pub(super) fn release_io(&mut self) {
+        self.cancel_feedback_test();
+        self.io = None;
     }
 }
 
@@ -110,6 +121,9 @@ pub fn profile(l: &mut Launcher, area: Rect) {
             let name = l.state.config.profile.clone();
             match core::delete_profile(&name) {
                 Ok(()) => {
+                    l.state.profile = None;
+                    l.state.config.profile.clear();
+                    let _ = core::save_config(&l.state.config);
                     l.state.set_status(format!("Personnel file of {name} deleted."), false);
                     l.state.load_profiles();
                 }
@@ -536,18 +550,27 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
             }
         }
     }
-    sel_setting(ui, s, dirty, "s-graphics", c.row(), "Graphics", "graphics", &[("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced")]);
+    sel_setting(ui, s, dirty, "s-graphics", c.row(), "Graphics", "graphics", &[("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")]);
     // Vanilla draws what OMSI 2 draws: no sun shadows, ambient occlusion or detail grain
     let classic = get(s, "graphics").as_str() == Some("vanilla");
+    let traced = get(s, "graphics").as_str() == Some("enhanced_plus");
     sel_setting(ui, s, dirty, "s-msaa", c.row(), "Anti-aliasing", "msaa", &[("1", "Off"), ("2", "2x MSAA"), ("4", "4x MSAA"), ("8", "8x MSAA")]);
     sel_setting(ui, s, dirty, "s-scale", c.row(), "Render scale", "render_scale", &[("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")]);
     sel_setting(ui, s, dirty, "s-af", c.row(), "Anisotropic", "anisotropy", &[("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")]);
     if !classic {
         sel_setting(ui, s, dirty, "s-shadow", c.row(), "Shadow map", "shadow_size", &[("1024", "1024"), ("2048", "2048"), ("4096", "4096")]);
-        toggle_setting(ui, s, dirty, c.row(), "Ambient occlusion", "ssao");
-        toggle_setting(ui, s, dirty, c.row(), "Sun shadows", "shadows");
+        // (Enhanced+ traces its shadows, occlusion and reflections: always on there)
+        if !traced {
+            toggle_setting(ui, s, dirty, c.row(), "Ambient occlusion", "ssao");
+            toggle_setting(ui, s, dirty, c.row(), "Sun shadows", "shadows");
+        }
         sel_setting(ui, s, dirty, "s-casters", c.row(), "Shadows cast by", "shadow_casters", &[("all", "Every solid mesh"), ("omsi", "[shadow] meshes, as OMSI")]);
         toggle_setting(ui, s, dirty, c.row(), "Detail texturing up close", "detail_textures");
+        let mut night = get(s, "night_brightness").as_f64().unwrap_or(0.0) as f32;
+        if ui.slider("s-night", c.row(), &mut night, 0.0, 3.0, 0.25, "Night brightness", &|v| if v < 0.01 { "Off".to_string() } else { format!("+{v:.2}") }) {
+            s["night_brightness"] = json!((night / 0.25).round() * 0.25);
+            *dirty = 0.3;
+        }
         // (an LED panel's dots are its own light: how bright they burn, and how much of the
         // mip chain the panel's picture and its mask are held at - 0 point-samples them,
         // the sharpest dots and the worst shimmer; higher holds them at the level the
@@ -566,8 +589,11 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     // (the models' `[isshadow]` blob is what OMSI draws under a vehicle in every graphics
     // mode, the vanilla one included, so its switch is not part of the extras above)
     toggle_setting(ui, s, dirty, c.row(), "OMSI's shadow meshes (under vehicles)", "shadow_blobs");
-    toggle_setting(ui, s, dirty, c.row(), "Reflection maps (paint, chrome, glass)", "reflections");
+    if !traced {
+        toggle_setting(ui, s, dirty, c.row(), "Reflection maps (paint, chrome, glass)", "reflections");
+    }
     toggle_setting(ui, s, dirty, c.row(), "Clouds", "clouds");
+    toggle_setting(ui, s, dirty, c.row(), "Windy trees", "windy_trees");
     let left = c.used();
     let mut c = Col::new(ui, cols[1], "Display");
     toggle_setting(ui, s, dirty, c.row(), "Fullscreen", "fullscreen");
@@ -577,9 +603,10 @@ fn graphics_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     toggle_setting(ui, s, dirty, c.row(), "V-sync", "vsync");
     sel_setting(ui, s, dirty, "s-fps", c.row(), "Frame limit", "max_fps", &[("0", "Screen refresh rate"), ("30", "30 fps"), ("45", "45 fps"), ("60", "60 fps"), ("120", "120 fps"), ("144", "144 fps"), ("1000", "Unlimited")]);
     // (a Mac has Metal only; elsewhere a driver's Vulkan that misbehaves, or a card without
-    // it, is got round here)
+    // it, is got round here; on Windows also OpenGL ES on ANGLE over DirectX 11, for a chip
+    // with none of the others - it is tried only when the package has ANGLE's DLLs)
     if cfg!(windows) {
-        sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("dx12", "DirectX 12"), ("gl", "OpenGL")]);
+        sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("dx12", "DirectX 12"), ("gl", "OpenGL"), ("angle", "ANGLE (DirectX 11)")]);
     } else if !cfg!(target_os = "macos") {
         sel_setting(ui, s, dirty, "s-api", c.row(), "Graphics API", "graphics_api", &[("auto", "Automatic"), ("vulkan", "Vulkan"), ("gl", "OpenGL")]);
     }
@@ -619,16 +646,41 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
         s["mouse_sens"] = json!((ms * 100.0).round() / 100.0);
         *dirty = 0.3;
     }
+    let mut mouse_pedal = get(s, "mouse_pedal_strength")
+        .as_f64()
+        .unwrap_or(1.0) as f32;
+    if ui.slider(
+        "s-mouse-pedal",
+        c.row(),
+        &mut mouse_pedal,
+        0.5,
+        2.0,
+        0.05,
+        "Mouse pedal strength",
+        &|v| {
+            if (v - 1.0).abs() < 0.01 {
+                "OMSI".to_string()
+            } else {
+                format!("{:.0}%", v * 100.0)
+            }
+        },
+    ) {
+        s["mouse_pedal_strength"] = json!((mouse_pedal * 100.0).round() / 100.0);
+        *dirty = 0.3;
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Smooth mouse steering (off: the wheel follows the cursor at once, as in OMSI)", "mouse_smooth");
     toggle_setting(ui, s, dirty, c.row(), "A right click ends the mouse steering (as in OMSI)", "mouse_right_off");
     toggle_setting(ui, s, dirty, c.row(), "Indicators cancel themselves (as the bus's script does)", "blinker_cancel");
     toggle_setting(ui, s, dirty, c.row(), "The keyboard brake stays on until the throttle (as in OMSI)", "brake_hold");
     toggle_setting(ui, s, dirty, c.row(), "Automatic clutch (manual gearboxes)", "auto_clutch");
-    toggle_setting(ui, s, dirty, c.row(), "Hold manual gear buttons (release returns to neutral)", "momentary_gears");
+    // (it was in the game's menu only, #1780)
+    toggle_setting(ui, s, dirty, c.row(), "Automated manual gearbox (shifts a manual gearbox for you by the engine speed)", "auto_shift");
     if ui.button("s-go-keys", c.row(), "Change the keys", Some("keyboard"), ButtonKind::Normal) {
         out.controls = Some(0);
     }
     let left = c.used();
     let mut c = Col::new(ui, cols[1], "Game controllers");
+    toggle_setting(ui, s, dirty, c.row(), "H-pattern shifter: return to neutral when the gear is released", "momentary_gears");
     // steering wheels: the wheel's own rotation and how much of it is the bus's full lock
     // (a real bus: about two and a half turns), force feedback the other way round
     let mut range = get(s, "wheel_range").as_f64().unwrap_or(900.0) as f32;
@@ -641,6 +693,14 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
         s["wheel_lock"] = json!(if lock < 45.0 { 0.0 } else { lock.round() });
         *dirty = 0.3;
     }
+    // a gamepad stick's steering, eased onto where the stick points (0: as it reads)
+    let mut pad_smooth = get(s, "pad_steer_smooth").as_f64().unwrap_or(120.0) as f32;
+    if ui.slider("s-pad-steer-smooth", c.row(), &mut pad_smooth, 0.0, 300.0, 10.0, "Stick steering smoothing", &|v| if v <= 0.0 { "Off".to_string() } else { format!("{v:.0} ms") }) {
+        s["pad_steer_smooth"] = json!(pad_smooth.round());
+        *dirty = 0.3;
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Stick steers like a wheel (a wheel seen as a gamepad)", "pad_steer_linear");
+    toggle_setting(ui, s, dirty, c.row(), "Arrow keys switch the cameras with a wheel too (no glance)", "arrows_switch_cams");
     // the pedals' response: softer (below 1) or stronger (above 1) than the pedal reads
     for (key, label, id) in [("pedal_throttle", "Throttle pedal strength", "s-pedt"), ("pedal_brake", "Brake pedal strength", "s-pedb")] {
         let mut v = get(s, key).as_f64().unwrap_or(1.0) as f32;
@@ -652,11 +712,29 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
     toggle_setting(ui, s, dirty, c.row(), "Force feedback and vibration", "ff_enabled");
     toggle_setting(ui, s, dirty, c.row(), "Invert force feedback by default", "ff_invert");
     c.y += ui.paragraph("Wheels with a saved direction use their own setting under Controls → Game controllers.", Vec2::new(c.inner.x, c.y), c.inner.w, 12.5, Weight::Regular, TEXT_DIM) + 8.0;
+    toggle_setting(ui, s, dirty, c.row(), "Invert force feedback", "ff_invert");
+    // what the wheel feels all the time while the bus runs: the road's grain and the
+    // engine's buzz, and how long a jolt eases away once it is over
+    for (key, label, id) in [("ff_road_vib", "Road texture vibration", "s-ffroad"), ("ff_engine_vib", "Engine vibration", "s-ffeng")] {
+        let mut v = get(s, key).as_f64().unwrap_or(1.0) as f32;
+        if ui.slider(id, c.row(), &mut v, 0.0, 4.0, 0.05, label, &|v| if v < 0.01 { "Off".to_string() } else if (v - 1.0).abs() < 0.01 { "Normal".to_string() } else { format!("{:.0}%", v * 100.0) }) {
+            s[key] = json!((v * 20.0).round() / 20.0);
+            *dirty = 0.3;
+        }
+    }
+    let mut fade = get(s, "ff_fade").as_f64().unwrap_or(0.28) as f32;
+    if ui.slider("s-fffade", c.row(), &mut fade, 0.0, 1.5, 0.05, "Vibration fade-out", &|v| if v < 0.01 { "Off".to_string() } else { format!("{:.0} ms", (v * 1000.0).round() as i32) }) {
+        s["ff_fade"] = json!((fade * 100.0).round() / 100.0);
+        *dirty = 0.3;
+    }
     if ui.button("s-wreset", c.row(), "Reset wheel settings", Some("restart_alt"), ButtonKind::Normal) {
         s["wheel_range"] = json!(900.0);
         s["wheel_lock"] = json!(0.0);
         s["ff_invert"] = json!(false);
         s["ff_enabled"] = json!(true);
+        s["ff_road_vib"] = json!(1.0);
+        s["ff_engine_vib"] = json!(1.0);
+        s["ff_fade"] = json!(0.28);
         *dirty = 0.3;
     }
     if ui.button("s-go-pads", c.row(), "Set up a wheel or pedals", Some("sports_esports"), ButtonKind::Normal) {
@@ -669,6 +747,7 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
 fn camera_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, cols: [Rect; 2]) -> [f32; 2] {
     let mut c = Col::new(ui, cols[0], "Driver's view");
     // the driver's eye, moved from the bus's own camera
+    c.section(ui, "Seat position");
     for (key, label, id) in [("seat_y", "Seat forward / back", "s-seaty"), ("seat_z", "Seat up / down", "s-seatz"), ("seat_x", "Seat right / left", "s-seatx")] {
         let mut v = get(s, key).as_f64().unwrap_or(0.0) as f32;
         if ui.slider(id, c.row(), &mut v, -0.6, 0.6, 0.01, label, &|v| format!("{:+.0} cm", v * 100.0)) {
@@ -676,10 +755,16 @@ fn camera_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, co
             *dirty = 0.3;
         }
     }
+    let mut seat_pitch = get(s, "seat_pitch_deg").as_f64().unwrap_or(0.0) as f32;
+    if ui.slider("s-seat-pitch", c.row(), &mut seat_pitch, -45.0, 45.0, 1.0, "Head pitch", &|v| format!("{v:+.0}°")) {
+        s["seat_pitch_deg"] = json!(seat_pitch.round());
+        *dirty = 0.3;
+    }
     if ui.button("s-seatreset", c.row(), "Reset the seat position", Some("restart_alt"), ButtonKind::Normal) {
         for k in ["seat_x", "seat_y", "seat_z"] {
             s[k] = json!(0.0);
         }
+        s["seat_pitch_deg"] = json!(0.0);
         *dirty = 0.3;
     }
     let fov_key = if get(s, "triple_screen").as_bool().unwrap_or(false)
@@ -699,6 +784,23 @@ fn camera_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, co
         s["look_sens"] = json!((look * 100.0).round() / 100.0);
         *dirty = 0.3;
     }
+    toggle_setting(ui, s, dirty, c.row(), "Right stick turns the view", "right_stick_look");
+    let mut smooth = get(s, "look_smoothing_ms").as_f64().unwrap_or(0.0) as f32;
+    if ui.slider("s-look-smoothing", c.row(), &mut smooth, 0.0, 200.0, 10.0, "Smooth the mouse look", &|v| if v <= 0.0 { "Off".to_string() } else { format!("{v:.0} ms") }) {
+        s["look_smoothing_ms"] = json!(smooth.round());
+        *dirty = 0.3;
+    }
+    c.section(ui, "A head at rest");
+    let mut idle = get(s, "head_idle").as_f64().unwrap_or(0.0) as f32;
+    if ui.slider("s-head-idle", c.row(), &mut idle, 0.0, 1.0, 0.05, "Head sway at a standstill", &|v| if v <= 0.0 { "Off".to_string() } else { format!("{:.0}%", v * 100.0) }) {
+        s["head_idle"] = json!((idle * 100.0).round() / 100.0);
+        *dirty = 0.3;
+    }
+    let mut pace = get(s, "head_idle_pace").as_f64().unwrap_or(1.0) as f32;
+    if ui.slider("s-head-idle-pace", c.row(), &mut pace, 0.5, 2.0, 0.05, "Sway pace", &|v| format!("{:.0}%", v * 100.0)) {
+        s["head_idle_pace"] = json!((pace * 100.0).round() / 100.0);
+        *dirty = 0.3;
+    }
     toggle_setting(ui, s, dirty, c.row(), "Driver's view turns with the steering", "steer_look");
     let mut angle = get(s, "steer_look_angle").as_f64().unwrap_or(30.0) as f32;
     if ui.slider("s-steer-look-angle", c.row(), &mut angle, 0.0, 60.0, 1.0, "Steering view angle", &|v| format!("{v:.0}°")) {
@@ -714,12 +816,67 @@ fn camera_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, co
     toggle_setting(ui, s, dirty, c.row(), "Camera glides between viewpoints", "driverview_smooth");
     toggle_setting(ui, s, dirty, c.row(), "Driver's hands in the cab view", "hands_in_cab");
     toggle_setting(ui, s, dirty, c.row(), "Right mouse button turns the view, Shift+right zooms (off: right zooms as in OMSI, the wheel button turns)", "alt_view");
+    toggle_setting(ui, s, dirty, c.row(), "Precision mouse zoom (FOV curve instead of the linear way)", "precision_zoom");
     let left = c.used();
     let mut c = Col::new(ui, cols[1], "Outside views");
     toggle_setting(ui, s, dirty, c.row(), "Camera collisions (outside view)", "camera_collision");
     toggle_setting(ui, s, dirty, c.row(), "Driver at the wheel (outside views)", "driver");
     c.section(ui, "Head tracking");
-    toggle_setting(ui, s, dirty, c.row(), "Head tracking (TrackIR and others through opentrack, UDP 4242)", "head_tracking");
+    toggle_setting(ui, s, dirty, c.row(), "Head tracking (native TrackIR / OpenTrack)", "head_tracking");
+
+    // TrackIR axis controls. Values are stored as user-facing percentages:
+    // 0% disables an axis; 100% (the default) is 1:1.
+    c.section(ui, "Rotation");
+    for (key, id, label) in [
+        ("head_tracking_yaw_sens", "s-trackir-yaw", "Yaw sensitivity (left / right)"),
+        ("head_tracking_pitch_sens", "s-trackir-pitch", "Pitch sensitivity (up / down)"),
+        ("head_tracking_roll_sens", "s-trackir-roll", "Roll sensitivity"),
+    ] {
+        let mut v = get(s, key).as_f64().unwrap_or(100.0) as f32;
+        if ui.slider(id, c.row(), &mut v, 0.0, 100.0, 1.0, label, &|v| {
+            if v <= 0.0 { "Off".to_string() } else { format!("{v:.0}%") }
+        }) {
+            s[key] = json!(v.round().clamp(0.0, 100.0));
+            *dirty = 0.3;
+        }
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Invert yaw", "head_tracking_invert_yaw");
+    toggle_setting(ui, s, dirty, c.row(), "Invert pitch", "head_tracking_invert_pitch");
+    toggle_setting(ui, s, dirty, c.row(), "Invert roll", "head_tracking_invert_roll");
+
+    c.section(ui, "Position");
+    for (key, id, label) in [
+        ("head_tracking_x_sens", "s-trackir-x", "X sensitivity (left / right)"),
+        ("head_tracking_y_sens", "s-trackir-y", "Y sensitivity (up / down)"),
+        ("head_tracking_z_sens", "s-trackir-z", "Z sensitivity (forward / back)"),
+    ] {
+        let mut v = get(s, key).as_f64().unwrap_or(100.0) as f32;
+        if ui.slider(id, c.row(), &mut v, 0.0, 100.0, 1.0, label, &|v| {
+            if v <= 0.0 { "Off".to_string() } else { format!("{v:.0}%") }
+        }) {
+            s[key] = json!(v.round().clamp(0.0, 100.0));
+            *dirty = 0.3;
+        }
+    }
+    toggle_setting(ui, s, dirty, c.row(), "Invert X", "head_tracking_invert_x");
+    toggle_setting(ui, s, dirty, c.row(), "Invert Y", "head_tracking_invert_y");
+    toggle_setting(ui, s, dirty, c.row(), "Invert Z", "head_tracking_invert_z");
+
+    if ui.button("s-trackir-reset", c.row(), "Reset head-tracking axes", Some("restart_alt"), ButtonKind::Normal) {
+        for key in [
+            "head_tracking_yaw_sens", "head_tracking_pitch_sens", "head_tracking_roll_sens",
+            "head_tracking_x_sens", "head_tracking_y_sens", "head_tracking_z_sens",
+        ] {
+            s[key] = json!(15.0);
+        }
+        for key in [
+            "head_tracking_invert_yaw", "head_tracking_invert_pitch", "head_tracking_invert_roll",
+            "head_tracking_invert_x", "head_tracking_invert_y", "head_tracking_invert_z",
+        ] {
+            s[key] = json!(false);
+        }
+        *dirty = 0.3;
+    }
     c.section(ui, "Triple screen");
     toggle_setting(
         ui,
@@ -871,7 +1028,47 @@ fn sound_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) -> [f
     }
     toggle_setting(ui, s, dirty, c.row(), "Doppler effect", "doppler");
     sel_setting(ui, s, dirty, "s-voices", c.row(), "Passenger voices", "pax_voices", &[("all", "Greetings and tickets"), ("tickets", "Only the ticket asked for"), ("off", "Silent")]);
-    [c.used(), 0.0]
+    [c.used(), radio_stations(ui, cols[1])]
+}
+
+thread_local! {
+    /// The radio stations as the Sound settings edit them (`radio.cfg`, read the first time).
+    static RADIO: std::cell::RefCell<Option<Vec<(String, String)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The bus radios' internet stations (`radio.cfg`, see `radio`): each with its name and
+/// address, removed or added here, saved at once (#857). Returns the column's height.
+fn radio_stations(ui: &mut Ui, r: Rect) -> f32 {
+    let mut c = Col::new(ui, r, "Radio stations");
+    c.y += ui.paragraph("A radio's station button n plays the n-th station, a cassette player the first; Shift+R steps through them. An address is an MP3, AAC or Ogg stream or an .m3u/.pls playlist.", Vec2::new(c.inner.x, c.y), c.inner.w, 12.5, Weight::Regular, TEXT_DIM) + 8.0;
+    RADIO.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let list = cell.get_or_insert_with(crate::radio::own_stations);
+        let mut changed = false;
+        let mut remove = None;
+        for (k, (name, address)) in list.iter_mut().enumerate() {
+            let row = c.row();
+            let nw = (row.w * 0.3).round();
+            changed |= ui.text_input(&format!("radio-name-{k}"), Rect::new(row.x, row.y, nw, row.h), name, "Name", None);
+            changed |= ui.text_input(&format!("radio-url-{k}"), Rect::new(row.x + nw + 8.0, row.y, row.w - nw - 8.0 - 36.0, row.h), address, "https://…", None);
+            if ui.icon_button(&format!("radio-del-{k}"), Vec2::new(row.right() - 16.0, row.center().y), 14.0, "delete", "Remove this station") {
+                remove = Some(k);
+            }
+        }
+        if let Some(k) = remove {
+            list.remove(k);
+            changed = true;
+        }
+        if ui.button("radio-add", c.row(), "Add a station", Some("add"), ButtonKind::Normal) {
+            list.push((String::new(), String::new()));
+        }
+        if changed {
+            if let Err(e) = crate::radio::save_stations(list) {
+                log::warn!("radio.cfg: {e}");
+            }
+        }
+    });
+    c.used()
 }
 
 /// How the world behaves: passengers, traffic, collisions, wear, the clock.
@@ -889,6 +1086,8 @@ fn gameplay_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) ->
     sel_setting(ui, s, dirty, "s-unsched", c.row(), "Random traffic", "ai_unsched_factor", &[("25", "25%"), ("50", "50%"), ("75", "75%"), ("100", "100%"), ("150", "150%"), ("200", "200%")]);
     sel_setting(ui, s, dirty, "s-maxsched", c.row(), "Timetable vehicles", "ai_max_scheduled", &[("0", "All"), ("10", "At most 10"), ("25", "At most 25"), ("50", "At most 50")]);
     sel_setting(ui, s, dirty, "s-maxpark", c.row(), "Parked cars", "ai_max_parked", &[("-1", "None"), ("0", "Every space"), ("35", "At most 35"), ("100", "At most 100"), ("250", "At most 250")]);
+    // (off: an early bus waits at every stop, as in OMSI)
+    toggle_setting(ui, s, dirty, c.row(), "Timetable buses ahead of time wait only at timed stops", "ai_wait_timed_stops_only");
     let left = c.used();
     // OMSI's own options (options.cfg)
     let mut c = Col::new(ui, cols[1], "Simulation");
@@ -969,6 +1168,12 @@ fn general_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
     toggle_setting(ui, s, dirty, c.row(), "Frame rate in the corner", "show_fps");
     toggle_setting(ui, s, dirty, c.row(), "Notes in the top-left corner", "notes");
     toggle_setting(ui, s, dirty, c.row(), "Chat in online games", "chat");
+    // (the chat's own size on top of the interface's; Ctrl + the wheel over it in the game)
+    let mut chat = get(s, "chat_size").as_f64().unwrap_or(1.0) as f32;
+    if ui.slider("s-chatsize", c.row(), &mut chat, 0.5, 3.0, 0.1, "Chat size", &|v| format!("{:.0}%", v * 100.0)) {
+        s["chat_size"] = json!((chat * 10.0).round() / 10.0);
+        *dirty = 0.3;
+    }
     toggle_setting(ui, s, dirty, c.row(), "Other players' names above their buses", "name_tags");
     c.section(ui, "Navigator");
     toggle_setting(ui, s, dirty, c.row(), "Navigator (Shift+N: map, schedule, off)", "navigator");
@@ -1003,6 +1208,8 @@ fn general_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
     let mut c = Col::new(ui, cols[1], "Updates");
     toggle_setting(ui, s, dirty, c.row(), "Look for updates when the launcher starts", "update_check");
     toggle_setting(ui, s, dirty, c.row(), "Install updates without asking", "update_auto");
+    toggle_setting(ui, s, dirty, c.row(), "Tell me about a new version during a session", "update_notify");
+    toggle_setting(ui, s, dirty, c.row(), "Count me in the website's \"playing now\" (anonymous)", "presence");
     {
         use crate::updater::Status;
         let r = c.row();
@@ -1011,6 +1218,7 @@ fn general_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
             out.check_updates = true;
         }
         let text = match &out.update {
+            Status::UpToDate if crate::updater::is_test_build(crate::updater::current_version()) => format!("{} is a test build: it is not updated", crate::updater::current_version()),
             Status::UpToDate => format!("{} is the latest version", crate::updater::current_version()),
             Status::Available(rel) => format!("{} is available", rel.version),
             Status::Failed(_) => "The last check failed".to_string(),
@@ -1039,6 +1247,12 @@ fn mb(v: i64) -> String {
 }
 
 // --- controls ---------------------------------------------------------------------------------
+
+/// The game's own actions a controller's button can be given, besides the bus's: the doors
+/// and gears of any bus, looking round while held, the bus radio while held, the cameras
+/// and the views - both of OMSI's view resets, the one view's (C) and every view's (Space),
+/// which a controller could not bring back to the first camera (#1167).
+const PAD_GAME_ACTIONS: [&str; 26] = ["doors_all", "door_4", "door_3", "door_2", "door_1", "gear_up", "gear_down", "view_look_left", "view_look_right", "view_look_up", "view_look_down", "view_reset_direction", "view_reset_all_directions", "view_interiorcam_plus", "view_interiorcam_minus", "view_toggle_viewpoint", "view_toggle_interior", "view_set_driver", "view_set_passenger", "view_set_outside", "sim_pause", "screenshot", "quicksave", "toggel_mouse_ctrl", "toggel_ctrler", "voice_radio"];
 
 fn action_text(names: &crate::describe::ControlNames, a: &str) -> String {
     known_action(a).unwrap_or_else(|| names.control(a))
@@ -1101,6 +1315,7 @@ fn known_action(a: &str) -> Option<String> {
         ("exit", "Quit"),
         ("chat_open", "Multiplayer: write in the chat"),
         ("chat_toggle", "Multiplayer: show / hide the chat"),
+        ("voice_radio", "Multiplayer: bus radio (hold)"),
         ("sim_pause", "Pause"),
         ("screenshot", "Screenshot"),
         ("quicksave", "Quicksave"),
@@ -1183,13 +1398,58 @@ pub fn controls(l: &mut Launcher, area: Rect) {
         let inner = l.ui.heading(Rect::new(r.x + 18.0, r.y + 14.0, r.w - 36.0, r.h - 28.0), title, Some(if sec == 0 { "directions_bus" } else { "sports_esports" }));
         l.ui.text_in(sub, Rect::new(inner.x, inner.y - 6.0, inner.w, 18.0), 12.0, Weight::Regular, TEXT_DIM, Align::Left);
         let mut filter = std::mem::take(&mut l.pages.kb_filter[sec]);
-        l.ui.text_input(&format!("kb-filter-{sec}"), Rect::new(inner.x, inner.y + 18.0, inner.w, 34.0), &mut filter, "Filter…", Some("search"));
+        let event_w = if sec == 0 { 138.0 } else { 0.0 };
+        let filter_w = if sec == 0 { (inner.w - event_w - GAP).max(120.0) } else { inner.w };
+        l.ui.text_input(&format!("kb-filter-{sec}"), Rect::new(inner.x, inner.y + 18.0, filter_w, 34.0), &mut filter, if l.pages.kb_events[sec] { "Filter events…" } else { "Filter…" }, Some("search"));
+        if sec == 0 && l.ui.button(
+            "kb-events",
+            Rect::new(inner.x + filter_w + GAP, inner.y + 18.0, event_w, 34.0),
+            if l.pages.kb_events[sec] { "Back to keys" } else { "Add event…" },
+            Some(if l.pages.kb_events[sec] { "arrow_back" } else { "add" }),
+            ButtonKind::Normal,
+        ) {
+            l.pages.kb_events[sec] = !l.pages.kb_events[sec];
+            filter.clear();
+        }
         l.pages.kb_filter[sec] = filter.clone();
         let q = filter.to_lowercase();
+
+        // OMSI's Add event dialog: all KY_ events from the language files, including
+        // event tables supplied by installed mods. Picking one adds an unbound vehicle
+        // entry and immediately waits for its key.
+        if sec == 0 && l.pages.kb_events[sec] {
+            let mut events = names.events();
+            if !q.is_empty() {
+                events.retain(|(action, label)| action.to_lowercase().contains(&q) || matches(label, &q));
+            }
+            let mut picked: Option<String> = None;
+            l.ui.scroll_area(&format!("kb-events-{sec}"), Rect::new(inner.x - 6.0, inner.y + 62.0, inner.w + 12.0, inner.bottom() - (inner.y + 62.0)), &mut |ui, v| {
+                let rh = 40.0;
+                for (row, (action, label)) in events.iter().enumerate() {
+                    let rr = Rect::new(v.x + 6.0, v.y + row as f32 * rh, v.w - 16.0, rh - 4.0);
+                    let shown = format!("{label}  ·  KY_{action}");
+                    if ui.button(&format!("kb-event-{row}"), rr, &shown, Some("add"), ButtonKind::Ghost) {
+                        picked = Some(action.clone());
+                    }
+                }
+                events.len() as f32 * rh
+            });
+            if let Some(action) = picked {
+                if let Some(a) = l.state.keybindings.get_mut("vehicles").and_then(|a| a.as_array_mut()) {
+                    a.push(json!({ "action": action.clone(), "scan_code": 0, "modifier": 0 }));
+                    l.pages.capturing = Some((0, a.len() - 1));
+                    l.pages.kb_events[0] = false;
+                    l.pages.kb_filter[0] = action;
+                    l.state.set_status("Event added. Press the key you want to use (Escape cancels).", false);
+                }
+            }
+            continue;
+        }
+
         let list: Vec<(usize, String, i64, i64)> = l.state.keybindings.get(*key).and_then(|a| a.as_array()).map(|a| a.iter().enumerate().map(|(i, b)| (i, b.get("action").and_then(|x| x.as_str()).unwrap_or("").to_string(), b.get("scan_code").and_then(|x| x.as_i64()).unwrap_or(0), b.get("modifier").and_then(|x| x.as_i64()).unwrap_or(0))).collect()).unwrap_or_default();
         let mut shown: Vec<(usize, String, String, bool)> = list
             .iter()
-            .filter(|(_, a, s, m)| q.is_empty() || action_text(names, a).to_lowercase().contains(&q) || a.to_lowercase().contains(&q) || crate::keys::key_name(*s, *m).to_lowercase().contains(&q))
+            .filter(|(_, a, s, m)| q.is_empty() || matches(&action_text(names, a), &q) || a.to_lowercase().contains(&q) || crate::keys::key_name(*s, *m).to_lowercase().contains(&q))
             .map(|(i, a, s, m)| {
                 let clash = *s != 0 && list.iter().any(|(j, _, s2, m2)| j != i && s2 == s && m2 == m);
                 (*i, action_text(names, a), crate::keys::key_name(*s, *m), clash)
@@ -1320,6 +1580,12 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
         connected = io.connected();
     }
     let devices = pv.devices.get_or_insert_with(Vec::new);
+    let mut body = body;
+    if !l.state.settings.get("momentary_gears").and_then(|v| v.as_bool()).unwrap_or(false) && crate::hpattern::has_held_bindings(devices) {
+        let height = l.ui.paragraph("H-pattern gears are assigned. Enable return to neutral under Settings → Driving → Game controllers if your shifter has no neutral button.", Vec2::new(body.x + 12.0, body.y + 8.0), body.w - 24.0, 12.5, Weight::Regular, TEXT_DIM);
+        body.y += height + 20.0;
+        body.h -= height + 20.0;
+    }
     // devices connected but not set up yet can be added
     let list_w = (body.w * 0.32).min(360.0);
     let left = Rect::new(body.x, body.y, list_w, body.h);
@@ -1370,14 +1636,20 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
         pv.capturing = false;
         pv.revealed_button = None;
         pv.wizard = None;
+        pv.confirm_remove = None;
     }
     if let Some(name) = add {
+        // (a device of buttons only - a gear shifter, a button box - has no axes for the
+        // assistant: its buttons are given their keys on its page)
+        let axes = !pv.io.as_ref().is_some_and(|io| io.buttons_only(&name));
         devices.push(DeviceCfg { name, second: "0".into(), ..Default::default() });
         pv.selected = devices.len() - 1;
         pv.revealed_button = None;
         pv.dirty = true;
         // a new device starts with the assistant
-        pv.wizard = Some(Wizard { step: 0, rest: [None; 8], at: Vec::new(), error: None, calibration: None, ff_choice: None, test_strength: crate::ffb_calibration::PULSE_FORCE });
+        if axes {
+            pv.wizard = Some(Wizard { step: 0, rest: [None; 8], at: Vec::new(), error: None, calibration: None, ff_choice: None, test_strength: crate::ffb_calibration::PULSE_FORCE });
+        }
     }
     // the dead zone (a setting of the game's)
     let dz_r = Rect::new(inner.x, inner.bottom() - 98.0, inner.w, 34.0);
@@ -1400,7 +1672,7 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
     l.ui.panel(right);
     let Some(d) = devices.get_mut(pv.selected) else { return };
     let inner = l.ui.heading(Rect::new(right.x + 18.0, right.y + 14.0, right.w - 36.0, right.h - 28.0), &d.name.clone(), Some("tune"));
-    let live_dev = connected.iter().find(|c| crate::controllers::names_match(&d.name, &c.name));
+    let live_dev = crate::controllers::find_connected(&connected, &d.name);
     let live: Vec<(usize, f32)> = live_dev.map(|c| c.axes.clone()).unwrap_or_default();
     // every button the device has gets its line (DirectInput says how many)
     if let Some(n) = live_dev.map(|c| c.buttons).filter(|n| *n > d.buttons.len()) {
@@ -1442,7 +1714,8 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
             l.state.settings_dirty = 0.3;
         }
     }
-    if l.ui.button("pad-wizard", Rect::new(inner.right() - 220.0, inner.y - 36.0, 220.0, 30.0), "Set up step by step", Some("touch_app"), ButtonKind::Normal) {
+    let buttons_only = pv.io.as_ref().is_some_and(|io| io.buttons_only(&d.name));
+    if !buttons_only && l.ui.button("pad-wizard", Rect::new(inner.right() - 220.0, inner.y - 36.0, 220.0, 30.0), "Set up step by step", Some("touch_app"), ButtonKind::Normal) {
         pv.wizard = Some(Wizard { step: 0, rest: [None; 8], at: Vec::new(), error: None, calibration: None, ff_choice: None, test_strength: crate::ffb_calibration::PULSE_FORCE });
     }
     const AXES: [&str; 8] = ["X axis", "Y axis", "Z axis", "X rotation", "Y rotation", "Z rotation", "Slider 1", "Slider 2"];
@@ -1457,7 +1730,7 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
         }
     }
     // the game's own view actions (looking around while held, the cameras, the views)
-    for a in ["doors_all", "door_4", "door_3", "door_2", "door_1", "gear_up", "gear_down", "view_look_left", "view_look_right", "view_look_up", "view_look_down", "view_reset_direction", "view_interiorcam_plus", "view_interiorcam_minus", "view_toggle_viewpoint", "view_toggle_interior", "view_set_driver", "view_set_passenger", "view_set_outside", "sim_pause", "screenshot", "quicksave", "toggel_mouse_ctrl", "toggel_ctrler"] {
+    for a in PAD_GAME_ACTIONS {
         if !actions.iter().any(|x| x == a) {
             actions.insert(1, a.to_string());
         }
@@ -1504,7 +1777,8 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
         let sel_w = (w - lab_w - inv_w - shp_w - 60.0 - 4.0 * GAP).clamp(120.0, 200.0);
         let bar_w = (w - lab_w - sel_w - inv_w - shp_w - 4.0 * GAP).max(30.0);
         let shapes: Vec<String> = crate::controllers::AXIS_SHAPES.iter().map(|s| s.0.to_string()).collect();
-        for a in 0..8 {
+        // (a device of buttons only has no axes to give a function)
+        for a in (0..8).filter(|_| !buttons_only) {
             let r = Rect::new(x0, y, w, ROW);
             ui.label(Rect::new(r.x, r.y, lab_w, r.h), AXES[a]);
             let bar = Rect::new(r.x + lab_w + GAP, r.y + 12.0, bar_w, r.h - 24.0);
@@ -1611,6 +1885,33 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
     if l.ui.button("pad-add-button", add_r, if pv.capturing { "Press a button on the device…" } else { "Add a button" }, Some("add"), ButtonKind::Normal) {
         pv.capturing = !pv.capturing;
     }
+    // a device no longer used (a wheel sold, one that came along in OMSI's own file) leaves
+    // the list on a second click; Save keeps it so, and a connected one can be set up again
+    // from the list (#636)
+    let armed = pv.confirm_remove.is_some_and(|t| t.elapsed().as_secs() < 4);
+    let remove_r = Rect::new(inner.right() - 260.0, inner.bottom() - 40.0, 260.0, 36.0);
+    if l.ui.button("pad-remove", remove_r, if armed { "Click again to remove" } else { "Remove this device" }, Some("delete"), ButtonKind::Danger) {
+        if armed {
+            release_feedback(&mut pv.io, &mut pv.feedback_test);
+            let name = remove_device(devices, &mut pv.selected);
+            pv.capturing = false;
+            pv.revealed_button = None;
+            pv.last_pressed = None;
+            pv.confirm_remove = None;
+            pv.dirty = true;
+            l.state.set_status(format!("{name} removed: press Save to keep it so."), false);
+        } else {
+            pv.confirm_remove = Some(std::time::Instant::now());
+        }
+    }
+}
+
+/// Take the device shown (`selected`) out of the list; the one below it (or the last) is
+/// shown next. Its name.
+fn remove_device(devices: &mut Vec<crate::controllers::DeviceCfg>, selected: &mut usize) -> String {
+    let name = devices.remove(*selected).name;
+    *selected = (*selected).min(devices.len().saturating_sub(1));
+    name
 }
 
 /// The steps of the set-up assistant (see `Wizard`): what the player is asked each time.
@@ -2262,20 +2563,40 @@ pub fn setup(l: &mut Launcher, area: Rect) {
     }
     y += 12.0;
     if l.ui.button("cfg-save", Rect::new(inner.x, y, 180.0, 42.0), "Save", Some("save"), ButtonKind::Primary) {
-        l.state.config.root = root.trim().to_string();
-        l.state.config.game = game.trim().to_string();
-        match core::save_config(&l.state.config) {
-            Ok(()) => {
-                // (what was read of the folders before is forgotten: a folder copied or
-                // changed while the launcher ran is read as it is now)
-                omsi_cfg::content_changed();
-                l.state.config = core::load_config();
-                l.pages.setup_root = None;
-                l.pages.setup_game = None;
-                l.state.set_status("Saved. Reading the content again…", false);
-                l.state.load_content();
+        let chosen = root.trim().to_string();
+        // A folder that is no complete installation is said so, with what it lacks, and
+        // nothing is saved: it was saved, then quietly replaced by the installation found
+        // before, while the page said "Saved" (#1656).
+        let missing = if chosen.is_empty() { Vec::new() } else { omsi_cfg::missing_original_essentials(std::path::Path::new(&chosen)) };
+        if !missing.is_empty() {
+            let shown: Vec<&str> = missing.iter().map(String::as_str).take(6).collect();
+            let more = if missing.len() > shown.len() { format!(" and {} more", missing.len() - shown.len()) } else { String::new() };
+            l.state.set_status(format!("Not saved: {chosen} is not a complete OMSI 2 installation - it lacks {}{more}", shown.join(", ")), true);
+        } else {
+            l.state.config.root = chosen.clone();
+            l.state.config.game = game.trim().to_string();
+            match core::save_config(&l.state.config) {
+                Ok(()) => {
+                    // (what was read of the folders before is forgotten: a folder copied or
+                    // changed while the launcher ran is read as it is now)
+                    omsi_cfg::content_changed();
+                    l.state.config = core::load_config();
+                    l.pages.setup_root = None;
+                    l.pages.setup_game = None;
+                    let same = chosen.is_empty() || std::path::Path::new(&chosen) == std::path::Path::new(&l.state.config.root);
+                    if same {
+                        l.state.set_status("Saved. Reading the content again…", false);
+                    } else {
+                        l.state.set_status(format!("Saved, but the OMSI 2 folder used is {}", l.state.config.root), true);
+                    }
+                    // (a phone: the gallery is kept out of the folder chosen at once, before
+                    // its media scanner lists its textures as photos, #1632)
+                    #[cfg(target_os = "android")]
+                    crate::android::hide_content_from_gallery();
+                    l.state.load_content();
+                }
+                Err(e) => l.state.set_status(format!("{e:#}"), true),
             }
-            Err(e) => l.state.set_status(format!("{e:#}"), true),
         }
     }
 }
@@ -2442,23 +2763,28 @@ mod settings_tests {
     fn by_tab() -> Vec<Vec<&'static str>> {
         let mut graphics = vec![
             "s-gp-sel", "s-gp-load", "s-gp-del", "s-gp-name", "s-gp-save",
-            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds",
+            "s-preset", "s-graphics", "s-msaa", "s-scale", "s-af", "s-shadow", "set-ssao", "set-shadows", "s-casters", "set-detail_textures", "s-night", "s-led", "s-led-mip", "set-shadow_blobs", "set-reflections", "set-clouds", "set-windy_trees",
             "set-fullscreen", "s-res", "set-vsync", "s-fps", "s-view", "s-maxobj", "s-minobj", "s-mirror", "s-mirror-refresh", "s-texmem", "set-texture_compression",
         ];
         if !cfg!(target_os = "macos") {
             graphics.push("s-api");
         }
         let driving = vec![
-            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-momentary_gears", "s-go-keys",
-            "s-wrange", "s-wlock", "s-pedt", "s-pedb", "set-ff_enabled", "set-ff_invert", "s-wreset", "s-go-pads",
+            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "s-mouse-pedal", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-auto_shift", "set-momentary_gears", "s-go-keys",
+            "s-wrange", "s-wlock", "s-pad-steer-smooth", "set-pad_steer_linear", "set-arrows_switch_cams", "s-pedt", "s-pedb", "set-ff_enabled", "set-ff_invert", "s-ffroad", "s-ffeng", "s-fffade", "s-wreset", "s-go-pads",
         ];
         let mut camera = vec![
             "s-seaty",
             "s-seatz",
             "s-seatx",
+            "s-seat-pitch",
             "s-seatreset",
             "s-fov",
             "s-look-sens",
+            "set-right_stick_look",
+            "s-look-smoothing",
+            "s-head-idle",
+            "s-head-idle-pace",
             "set-steer_look",
             "s-steer-look-angle",
             "s-steer-look-response",
@@ -2466,9 +2792,15 @@ mod settings_tests {
             "set-driverview_smooth",
             "set-hands_in_cab",
             "set-alt_view",
+            "set-precision_zoom",
             "set-camera_collision",
             "set-driver",
             "set-head_tracking",
+            "s-trackir-yaw", "s-trackir-pitch", "s-trackir-roll",
+            "set-head_tracking_invert_yaw", "set-head_tracking_invert_pitch", "set-head_tracking_invert_roll",
+            "s-trackir-x", "s-trackir-y", "s-trackir-z",
+            "set-head_tracking_invert_x", "set-head_tracking_invert_y", "set-head_tracking_invert_z",
+            "s-trackir-reset",
             "set-triple_screen",
             "set-triple_span",
             "set-triple_hud_center",
@@ -2482,15 +2814,16 @@ mod settings_tests {
         if cfg!(windows) {
             camera.extend(["set-vr", "s-vr-scale", "s-vr-head-smoothing", "s-vr-mirror-rate", "set-vr_desktop_mirror", "s-go-vr-keys"]);
         }
-        let sound = vec!["s-vol", "s-volai", "s-volsc", "set-doppler", "s-voices"];
+        // (the radio stations: one, see `frame`)
+        let sound = vec!["s-vol", "s-volai", "s-volsc", "set-doppler", "s-voices", "radio-name-0", "radio-url-0", "radio-del-0", "radio-add"];
         let gameplay = vec![
-            "s-board", "set-exact_fare", "s-pax", "set-get_up", "s-unsched", "s-maxsched", "s-maxpark",
+            "s-board", "set-exact_fare", "s-pax", "set-get_up", "s-unsched", "s-maxsched", "s-maxpark", "set-ai_wait_timed_stops_only",
             "s-maint", "set-collision_vehicles", "set-collision_objects", "set-collision_pedestrians", "set-use_real_time", "set-use_real_date", "set-time_sync", "set-metar_sync", "s-timespeed",
         ];
         let general = vec![
-            "s-lang", "set-machine_translation", "set-launcher_rest", "set-discord_status", "set-voice_chat", "s-uiscale", "set-ui_scale_window", "s-uiop", "set-tooltips", "set-show_fps", "set-notes", "set-chat", "set-name_tags",
+            "s-lang", "set-machine_translation", "set-launcher_rest", "set-discord_status", "set-voice_chat", "s-uiscale", "set-ui_scale_window", "s-uiop", "set-tooltips", "set-show_fps", "set-notes", "set-chat", "s-chatsize", "set-name_tags",
             "set-navigator", "set-nav_arrows", "set-nav_ai", "corner-top-left", "corner-top-right", "corner-bottom-left", "corner-bottom-right",
-            "set-update_check", "set-update_auto", "s-upd-check", "s-upd-github", "s-reset",
+            "set-update_check", "set-update_auto", "set-update_notify", "set-presence", "s-upd-check", "s-upd-github", "s-reset",
         ];
         vec![graphics, driving, camera, sound, gameplay, general]
     }
@@ -2508,8 +2841,12 @@ mod settings_tests {
         Outside { update: Status::Idle, check_updates: false, reset: false, controls: None }
     }
 
-    /// One frame of tab `tab`, its two columns tall enough that nothing is cut off.
+    /// One frame of tab `tab`, its two columns tall enough that nothing is cut off. The Sound
+    /// tab lists one radio station (not the radio.cfg of whoever runs the tests).
     fn frame(ui: &mut Ui, tab: usize, s: &mut Value, out: &mut Outside) {
+        RADIO.with(|r| {
+            r.borrow_mut().get_or_insert_with(|| vec![("One".into(), "https://example.org/one.mp3".into())]);
+        });
         ui.begin(Vec2::new(1200.0, 2000.0), 1.0, 1.0 / 60.0);
         let mut dirty = 0.0;
         settings_tab(ui, tab, s, &mut dirty, out, [Rect::new(0.0, 0.0, 580.0, 2000.0), Rect::new(620.0, 0.0, 580.0, 2000.0)]);
@@ -2551,10 +2888,41 @@ mod settings_tests {
     }
 
     #[test]
+    fn right_stick_look_switch_toggles_and_saves_from_the_camera_tab() {
+        let mut s = all_rows();
+        assert_eq!(s["right_stick_look"], json!(true));
+
+        click(2, "set-right_stick_look", &mut s);
+        assert_eq!(s["right_stick_look"], json!(false));
+        let saved = core::settings_to_text(&s, None);
+        assert_eq!(
+            core::settings_from_text(Some(&saved))["right_stick_look"],
+            json!(false)
+        );
+
+        click(2, "set-right_stick_look", &mut s);
+        assert_eq!(s["right_stick_look"], json!(true));
+    }
+
+    #[test]
     fn the_driving_tab_leads_to_the_keys_and_the_controllers() {
         let mut s = all_rows();
         assert_eq!(click(1, "s-go-keys", &mut s).controls, Some(0));
         assert_eq!(click(1, "s-go-pads", &mut s).controls, Some(1));
+    }
+
+    /// The mouse steering's smoothing is on unless switched off, and the switch is kept (#1092).
+    #[test]
+    fn smooth_mouse_steering_switches_off_and_is_saved() {
+        let mut s = all_rows();
+        assert_eq!(s["mouse_smooth"], json!(true));
+        click(1, "set-mouse_smooth", &mut s);
+        assert_eq!(s["mouse_smooth"], json!(false));
+        let saved = core::settings_to_text(&s, None);
+        assert!(saved.contains("mouse_smooth=0\n"), "{saved}");
+        assert_eq!(core::settings_from_text(Some(&saved))["mouse_smooth"], json!(false));
+        assert!(!crate::settings::Settings::from_text(&saved).mouse_smooth);
+        assert!(crate::settings::Settings::from_text("").mouse_smooth);
     }
 
     #[test]
@@ -2564,5 +2932,52 @@ mod settings_tests {
         let out = click(5, "s-reset", &mut s);
         assert!(out.reset);
         assert_eq!(s, before);
+    }
+}
+
+#[cfg(test)]
+mod pad_action_tests {
+    /// Every game action a button can be given is one the game carries out from a
+    /// controller (app_events: `view_look_*` / `voice_radio` while held, the gears by name,
+    /// the rest through `is_game_action`, the doors through `Player::action`) - Space's
+    /// reset of every view among them (#1167).
+    #[test]
+    fn a_button_can_reset_every_view() {
+        assert!(super::PAD_GAME_ACTIONS.contains(&"view_reset_all_directions"));
+        assert!(super::PAD_GAME_ACTIONS.contains(&"voice_radio"));
+        assert_eq!(super::known_action("voice_radio").as_deref(), Some("Multiplayer: bus radio (hold)"));
+        for a in super::PAD_GAME_ACTIONS {
+            let held = a.starts_with("view_look_") || a == "voice_radio";
+            let handled = held
+                || crate::input_script::is_game_action(a)
+                || a.starts_with("gear_")
+                || crate::player::door_action(a).is_some();
+            assert!(handled, "{a}");
+        }
+        // held pad actions are game actions so they never reach the bus script
+        assert!(crate::input_script::is_game_action("voice_radio"));
+        assert!(crate::input_script::is_game_action("view_look_left"));
+    }
+}
+
+#[cfg(test)]
+mod pad_remove_tests {
+    use crate::controllers::{cfg_text, parse_cfg};
+
+    /// A device taken out of the list is gone from the file Save writes, and the next one is
+    /// shown - the one below it, or above it when it was the last (#636).
+    #[test]
+    fn a_removed_device_leaves_the_file() {
+        let mut devices = parse_cfg("[ctrl]\r\nSideWinder Joystick\r\n0\r\n\r\n[ctrl]\r\nLogitech G25 Racing Wheel USB\r\n1\r\n\r\n[ctrl]\r\nMOZA R3 Base\r\n0\r\n");
+        let mut sel = 1;
+        assert_eq!(super::remove_device(&mut devices, &mut sel), "Logitech G25 Racing Wheel USB");
+        assert_eq!(sel, 1);
+        let names = |text: &str| parse_cfg(text).into_iter().map(|d| d.name).collect::<Vec<_>>();
+        assert_eq!(names(&cfg_text(&devices)), ["SideWinder Joystick", "MOZA R3 Base"]);
+        assert_eq!(super::remove_device(&mut devices, &mut sel), "MOZA R3 Base");
+        assert_eq!(sel, 0);
+        assert_eq!(super::remove_device(&mut devices, &mut sel), "SideWinder Joystick");
+        assert_eq!(sel, 0);
+        assert!(names(&cfg_text(&devices)).is_empty());
     }
 }

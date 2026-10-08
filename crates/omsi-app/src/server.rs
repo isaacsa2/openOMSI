@@ -103,7 +103,8 @@ metar_sync = 0
 metar_station =
 
 # the buses players may drive, separated by ; (vehicle files such as
-# Vehicles/MAN_SD200/MAN_SD77.bus; empty: every bus installed on the server)
+# Vehicles/MAN_SD200/MAN_SD77.bus; empty: every bus installed on the server). The players'
+# vehicle menu offers only these, and a player who drives another bus is sent away
 vehicles =
 
 # tell anyone who asks the web port (GET /players) the players' names, buses, lines and
@@ -114,11 +115,13 @@ share_positions = 0
 # openOMSI plugin (as SaltyChat does for FiveM). voice_server_uid is the voice server's unique
 # id (its info panel; needed: without it there is no voice chat), voice_channel the in-game
 # channel's id or name (empty: no voice chat), voice_range how far a player is heard (m).
+# voice_radio (1/0): drivers get a bindable map-wide bus radio on top of proximity voice.
 # The channel and its password are sent to every player who joins
 voice_server_uid =
 voice_channel =
 voice_channel_password =
 voice_range = 20
+voice_radio = 1
 ";
 
 impl ServerCfg {
@@ -150,7 +153,7 @@ impl ServerCfg {
             date: kv.get("date").cloned().filter(|v| !v.is_empty()),
             time: get("time", "08:00"),
             weather: kv.get("weather").cloned().filter(|v| !v.is_empty()),
-            traffic: num("traffic", 30).clamp(0, 200) as usize,
+            traffic: (num("traffic", 30).max(0) as usize).min(crate::game_lists::TRAFFIC_MAX),
             timetable: flag("timetable", true),
             passengers: flag("passengers", true),
             port: num("port", 27015).clamp(1, 65535) as u16,
@@ -243,6 +246,27 @@ pub(crate) static SERVER_METAR: std::sync::OnceLock<Option<String>> = std::sync:
 /// The buses a dedicated server allows (`vehicles`; empty: every bus it has).
 pub(crate) static SERVER_VEHICLES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
 
+/// Whether a `vehicles` list allows the bus `file` (an empty list: every bus). A player's
+/// game may name it with a folder before it (`D:/OMSI 2/Vehicles/…/….bus`).
+pub(crate) fn allows(list: &[String], file: &str) -> bool {
+    let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
+    let f = norm(file);
+    list.is_empty() || list.iter().map(|v| norm(v)).any(|v| f == v || f.ends_with(&format!("/{v}")))
+}
+
+/// A server's `vehicles` list holds: a player who drives another bus (put down in the game's
+/// own vehicle menu, which a game before this one did not limit to the list, #1183) is sent
+/// away and told which buses the server has. It may join again with one of them.
+pub(crate) fn enforce_vehicles(lan: &mut omsi_net::LanSession) {
+    let Some(list) = SERVER_VEHICLES.get().filter(|l| !l.is_empty()) else { return };
+    let out: Vec<(u32, String)> = lan.peers().filter(|p| p.has_info && !p.pose.bus.is_empty() && !allows(list, &p.pose.bus)).map(|p| (p.pose.id, p.pose.bus.clone())).collect();
+    for (id, bus) in out {
+        log::warn!("server: player {id} drives {bus}, which the vehicles list does not allow: sent away");
+        let names: Vec<&str> = list.iter().map(|v| v.rsplit('/').next().unwrap_or(v)).collect();
+        lan.kick(id, &format!("this server allows only these buses: {}", names.join(", ")), false);
+    }
+}
+
 /// A dedicated server's voice server (`voice_*` of `server.cfg`).
 pub(crate) static SERVER_VOICE: std::sync::OnceLock<Option<crate::voice::VoiceServer>> = std::sync::OnceLock::new();
 
@@ -295,6 +319,27 @@ pub(crate) fn player_info<'a>(q: &omsi_net::Pose, pose_of: impl Fn(u32) -> Optio
         aboard,
         lat_lon: omsi_map::world_to_lat_lon(x, y),
     })
+}
+
+#[cfg(test)]
+mod vehicles_tests {
+    use super::allows;
+
+    #[test]
+    fn the_list_allows_its_buses_only() {
+        let list = vec!["Vehicles/MAN_SD200/MAN_SD77.bus".to_string(), "Vehicles/MAN_SD202/MAN_D92.bus".to_string()];
+        assert!(allows(&list, "Vehicles/MAN_SD200/MAN_SD77.bus"));
+        // another case, backslashes, a folder before it
+        assert!(allows(&list, "vehicles\\man_sd200\\MAN_SD77.bus"));
+        assert!(allows(&list, "D:/OMSI 2/Vehicles/MAN_SD202/MAN_D92.bus"));
+        // the issue's: another bus of the same folder, a mod bus
+        assert!(!allows(&list, "Vehicles/MAN_SD200/MAN_SD83.bus"));
+        assert!(!allows(&list, "Vehicles/Some_Mod/Bus.bus"));
+        // (a file whose name only ends like a listed one)
+        assert!(!allows(&list, "Vehicles/MAN_SD200/XMAN_SD77.bus"));
+        // no list: every bus
+        assert!(allows(&[], "Vehicles/Some_Mod/Bus.bus"));
+    }
 }
 
 #[cfg(test)]
