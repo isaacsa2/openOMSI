@@ -30,7 +30,7 @@ checklist. It is updated as each step lands.
 | Fork | `isaacsa2/openOMSI`, `main` at the same commit |
 | Toolchain used for the checks | rustc 1.99.0 on Linux x86_64 (`Cargo.lock` needs 1.97.1 or newer) |
 
-Upstream is fetched again before every step (still `c85b2e0` at R2). The commit each step is based on is recorded in
+Upstream is fetched again before every step (still `c85b2e0` up to R9b). The commit each step is based on is recorded in
 its pull request.
 
 ## Baseline (upstream `c85b2e0`, before any step)
@@ -65,18 +65,26 @@ Order: `omsi-render` first, then the `omsi-app` subsystems, then the rest.
 
 ### omsi-render
 
+Each step is a draft pull request based on the previous step's branch; review and merge them
+in this order.
+
 | # | Step | Moves to | State |
 | --- | --- | --- | --- |
 | R1 | Shader source assembly (WGSL text and its adaptation to the device) | `shader_source.rs` | PR #168 |
-| R2 | Device capabilities: backend, array path, feature flags, adapter memory, the per-adapter fallback file | `device_caps.rs` | PR #170 (on #168) |
-| R3 | GPU arrays (storage buffer or texture) and their texture spans | `gpu_array.rs` | planned |
-| R4 | Bind group layouts of the camera and material groups, with `sixteen_texture_units` | `layouts.rs` | planned |
-| R5 | Mesh pages and mesh/texture preparation on worker threads | `mesh_pages.rs`, `prepare.rs` | planned |
-| R6 | Draw batching and recording (`DrawItem`, `Batch`, `batch_items`, `encode_batches*`) | `batching.rs` | planned |
-| R7 | Exposure, sky light and fog maths of the enhanced path | `sky_light.rs` | planned |
-| R8 | GPU timers | `gpu_timers.rs` | planned |
-| R9 | Public scene types (camera, lighting, lights, materials, instances, scene), re-exported from the crate root | `types/` | planned |
-| R10 | `impl Renderer` split by responsibility (creation, resources, upload, frame) | `renderer/` | planned |
+| R2 | Device capabilities: backend, array path, feature flags, adapter memory, the per-adapter fallback file | `device_caps.rs` | PR #170 |
+| R3 | GPU arrays (storage buffer or texture) and their layout entries | `gpu_array.rs` | PR #172 |
+| R5 | Mesh pages, their allocator and mesh preparation on worker threads | `mesh_pages.rs` | PR #173 |
+| R6 | Draw batching and recording (`DrawItem`, `Batch`, `batch_items`, `encode_batches*`) | `batching.rs` | PR #175 |
+| R7 | The enhanced picture's light model (metering, glare, sky glow, fog and sky input) | `enhanced_light.rs` | PR #187 |
+| R8 | GPU pass timers | `gpu_timers.rs` | PR #188 |
+| R9a | Fitting textures to the chip's size limit | `texture_fit.rs` | PR #189 |
+| R9b | Texture upload (prepared on worker threads, or the game's own pictures) | `texture_upload.rs` | PR #190 |
+| R4 | Bind group layouts of the camera and material groups, with `sixteen_texture_units` | `layouts.rs` | postponed: #106 and #143 change `camera_layout_entries` |
+| R10 | GPU waits on OpenGL (`wait_gpu`, `gl_worker_turn`) and the device poller | planned | |
+| R11 | Public scene types (camera, lighting, lights, materials, instances, scene), re-exported from the crate root | `types/` | planned |
+| R12 | `impl Renderer` split by responsibility (creation, resources, upload, frame) | `renderer/` | planned |
+
+`lib.rs` went from 15 830 to about 14 090 lines after R9b.
 
 ### omsi-app
 
@@ -98,14 +106,17 @@ Order: `omsi-render` first, then the `omsi-app` subsystems, then the rest.
 
 - [x] R1 shader source (PR #168)
 - [x] R2 device capabilities (PR #170)
-- [ ] R3 GPU arrays
-- [ ] R4 bind group layouts
-- [ ] R5 mesh pages and preparation
-- [ ] R6 batching
-- [ ] R7 sky light maths
-- [ ] R8 GPU timers
-- [ ] R9 public scene types
-- [ ] R10 `impl Renderer` split
+- [x] R3 GPU arrays (PR #172)
+- [x] R5 mesh pages (PR #173)
+- [x] R6 batching (PR #175)
+- [x] R7 enhanced light model (PR #187)
+- [x] R8 GPU timers (PR #188)
+- [x] R9a texture fitting (PR #189)
+- [x] R9b texture upload (PR #190)
+- [ ] R4 bind group layouts (postponed)
+- [ ] R10 GPU waits and device poller
+- [ ] R11 public scene types
+- [ ] R12 `impl Renderer` split
 - [ ] A1–A5 `omsi-app`
 - [ ] S1 `omsi-sim`
 
