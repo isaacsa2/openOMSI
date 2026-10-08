@@ -348,7 +348,14 @@ fn panels_clicks_and_focus_through_omsi_ui() {
     plugins.frame(&mut Keyed(&mut bus, &mut keys));
     assert_eq!(bus.messages.last().unwrap(), "focus false");
     // the plugin is loaded again after a change: its old panels go, it shows its new ones
-    std::fs::write(d.join("career.lua"), "omsi.ui.set('again', {})").unwrap();
+    let path = d.join("career.lua");
+    let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, "omsi.ui.set('again', {})").unwrap();
+    // Reload watches mtime; two quick writes can share a filesystem timestamp.
+    let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_times(std::fs::FileTimes::new().set_modified(stamp + std::time::Duration::from_secs(2)))
+        .unwrap();
+    assert_ne!(std::fs::metadata(&path).unwrap().modified().unwrap(), stamp);
     let ids = |ui: &omsi_plugin::ui::SharedUi| -> Vec<String> {
         ui.borrow().panels().iter().map(|p| p.id.clone()).collect()
     };
