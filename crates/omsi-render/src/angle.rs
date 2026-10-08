@@ -44,13 +44,14 @@ pub fn instance(mut descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
 /// A single worker for the entire pipeline build, not one thread per pipeline. With
 /// ANGLE's native jobs disabled, translation and D3D compilation inherit this stack.
 /// Reserving stack address space does not commit all 32 MB at thread creation.
-pub(crate) fn compile<F, T>(operation: F) -> T
+pub(crate) fn compile<F, T>(device: &wgpu::Device, operation: F) -> T
 where
     F: FnOnce() -> T + Send,
     T: Send,
 {
     #[cfg(windows)]
     {
+        no_parallel_compiles(device);
         std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .name("ANGLE shader compiler".into())
@@ -62,7 +63,29 @@ where
         })
     }
     #[cfg(not(windows))]
-    operation()
+    {
+        let _ = device;
+        operation()
+    }
+}
+
+/// The feature overrides alone leave the link's HLSL compiles on ANGLE's thread pool:
+/// with `alwaysRunLinkSubJobsThreaded` off, its sub-jobs go to the shader compile pool,
+/// which stays the multi-threaded one while GL_KHR_parallel_shader_compile allows any
+/// compiler threads (the default). ANGLE's native threads have the executable's default
+/// 1 MB stack, where WARP's first scene pipeline overflowed it. No compiler threads at
+/// all puts every compile and link on the calling, managed thread.
+#[cfg(windows)]
+fn no_parallel_compiles(device: &wgpu::Device) {
+    use glow::HasContext;
+    // SAFETY: the context is only locked (made current) to set a piece of its state
+    let Some(hal) = (unsafe { device.as_hal::<wgpu::hal::api::Gles>() }) else { return };
+    let gl = hal.context().lock();
+    if gl.supported_extensions().contains("GL_KHR_parallel_shader_compile") {
+        // SAFETY: the extension is there, so the KHR entry point is loaded
+        unsafe { gl.max_shader_compiler_threads(0) };
+        log::info!("ANGLE: no parallel shader compiler threads (GL_KHR_parallel_shader_compile)");
+    }
 }
 
 #[cfg(test)]

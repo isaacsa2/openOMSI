@@ -46,9 +46,7 @@ fn dedicated_vram_mb(info: &wgpu::AdapterInfo) -> Option<u64> {
             if (info.vendor == 0 || info.device == 0)
                 && (dxgi_name.eq_ignore_ascii_case(info.name.trim()) || angle_matches)
             {
-                if name_match.replace(mb).is_some() {
-                    ambiguous_name = true;
-                }
+                ambiguous_name |= name_match.replace(mb).is_some();
             }
         }
         if ambiguous_name { None } else { name_match }

@@ -3415,6 +3415,7 @@ dependencies = [
  "bytemuck",
  "env_logger",
  "glam",
+ "glow",
  "hashbrown 0.17.1",
  "log",
  "naga",

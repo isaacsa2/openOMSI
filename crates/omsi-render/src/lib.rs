@@ -2792,7 +2792,7 @@ impl Renderer {
             let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
             let build = || Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
             let renderer = if cfg!(windows) && info.backend == wgpu::Backend::Gl && info.name.contains("ANGLE") {
-                angle::compile(build)
+                angle::compile(device, build)
             } else {
                 build()
             };
