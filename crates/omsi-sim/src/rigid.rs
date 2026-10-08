@@ -44,8 +44,7 @@ const OMSI_FRAME: f32 = 1.0 / 30.0;
 /// The suspension as Omsi.exe has it (see `step_slice`); `OMSI_TYRE_SUSPENSION=1` gives
 /// the old one with a wheel mass, a tyre and bump stops (A/B).
 fn omsi_suspension() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| omsi_cfg::env::var_os("OMSI_TYRE_SUSPENSION").is_none())
+    !omsi_cfg::flags::OMSI_TYRE_SUSPENSION.is_set()
 }
 
 /// What is left of the body's pitch and roll rate after `dt` seconds of OMSI's damping.
@@ -99,7 +98,7 @@ const WALL_HEIGHT: f64 = 1.5;
 const WALL_K: f32 = 1.5e6;
 const WALL_C: f32 = 6.0e4;
 /// Share of the closing speed an obstacle gives back, and the sliding friction along it.
-const RESTITUTION: f32 = 0.2;
+pub(crate) const RESTITUTION: f32 = 0.2;
 const SCRAPE_FRICTION: f32 = 0.4;
 /// Below this closing speed (m/s) a touch is a push, not a crash.
 pub const CRASH_SPEED: f32 = 0.4;
@@ -235,7 +234,7 @@ impl RigidWheel {
         let mu_n = friction * c.grip;
         // (`OMSI_NO_WHEEL_SLIP=1`: every wheel grips, as before the wheels had a turning of
         // their own - for comparison)
-        let no_slip = omsi_cfg::env::var_os("OMSI_NO_WHEEL_SLIP").is_some();
+        let no_slip = omsi_cfg::flags::OMSI_NO_WHEEL_SLIP.is_set();
         if no_slip {
             self.slipping = false;
             self.locked = false;
@@ -925,7 +924,7 @@ impl RigidBody {
                     if before != 0.0 && sign(before) != sign(w.spin) && brake_w > 0.0 {
                         w.spin = 0.0;
                     }
-                    w.slipping = omsi_cfg::env::var_os("OMSI_NO_WHEEL_SLIP").is_none();
+                    w.slipping = !omsi_cfg::flags::OMSI_NO_WHEEL_SLIP.is_set();
                     w.rpm = w.spin * 60.0 / std::f32::consts::TAU;
                     w.rotation_deg = (w.rotation_deg + w.spin.to_degrees() * h).rem_euclid(360.0);
                     // the tyre off the ground (or nothing under it: the edge of the loaded
@@ -1235,10 +1234,17 @@ impl RigidBody {
                     continue;
                 }
             }
+            // (a car leaving the body fast goes out of it by itself)
+            if o.mass > 0.0 && vn_full > CRASH_SPEED {
+                continue;
+            }
             // out of the obstacle along the shortest way, a millimetre clear - out of a moving
-            // one only as far as the body itself ran into it this frame: a standing car is not
-            // ploughed through, and one that drives into the bus does not drag it along
-            let out = if o.mass > 0.0 { (c.depth as f32).min((-vn).max(0.0) * dt + 0.001) } else { c.depth as f32 + 0.001 };
+            // one that comes on only as far as the body itself ran into it this frame: a
+            // standing car is not ploughed through, and one that drives into the bus does not
+            // drag it along (not even creeping, below the crash speed). Out of a car that
+            // stands or draws away the bus comes all the way: it no longer hangs in it.
+            let approaching = o.mass > 0.0 && v_other.dot(n) > 0.0;
+            let out = if approaching { (c.depth as f32).min((-vn).max(0.0) * dt + 0.001) } else { c.depth as f32 + 0.001 };
             self.position += (n * out).as_dvec3();
             if vn_full >= 0.0 {
                 continue;
@@ -1585,6 +1591,42 @@ mod tests {
         let brakes = vec![brake; rb.wheels.len()];
         for _ in 0..(secs * 60.0) as usize {
             rb.step(1.0 / 60.0, torque, &brakes, 0.0, g);
+        }
+    }
+
+    #[test]
+    fn driving_past_a_thin_roadside_triangle_has_no_false_wall() {
+        let mut grid = omsi_geometry::DriveGrid::default();
+        grid.push([Vec3::ZERO, Vec3::new(30.0, 0.0, 0.0), Vec3::new(0.0, 50.0, 0.0)]);
+        grid.push([Vec3::new(30.0, 0.0, 0.0), Vec3::new(30.0, 50.0, 0.0), Vec3::new(0.0, 50.0, 0.0)]);
+        // Entirely beside the bus's wheel track. A tolerance on the infinite
+        // edge lines extended this face into the road and extrapolated its height.
+        grid.push([Vec3::new(10.0, 10.0, 0.0), Vec3::new(12.0, 9.6, 0.8), Vec3::new(10.0, 9.999, 0.0)]);
+        grid.build(300.0);
+        let ground = |x: f64, y: f64, top: f64| {
+            let p = grid.probe(x as f32, y as f32, top as f32);
+            GroundProbe { below: p.below.map(f64::from), above: p.above.map(f64::from) }
+        };
+        for fps in [30, 60] {
+            for kmh in [5.0, 40.0, 45.0, 60.0] {
+                let mut rb = RigidBody::from_definition(&bus(), &[]);
+                rb.place(DVec3::new(14.0, 4.0, 0.0), 0.0);
+                run(&mut rb, 2.0, 0.0, 0.0, &ground);
+                let speed = kmh / 3.6;
+                rb.velocity = Vec3::Y * speed;
+                for w in &mut rb.wheels { w.spin = speed / w.radius; }
+                let radius = rb.wheels.iter().find(|w| w.driven).unwrap().radius;
+                let dt = 1.0 / fps as f32;
+                // Hold speed with drive torque so the slow case crosses too.
+                for _ in 0..(18.0 / speed / dt).ceil() as usize {
+                    let torque = ((speed - rb.forward_speed()) * rb.mass * 2.0 + rb.rolling_resistance) * radius;
+                    rb.step(dt, torque, &[0.0; 4], 0.0, &ground);
+                    assert!(rb.wheel_impacts.is_empty(), "{kmh} km/h at {fps} fps: {:?}", rb.wheel_impacts);
+                    assert!(rb.wheels.iter().all(|w| w.walls.is_empty()), "{kmh} km/h at {fps} fps: false wheel wall");
+                }
+                assert!(rb.position.y > 20.0, "{kmh} km/h at {fps} fps: stopped at {:?}", rb.position);
+                assert!(rb.forward_speed() > speed * 0.9, "{kmh} km/h at {fps} fps: lost speed");
+            }
         }
     }
 
@@ -2250,6 +2292,57 @@ mod tests {
         let want = 0.5 * v * v * (1.0 - RESTITUTION * RESTITUTION) / k;
         assert!((hits[0].energy - want).abs() < 0.15 * want, "{} J, want about {want}", hits[0].energy);
         assert!(hits[0].energy < 100_000.0, "{hits:?}");
+    }
+
+    #[test]
+    fn moving_car_overlap_does_not_bulldoze_bus_and_clears_when_receding() {
+        let def = bus();
+        let bb = def.bounding_box.unwrap();
+        let mut rb = RigidBody::from_definition(&def, &[]);
+        rb.place(DVec3::ZERO, 0.0);
+        let g = road(1e9, 0.0);
+        run(&mut rb, 1.0, 0.0, 5000.0, &g);
+        let car = Obb::from_box(
+            [1.7, 4.2, 1.4, 0.0, 0.0, 0.7],
+            DVec3::new(-3.2, 0.0, 0.0),
+            90.0,
+        )
+        .moving(glam::DVec2::new(8.0, 0.0), 1000.0, 7);
+        assert!(rb.body_box(bb).overlaps(&car));
+
+        let impacts = rb.collide(bb, &[car], &|_| false, 1.0 / 30.0);
+
+        assert_eq!(impacts.len(), 1);
+        assert!(rb.body_box(bb).overlaps(&car));
+        assert!(rb.origin().x > 0.0 && rb.origin().x < 0.02, "{}", rb.origin().x);
+        let receding = Obb {
+            center: car.center - glam::DVec2::new(0.5, 0.0),
+            velocity: glam::DVec2::new(-8.0, 0.0),
+            ..car
+        };
+        rb.collide(bb, &[receding], &|_| false, 1.0 / 30.0);
+        assert!(!rb.body_box(bb).overlaps(&receding));
+    }
+
+    /// An AI car that creeps into the standing bus (below the crash speed, its planner blind
+    /// to the bus) does not shove it along at its own pace: the bus only leaves an overlap
+    /// as far as it moved into it itself, as it did before the moving-car change.
+    #[test]
+    fn a_creeping_car_does_not_shove_the_standing_bus() {
+        let def = bus();
+        let bb = def.bounding_box.unwrap();
+        let mut rb = RigidBody::from_definition(&def, &[]);
+        rb.place(DVec3::ZERO, 0.0);
+        let g = road(1e9, 0.0);
+        run(&mut rb, 1.0, 0.0, 5000.0, &g);
+        let x0 = rb.origin().x;
+        let mut car = Obb::from_box([1.7, 4.2, 1.4, 0.0, 0.0, 0.7], DVec3::new(-3.3, 0.0, 0.0), 90.0)
+            .moving(glam::DVec2::new(0.3, 0.0), 1000.0, 7);
+        for _ in 0..60 {
+            car.center += car.velocity / 30.0;
+            rb.collide(bb, &[car], &|_| false, 1.0 / 30.0);
+        }
+        assert!(rb.origin().x - x0 < 0.1, "the bus was shoved {:.2} m", rb.origin().x - x0);
     }
 
     /// The scripts hear where the bodies meet - low down at the bumpers - not the height of

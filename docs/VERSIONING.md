@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `MAJOR` | the first number in the [`VERSION`](../VERSION) file, changed by hand | `1` |
 | `MINOR` | the second number in `VERSION`, changed by hand | `1.2` |
-| `COMMIT` | counted automatically: commits on `main` since `VERSION` last changed | `1.2.17` |
+| `COMMIT` | counted automatically: commits on `main` since `VERSION` last changed (not counting those marked `[skip ci]` or `[skip actions]`, which are never released) | `1.2.17` |
 
 `COMMIT` restarts from `0` whenever `VERSION` changes: after `1.1.23`, a commit that sets
 `VERSION` to `1.2` is released as `1.2.0`, and the next one as `1.2.1`.
@@ -38,6 +38,20 @@ Every push to `main` runs [`.github/workflows/release.yml`](../.github/workflows
 
 Pull requests run the same builds without publishing anything. Build output never goes
 into the repository (`target/` and `dist/` are ignored).
+
+### Test builds of a pull request
+
+A pull request's builds are test builds for anyone who wants to try the change:
+
+* their version names the pull request, `<version>-pr<number>` (e.g. `0.1.1313-pr1192`),
+  in the launcher's side bar, `game.log` and crash reports;
+* the updater never offers them a release, so a test build stays until it is deleted;
+* the Android one is an app of its own, *openOMSI PR #N* (`org.openomsi.game.pr`), that
+  installs beside the release and shares its `openOMSI` folder;
+* [`.github/workflows/pr_builds.yml`](../.github/workflows/pr_builds.yml) comments on the
+  pull request with a download link per platform (through [nightly.link](https://nightly.link),
+  no GitHub account needed) once they are built, and updates that comment on every push.
+  The files are kept for 14 days.
 
 The version badge at the top of the README always shows the newest release.
 

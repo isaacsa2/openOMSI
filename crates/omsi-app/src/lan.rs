@@ -30,6 +30,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use sha2::{Digest, Sha256};
 use winit::keyboard::KeyCode;
 
 /// How long a joining player's game waits for the host's welcome (its world) before the
@@ -112,6 +113,38 @@ fn engine_fed(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     PREFIXES.iter().any(|p| n.starts_with(p))
         || matches!(n.as_str(), "n_wheel" | "wetness" | "time" | "timegap")
+}
+
+/// Every variable of a vehicle type that goes to the others (`omsi_net::vars`): the
+/// variables its own varlists declare - not those every copy works out for itself
+/// (`engine_fed`), nor the engine's own (the view, the weather) - and all its strings, by
+/// their ids, with a hash of their names that tells two copies made from the same files.
+pub struct VarTable {
+    pub hash: u32,
+    pub floats: Vec<u16>,
+    pub strings: Vec<u16>,
+}
+
+fn var_table(program: &omsi_script::Program) -> VarTable {
+    let mut h: u32 = 0x811c_9dc5;
+    let mut eat = |s: &str| {
+        for b in s.bytes().chain(std::iter::once(0)) {
+            h = (h ^ b.to_ascii_lowercase() as u32).wrapping_mul(0x0100_0193);
+        }
+    };
+    let mut floats = Vec::new();
+    for (k, n) in program.var_names.iter().enumerate().take(u16::MAX as usize) {
+        if program.script_vars.contains(&n.to_ascii_lowercase()) && !engine_fed(n) {
+            eat(n);
+            floats.push(k as u16);
+        }
+    }
+    let mut strings = Vec::new();
+    for (k, n) in program.str_var_names.iter().enumerate().take(u16::MAX as usize) {
+        eat(n);
+        strings.push(k as u16);
+    }
+    VarTable { hash: h, floats, strings }
 }
 
 /// Sound entries of the full `[sound]` set that are heard from outside as well: the horn,
@@ -203,17 +236,63 @@ fn vehicle_identity(def: &omsi_vehicle::Vehicle) -> String {
     format!("{:016X}", fnv1a64(key.as_bytes()).max(1))
 }
 
-/// A repaint fingerprint based on what the scheme actually changes, not its display name.
-fn paint_scheme_identity(scheme: &omsi_sim::vehicle::PaintScheme) -> String {
+/// Texture contents are read once per content generation, never on every frame.
+#[derive(Default)]
+struct PaintIdentities {
+    generation: u64,
+    schemes: hashbrown::HashMap<(PathBuf, usize), String>,
+    textures: hashbrown::HashMap<PathBuf, Option<String>>,
+}
+
+impl PaintIdentities {
+    fn refresh(&mut self) {
+        let generation = omsi_cfg::content_generation();
+        if generation != self.generation {
+            self.generation = generation;
+            self.schemes.clear();
+            self.textures.clear();
+        }
+    }
+
+    fn texture(&mut self, path: &Path) -> Option<String> {
+        self.textures.entry(path.to_path_buf()).or_insert_with(|| {
+            omsi_cfg::vfs::read(path).ok().map(|data| format!("{:x}", Sha256::digest(data)))
+        }).clone()
+    }
+
+    fn scheme(&mut self, root: &Path, ty: &omsi_sim::VehicleType, i: usize) -> String {
+        self.refresh();
+        let key = (ty.def.path.clone(), i);
+        if let Some(identity) = self.schemes.get(&key) { return identity.clone(); }
+        let identity = ty.paint_schemes.get(i)
+            .map(|scheme| paint_scheme_identity(scheme, &ty.texture_dirs(root), self))
+            .unwrap_or_default();
+        self.schemes.insert(key, identity.clone());
+        identity
+    }
+}
+
+/// Content-based repaint identity: renamed image files can still match, while different
+/// images with the same filename cannot. Missing images do not prove equivalence.
+fn paint_scheme_identity(
+    scheme: &omsi_sim::vehicle::PaintScheme,
+    texture_dirs: &[PathBuf],
+    cache: &mut PaintIdentities,
+) -> String {
+    cache.refresh();
     let mut textures = scheme.textures.clone();
     textures.sort_by_key(|(slot, file)| (slot.to_ascii_lowercase(), file.to_ascii_lowercase()));
     let mut vars = scheme.set_vars.clone();
     vars.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()).then_with(|| a.1.total_cmp(&b.1)));
-    let mut key = String::new();
+    let mut key = String::from("paint-content-v2;");
+    let dirs: Vec<&Path> = std::iter::once(scheme.dir.as_path())
+        .chain(texture_dirs.iter().map(PathBuf::as_path)).collect();
     for (slot, file) in textures {
+        let Some(path) = omsi_texture::find_texture(&file, &dirs) else { return String::new() };
+        let Some(content) = cache.texture(&path) else { return String::new() };
         key.push_str(&slot.trim().to_ascii_lowercase());
         key.push('=');
-        key.push_str(&file.trim().replace('\\', "/").to_ascii_lowercase());
+        key.push_str(&content);
         key.push(';');
     }
     for (name, value) in vars {
@@ -239,15 +318,23 @@ fn current_paint_name(
 }
 
 /// Fingerprint the same scheme whose name is sent in INFO, including runtime repaints.
-fn paint_identity(schemes: &[omsi_sim::vehicle::PaintScheme], name: &str) -> String {
+fn paint_identity(game: &mut LanGame, root: &Path, ty: &omsi_sim::VehicleType, name: &str) -> String {
     if name.is_empty() {
         return String::new();
     }
-    schemes
+    ty.paint_schemes
         .iter()
-        .find(|s| s.name.eq_ignore_ascii_case(name))
-        .map(paint_scheme_identity)
+        .position(|s| s.name.eq_ignore_ascii_case(name))
+        .map(|i| game.paint_identities.scheme(root, ty, i))
         .unwrap_or_default()
+}
+
+fn unique_paint_match(identities: impl IntoIterator<Item = String>, wanted: &str) -> Option<usize> {
+    if wanted.is_empty() { return None; }
+    let mut hits = identities.into_iter().enumerate()
+        .filter(|(_, identity)| !identity.is_empty() && identity.eq_ignore_ascii_case(wanted));
+    let first = hits.next()?.0;
+    hits.next().is_none().then_some(first)
 }
 
 impl SyncTable {
@@ -300,7 +387,8 @@ impl SyncTable {
                     .chain(m.light_enh.iter().map(|l| l.variable.clone()))
                     .chain(m.light_enh_2.iter().map(|l| l.variable.clone()))
             })
-            .chain(types.iter().flat_map(|t| t.model.interior_lights.iter()).map(|l| l.variable.clone()));
+            .chain(types.iter().flat_map(|t| t.model.interior_lights.iter()).map(|l| l.variable.clone()))
+            .chain(types.iter().flat_map(|t| t.model.spotlights_2.iter()).map(|l| l.variable.clone()));
         let lamps = collect(
             &mut lamp_names.collect::<Vec<_>>().into_iter(),
             &|n| engine_fed(n) || paint_vars.contains(&n.to_ascii_lowercase()),
@@ -389,6 +477,9 @@ impl SyncTable {
         };
         let sound_names = sound_vars(&mut sounds.iter().map(|s| &s.0));
         let part_sound_names = sound_vars(&mut part_sounds.iter().map(|s| &s.1));
+        let passenger_sound_names = interior.as_ref()
+            .map(|(cfg, _)| crate::passenger::sound_variables(cfg))
+            .unwrap_or_default();
         // what moves where it can be seen
         let mut value_names: Vec<String> = Vec::new();
         // the parts that move where they can be seen (not the cockpit's switches)
@@ -410,7 +501,8 @@ impl SyncTable {
                 || m.mesh_ident.as_deref().is_some_and(|x| doorish(x))
                 || m.mouse_event.as_deref().is_some_and(|x| doorish(x))
                 || m.animations.iter().any(|a| doorish(&a.variable));
-            if wiper || door {
+            let passenger_control = m.mouse_event.as_deref().is_some_and(crate::passenger::passenger_event);
+            if wiper || door || passenger_control {
                 value_names.extend(m.animations.iter().map(|a| a.variable.clone()));
             }
         }
@@ -431,9 +523,13 @@ impl SyncTable {
         // What is seen first, then the leading vehicle's sounds, then the rear sections',
         // each sorted by name: the list is capped, and taken as one list in name order the
         // rear sections' sound variables pushed what is seen out of it.
-        let skip = |n: &str| (engine_fed(n) && !rain_film(n)) || var(n).map(|id| taken.contains(&id)).unwrap_or(true);
+        // A mod's door_handsteuerung is script state, despite the generic door_ prefix.
+        // Interior bell conditions must follow the owner too, not only exterior audio.
+        let skip = |n: &str| (engine_fed(n) && !rain_film(n)
+            && !passenger_sound_names.iter().any(|s| s.eq_ignore_ascii_case(n)))
+            || var(n).map(|id| taken.contains(&id)).unwrap_or(true);
         let mut values = collect(&mut value_names.into_iter(), &skip, omsi_net::wire::MAX_VALUES);
-        for names in [sound_names, part_sound_names] {
+        for names in [passenger_sound_names.clone(), sound_names, part_sound_names] {
             let had: Vec<VarId> = values.iter().map(|v| v.1).collect();
             let more = collect(
                 &mut names.into_iter(),
@@ -598,12 +694,35 @@ pub struct RemoteVehicle {
     offset: Option<f64>,
     /// The moment of theirs drawn (see `PlayClock`).
     play: crate::lan_world::PlayClock,
+    /// Every variable of theirs as it came (`omsi_net::vars`), pinned each frame, and their
+    /// strings - for the same vehicle files only (`vars`' hash); and the variables the pose
+    /// already carries, which glide instead (lamps, switches, moving parts, doors).
+    vars: Option<VarTable>,
+    synced: hashbrown::HashMap<u16, f32>,
+    synced_strings: hashbrown::HashMap<u16, String>,
+    smooth: hashbrown::HashSet<u16>,
 }
 
 impl RemoteVehicle {
     /// The LAN player's vehicle as it is drawn here.
     pub fn vehicle(&self) -> &omsi_sim::VehicleInstance {
         &self.vehicle
+    }
+
+    /// Only the vehicle owner's command reaches this queue. Play a configured sound
+    /// without executing a second copy of the door/window script on the remote AI.
+    pub(crate) fn passenger_sound(&mut self, event: &str) {
+        if self.stand_in { return; }
+        let known = self.table.sounds.iter().map(|(cfg, _)| cfg)
+            .chain(self.table.interior.iter().map(|(cfg, _)| cfg))
+            .chain(self.table.part_sounds.iter().map(|(_, cfg, _)| cfg))
+            .any(|cfg| cfg.sounds.iter().any(|s| s.triggers.iter().any(|t| t.eq_ignore_ascii_case(event))));
+        if known { self.vehicle.host.fired_triggers.push(event.to_string()); }
+    }
+
+    /// The same, for the plugins (`omsi.set_other_var`: their next state writes it again).
+    pub fn vehicle_mut(&mut self) -> &mut omsi_sim::VehicleInstance {
+        &mut self.vehicle
     }
 }
 
@@ -713,6 +832,11 @@ pub struct LanGame {
     /// Bus identities already resolved on this installation. None means that the identity
     /// was absent or ambiguous here, so repeated INFO messages do not rescan every vehicle.
     identity_files: hashbrown::HashMap<String, Option<PathBuf>>,
+    paint_identities: PaintIdentities,
+    pub(crate) passenger_actions: hashbrown::HashMap<u32, Instant>,
+    /// Our vehicle's variable table (by its program), for `omsi_net::vars`.
+    my_vars: Option<(usize, Arc<VarTable>)>,
+    vars_log: f32,
 }
 
 /// What the frame knows that LAN play needs.
@@ -733,6 +857,8 @@ pub struct Frame<'a> {
     pub walker: Option<omsi_net::Walker>,
     /// We stand or sit in this player's bus: it is drawn from inside.
     pub inside_of: Option<u32>,
+    /// We are holding the bus radio key (map-wide GreenTeaSpeak voice).
+    pub radio_keyed: bool,
 }
 
 pub(crate) fn data_dir() -> Option<PathBuf> {
@@ -742,8 +868,9 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
 
 /// The status file of this game process.
 fn status_path() -> Option<PathBuf> {
-    let id = omsi_cfg::env::var("OMSI_INSTANCE")
-        .ok()
+    let id = omsi_cfg::flags::OMSI_INSTANCE
+        .var()
+        .map(str::to_string)
         .filter(|s| {
             !s.is_empty()
                 && s.len() <= 64
@@ -857,7 +984,7 @@ pub fn open_public_gateway(session: &LanSession, info: omsi_net::ws::ServerInfo,
     if let Ok(mut w) = WS_PATH.lock() {
         *w = Some(WsPath { gateway: Some(gateway), tunnel: None, _client: None, url: None });
     }
-    if !want_tunnel || omsi_cfg::env::var_os("OMSI_NO_TUNNEL").is_some() || omsi_cfg::env::var_os("OMSI_NO_BRIDGE").is_some() {
+    if !want_tunnel || omsi_cfg::flags::OMSI_NO_TUNNEL.is_set() || omsi_cfg::flags::OMSI_NO_BRIDGE.is_set() {
         return;
     }
     // (in the background: cloudflared is fetched first when it is not installed)
@@ -881,7 +1008,7 @@ pub fn open_public_gateway(session: &LanSession, info: omsi_net::ws::ServerInfo,
         let mut checked = Instant::now();
         // the official server (`OMSI_OFFICIAL_KEY`: its signing key's file) says where it is
         // reached every five minutes, for the players who type `openomsi`
-        let official = omsi_cfg::env::var_os("OMSI_OFFICIAL_KEY").and_then(|p| std::fs::read(&p).map_err(|e| log::warn!("official key {}: {e}", std::path::Path::new(&p).display())).ok());
+        let official = omsi_cfg::flags::OMSI_OFFICIAL_KEY.os().and_then(|p| std::fs::read(p).map_err(|e| log::warn!("official key {}: {e}", std::path::Path::new(&p).display())).ok());
         let mut announced: Option<(String, Instant)> = None;
         loop {
             let now = url.lock().ok().and_then(|u| u.clone());
@@ -954,6 +1081,107 @@ pub fn publish_vehicles(root: PathBuf, only: Vec<String>) {
     });
 }
 
+/// The buses the server we joined offers (its `vehicles`, else every bus it has), as its
+/// status page says, tied to the session that asked: each session starts with every bus
+/// offered, and a server's answer counts only while the session that asked it is the one
+/// running (on a phone the launcher and the game share one process, one drive after the
+/// other).
+struct ServerOffers {
+    /// The session now: counted up by every `lan::start`.
+    session: u64,
+    /// The offered buses as `bus_key`s. None: any - not on a server, or it has not said (yet).
+    list: Option<std::sync::Arc<std::collections::HashSet<String>>>,
+}
+
+impl ServerOffers {
+    /// A new session: every bus offered until its server says otherwise. Its number.
+    fn reset(&mut self) -> u64 {
+        self.session += 1;
+        self.list = None;
+        self.session
+    }
+
+    /// A server's answer to `session`: taken while that session runs, else dropped (an
+    /// answer late for a session that ended).
+    fn answer(&mut self, session: u64, vehicles: &[String]) -> bool {
+        if session != self.session {
+            return false;
+        }
+        self.list = Some(std::sync::Arc::new(offered_keys(vehicles)));
+        true
+    }
+}
+
+static SERVER_OFFERS: std::sync::Mutex<ServerOffers> = std::sync::Mutex::new(ServerOffers { session: 0, list: None });
+
+fn server_offers_state() -> std::sync::MutexGuard<'static, ServerOffers> {
+    SERVER_OFFERS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The address to ask for the buses a server offers, for what the player joins: a server's
+/// web address, or a host's address (`host`, `host:port`, a port on this computer - its
+/// status page is found at that port, ten above it or 27025, see `omsi_net::ws::web_bases`).
+/// None for a search of the network or a session code: nobody to ask.
+fn offers_query_target(target: &str) -> Option<String> {
+    let t = target.trim();
+    if t.is_empty() || ["auto", "discover", "search"].iter().any(|w| t.eq_ignore_ascii_case(w)) {
+        return None;
+    }
+    if omsi_net::ws::ws_url(t).is_some() {
+        return Some(t.to_string());
+    }
+    if omsi_net::looks_like_code(t) {
+        return None;
+    }
+    if t.bytes().all(|b| b.is_ascii_digit()) {
+        return Some(format!("127.0.0.1:{t}"));
+    }
+    Some(t.to_string())
+}
+
+/// A player joining a server asks it in the background which buses it offers, so that the
+/// game menu's "Place a vehicle" and "Swap" offer only those, as the launcher's bus step
+/// does: a whitelist in `server.cfg` was dodged by placing another bus in the game (#1183).
+fn ask_server_offers(target: &str, session: u64) {
+    let Some(target) = offers_query_target(target) else { return };
+    let _ = std::thread::Builder::new().name("server buses".into()).spawn(move || match omsi_net::ws::query(&target, false) {
+        Ok(i) if !i.vehicles.is_empty() => {
+            if server_offers_state().answer(session, &i.vehicles) {
+                log::info!("LAN: the server offers {} buses", i.vehicles.len());
+            }
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!("LAN: the server did not say which buses it offers ({e}); every bus is offered"),
+    });
+}
+
+/// The buses the server we joined offers, as `bus_key`s (None: any, see `ServerOffers`).
+pub(crate) fn server_offers() -> Option<std::sync::Arc<std::collections::HashSet<String>>> {
+    server_offers_state().list.clone()
+}
+
+/// A vehicle file from its `Vehicles` folder on, in lower case and with forward slashes: a
+/// server names it as its `server.cfg` does, or under its own content folder.
+fn bus_key(s: &str) -> String {
+    let s = s.trim().replace('\\', "/").to_ascii_lowercase();
+    let parts: Vec<&str> = s.split('/').filter(|p| !p.is_empty()).collect();
+    match parts.iter().rposition(|p| *p == "vehicles") {
+        Some(i) => parts[i..].join("/"),
+        None => parts.join("/"),
+    }
+}
+
+/// A server's bus list as the keys `offers` looks a bus up in.
+fn offered_keys(list: &[String]) -> std::collections::HashSet<String> {
+    list.iter().map(|v| bus_key(v)).collect()
+}
+
+/// Whether `bus` (a vehicle file as the game's lists name it, `Vehicles/<folder>/<file>`) is
+/// one of `offered` (see `server_offers`): the same file, in any case and with either slash.
+pub(crate) fn offers(offered: &std::collections::HashSet<String>, bus: &str) -> bool {
+    offered.contains(&bus_key(bus))
+}
+
 /// The port of the WebSocket gateway this game opened.
 fn port_of_gateway() -> Option<u16> {
     WS_PATH.lock().ok()?.as_ref()?.gateway.as_ref().map(|g| g.addr.port())
@@ -969,6 +1197,17 @@ pub fn update_server_info(players: usize, time: &str, weather: &str) {
                 if !weather.is_empty() {
                     i.weather = weather.to_string();
                 }
+            }
+        }
+    }
+}
+
+/// A server run: its shared world now, for `GET /status`.
+pub fn update_server_world(world: omsi_net::ws::WorldCounts) {
+    if let Ok(w) = WS_PATH.lock() {
+        if let Some(g) = w.as_ref().and_then(|w| w.gateway.as_ref()) {
+            if let Ok(mut i) = g.info.lock() {
+                i.world = Some(world);
             }
         }
     }
@@ -1012,6 +1251,8 @@ fn ws_join_target(url: &str) -> Result<String, String> {
 /// cannot be started is reported and the game runs on alone. A joining player waits
 /// briefly for the host's welcome, so that its map is loaded with the host's world.
 pub fn start(args: &Args) -> Option<LanSession> {
+    // (every bus offered until the server joined now says otherwise, see `ServerOffers`)
+    let offers_session = server_offers_state().reset();
     let world = world_info(args);
     let session = match (&args.lan_host, &args.lan_join) {
         (Some(port), _) => {
@@ -1034,14 +1275,22 @@ pub fn start(args: &Args) -> Option<LanSession> {
             // a server's address (https://…, a trycloudflare name): over a WebSocket
             let direct = match omsi_net::ws::ws_url(target) {
                 Some(url) => match ws_join_target(&url) {
-                    Ok(local) => local,
+                    Ok(local) => {
+                        ask_server_offers(target, offers_session);
+                        local
+                    }
                     Err(e) => {
                         log::warn!("LAN: cannot reach '{target}': {e}");
                         write_failure(&format!("cannot reach '{target}': {e}"));
                         return None;
                     }
                 },
-                None => target.clone(),
+                // (an address over UDP: a server there answers at its web port too; a code
+                // or a search has nobody to ask)
+                None => {
+                    ask_server_offers(target, offers_session);
+                    target.clone()
+                }
             };
             match LanSession::join(&direct, &player_name(args), world, Duration::from_secs(3)) {
                 Ok(s) => Some(s),
@@ -1122,6 +1371,22 @@ pub fn start(args: &Args) -> Option<LanSession> {
     }
     write_status(&session, &Default::default(), None);
     Some(session)
+}
+
+/// The line the launcher looks for in the game's log when the game is over: the server sent
+/// the player away (kick, ban) or turned it away at the door, with the server's message.
+pub const LEFT_SERVER: &str = "LAN: disconnected from the server: ";
+
+/// A joining game the server sent or turned away: the reason, once (the game then ends and the
+/// launcher shows "Disconnected from the server" with it). None for a host, or while it may play.
+pub fn turned_away(lan: &LanSession) -> Option<String> {
+    static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let why = lan.turned_away.clone().filter(|_| lan.role == Role::Client)?;
+    if SAID.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+    log::warn!("{LEFT_SERVER}{why}");
+    Some(why)
 }
 
 /// The host's mods (see `lan_mods`): the host serves them on its session's port number
@@ -1333,7 +1598,10 @@ fn host_weather(args: &Args, weather: &str) -> Result<Option<String>, String> {
     if w.is_empty() {
         return Ok(None);
     }
-    if crate::weather_setup::custom_weather(Some(w)).is_some(){return Ok(Some(w.to_string()));}
+    // the natural model and the cycle are made on each machine: no file to have
+    if crate::weather_model::is_natural(Some(w)) || w == "cycle" || crate::weather_setup::custom_weather(Some(w)).is_some() {
+        return Ok(Some(w.to_string()));
+    }
     // a METAR report's values: made into a weather here, no file and no sync of our own
     if w.starts_with(crate::weather_setup::REPORT) {
         return if crate::weather_setup::from_report(w).is_some() {
@@ -1608,11 +1876,37 @@ fn relative_position(me: &omsi_sim::VehicleInstance, pose: &Pose) -> String {
     }
 }
 
+/// The other players for the navigator and the city map (#1011, #1080); `my_id` is ours.
+pub fn nav_players(game: &LanGame, my_id: u32) -> Vec<crate::navigator::NavPlayer> {
+    let bus_of = |id: u32| game.remotes.get(&id).map(|r| (r.vehicle.position, r.vehicle.heading));
+    let mut out: Vec<_> = game.remotes.values().filter_map(|r| nav_player(&r.last, &r.name, (r.vehicle.position, r.vehicle.heading), my_id, bus_of)).collect();
+    // (always in the same order: the tags of two players close together do not swap)
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// A player as the maps show them: with the bus they drive (`bus`: as drawn here), else on
+/// foot where they walk - riding in a third player's bus, with that bus (`bus_of`; the
+/// walker's own point lags behind it), and not at all in ours, which is our own arrow.
+fn nav_player(pose: &Pose, name: &str, bus: (DVec3, f64), my_id: u32, bus_of: impl Fn(u32) -> Option<(DVec3, f64)>) -> Option<crate::navigator::NavPlayer> {
+    let (position, heading) = match pose.walker {
+        None => bus,
+        Some(w) => match w.aboard {
+            Some(a) if a.owner == my_id => return None,
+            Some(a) => bus_of(a.owner).unwrap_or((DVec3::new(w.x, w.y, w.z), w.heading as f64)),
+            None => (DVec3::new(w.x, w.y, w.z), w.heading as f64),
+        },
+    };
+    let name = if name.trim().is_empty() { format!("player {}", pose.id) } else { name.trim().to_string() };
+    Some(crate::navigator::NavPlayer { position, heading, name })
+}
+
 /// The other players' name tags, as ETS2 has them: the name over the bus's roof and a
 /// small line under it (line and destination, how far away), fading out beyond 300 m.
 /// Screen positions in physical pixels of a `width` x `height` picture (on a triple-screen
 /// rig, of the three panels side by side). `speaks` tells who talks in the voice chat now (by
-/// name and id): "speaking" under their name.
+/// name and id): "speaking" under their name. `on_radio` who keys the bus radio: "radio"
+/// instead, and the tag stays visible across the map.
 pub fn name_tags(
     game: &LanGame,
     cam: &omsi_render::Camera,
@@ -1620,6 +1914,7 @@ pub fn name_tags(
     height: f32,
     rig: Option<&omsi_render::TripleScreen>,
     speaks: &dyn Fn(&str, u32) -> bool,
+    on_radio: &dyn Fn(&str, u32) -> bool,
 ) -> Vec<((f32, f32), String, String, f32)> {
     let views: Vec<_> = if let Some(rig) = rig {
         rig.views(cam, width as u32, height as u32)
@@ -1648,7 +1943,9 @@ pub fn name_tags(
             None => v.position + DVec3::new(0.0, 0.0, top + 0.6),
         };
         let d = (p - cam.position).length();
-        if d > 450.0 {
+        let radio = on_radio(&r.name, r.last.id) || r.last.radio_keyed;
+        // (a radio key across the map: the tag still shows who is transmitting)
+        if d > 450.0 && !radio {
             continue;
         }
         let Some((screen_x, y)) = views.iter().find_map(|(vp, offset, panel_width)| {
@@ -1682,10 +1979,12 @@ pub fn name_tags(
             let dist = if d >= 1000.0 { format!("{:.1} km", d / 1000.0) } else { format!("{:.0} m", d) };
             sub = if sub.is_empty() { dist } else { format!("{sub} · {dist}") };
         }
-        if speaks(&r.name, r.last.id) {
+        if radio {
+            sub = if sub.is_empty() { omsi_ui::tr("radio").into_owned() } else { format!("{} · {sub}", omsi_ui::tr("radio")) };
+        } else if speaks(&r.name, r.last.id) {
             sub = if sub.is_empty() { omsi_ui::tr("speaking").into_owned() } else { format!("{} · {sub}", omsi_ui::tr("speaking")) };
         }
-        let alpha = (1.0 - ((d as f32 - 300.0) / 150.0)).clamp(0.0, 1.0);
+        let alpha = if radio { 1.0 } else { (1.0 - ((d as f32 - 300.0) / 150.0)).clamp(0.0, 1.0) };
         tags.push(((screen_x, (1.0 - y) * 0.5 * height), name, sub, alpha));
     }
     tags
@@ -1696,12 +1995,7 @@ pub fn name_tags(
 fn content_relative(path: &Path, root: &Path) -> String {
     let mut roots = omsi_cfg::content_roots();
     roots.push(root.to_path_buf());
-    for r in roots {
-        if let Ok(rel) = path.strip_prefix(&r) {
-            return rel.to_string_lossy().replace('\\', "/");
-        }
-    }
-    String::new()
+    crate::lan_world::relative_to_roots(path, &roots).unwrap_or_default()
 }
 
 /// The paint scheme `--paint` picked, by name.
@@ -1775,8 +2069,10 @@ fn line_and_destination(p: &Player, duty: Option<(&str, &str)>) -> (String, Stri
             .get(i as usize)
             .filter(|t| t.code != 0)
             .map(|t| {
+                // (its sign's first line; a blank one names nothing on the others' side)
                 t.strings
-                    .first()
+                    .iter()
+                    .find(|s| !s.trim().is_empty())
                     .cloned()
                     .unwrap_or_else(|| t.texture_id.clone())
             })
@@ -1875,7 +2171,7 @@ pub fn my_pose(
         v.host.paint_scheme,
         &paint_name(args, &v.ty),
     );
-    let paint_identity = paint_identity(&v.ty.paint_schemes, &paint);
+    let paint_identity = paint_identity(game, &args.root, &v.ty, &paint);
     Pose {
         id: 0,
         name: String::new(),
@@ -1933,6 +2229,7 @@ pub fn my_pose(
         values: table.values.iter().map(|(_, id)| get(*id)).collect(),
         walker: None,
         sent_ms: 0,
+        radio_keyed: false,
     }
 }
 
@@ -2403,12 +2700,19 @@ fn remote_bus_file(args: &Args, bus: &str) -> Result<PathBuf, String> {
     if !roots.iter().any(|r| path.starts_with(r)) {
         return Err("not inside a content folder".into());
     }
-    let md = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    if !md.is_file() {
-        return Err("not a file".into());
-    }
-    if md.len() > MAX_VEHICLE_FILE {
-        return Err(format!("{} bytes is too much for a vehicle file", md.len()));
+    // (a file in an archive or among the host's mods has no metadata of its own)
+    let len = match omsi_cfg::vfs::file_size(&path) {
+        Some(len) => len,
+        None => {
+            let md = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+            if !md.is_file() {
+                return Err("not a file".into());
+            }
+            md.len()
+        }
+    };
+    if len > MAX_VEHICLE_FILE {
+        return Err(format!("{len} bytes is too much for a vehicle file"));
     }
     Ok(path)
 }
@@ -2467,40 +2771,14 @@ fn remote_type(
     player: Option<&Player>,
 ) -> Option<(Arc<omsi_sim::VehicleType>, bool)> {
     let allowed = crate::server::SERVER_VEHICLES.get().filter(|l| !l.is_empty());
-    let norm = |s: &str| s.trim().replace('\\', "/").to_ascii_lowercase();
-    let exact_allowed = allowed
-        .map(|l| l.iter().any(|v| norm(v) == norm(&pose.bus) || norm(&pose.bus).ends_with(&norm(v))))
-        .unwrap_or(true);
-    let loaded = if exact_allowed {
-        match remote_bus_file(args, &pose.bus)
-            .and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
-        {
-            Ok(t) => Ok(t),
-            Err(original) => match equivalent_bus_file(game, args, &pose.bus_identity, allowed) {
-                Some(path) => {
-                    log::info!(
-                        "LAN: player {}'s {:?} is installed here as {} (vehicle identity {})",
-                        pose.id,
-                        pose.bus,
-                        path.display(),
-                        pose.bus_identity
-                    );
-                    omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
-                }
-                None => Err(original),
-            },
-        }
-    } else if let Some(path) = equivalent_bus_file(game, args, &pose.bus_identity, allowed) {
-        log::info!(
-            "LAN: player {}'s vehicle path differs from the server list; allowed equivalent {} matched identity {}",
-            pose.id,
-            path.display(),
-            pose.bus_identity
-        );
-        omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string())
-    } else {
-        Err("the server does not offer it".to_string())
-    };
+    let loaded = if allowed.is_none_or(|l| crate::server::allows(l, &pose.bus)) {
+        remote_bus_file(args, &pose.bus).and_then(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
+    } else { Err("the server does not offer it".into()) };
+    let loaded = loaded.or_else(|original| {
+        equivalent_bus_file(game, args, &pose.bus_identity, allowed)
+            .map(|path| omsi_sim::VehicleType::load(&args.root, &path).map_err(|e| e.to_string()))
+            .unwrap_or(Err(original))
+    });
     match loaded {
         Ok(t) => Some((Arc::new(t), false)),
         Err(e) => {
@@ -2540,7 +2818,10 @@ fn new_remote(
             .position(|s| s.name.eq_ignore_ascii_case(&pose.paint))
             .or_else(|| {
                 (!pose.paint_identity.is_empty()).then(|| {
-                    ty.paint_schemes.iter().position(|s| paint_scheme_identity(s).eq_ignore_ascii_case(&pose.paint_identity))
+                    unique_paint_match(
+                        (0..ty.paint_schemes.len()).map(|i| game.paint_identities.scheme(&args.root, &ty, i)),
+                        &pose.paint_identity,
+                    )
                 }).flatten()
             })
     };
@@ -2648,6 +2929,10 @@ fn new_remote(
         samples: std::collections::VecDeque::new(),
         offset: None,
         play: Default::default(),
+        vars: None,
+        synced: Default::default(),
+        synced_strings: Default::default(),
+        smooth: Default::default(),
     })
 }
 
@@ -2660,6 +2945,25 @@ fn lan_now() -> f64 {
 /// How far in the past the others' buses are drawn (s): two states at 20 a second, and
 /// room for one late one.
 const INTERP_DELAY: f64 = 0.12;
+
+/// STATE samples contain movement only; metadata comes from the newest INFO even while
+/// the vehicle is drawn at an older interpolated point. Empty fleet strings clear it too.
+fn current_remote_info(sample: &mut Pose, info: &Pose) {
+    sample.name.clone_from(&info.name);
+    sample.bus.clone_from(&info.bus);
+    sample.paint.clone_from(&info.paint);
+    sample.bus_identity.clone_from(&info.bus_identity);
+    sample.paint_identity.clone_from(&info.paint_identity);
+    sample.number.clone_from(&info.number);
+    sample.ident.clone_from(&info.ident);
+    sample.table = info.table;
+    sample.line.clone_from(&info.line);
+    sample.destination.clone_from(&info.destination);
+    sample.texts.clone_from(&info.texts);
+    sample.freetex.clone_from(&info.freetex);
+    sample.figure.clone_from(&info.figure);
+    sample.tour.clone_from(&info.tour);
+}
 
 impl RemoteVehicle {
     /// Take in the states that came (with when they arrived).
@@ -2702,7 +3006,7 @@ impl RemoteVehicle {
     fn interpolated(&mut self) -> Option<Pose> {
         // (`OMSI_NO_INTERP=1`: the old way, for comparing)
         static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *OFF.get_or_init(|| omsi_cfg::env::var_os("OMSI_NO_INTERP").is_some()) {
+        if *OFF.get_or_init(|| omsi_cfg::flags::OMSI_NO_INTERP.is_set()) {
             return None;
         }
         let off = self.offset?;
@@ -2834,6 +3138,16 @@ fn release(
     }
 }
 
+/// The rear sections of another game's vehicle where that game has them (`rear`: position
+/// and heading of each), each leaning so that it meets the part in front at their joint
+/// (`Trailer::set_remote_pose`).
+fn place_remote_rear(v: &mut omsi_sim::VehicleInstance, rear: &[(DVec3, f64, f32, f32)]) {
+    for (i, cur) in rear.iter().enumerate() {
+        let Some(t) = v.trailers.get_mut(i) else { break };
+        t.set_network_pose(cur.0, cur.1, cur.2, cur.3);
+    }
+}
+
 fn ease_heading(from: f64, to: f64, k: f64) -> f64 {
     let dh = (to - from + 540.0).rem_euclid(360.0) - 180.0;
     if dh.abs() > 90.0 {
@@ -2870,11 +3184,7 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
         rv.target = (rv.vehicle.position, rv.vehicle.heading);
         rv.pose_seen = (rv.vehicle.position, Instant::now());
         rv.rear = pose.rear.iter().map(|q| (DVec3::new(q.x, q.y, q.z), q.heading as f64, q.pitch, q.bank)).collect();
-        for (i, cur) in rv.rear.iter().enumerate() {
-            if let Some(t) = rv.vehicle.trailers.get_mut(i) {
-                t.set_network_pose(cur.0, cur.1, cur.2, cur.3);
-            }
-        }
+        place_remote_rear(&mut rv.vehicle, &rv.rear);
         rv.doors = pose.doors.clone();
         rv.suspension = pose.suspension.clone();
         rv.values = pose.values.clone();
@@ -2898,7 +3208,7 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
         rv.vehicle.heading = ease_heading(rv.vehicle.heading, rv.target.1, kd);
         // the rear sections where the other game has them
         rv.rear.resize(pose.rear.len(), (DVec3::ZERO, 0.0, 0.0, 0.0));
-        for (i, (cur, q)) in rv.rear.iter_mut().zip(pose.rear.iter()).enumerate() {
+        for (cur, q) in rv.rear.iter_mut().zip(pose.rear.iter()) {
             // (carried on with the bus: a rear section follows the same way)
             let tgt = (DVec3::new(q.x, q.y, q.z) + ahead, q.heading as f64, q.pitch, q.bank);
             let jump = cur.0 == DVec3::ZERO || (tgt.0 - cur.0).length() > 25.0;
@@ -2906,10 +3216,8 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
             cur.1 = if jump { tgt.1 } else { ease_heading(cur.1, tgt.1, kd) };
             cur.2 = if jump { tgt.2 } else { cur.2 + (tgt.2 - cur.2) * k };
             cur.3 = if jump { tgt.3 } else { cur.3 + (tgt.3 - cur.3) * k };
-            if let Some(t) = rv.vehicle.trailers.get_mut(i) {
-                t.set_network_pose(cur.0, cur.1, cur.2, cur.3);
-            }
         }
+        place_remote_rear(&mut rv.vehicle, &rv.rear);
         glide(&mut rv.doors, &pose.doors, k);
         glide(&mut rv.suspension, &pose.suspension, k);
         glide(&mut rv.values, &pose.values, k);
@@ -3010,9 +3318,90 @@ fn drive_remote(rv: &mut RemoteVehicle, pose: &Pose, dt: f32, exact: bool) {
         // already in those values - the frame only runs the AI half of the script.
         at_station_side: 0.0,
         priority_warning: false,
+        engine_off: false,
     };
+    // and every other variable of theirs, as their scripts have it (`omsi_net::vars`)
+    pinned.extend(rv.synced.iter().filter(|(id, _)| !rv.smooth.contains(*id)).map(|(id, v)| (*id as VarId, *v)));
     rv.vehicle.update_ai_with(dt, &frame, &inputs, &pinned);
+    apply_remote_strings(&mut rv.vehicle, &rv.synced_strings);
     rv.last = pose.clone();
+}
+
+fn apply_remote_strings(vehicle: &mut omsi_sim::VehicleInstance, strings: &hashbrown::HashMap<u16, String>) {
+    // INFO is the authoritative fleet metadata: VARS strings are cut to 255 bytes,
+    // less than INFO's 64 four-byte characters, and may arrive after a newer INFO.
+    let fleet = [vehicle.ty.program.str_var("number"), vehicle.ty.program.str_var("ident")];
+    for (id, text) in strings {
+        if fleet.iter().flatten().any(|fleet_id| *fleet_id as usize == *id as usize) {
+            continue;
+        }
+        if let Some(s) = vehicle.state.str_vars.get_mut(*id as usize) {
+            if s != text {
+                s.clone_from(text);
+            }
+        }
+    }
+}
+
+/// Our vehicle's variables to the others, and theirs taken into the copies drawn here.
+fn sync_vars(lan: &mut LanSession, game: &mut LanGame, player: Option<&Player>, dt: f32) {
+    if omsi_cfg::flags::OMSI_NO_VAR_SYNC.is_set() {
+        return;
+    }
+    if let Some(p) = player {
+        let program = &p.vehicle.ty.program;
+        let key = Arc::as_ptr(program) as usize;
+        if game.my_vars.as_ref().map(|m| m.0) != Some(key) {
+            let t = var_table(program);
+            log::info!("LAN: {} variables and {} strings of our bus go to the others (table {:08x})", t.floats.len(), t.strings.len(), t.hash);
+            game.my_vars = Some((key, Arc::new(t)));
+        }
+        let t = game.my_vars.as_ref().map(|m| m.1.clone()).expect("just made");
+        let vars = &p.vehicle.state.vars;
+        let floats: Vec<f32> = t.floats.iter().map(|id| vars.get(*id as usize).copied().unwrap_or(0.0)).collect();
+        let strs = &p.vehicle.state.str_vars;
+        let strings: Vec<String> = t.strings.iter().map(|id| strs.get(*id as usize).cloned().unwrap_or_default()).collect();
+        lan.send_vars(t.hash, &t.floats, &floats, &t.strings, &strings, dt);
+        // `OMSI_DEBUG_VAR_SYNC=<variable>`: ours every two seconds, theirs as it came
+        if let Some(name) = omsi_cfg::flags::OMSI_DEBUG_VAR_SYNC.var() {
+            game.vars_log += dt;
+            if game.vars_log > 2.0 {
+                game.vars_log = 0.0;
+                log::info!("LAN vars: ours {name} = {:?}", p.vehicle.var(&name));
+                for (id, rv) in &game.remotes {
+                    let theirs = rv.vehicle.ty.program.var(&name).and_then(|k| rv.synced.get(&(k as u16)).copied());
+                    log::info!("LAN vars: player {id}'s {name} = {theirs:?} ({} variables, {} strings taken)", rv.synced.len(), rv.synced_strings.len());
+                }
+            }
+        }
+    }
+    for v in lan.take_vars() {
+        let Some(rv) = game.remotes.get_mut(&v.id) else { continue };
+        if rv.stand_in {
+            continue;
+        }
+        if rv.vars.is_none() {
+            let t = var_table(&rv.vehicle.ty.program);
+            let tbl = &rv.table;
+            rv.smooth = tbl.lamps.iter().chain(&tbl.switches).chain(&tbl.values).map(|(_, id)| *id as u16).chain(tbl.doors.iter().map(|id| *id as u16)).chain(tbl.engine_n.map(|id| id as u16)).collect();
+            rv.vars = Some(t);
+        }
+        let Some(t) = rv.vars.as_ref() else { continue };
+        if t.hash != v.table {
+            continue;
+        }
+        let (nf, ns) = (rv.vehicle.state.vars.len(), rv.vehicle.state.str_vars.len());
+        for (id, x) in v.floats {
+            if (id as usize) < nf && x.is_finite() {
+                rv.synced.insert(id, x);
+            }
+        }
+        for (id, s) in v.strings {
+            if (id as usize) < ns {
+                rv.synced_strings.insert(id, s);
+            }
+        }
+    }
 }
 
 /// The outside sounds of a remote bus: made when it comes into earshot, dropped beyond.
@@ -3117,6 +3506,7 @@ pub fn tick(
     mut scene: Option<&mut Scene>,
     mut traffic: Option<&mut crate::traffic::Traffic>,
     mut humans: Option<&mut crate::humans::Humans>,
+    view: &mut crate::view_sync::SimView,
     duty: Option<(&str, &str)>,
     frame: &Frame,
 ) -> Vec<WorldUpdate> {
@@ -3127,6 +3517,8 @@ pub fn tick(
     let mut mine = my_pose(game, player.as_deref(), args, duty, frame.riders);
     mine.tour = frame.tour.clone().unwrap_or_default();
     mine.walker = frame.walker;
+    // (only while driving: on foot or as a passenger the radio key does nothing)
+    mine.radio_keyed = frame.radio_keyed && frame.walker.is_none() && mine.has_vehicle();
     if lan.role == Role::Host {
         // the tours the others drive are theirs, not the timetable's
         let tours: hashbrown::HashSet<(String, String)> = lan
@@ -3148,6 +3540,7 @@ pub fn tick(
         }
     }
     let gone = lan.tick(dt, &mine);
+    sync_vars(lan, game, player.as_deref(), dt);
     game.world.tick(
         lan,
         dt,
@@ -3157,6 +3550,7 @@ pub fn tick(
         scene.as_deref_mut(),
         traffic.as_deref_mut(),
         humans.as_deref_mut(),
+        view,
         player.as_deref().map(|p| p.vehicle.position),
     );
     // the host's world: taken over at a late welcome, the clock kept in step
@@ -3222,7 +3616,7 @@ pub fn tick(
     // OMSI_LAN_SAY="30=Hallo;45=Tschüss": chat lines said at these seconds of the session
     // (for tests of games that have no keyboard: offscreen runs)
     game.clock += dt;
-    if let Ok(script) = omsi_cfg::env::var("OMSI_LAN_SAY") {
+    if let Some(script) = omsi_cfg::flags::OMSI_LAN_SAY.var() {
         for item in script.split(';') {
             if let Some((at, text)) = item.split_once('=') {
                 if at
@@ -3349,13 +3743,7 @@ pub fn tick(
         match rv.interpolated() {
             Some(mut ip) => {
                 // (who they are, what their bus shows: the newest state's)
-                ip.name = pose.name.clone();
-                ip.bus = pose.bus.clone();
-                ip.table = pose.table;
-                ip.line = pose.line.clone();
-                ip.destination = pose.destination.clone();
-                ip.texts = pose.texts.clone();
-                ip.freetex = pose.freetex.clone();
+                current_remote_info(&mut ip, &pose);
                 drive_remote(rv, &ip, dt, true);
             }
             None => drive_remote(rv, &pose, dt, false),
@@ -3381,7 +3769,7 @@ pub fn tick(
         // never faded by an alpha variable the AI scripts left at 0, the bellows skinned
         let inside = frame.inside_of == Some(*id);
         // OMSI_TRACE_REMOTE=<file.csv>: where each other player's bus is drawn, every frame
-        if let Ok(path) = omsi_cfg::env::var("OMSI_TRACE_REMOTE") {
+        if let Some(path) = omsi_cfg::flags::OMSI_TRACE_REMOTE.var() {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
                 let _ = writeln!(f, "{:.4},{id},{:.3},{:.3},{:.3},{:.2},{}", lan_now(), rv.vehicle.position.x, rv.vehicle.position.y, rv.vehicle.position.z, rv.vehicle.heading, rv.offset.is_some());
@@ -3396,7 +3784,7 @@ pub fn tick(
 /// `OMSI_DEBUG_LAN`: every few seconds, what we know of every player, what their bus
 /// shows and plays here, and the bytes that went over the network.
 fn debug_log(lan: &LanSession, game: &mut LanGame, dt: f32, frame: &Frame) {
-    if omsi_cfg::env::var_os("OMSI_DEBUG_LAN").is_none() {
+    if !omsi_cfg::flags::OMSI_DEBUG_LAN.is_set() {
         return;
     }
     game.log_t -= dt;
@@ -3665,7 +4053,7 @@ pub fn hud_lines(lan: &LanSession, _game: &LanGame, _player: Option<&Player>) ->
         lines.push(format!("Online: {w}"));
     }
     // OMSI_DEBUG_LAN: what the HUD shows, every few seconds
-    if omsi_cfg::env::var_os("OMSI_DEBUG_LAN").is_some() {
+    if omsi_cfg::flags::OMSI_DEBUG_LAN.is_set() {
         HUD_LOG.with(|t| {
             let now = Instant::now();
             if t.get()
@@ -3685,146 +4073,4 @@ thread_local! {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn runtime_repaint_name_and_identity_follow_the_same_selection() {
-        let schemes: Vec<_> = ["Startup", "Runtime"]
-            .into_iter()
-            .map(|name| omsi_sim::vehicle::PaintScheme {
-                name: name.to_string(),
-                dir: PathBuf::new(),
-                textures: vec![("body".to_string(), format!("{name}.dds"))],
-                set_vars: vec![],
-            })
-            .collect();
-        for (selection, expected) in [
-            (None, "Startup"),
-            (Some(Some(1)), "Runtime"),
-            (Some(None), ""),
-            (Some(Some(99)), ""),
-        ] {
-            let name = current_paint_name(&schemes, selection, "Startup");
-            assert_eq!(name, expected);
-            let identity = paint_identity(&schemes, &name);
-            if expected.is_empty() {
-                assert!(identity.is_empty());
-            } else {
-                let scheme = schemes.iter().find(|s| s.name == expected).unwrap();
-                assert_eq!(identity, paint_scheme_identity(scheme));
-            }
-        }
-        assert_ne!(
-            paint_scheme_identity(&schemes[0]),
-            paint_scheme_identity(&schemes[1])
-        );
-    }
-
-    /// What is seen comes before what is heard in the capped values list: the AA-FR Agora
-    /// L's sound variables filled it in name order before its roller blind's scroll.
-    #[test]
-    fn the_roller_blind_scroll_is_in_the_sync_table() {
-        let root = omsi_cfg::env::var_os("OMSI_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("../../../OMSI 2 Original"));
-        let bus = root.join("Vehicles/AA-FR_BusBundle/2002_Agora_L_4d_main.bus");
-        if !bus.exists() {
-            eprintln!("skipped: no {}", bus.display());
-            return;
-        }
-        let ty = omsi_sim::VehicleType::load(&root, &bus).expect("Agora L");
-        let t = SyncTable::new(&ty, &[]);
-        assert!(t.values.len() <= omsi_net::wire::MAX_VALUES);
-        for want in ["Rollband_Linie_Trans", "Rollband_Linie_Trans_2"] {
-            assert!(t.values.iter().any(|v| v.0.eq_ignore_ascii_case(want)), "no {want}: {}", t.describe());
-        }
-    }
-
-    /// An articulated bus's rear section is in its sync table: its lamps, displays' switches
-    /// and outside sounds (the AA-FR Agora L's rear section stood dark and silent in the
-    /// other players' games).
-    #[test]
-    fn the_rear_section_is_in_the_sync_table() {
-        let root = omsi_cfg::env::var_os("OMSI_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("../../../OMSI 2 Original"));
-        let bus = root.join("Vehicles/AA-FR_BusBundle/2002_Agora_L_3d_main.bus");
-        let trail = root.join("Vehicles/AA-FR_BusBundle/2002_Agora_L_3d_trail.bus");
-        if !bus.exists() || !trail.exists() {
-            eprintln!("skipped: no {}", bus.display());
-            return;
-        }
-        let ty = omsi_sim::VehicleType::load(&root, &bus).expect("Agora L");
-        let part = Arc::new(omsi_sim::VehicleType::load(&root, &trail).expect("Agora L trail"));
-        let alone = SyncTable::new(&ty, &[]);
-        let whole = SyncTable::new(&ty, &[part]);
-        let count = |t: &SyncTable| t.lamps.len() + t.switches.len();
-        assert!(count(&whole) > count(&alone), "alone {}, whole {}", alone.describe(), whole.describe());
-        assert!(!whole.part_sounds.is_empty(), "no sounds for the rear section: {}", whole.describe());
-        assert_ne!(whole.hash, alone.hash);
-    }
-
-    #[test]
-    fn day_numbers_and_clock_gaps() {
-        assert_eq!(day_number(1990, 1) - day_number(1989, 365), 1);
-        assert_eq!(day_number(1989, 1) - day_number(1988, 366), 1);
-        let a = omsi_sim::SimClock {
-            year: 1990,
-            day_of_year: 1,
-            time: 10.0,
-            ..Default::default()
-        };
-        let b = omsi_sim::SimClock {
-            year: 1989,
-            day_of_year: 365,
-            time: 86390.0,
-            ..Default::default()
-        };
-        assert!((clock_gap(&a, &b) - 20.0).abs() < 1e-9);
-        assert!((clock_gap(&b, &a) + 20.0).abs() < 1e-9);
-        assert_eq!(parse_date("1989-05-30"), Some((1989, 150)));
-        assert_eq!(parse_date("x"), None);
-    }
-
-    #[test]
-    fn the_hosts_clock_moves_on_past_midnight() {
-        let h = omsi_net::HostClock {
-            world: omsi_net::WorldInfo {
-                date: "1989-12-31".into(),
-                time: 86399.5,
-                ..Default::default()
-            },
-            at: Instant::now() - Duration::from_secs(2),
-            speed: 1.0,
-        };
-        let c = host_clock_now(&h).unwrap();
-        assert_eq!((c.year, c.day_of_year), (1990, 1));
-        assert!((c.time - 1.5).abs() < 0.1, "{}", c.time);
-    }
-
-    #[test]
-    fn engine_fed_names() {
-        for n in [
-            "Wheel_RotationSpeed_1_R",
-            "Velocity",
-            "AI_Light",
-            "door_0",
-            "StreetCond",
-            "Timegap",
-        ] {
-            assert!(engine_fed(n), "{n}");
-        }
-        for n in [
-            "engine_n",
-            "engine_throttle_injection",
-            "M_Wheel",
-            "doorSpeed_0",
-            "wiperpos",
-            "cockpit_hupe_volume",
-            "lights_stand",
-        ] {
-            assert!(!engine_fed(n), "{n}");
-        }
-    }
-}
+mod tests;
