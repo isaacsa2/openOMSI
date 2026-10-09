@@ -7,12 +7,14 @@ use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
 use omsi_sim::people::BusId;
 use std::sync::OnceLock;
 
+fn is_procedural_mode(value: &str) -> bool {
+    matches!(value.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
+}
+
 pub(super) fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        std::env::var("OMSI_PAX_ANIMATION").is_ok_and(|v| {
-            matches!(v.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
-        })
+        std::env::var("OMSI_PAX_ANIMATION").is_ok_and(|value| is_procedural_mode(&value))
     })
 }
 
@@ -69,8 +71,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn original_animation_is_unmodified_without_opt_in() {
-        // The default renderer path must stay on OmsiAnim and never allocate a Pose.
-        assert_eq!(std::mem::size_of::<Option<Pose>>() > 0, true);
+    fn enhanced_pose_requires_explicit_opt_in() {
+        assert!(!is_procedural_mode(""));
+        assert!(!is_procedural_mode("original"));
+        assert!(!is_procedural_mode("0"));
+        assert!(is_procedural_mode("procedural"));
+        assert!(is_procedural_mode("enhanced"));
+        assert!(is_procedural_mode("ENHANCED"));
+        assert!(is_procedural_mode("1"));
     }
 }
