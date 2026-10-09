@@ -21,9 +21,9 @@ pub(super) fn enabled() -> bool {
 /// A passenger is anchored at a model's [seatheight] below the seat's hip point.
 /// Its actual floor is at the cabin [passpos] height below that point, which may differ.
 /// Re-anchor the procedural floor and keep the pelvis on the seat's [passpos], not below it.
-fn seated_pose(model_height: f32, place_height: f32, rig: &omsi_sim::human::Rig) -> (Vec3, f32) {
+fn seated_pose(model_height: f32, place_height: f32, seat_front: f32, seat_lift: f32) -> (Vec3, f32) {
     let lift = model_height - place_height;
-    (Vec3::new(0.0, rig.seat_front() - 0.03, place_height - rig.seat_lift), lift)
+    (Vec3::new(0.0, seat_front - 0.03, place_height - seat_lift), lift)
 }
 
 /// The previous foot-planted / IK pose system, driven by the current people's state.
@@ -49,7 +49,7 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
                 _ => Activity::Stand,
             };
             let (seat, floor_lift) = if kind == 2 {
-                let (seat, lift) = seated_pose(p.ty.def.seat_height, x.seat_h, &p.ty.rig);
+                let (seat, lift) = seated_pose(p.ty.def.seat_height, x.seat_h, p.ty.rig.seat_front(), p.ty.rig.seat_lift);
                 (Some(seat), lift)
             } else {
                 (None, 0.0)
@@ -110,13 +110,11 @@ mod tests {
         let seat_front = 0.34;
         let seat_lift = 0.10;
         // The same calculation as seated_pose, with rig measurements supplied.
-        let floor_lift = model - physical;
-        let seat_y = seat_front - 0.03;
-        let seat_z = physical - seat_lift;
+        let (seat, floor_lift) = seated_pose(model, physical, seat_front, seat_lift);
         // The pelvis is still precisely at [passpos] (the simulation origin + 0.82).
-        assert!((floor_lift + seat_z + seat_lift - model).abs() < 1e-5);
+        assert!((floor_lift + seat.z + seat_lift - model).abs() < 1e-5);
         // The hip aligns with [passpos] instead of being behind the seat.
-        assert!((seat_y - seat_front + 0.03).abs() < 1e-5);
+        assert!((seat.y - seat_front + 0.03).abs() < 1e-5);
         // The soles follow the real floor of the seat, not model [seatheight].
         assert!((floor_lift - (model - physical)).abs() < 1e-5);
     }
