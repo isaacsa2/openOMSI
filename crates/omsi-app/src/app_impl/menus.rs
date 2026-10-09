@@ -195,6 +195,10 @@ impl App {
                 self.close_game_menu();
                 self.skip_next_stop();
             }
+            "aidrive" => {
+                self.close_game_menu();
+                self.toggle_autopilot();
+            }
             // the route ends here: free drive, as the list of lines has it
             "endduty" => {
                 crate::game_lists::end_duty(self);
@@ -467,7 +471,7 @@ impl crate::App {
 
 /// The lines of the game menu: (what, label). What can be set is on the pages behind
 /// "Options", "Vehicle options" and "World options" (see `game_lists`).
-pub(crate) const GAME_MENU: [(&str, &str); 15] = [
+pub(crate) const GAME_MENU: [(&str, &str); 16] = [
     ("resume", "Resume"),
     ("options", "Options..."),
     ("controls", "Controls..."),
@@ -479,6 +483,8 @@ pub(crate) const GAME_MENU: [(&str, &str); 15] = [
     ("map", "City map"),
     ("duty", "Line and tour..."),
     ("skipstop", "Skip the next stop"),
+    // (the AI at the wheel and back, Ctrl+Shift+A: see `crate::autopilot`)
+    ("aidrive", "AI drives the bus (on/off)"),
     ("endduty", "End the tour"),
     ("save", "Save the situation"),
     ("saveslot", "Save to a new slot"),

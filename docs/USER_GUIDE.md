@@ -151,7 +151,10 @@ the installation in front of the camera (or beside the bus), couple what stands 
 the bus and uncouple it again, save the situation or load the quicksave, the next weather, the clock an hour on or back, refuel and wash (only at a
 petrol station, as in OMSI), repair (the team needs the map's travel time when the bus stands
 in no depot yard), screenshot, timetable, skip the duty's next stop (also **Ctrl+Shift+H**: for a
-stop the bus cannot reach or never registers at), the object editor (below), quit. Its *Options* hold
+stop the bus cannot reach or never registers at), the AI at the wheel (also **Ctrl+Shift+A**: it
+drives the bus along the lanes at their speed limit, slower in bends, behind the traffic and
+stopping at red lights, taking the straightest way at a junction; the brake or the same key
+takes the bus back), the object editor (below), quit. Its *Options* hold
 one line a setting under the launcher's headings (Simulation, Display & sound, Driving,
 Camera): **Left** and **Right** (or a click on the arrows round the value) step it down and
 up, Enter as before; they are kept for the next game. Home is the ticket desk camera and Insert the timetable view (as OMSI's keyboard.cfg binds them), and the

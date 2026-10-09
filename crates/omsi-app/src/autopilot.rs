@@ -1,7 +1,9 @@
-//! OMSI_AUTOPILOT=<km/h>: the player's bus drives itself along the road network's lanes at
-//! that speed. Offscreen it drives a map's roundabouts and bends to see where the bus falls
-//! through or leaves the road; in the window it drives the bus for a measured run
-//! (OMSI_PROFILE_JSON with --exit-after) without anybody at the wheel.
+//! The AI at the wheel of the player's bus. In the game Ctrl+Shift+A (or the game menu's
+//! line) hands the bus over to it and takes it back, as does the player's brake: it keeps to
+//! the lanes at their speed limit and slower in bends, behind the traffic, stopping at red
+//! lights. OMSI_AUTOPILOT=<km/h> drives at that speed from the start: offscreen it drives a
+//! map's roundabouts and bends to see where the bus falls through or leaves the road, in the
+//! window a measured run (OMSI_PROFILE_JSON with --exit-after) with nobody at the wheel.
 
 use glam::DVec3;
 use omsi_sim::collision::Obb;
@@ -79,6 +81,29 @@ pub(crate) fn lane_controls(net: &Network, v: &VehicleInstance, kmh: f32) -> Opt
     path_controls(net, &path_ahead(net, v.position, v.heading, AIM_AHEAD + 1.0), v, kmh)
 }
 
+/// The sideways acceleration (m/s²) the AI takes a bend at.
+const BEND_ACCEL: f32 = 1.8;
+
+/// The speed (km/h) for the lanes of `path` within 40 m: their speed limit (50 where they
+/// have none) and the sharpest bend on them.
+pub(crate) fn speed_for_road(net: &Network, path: &[(usize, f32, f32)]) -> f32 {
+    path.iter()
+        .filter(|(_, to_start, _)| *to_start < 40.0)
+        .map(|&(l, _, from)| {
+            let lane = &net.lanes[l];
+            let limit = if lane.speed_limit_kmh > 0.0 { lane.speed_limit_kmh } else { 50.0 };
+            let bend = lane
+                .curvature
+                .iter()
+                .zip(&lane.dist)
+                .filter(|(_, d)| **d >= from)
+                .map(|(c, _)| c.abs())
+                .fold(0.0f32, f32::max);
+            if bend > 1e-4 { limit.min(((BEND_ACCEL / bend).sqrt() * 3.6).max(12.0)) } else { limit }
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
 /// The speed (km/h) to stop for the first light on `path` that does not let traffic go: at
 /// its lane's start, 3 m short of it, closing in at 2 km/h a metre (`kmh` with none red).
 /// `until_go`: the seconds until a light (controller, light) lets traffic go.
@@ -112,10 +137,12 @@ pub(crate) fn speed_behind(position: DVec3, heading: f64, others: &[Obb], kmh: f
     }
 }
 
-/// The window's autopilot: the bus put in gear D at the start, then driven by
-/// [`lane_controls`] behind the traffic.
+/// The window's autopilot: with OMSI_AUTOPILOT the bus put in gear D at the start, then
+/// driven along [`path_ahead`] behind the traffic.
 #[derive(Default)]
 pub(crate) struct Autopilot {
+    /// Handed over in the game (Ctrl+Shift+A, the game menu).
+    on: bool,
     /// Seconds driven.
     t: f32,
     /// Gear D asked for.
@@ -134,7 +161,10 @@ impl Autopilot {
         player: &mut crate::player::Player,
         traffic: Option<&crate::traffic::Traffic>,
     ) -> Option<crate::controllers::Analog> {
-        let kmh = omsi_cfg::flags::OMSI_AUTOPILOT.parse::<f32>()?;
+        let fixed = omsi_cfg::flags::OMSI_AUTOPILOT.parse::<f32>();
+        if !self.on && fixed.is_none() {
+            return None;
+        }
         let t = traffic?;
         self.t += dt;
         // (the foot on the brake for the first seconds: the gearbox's D wants it, and the
@@ -144,12 +174,14 @@ impl Autopilot {
                 self.in_gear = true;
                 player.action("automatic_D", true);
                 player.action("automatic_D", false);
-                log::info!("autopilot: gear D, driving at {kmh:.0} km/h");
+                log::info!("autopilot: gear D, driving at {:.0} km/h", fixed.unwrap_or(0.0));
             }
             return Some(crate::controllers::Analog { steering: Some(0.0), throttle: Some(0.0), brake: Some(1.0), ..Default::default() });
         }
         let v = &player.vehicle;
         let path = path_ahead(&t.net, v.position, v.heading, 70.0);
+        let road = speed_for_road(&t.net, &path);
+        let kmh = fixed.map_or(road, |k| k.min(road));
         let limit = speed_behind(v.position, v.heading, &t.boxes(v.position, 60.0), kmh).min(speed_for_lights(&t.net, &path, kmh, |c, li| t.light_until_go(c, li)));
         let (steer, throttle, brake) = path_controls(&t.net, &path, v, limit)?;
         // (stopped behind somebody: the brake held, as a driver does)
@@ -172,6 +204,43 @@ impl Autopilot {
             log::info!("autopilot t={:.0} s: {:.0} km/h (limit {limit:.0})", self.t, v.physics.velocity_kmh());
         }
         Some(crate::controllers::Analog { steering: Some(steer), throttle: Some(throttle), brake: Some(brake), ..Default::default() })
+    }
+}
+
+impl crate::app::App {
+    /// The AI hands the bus back, or takes it over from where it is (Ctrl+Shift+A, the game
+    /// menu).
+    pub(crate) fn toggle_autopilot(&mut self) {
+        let Some(p) = self.player.as_mut() else { return };
+        let a = &mut self.input.autopilot;
+        a.on = !a.on;
+        a.stuck = 0.0;
+        let msg = if a.on {
+            // (no start-up: the bus may be under way; D asked for, a brake the keys
+            // hold let go)
+            a.t = 3.0;
+            a.in_gear = true;
+            p.axes.brake = 0.0;
+            p.action("automatic_D", true);
+            p.action("automatic_D", false);
+            log::info!("autopilot: the AI drives the bus");
+            "The AI drives the bus (the brake or Ctrl+Shift+A takes it back)"
+        } else {
+            log::info!("autopilot: the player drives the bus again");
+            "You drive the bus again"
+        };
+        self.service_msg = Some((msg.into(), 5.0));
+    }
+
+    /// The AI's wheel and pedals in place of the player's this frame, when it drives; the
+    /// player's brake (keys, pedal) takes the bus back.
+    pub(crate) fn frame_autopilot(&mut self, dt: f32, analog: crate::controllers::Analog) -> crate::controllers::Analog {
+        let Some(p) = self.player.as_mut() else { return analog };
+        if self.input.autopilot.on && (p.axes.brake > 0.3 || analog.brake.is_some_and(|b| b > 0.3)) {
+            self.toggle_autopilot();
+            return analog;
+        }
+        self.input.autopilot.controls(dt, p, self.session.traffic.as_ref()).unwrap_or(analog)
     }
 }
 
@@ -215,6 +284,22 @@ mod tests {
         assert_eq!(green, 40.0);
         let near = path_ahead(&net, DVec3::new(0.0, 28.0, 0.0), 0.0, 50.0);
         assert_eq!(speed_for_lights(&net, &near, 40.0, |_, _| Some(12.0)), 0.0);
+    }
+
+    #[test]
+    fn it_slows_for_the_bend_and_the_limit() {
+        let mut net = fork();
+        // (lane 1 straight: 50 km/h without a limit; 30 where it has one)
+        let path = path_ahead(&net, DVec3::new(0.0, 10.0, 0.0), 0.0, 50.0);
+        assert_eq!(speed_for_road(&net, &path), 50.0);
+        net.lanes[1].speed_limit_kmh = 30.0;
+        assert_eq!(speed_for_road(&net, &path), 30.0);
+        // a bend of 20 m radius ahead: sqrt(1.8 * 20) m/s = 21.6 km/h
+        net.lanes[1].speed_limit_kmh = 0.0;
+        let n = net.lanes[1].curvature.len();
+        net.lanes[1].curvature = vec![1.0 / 20.0; n];
+        let v = speed_for_road(&net, &path);
+        assert!((v - 21.6).abs() < 0.2, "{v}");
     }
 
     #[test]
