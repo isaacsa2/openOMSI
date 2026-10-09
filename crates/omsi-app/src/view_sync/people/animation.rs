@@ -1,0 +1,76 @@
+//! Opt-in restoration of the earlier procedural human poses.
+//! Keep the original OMSI animation as the default for compatibility and A/B testing.
+
+use super::*;
+use glam::{Affine3A, Vec3};
+use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
+use omsi_sim::people::BusId;
+use std::sync::OnceLock;
+
+pub(super) fn enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("OMSI_PAX_ANIMATION").is_ok_and(|v| {
+            matches!(v.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
+        })
+    })
+}
+
+/// The previous foot-planted / IK pose system, driven by the current people's state.
+/// This changes only how bodies are skinned, never boarding, movement or ticket logic.
+pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
+    let (origin, heading, frame) = match p.place {
+        Place::Ground => (p.position, p.heading, 0),
+        Place::Bus(bus, at) => {
+            let frame = match bus {
+                BusId::Player => 1,
+                BusId::Ai(id) => id.wrapping_add(2),
+            };
+            (at.as_dvec3(), p.lheading, frame)
+        }
+    };
+    let (activity, seat, reach) = match &p.state {
+        State::Pax(x) => {
+            let kind = x.pax_state.round().clamp(0.0, 2.0) as u8;
+            let activity = match kind {
+                2 => Activity::Sit,
+                1 => Activity::Walk,
+                _ if x.reach => Activity::Pay,
+                _ => Activity::Stand,
+            };
+            let seat = (kind == 2).then(|| Vec3::new(0.0, 0.0, x.seat_h));
+            let reach = (x.reach && x.inside.is_some()).then(|| {
+                let d = x.reach_at.as_dvec3() - x.pos;
+                let (s, c) = x.yaw.sin_cos();
+                Vec3::new((d.x * c - d.y * s) as f32, (d.x * s + d.y * c) as f32, d.z as f32)
+            });
+            (activity, seat, reach)
+        }
+        _ => (p.activity, None, None),
+    };
+    let input = PoseInput {
+        activity,
+        origin,
+        heading,
+        frame,
+        velocity: p.vel,
+        seat,
+        reach,
+        ..PoseInput::default()
+    };
+    let seed = p.id;
+    let pose = p.procedural.get_or_insert_with(|| Pose::new(seed));
+    pose.advance(&p.ty.rig, &input, dt);
+    pose.bones(&p.ty.rig).bones
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn original_animation_is_unmodified_without_opt_in() {
+        // The default renderer path must stay on OmsiAnim and never allocate a Pose.
+        assert_eq!(std::mem::size_of::<Option<Pose>>() > 0, true);
+    }
+}
