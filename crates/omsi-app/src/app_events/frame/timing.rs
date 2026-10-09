@@ -198,7 +198,7 @@ impl App {
                 | wgpu::CurrentSurfaceTexture::Suboptimal(frame) =
                     s.acquire()
                 {
-                    let view = frame.texture.create_view(&Default::default());
+                    let view = s.view(&r.device, &frame);
                     let cam = Camera {
                         position: DVec3::ZERO,
                         yaw: 0.0,
@@ -221,7 +221,7 @@ impl App {
                         &lighting,
                     );
                     win.pre_present_notify();
-                    s.present(frame);
+                    s.present(&r.device, &r.queue, frame);
                 }
             }
             return false;

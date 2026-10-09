@@ -1,5 +1,6 @@
 //! The sun's (and the street lamps') shadow maps and the pipelines drawing into them.
 
+use super::common::*;
 use super::scene::SceneBase;
 use crate::*;
 
@@ -60,7 +61,7 @@ pub(crate) fn build(device: &wgpu::Device, scene: &SceneBase, shadow_size: u32) 
             immediate_size: 0,
         });
     let make_shadow = |kind: u8, cascade: u8| {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        compile_pipeline(device, &wgpu::RenderPipelineDescriptor {
             label: Some("shadow"),
             layout: Some(&shadow_pipeline_layout),
             vertex: wgpu::VertexState {
@@ -133,7 +134,7 @@ pub(crate) fn build(device: &wgpu::Device, scene: &SceneBase, shadow_size: u32) 
 
 fn clear_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
     log::info!("renderer: compiling the shadow clear shader");
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+    let module = compile_shader(device, wgpu::ShaderModuleDescriptor {
         label: Some("shadow clear"),
         source: wgpu::ShaderSource::Wgsl(
             "@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -149,7 +150,7 @@ fn clear_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         bind_group_layouts: &[],
         immediate_size: 0,
     });
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    compile_pipeline(device, &wgpu::RenderPipelineDescriptor {
         label: Some("shadow clear"),
         layout: Some(&layout),
         vertex: wgpu::VertexState {

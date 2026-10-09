@@ -310,7 +310,7 @@ fn backend_instance(api: GraphicsApi) -> wgpu::Instance {
     d.backend_options.gl.context_lock_timeout = Some(GL_CONTEXT_LOCK_TIMEOUT);
     d.backends = api.backends();
     if api == GraphicsApi::Angle {
-        d.backend_options.gl.platform = wgpu::GlPlatform::Angle;
+        return omsi_render::angle::instance(d);
     }
     wgpu::Instance::new(d)
 }

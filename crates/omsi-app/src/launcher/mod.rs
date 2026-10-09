@@ -976,14 +976,14 @@ impl Launcher {
             }
             _ => return,
         };
-        let view = frame.texture.create_view(&Default::default());
+        let view = surface.view(&renderer.device, &frame);
         if let Some(gpu) = self.gpu.as_mut() {
             let mut enc = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("launcher") });
             gpu.render(&renderer.device, &renderer.queue, &mut enc, &view, (pw, ph), Some(bg), &layers, &draws);
             renderer.queue.submit([enc.finish()]);
         }
         window.pre_present_notify();
-        surface.present(frame);
+        surface.present(&renderer.device, &renderer.queue, frame);
         self.shown = Some((verts, key, Instant::now()));
         if std::mem::take(&mut self.first_frame) {
             log::info!("launcher: first frame presented in {:.2} s", self.started.elapsed().as_secs_f64());
