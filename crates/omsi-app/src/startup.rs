@@ -511,16 +511,28 @@ pub(crate) fn restart_with_allocator_settings() {
 }
 
 /// A Windows GUI program has no console; when it was started from one (cmd, PowerShell)
-/// the log and --help still belong there.
+/// the log and --help still belong there, unless its output was sent to a file or a pipe
+/// (`openomsi.exe ... > game.log 2>&1`): attached, the log went to the console instead and
+/// the file stayed empty.
 #[cfg(windows)]
 pub(crate) fn attach_parent_console() {
     extern "system" {
         fn AttachConsole(process: u32) -> i32;
+        fn GetStdHandle(which: u32) -> isize;
+        fn GetFileType(file: isize) -> u32;
     }
     const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
-    // fails harmlessly when there is no parent console (a double click, the launcher, whose
-    // redirected log file stays the output)
+    const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+    const FILE_TYPE_DISK: u32 = 1;
+    const FILE_TYPE_PIPE: u32 = 3;
+    // AttachConsole fails harmlessly when there is no parent console (a double click, the
+    // launcher, whose redirected log file stays the output)
+    // SAFETY: plain Win32 calls on this process's own standard handle
     unsafe {
+        let err = GetStdHandle(STD_ERROR_HANDLE);
+        if err != 0 && err != -1 && matches!(GetFileType(err), FILE_TYPE_DISK | FILE_TYPE_PIPE) {
+            return;
+        }
         AttachConsole(ATTACH_PARENT_PROCESS);
     }
 }
