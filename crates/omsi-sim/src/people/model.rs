@@ -118,6 +118,8 @@ pub struct Person {
     pub activity: Activity,
     /// The animation: Omsi.exe's walk phase and joint angles (sub_626ae8).
     pub anim: OmsiAnim,
+    /// Optional earlier IK/foot-planted animation, allocated only for experimental rendering.
+    pub procedural: Option<crate::human::Pose>,
     pub state: State,
     /// Seconds in the current state.
     pub t_state: f32,
