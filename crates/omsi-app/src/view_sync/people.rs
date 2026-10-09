@@ -42,6 +42,8 @@ pub(crate) struct PeopleView {
     pub(crate) gpu_materials: HashMap<(usize, usize, usize), Vec<MaterialId>>,
     pub(crate) spare: HashMap<(usize, usize, usize), Vec<(MeshId, usize)>>,
     pub(crate) sync_frame: u32,
+    /// Animation choice for this session, refreshed on Android in-process launches.
+    pub(crate) enhanced_poses: bool,
     /// Simulation time of the last `sync`.
     pub(crate) last_sync: f64,
     /// Frames synced, people posed and skinned, the time that took and the part of it spent
@@ -61,6 +63,7 @@ impl PeopleView {
             gpu_materials: HashMap::new(),
             spare: HashMap::new(),
             sync_frame: 0,
+            enhanced_poses: animation::enabled(),
             last_sync: 0.0,
             pose_stats: (0, 0, 0.0, 0.0),
             trace: omsi_cfg::flags::OMSI_TRACE_PAX.var().and_then(|f| std::fs::File::create(f).ok()).map(|f| {
@@ -311,7 +314,7 @@ impl Humans {
             );
         }
         let n_due = due.iter().filter(|d| **d).count();
-        let enhanced = animation::enabled();
+        let enhanced = view.enhanced_poses;
         let pose_one = |p: &mut Person| {
             // Preserve the OMSI-original pose unless the enhanced A/B mode is requested.
             let bones = if enhanced && p.puppet.is_none() {
