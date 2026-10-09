@@ -25,6 +25,9 @@ impl App {
         }
         if self.metar_locked(){self.service_msg=Some(("The weather cannot be changed while the METAR sync is on".into(),3.0));return;}
         custom.normalize();
+        // (the weather set by hand is the weather now: the physical model of the "natural"
+        // weather stops, or its next step put its own back at once)
+        crate::weather_model::stop();
         self.session.metar_rx=None;
         self.session.metar_once=false;
         let spec=custom.encode();

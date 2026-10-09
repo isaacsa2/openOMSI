@@ -191,7 +191,7 @@ fn ibis_line_number(v: &omsi_sim::VehicleInstance) -> Option<String> {
 /// `IBIS_LinieKurs`, the IBIS's number without its letter, a pick made 92E into 92 on the
 /// IBIS and the matrix. Not `SetLineTo` on any other bus: no script of its own writes it,
 /// only an earlier pick, so a line typed on the IBIS since went back to that pick's.
-fn destination_line(v: &omsi_sim::VehicleInstance) -> String {
+pub(crate) fn destination_line(v: &omsi_sim::VehicleInstance) -> String {
     let blind = crate::schedule::has_roller_blind(v).then(|| v.str_var("SetLineTo"));
     [Some(v.str_var("Matrix_Nr")), blind]
         .into_iter()
@@ -1105,7 +1105,7 @@ fn steps_of(verb: &str) -> Option<Vec<f32>> {
         "ui_scale" => (10..=40).map(|v| v as f32 * 0.05).collect(),
         "chat_size" => (5..=30).map(|v| v as f32 * 0.1).collect(),
         "ui_opacity" => (4..=20).map(|v| v as f32 * 0.05).collect(),
-        "vol_ai" | "vol_scenery" => (0..=20).map(|v| v as f32 * 0.05).collect(),
+        "vol_ai" | "vol_scenery" | "vol_ambient" => (0..=20).map(|v| v as f32 * 0.05).collect(),
         "wheel_range" => (6..=60).map(|v| v as f32 * 30.0).collect(),
         "wheel_lock" => std::iter::once(0.0).chain((2..=60).map(|v| v as f32 * 30.0)).collect(),
         "fov" => std::iter::once(0.0).chain((20..=120).map(|v| v as f32)).collect(),
@@ -1260,6 +1260,7 @@ fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "ui_opacity" => s.ui_opacity,
         "vol_ai" => s.vol_ai,
         "vol_scenery" => s.vol_scenery,
+        "vol_ambient" => s.vol_ambient,
         "wheel_range" => s.wheel_range,
         "wheel_lock" => s.wheel_lock,
         "triple_width_mm" => s.triple.width_mm,
@@ -1404,6 +1405,10 @@ fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option<(&'static 
         "vol_scenery" => {
             app.settings.vol_scenery = (v * 100.0).round() / 100.0;
             Some(("vol_scenery", app.settings.vol_scenery.to_string()))
+        }
+        "vol_ambient" => {
+            app.settings.vol_ambient = (v * 100.0).round() / 100.0;
+            Some(("vol_ambient", app.settings.vol_ambient.to_string()))
         }
         "wheel_range" => {
             app.settings.wheel_range = v.round();
@@ -1570,6 +1575,7 @@ fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "mouse" => app.input.mouse_drive,
         "mouse_right" => s.mouse_right_off,
         "mouse_smooth" => s.mouse_smooth,
+        "mouse_hold" => s.mouse_hold,
         "blinker_cancel" => s.blinker_cancel,
         "fps" => s.show_fps,
         "get_up" => s.get_up,
@@ -1600,6 +1606,7 @@ fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "reflections" => s.reflections,
         "clouds" => s.clouds,
         "windy_trees" => s.windy_trees,
+        "ambient" => s.ambient,
         "fullscreen" => s.fullscreen,
         "vsync" => s.vsync,
         "texture_compression" => s.texture_compression,
@@ -1699,6 +1706,11 @@ fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static str, String
         "mouse_smooth" => {
             app.settings.mouse_smooth = on;
             Some(("mouse_smooth", bit))
+        }
+        "mouse_hold" => {
+            app.settings.mouse_hold = on;
+            app.sync_mouse_grab();
+            Some(("mouse_hold", bit))
         }
         "get_up" => {
             app.settings.get_up = on;
@@ -1828,6 +1840,7 @@ fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static str, String
             app.settings.windy_trees = on;
             Some(("windy_trees", bit))
         }
+        "ambient" => { app.settings.ambient = on; Some(("ambient", bit)) }
         "fullscreen" => {
             app.settings.fullscreen = on;
             if app.gfx.spanned {
@@ -2467,6 +2480,8 @@ fn options_pages(app: &App) -> Vec<Page> {
         slider_row(app, "volume", "Volume", "Set how loud the game should be", &pct),
         slider_row(app, "vol_ai", "Traffic", "How loud the other vehicles are", &pct),
         slider_row(app, "vol_scenery", "Surroundings", "How loud the sounds of the scenery are", &pct),
+        switch_row(app, "ambient", "Ambience", "Wind, leaves, rain drops, birds, crickets, the town and the tyres on each road surface"),
+        slider_row(app, "vol_ambient", "Ambience volume", "How loud the ambience is", &pct),
         switch_row(app, "doppler", "Doppler effect", "Approaching sounds higher, receding ones lower"),
         pick("pax_voices", "Passenger voices", "What passengers say"),
     ]
@@ -2531,6 +2546,7 @@ fn options_pages(app: &App) -> Vec<Page> {
         slider_row(app, "mouse_sens", "Mouse steering sensitivity", "Adjust how much the steering wheel turns based on mouse movement", &pct),
         slider_row(app, "mouse_pedal_strength", "Mouse pedal strength", "Adjust how much mouse travel is needed to reach full throttle or braking", &|v| if (v - 1.0).abs() < 0.01 { "OMSI".to_string() } else { format!("{:.0}%", v * 100.0) }),
         switch_row(app, "mouse_smooth", "Smooth mouse steering", "The wheel eases after the cursor; off: it follows at once, as in OMSI"),
+        switch_row(app, "mouse_hold", "Hold the cursor while steering", "The wheel reaches its lock past the window's edges; off: the crosshair stays free and without delay, as in OMSI"),
         switch_row(app, "steering_linear", "Steering linearity (keys at OMSI's steady pace)", "Keyboard steering at OMSI's steady pace"),
         switch_row(app, "old_steering", "Old Steering (the wheel stays, turn it back yourself)", "The wheel stays where the keys left it"),
         switch_row(app, "red_steer_spd", "Dynamic steering (slower keys at speed, OMSI's redSteerSpd)", "The steering keys act slower at speed"),

@@ -238,6 +238,7 @@ impl<'a> Offscreen<'a> {
         let wetness = initial_wetness(&weather);
         let cabin_air = crate::condensation::CabinAir::new();
         let real_time = RealTime::default();
+        let recorder = record::Recorder::new(out, player.as_mut(), &args.root, &settings);
         Ok(Offscreen {
             args,
             out,
@@ -291,6 +292,7 @@ impl<'a> Offscreen<'a> {
             ground_gap,
             spray,
             real_time,
+            recorder,
         })
     }
 }

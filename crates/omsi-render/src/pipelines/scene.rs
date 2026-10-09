@@ -155,7 +155,7 @@ impl SceneBase {
                 },
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(device).as_ref(),
         })
     }
 
@@ -234,7 +234,7 @@ pub(crate) fn prepass(device: &wgpu::Device, scene: &SceneBase, msaa: u32) -> Pr
                 compilation_options: Default::default(),
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::pipeline_cache::get(device).as_ref(),
         })
     };
     let make_prepass = |kind: u8, cull: bool| make_prepass_samples(kind, cull, 1, false);

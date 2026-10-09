@@ -477,7 +477,8 @@ impl World {
                 let dirs = texture_dirs(&self.root, &dir);
                 let dirs: Vec<&Path> = dirs.iter().map(|p| p.as_path()).collect();
                 let surf = def.textures.iter().map(|t| surf_map(&t.file, &dirs)).collect();
-                Arc::new(SplineType { dir, def, surf })
+                let surface = def.textures.iter().map(|t| surface_id(&t.file, &dirs)).collect();
+                Arc::new(SplineType { dir, def, surf, surface })
             });
         self.spline_types
             .lock()

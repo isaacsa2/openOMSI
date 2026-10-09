@@ -315,19 +315,19 @@ fn spline_batches_keep_materials_cells_shadows_and_long_segments_separate() {
         textures: vec![SplineTexture { file: file.into(), ..Default::default() }],
         ..Default::default()
     };
-    let ty = Arc::new(SplineType { def: def("curb.dds"), dir: PathBuf::new(), surf: Vec::new() });
-    let other = Arc::new(SplineType { def: def("other.dds"), dir: PathBuf::new(), surf: Vec::new() });
-    let other_dir = Arc::new(SplineType { def: def("curb.dds"), dir: PathBuf::from("another_pack"), surf: Vec::new() });
+    let ty = Arc::new(SplineType { def: def("curb.dds"), dir: PathBuf::new(), surf: Vec::new(), surface: Vec::new() });
+    let other = Arc::new(SplineType { def: def("other.dds"), dir: PathBuf::new(), surf: Vec::new(), surface: Vec::new() });
+    let other_dir = Arc::new(SplineType { def: def("curb.dds"), dir: PathBuf::from("another_pack"), surf: Vec::new(), surface: Vec::new() });
     let mut tested = def("curb.dds");
     tested.textures[0].alpha = 1;
-    let tested = Arc::new(SplineType { def: tested, dir: PathBuf::new(), surf: Vec::new() });
+    let tested = Arc::new(SplineType { def: tested, dir: PathBuf::new(), surf: Vec::new(), surface: Vec::new() });
     let mut blended = def("curb.dds");
     blended.textures[0].alpha = 2;
-    let blended = Arc::new(SplineType { def: blended, dir: PathBuf::new(), surf: Vec::new() });
+    let blended = Arc::new(SplineType { def: blended, dir: PathBuf::new(), surf: Vec::new(), surface: Vec::new() });
     let mut compatible = def("curb.dds");
     compatible.path = PathBuf::from("another_profile.sli");
     compatible.textures.push(SplineTexture { file: "unused-grass.dds".into(), ..Default::default() });
-    let compatible = Arc::new(SplineType { def: compatible, dir: PathBuf::new(), surf: Vec::new() });
+    let compatible = Arc::new(SplineType { def: compatible, dir: PathBuf::new(), surf: Vec::new(), surface: Vec::new() });
     let mesh = |x: f32, length: f32| Arc::new(MeshData {
         positions: vec![glam::Vec3::new(x, 0.0, 0.0), glam::Vec3::new(x + length, 0.0, 0.0), glam::Vec3::new(x, 1.0, 0.0)],
         normals: vec![glam::Vec3::Z; 3],

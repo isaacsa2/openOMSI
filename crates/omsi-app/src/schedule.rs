@@ -93,7 +93,7 @@ impl TimetableWorld for World {
 
 impl Schedule {
     /// `clock` gives the date: tours carry a validity mask (bits 0-6 Monday…Sunday, 7 public
-    /// holiday, 8 school holidays, 9 school days) that selects which run today.
+    /// holiday, 8 school days, 9 school holidays) that selects which run today.
     pub fn new(root: &Path, world: &World, clock: &omsi_sim::SimClock) -> Schedule {
         Schedule {
             sim: ScheduleSim::new(root, world, clock),
