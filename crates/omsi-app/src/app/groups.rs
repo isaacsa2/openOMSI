@@ -9,8 +9,6 @@ pub(crate) struct SoundState {
     pub(crate) audio: Option<omsi_audio::AudioEngine>,
     /// Sounds of the world around the camera (rain, footsteps).
     pub(crate) ambience: Option<ambience::Ambience>,
-    /// openOMSI's ambience over OMSI's sounds (settings `ambient`, `vol_ambient`).
-    pub(crate) ambient_sound: Option<crate::ambient_sound::AmbientSound>,
     /// Positional voice through GreenTeaSpeak in a session (`voice`).
     pub(crate) voice: Option<crate::voice::Voice>,
 }
@@ -286,6 +284,8 @@ pub(crate) struct InputState {
     pub(crate) html_pressed: Option<(usize, f32, f32)>,
     /// The same for a page of a scenery object: its map id, script texture index and place.
     pub(crate) html_object_pressed: Option<(i64, usize, f32, f32)>,
+    /// The currently held scenery object switch: its map id and event name.
+    pub(crate) pressed_scenery_object: Option<(i64, String)>,
     /// Cursor movement (logical pixels) while dragging a switch, not yet handed to the
     /// script: `<event>_drag` fires once a frame with it (see `Player::drag`).
     pub(crate) drag_delta: (f32, f32),

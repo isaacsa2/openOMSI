@@ -494,6 +494,13 @@ impl App {
                     return;
                 }
             }
+            if let (Some(w), Some((o, d, spread))) = (self.world.as_ref(), self.cursor_ray_now()) {
+                let blocked = self.player.as_ref().and_then(|p| p.opaque_body_hit(o, d));
+                if let Some(hit) = w.scenery_object_hit(o, d, crate::input_script::SCENERY_OBJECT_REACH, spread).filter(|h| blocked.map_or(true, |t| t >= h.t)) {
+                    w.scenery_object_wheel(hit.map_id, &hit.event, -amount * 40.0);
+                    return;
+                }
+            }
         }
         let ctrl = self.input.keys.contains(&KeyCode::ControlLeft) || self.input.keys.contains(&KeyCode::ControlRight);
         if self.view == "outside" && self.player.is_some() && ctrl {

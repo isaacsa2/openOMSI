@@ -2589,10 +2589,14 @@ fn new_remote(
     let mut trailer_renders = Vec::new();
     let mut lead = ty.clone();
     let mut lead_rev = false;
-    for _ in 0..8 {
+    let mut seen = vec![lead.def.path.clone()];
+    for _ in 0..crate::spawn::MAX_COUPLED_PARTS {
         let Some((path, rev)) = crate::spawn::next_coupled(&lead.def, lead_rev, true) else {
             break;
         };
+        if crate::spawn::chain_has_part(&seen, &path) {
+            break;
+        }
         match omsi_sim::VehicleType::load(&args.root, &path) {
             Ok(t) => {
                 let t = Arc::new(t);
@@ -2604,6 +2608,7 @@ fn new_remote(
                     Some(&render),
                 ));
                 vehicle.attach_trailer_ex(t.clone(), rev);
+                seen.push(path);
                 lead = t;
                 lead_rev = rev;
             }
