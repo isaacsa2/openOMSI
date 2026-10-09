@@ -2938,7 +2938,6 @@ mod wizard_tests {
 }
 
 #[cfg(test)]
-#[path = "pages/settings_tests.rs"]
 mod settings_tests;
 
 #[cfg(test)]
