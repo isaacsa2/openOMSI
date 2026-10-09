@@ -92,7 +92,7 @@ mod tests {
         );
         assert_eq!(
             support(&p, &[], std::iter::empty(), DVec2::new(0.0, 0.5), 2.3),
-            Some(2.3)
+            Some(p[2].z as f64)
         );
         assert_eq!(
             support(
@@ -115,7 +115,7 @@ mod tests {
                 DVec2::ZERO,
                 0.7
             ),
-            Some(0.7)
+            Some(0.7_f32 as f64)
         );
     }
 }
