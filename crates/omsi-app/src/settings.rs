@@ -35,6 +35,8 @@ pub struct Settings {
     /// ticket key or the printer); `walk` - they just walk into the saloon (a flat-fare
     /// or ticket-machine service).
     pub boarding: String,
+    /// Passenger poses: `original` (the OMSI animation, default) or `enhanced` (experimental IK).
+    pub passenger_animation: String,
     /// Procedural detail (fractal) texturing of the ground and large walls when close.
     pub detail_textures: bool,
     /// Passengers pay the exact fare (no change to give at the cash desk).
