@@ -13,7 +13,7 @@ fn is_procedural_mode(value: &str) -> bool {
 pub(super) fn enabled() -> bool {
     // Read once per game session (PeopleView::new), not once per process: on Android
     // another game is started in the launcher's existing process.
-    let mode = std::env::var("OMSI_PAX_ANIMATION")
+    let mode = omsi_cfg::flags::OMSI_PAX_ANIMATION.live_var()
         .unwrap_or_else(|_| crate::settings::Settings::load().passenger_animation);
     is_procedural_mode(&mode)
 }
