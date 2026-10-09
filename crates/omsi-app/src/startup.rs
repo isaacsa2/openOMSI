@@ -2,7 +2,22 @@
 
 use super::*;
 
+/// CPU seconds this process has used so far (all threads): on Windows from the system,
+/// which has no `ps`; elsewhere from `ps`.
+#[cfg(windows)]
+pub(crate) fn process_cpu_seconds() -> Option<f64> {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let (mut created, mut exited, mut kernel, mut user) = Default::default();
+    // SAFETY: the pseudo handle of this process needs no closing; the four times are ours
+    unsafe { GetProcessTimes(GetCurrentProcess(), &mut created, &mut exited, &mut kernel, &mut user) }.ok()?;
+    // (in units of 100 ns)
+    let ticks = |t: FILETIME| ((t.dwHighDateTime as u64) << 32 | t.dwLowDateTime as u64) as f64;
+    Some((ticks(kernel) + ticks(user)) / 1e7)
+}
+
 /// CPU seconds this process has used so far (all threads), from `ps`.
+#[cfg(not(windows))]
 pub(crate) fn process_cpu_seconds() -> Option<f64> {
     let out = std::process::Command::new("ps")
         .args(["-o", "cputime=", "-p", &std::process::id().to_string()])
@@ -550,5 +565,22 @@ mod window_tests {
         // a big screen keeps the size asked for
         let ((w, h), _) = super::fit_rect((1600.0, 900.0), (3840.0, 2160.0), 1.5);
         assert_eq!((w, h), (1600.0, 900.0));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod cpu_time_tests {
+    /// OMSI_PROFILE's CPU time is read on Windows, which has no `ps` (whose whole seconds
+    /// elsewhere would not show 200 ms).
+    #[test]
+    fn the_process_cpu_time_is_read_and_grows() {
+        let before = super::process_cpu_seconds().expect("CPU time");
+        let t = std::time::Instant::now();
+        let mut x = 0u64;
+        while t.elapsed().as_millis() < 200 {
+            x = std::hint::black_box(x.wrapping_mul(6364136223846793005).wrapping_add(1));
+        }
+        let after = super::process_cpu_seconds().expect("CPU time");
+        assert!(after > before, "{before} -> {after}");
     }
 }
