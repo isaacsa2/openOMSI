@@ -62,6 +62,8 @@ pub struct TextureCfg {
     /// `[surface]`: 0 asphalt, 1 concrete, 2 cobblestone, 3 dirt, 4 grass, 5 gravel,
     /// 6 snow, 7 deep snow. This is the id the scripts see as `Axle_SurfaceID_`.
     pub surface: i32,
+    /// The file has a `[surface]` at all (else the id is OMSI's default, asphalt).
+    pub surface_given: bool,
 }
 
 impl TextureCfg {
@@ -75,7 +77,10 @@ impl TextureCfg {
                     "terrainmapping_alpha" => c.terrain_mapping_alpha = true,
                     "puddles" => c.puddles = true,
                     "moisture" => c.moisture = true,
-                    "surface" => c.surface = r.i32(),
+                    "surface" => {
+                        c.surface = r.i32();
+                        c.surface_given = true;
+                    }
                     _ => {}
                 }
             }

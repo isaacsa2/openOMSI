@@ -65,6 +65,8 @@ impl ApplicationHandler for App {
         self.input.touch.drop_gpu();
         self.input_lost();
         self.save_last_situation();
+        // (a phone's app in the background is often ended without `exiting`)
+        omsi_render::pipeline_cache::save();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -133,6 +135,15 @@ impl ApplicationHandler for App {
                 if event.state == ElementState::Released
                     && matches!(event.physical_key, PhysicalKey::Code(c) if input_script::is_modifier(c) && !self.input.keys.contains(&c)) => {}
             WindowEvent::KeyboardInput { event, .. } => {
+                // a plugin's text field being typed into takes the keys pressed (their
+                // releases go on, so that nothing held stays held)
+                if event.state == ElementState::Pressed {
+                    if let PhysicalKey::Code(code) = event.physical_key {
+                        if self.plugin_typing_key(code, event.text.as_deref()) {
+                            return;
+                        }
+                    }
+                }
                 if event.state == ElementState::Pressed && self.menus.menu_edit_icao {
                     if let Some(text)=event.text.as_deref(){ self.icao_edit_text(text); }
                 }
@@ -388,6 +399,8 @@ impl ApplicationHandler for App {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         crate::game_lists::flush_settings(true);
         self.finish_session();
+        // (with the pipelines made since the start: puddles, Enhanced+)
+        omsi_render::pipeline_cache::save();
         // ("playing now" ends with the game)
         self.integrations.presence = None;
         if let Some(lan) = self.net.lan.take() {

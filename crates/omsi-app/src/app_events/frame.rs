@@ -5,6 +5,7 @@
 use super::*;
 use crate::view_sync::{self, ViewSync};
 
+mod ambient;
 mod controls;
 mod driving;
 mod integrations;
@@ -59,6 +60,7 @@ impl App {
         self.frame_view_keys(dt);
         let daylight = self.frame_weather(dt);
         self.frame_lights(dt, daylight);
+        self.frame_ambient(dt, &daylight);
         self.frame_scripted(dt, daylight);
         let vr_nav_display = self.frame_ui(dt);
         let lighting = self.frame_lighting(dt, daylight);

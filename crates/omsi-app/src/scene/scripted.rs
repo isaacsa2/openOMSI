@@ -314,12 +314,29 @@ impl World {
                 log::info!("particle object {} at ({:.1}, {:.1}, {:.1}), {d:.0} m: {} particles", po.map_id, po.pos.x, po.pos.y, po.pos.z, po.set.particles().count());
             }
         }
+        // The scripted objects whose variables the emitters read, found in one pass over the
+        // list - the first of each id, as a search would find it: a search of the whole list
+        // for every emitter's object, every frame, was most of the scenery scripts' time on a
+        // city map.
+        let mut owners: HashMap<i64, Option<usize>> = HashMap::new();
+        for po in objs.values().flatten() {
+            if !((po.pos - center).length() > 1500.0) {
+                owners.insert(po.map_id, None);
+            }
+        }
+        if !owners.is_empty() {
+            for (i, s) in scripted.iter().enumerate() {
+                if let Some(slot) = owners.get_mut(&s.map_id) {
+                    slot.get_or_insert(i);
+                }
+            }
+        }
         for list in objs.values_mut() {
             for po in list.iter_mut() {
                 if (po.pos - center).length() > 1500.0 {
                     continue;
                 }
-                let inst = scripted.iter().find(|s| s.map_id == po.map_id).map(|s| &s.inst);
+                let inst = owners.get(&po.map_id).copied().flatten().map(|i| &scripted[i].inst);
                 let value = |n: &str| inst.and_then(|i| i.var(n)).unwrap_or(0.0);
                 po.set.update(dt, po.pos, po.rot, &value);
             }
@@ -476,8 +493,9 @@ impl World {
             if !o.texts.is_empty() {
                 let _ = o.inst.take_refresh_strings();
                 for (tex, st) in o.texts.iter_mut() {
-                    let text = o.inst.str_var(st.def.variable.trim()).to_string();
-                    if st.update(&text) {
+                    // (read in place: a copy each frame was only compared with the last)
+                    let text = o.inst.str_var(st.def.variable.trim());
+                    if st.update(text) {
                         let (w, h) = (st.def.width.max(1) as u32, st.def.height.max(1) as u32);
                         if let Some(rgba) = st.pending.take() {
                             // OMSI_DUMP_SCENERY_TEXT=<dir>: the pictures as drawn
