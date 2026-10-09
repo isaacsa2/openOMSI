@@ -4,7 +4,7 @@
 use super::*;
 use glam::{Affine3A, Vec3};
 use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
-use omsi_sim::people::BusId;
+use omsi_sim::people::{pax::Task, BusId};
 
 fn is_procedural_mode(value: &str) -> bool {
     matches!(value.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
@@ -16,6 +16,14 @@ pub(super) fn enabled() -> bool {
     let mode = omsi_cfg::flags::OMSI_PAX_ANIMATION.live_var()
         .unwrap_or_else(|_| crate::settings::Settings::load().passenger_animation);
     is_procedural_mode(&mode)
+}
+
+/// A passenger is anchored at a model's [seatheight] below the seat's hip point.
+/// Its actual floor is at the cabin [passpos] height below that point, which may differ.
+/// Re-anchor the procedural floor and keep the pelvis on the seat's [passpos], not below it.
+fn seated_pose(model_height: f32, place_height: f32, rig: &omsi_sim::human::Rig) -> (Vec3, f32) {
+    let lift = model_height - place_height;
+    (Vec3::new(0.0, rig.seat_front() - 0.03, place_height - rig.seat_lift), lift)
 }
 
 /// The previous foot-planted / IK pose system, driven by the current people's state.
@@ -31,7 +39,7 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
             (at.as_dvec3(), p.lheading, frame)
         }
     };
-    let (activity, seat, reach) = match &p.state {
+    let (activity, seat, reach, floor_lift, hold) = match &p.state {
         State::Pax(x) => {
             let kind = x.pax_state.round().clamp(0.0, 2.0) as u8;
             let activity = match kind {
@@ -40,35 +48,78 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
                 _ if x.reach => Activity::Pay,
                 _ => Activity::Stand,
             };
-            let seat = (kind == 2).then(|| Vec3::new(0.0, 0.0, x.seat_h));
+            let (seat, floor_lift) = if kind == 2 {
+                let (seat, lift) = seated_pose(p.ty.def.seat_height, x.seat_h, &p.ty.rig);
+                (Some(seat), lift)
+            } else {
+                (None, 0.0)
+            };
             let reach = (x.reach && x.inside.is_some()).then(|| {
                 let d = x.reach_at.as_dvec3() - x.pos;
                 let (s, c) = x.yaw.sin_cos();
                 Vec3::new((d.x * c - d.y * s) as f32, (d.x * s + d.y * c) as f32, d.z as f32)
             });
-            (activity, seat, reach)
+            // Standing riders at their assigned places can grip a pole or handrail.
+            // The procedural pose chooses the upper rail if reachable, otherwise a pole.
+            let hold = if x.inside.is_some() && x.task == Task::SittingInBus && kind == 0 && !x.reach {
+                1.0
+            } else {
+                0.0
+            };
+            (activity, seat, reach, floor_lift, hold)
         }
-        _ => (p.activity, None, None),
+        _ => (p.activity, None, None, 0.0, 0.0),
     };
     let input = PoseInput {
         activity,
-        origin,
+        // The simulation's renderer still places a seated person at hip - model height.
+        // The IK foot floor is hip - physical seat height, which can be higher.
+        origin: origin + glam::DVec3::Z * floor_lift as f64,
         heading,
         frame,
         velocity: p.vel,
         seat,
         reach,
+        hold,
         ..PoseInput::default()
     };
     let seed = p.id;
     let pose = p.procedural.get_or_insert_with(|| Pose::new(seed));
     pose.advance(&p.ty.rig, &input, dt);
-    pose.bones(&p.ty.rig).bones
+    let mut bones = pose.bones(&p.ty.rig).bones;
+    // Shift the local pose back to the renderer's original anchor; no game logic moves.
+    if floor_lift != 0.0 {
+        let lift = Affine3A::from_translation(Vec3::Z * floor_lift);
+        for bone in &mut bones {
+            *bone = lift * *bone;
+        }
+    }
+    bones
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seated_floor_and_pelvis_use_different_seat_heights() {
+        // Test the geometry used by the renderer: an OMSI model with [seatheight]
+        // 0.82 m placed at a 0.45 m physical seat height.
+        let model = 0.82;
+        let physical = 0.45;
+        let seat_front = 0.34;
+        let seat_lift = 0.10;
+        // The same calculation as seated_pose, with rig measurements supplied.
+        let floor_lift = model - physical;
+        let seat_y = seat_front - 0.03;
+        let seat_z = physical - seat_lift;
+        // The pelvis is still precisely at [passpos] (the simulation origin + 0.82).
+        assert!((floor_lift + seat_z + seat_lift - model).abs() < 1e-5);
+        // The hip aligns with [passpos] instead of being behind the seat.
+        assert!((seat_y - seat_front + 0.03).abs() < 1e-5);
+        // The soles follow the real floor of the seat, not model [seatheight].
+        assert!((floor_lift - (model - physical)).abs() < 1e-5);
+    }
 
     #[test]
     fn enhanced_pose_requires_explicit_opt_in() {
