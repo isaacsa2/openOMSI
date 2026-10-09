@@ -407,9 +407,11 @@ impl WindowWipers {
                     );
                 }
             }
+            // (painted and uploaded 30 times a second; 15 at a lower rain quality)
+            let every = if crate::rain::quality() >= 2 { 1.0 / 30.0 } else { 1.0 / 15.0 };
             film.paint_time += dt;
-            if film.paint_time >= 1.0 / 30.0 {
-                film.paint_time %= 1.0 / 30.0;
+            if film.paint_time >= every {
+                film.paint_time %= every;
                 if liquid {
                     // Also discard initial seeds which landed outside the mesh's slot.
                     let bounds = film.bounds;
