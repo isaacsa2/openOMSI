@@ -1710,7 +1710,6 @@ pub fn delete_profile(name: &str) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "profile_cleanup_tests.rs"]
 mod profile_cleanup_tests;
 
 // ---------------------------------------------------------------------------------------
