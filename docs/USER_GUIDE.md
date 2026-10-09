@@ -66,7 +66,7 @@ whole start-up by itself (main switch, ignition, starter, gearbox to neutral); `
 is the same thing for an offscreen run.
 
 **Updates.** When the launcher starts it asks
-[github.com/openOMSI-Project/openOMSI](https://github.com/openOMSI-Project/openOMSI) for the latest release
+[github.com/openOMSI-org/openOMSI](https://github.com/openOMSI-org/openOMSI) for the latest release
 and, when there is a newer one, offers it: **Update now** downloads it (checked against the
 SHA-256 GitHub lists), puts the new program in place of the old one and starts the launcher
 again - on Windows `openomsi.exe` and `openomsi-launcher.exe`, on macOS the `openOMSI.app`
@@ -108,7 +108,11 @@ Settings → Driving → *Mouse steering sensitivity* makes it more or less sens
 braking: above 100 % the pedal reaches full sooner and below 100 % it takes more travel.
 Mouse steering works in the driver's, the passenger and the outside view; the wheel follows
 the cursor smoothly (a short easing, no steps). With *Smooth mouse steering* off (Settings →
-Driving) the wheel and the pedals are where the cursor says at once, as in OMSI.
+Driving) the wheel and the pedals are where the cursor says at once, as in OMSI. While the mouse
+steers the cursor is held, so the wheel reaches its full lock past the window's edges and a
+cross shows where it steers; with *Hold the cursor while the mouse steers* off the system's
+crosshair stays free (it follows the hand without the frame's delay, and a graphics tablet's
+pen works with it) and the window's edges are the lock, as in OMSI.
 
 Two switches there change the steering keys (both off by default): *Steering linearity* turns
 the wheel at OMSI's own steady pace (the curvature grows by the same amount every millisecond
@@ -301,7 +305,8 @@ material its own light outright - `[matl_glow] <texture> <value>` (openOMSI's ow
 docs/FORMATS.md): the texture is a greyscale mask of where it shines (the light is the
 material's own colour) and `value` is on this slider's scale, so `6` is as bright as its default
 and `20` brighter than its top; the slider does not change it. `mouse_sens` (mouse steering,
-1 = OMSI's), `mouse_smooth` (0: the mouse's wheel follows the cursor without easing),
+1 = OMSI's), `mouse_smooth` (0: the mouse's wheel follows the cursor without easing), `mouse_hold` (0: the
+cursor stays free while the mouse steers),
 `ui_scale` (the size of the game's interface over the picture - its texts,
 the menu, the timetable, the navigator and the city map - from 0.5 to 2, 1 by default, on
 top of the screen's own scaling; on a window taller than 1080 lines the interface grows with
@@ -334,7 +339,7 @@ Radeon HD 5000/6000). It is tried last, after the other three failed, and only w
 `libEGL.dll` and `libGLESv2.dll` (Google's ANGLE, BSD licence, with its Direct3D 11 renderer)
 are next to `openomsi.exe`; without them it is skipped (the log says so). The Windows package
 is to ship them, built from ANGLE's own source by
-[angle-openomsi](https://github.com/openOMSI-Project/angle-openomsi); with them the log names the
+[angle-openomsi](https://github.com/openOMSI-org/angle-openomsi); with them the log names the
 adapter `ANGLE (…Direct3D11…)` on the `Gl` backend.
 
 `drive_keys` is a control preset: `simple` (W/S/A/D and the arrow keys drive; the default),
@@ -561,6 +566,43 @@ before (the model starts three days back), with the season's and the latitude's 
 It sets everything a weather sets - visibility, wind, temperature, rain or snow, the wet
 road - for every graphics mode; Enhanced and Enhanced+ also take its cloud amounts and its
 air. `OMSI_DAY_AIR=haze,angstrom[,height,strat]` fixes the air for comparisons.
+
+## Ambience
+
+On top of the sounds OMSI 2 plays itself (each bus's own sound configuration, the traffic's,
+the scenery's, the rain in the street), openOMSI adds an ambience of its own: Settings →
+Sound → *Ambience* switches it on or off (`ambient=1`, on by default) and *Ambience volume*
+sets how loud it is (`vol_ambient`, 0..1, 0.8 by default), on top of the master volume.
+It is synthesised while you play from what the game knows of the moment, so it follows the
+weather, the time and the road continuously and never loops:
+
+- **Wind and gusts** from the weather's wind: weaker between houses than over open land,
+  roaring in gusts in a storm; overhead wires sing in a strong wind in town; inside a moving
+  bus the air rushing past its doors and windows.
+- **Leaves** rustling in the trees around you, from a few leaves in a breeze to a roar in a
+  gale; green in summer, crisp and dry in autumn, nothing on bare winter trees.
+- **Rain drops** near you: on the ground and in the puddles in the street, on the glass by
+  your ear in the bus, and on the roof for a bus whose own sounds have no rain on its roof -
+  sparse in a drizzle, dense in a downpour. Thunder rolls in a thunderstorm, near strikes
+  cracking, far ones rumbling.
+- **Birds** by day (most at dawn in spring, little in winter, quiet in rain and wind),
+  **crickets** on warm summer nights (chirping faster the warmer it is) and the **far hum of
+  the town's traffic**, busier in the rush hours than at night.
+- **The tyres on the road**: what the surface under each wheel of your bus sounds like at
+  the speed it rolls - asphalt, concrete slabs (a knock at every joint), cobblestones (a knock
+  a stone), gravel (crunching, a stone now and then against the wheel arch), dirt and mud,
+  grass, snow (squeaking in hard frost; a road the weather has covered in snow crunches as snow),
+  the hiss of a wet road and the swash of the puddles.
+  The surface is the one OMSI 2 itself knows for the scripts (the `[surface]` of the road's or
+  the ground's texture, `Axle_SurfaceID_` - which your bus's scripts now read too); a texture
+  without one is told by its name, and an unknown one is asphalt.
+
+Everything outside is heard through the bus's bodywork when you sit in it - quieter and
+duller, opening up as the doors or the driver's window open - and echoes in a tunnel. What a
+bus or the map already plays is not doubled: a bus with its own rain on the roof, wet-road
+hiss or rolling noise keeps those, and the street's rain stays OMSI's `rain_outside.wav`.
+The bird recordings are free (CC0 / public domain, see `assets/sounds/ambient/CREDITS.md`);
+everything else is synthesised.
 
 ## Radio
 
