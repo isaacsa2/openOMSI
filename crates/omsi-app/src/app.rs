@@ -107,7 +107,7 @@ impl App {
         let resolution = crate::settings::Settings::resolution().filter(|_| self.args.size == crate::cli::DEFAULT_SIZE);
         if let Some((w, h)) = resolution {
             attrs = attrs.with_inner_size(winit::dpi::PhysicalSize::new(w, h));
-            if let Some(m) = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next()) {
+            if let Some(m) = crate::startup::home_monitor(event_loop) {
                 let (sw, sh) = (m.size().width as i32, m.size().height as i32);
                 attrs = attrs.with_position(winit::dpi::PhysicalPosition::new(m.position().x + ((sw - w as i32) / 2).max(0), m.position().y + ((sh - h as i32) * 2 / 5).max(0)));
             }
@@ -120,7 +120,7 @@ impl App {
             log::info!("gamescope (Steam Deck Gaming Mode): the window fills the screen");
         }
         if self.settings.fullscreen || gamescope {
-            attrs = attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+            attrs = attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(crate::startup::home_monitor(event_loop))));
         }
         if self.settings.triple.enabled
             && self.settings.triple_span
@@ -153,8 +153,15 @@ impl App {
         }
         // OMSI_BACKGROUND=1: a test window that does not take the keyboard from whoever is
         // working at the screen (OMSI_INPUT drives the handlers directly, it needs no focus)
-        if omsi_cfg::flags::OMSI_BACKGROUND.is_set() {
+        if omsi_cfg::flags::OMSI_BACKGROUND.is_set() || omsi_cfg::flags::OMSI_HIDDEN_WINDOW.is_set() {
             attrs = attrs.with_active(false);
+        }
+        // OMSI_HIDDEN_WINDOW=1: the window is never shown at all, so a benchmark of the
+        // window's own frame (its steps, OMSI_PROFILE's stages) can run beside whoever works
+        // at the screen; macOS then reports it occluded and the frames are drawn into a
+        // texture of its size (see `frame_acquire`)
+        if omsi_cfg::flags::OMSI_HIDDEN_WINDOW.is_set() {
+            attrs = attrs.with_visible(false);
         }
         let window = match given {
             Some(w) => w,
