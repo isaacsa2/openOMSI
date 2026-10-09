@@ -454,49 +454,13 @@ impl Offscreen<'_> {
             };
         }
         // OMSI_AUTOPILOT=<km/h>: the player's bus follows the road network's lanes at
-        // that speed (a steering wheel on a pure-pursuit point 12 m ahead, a throttle
-        // and brake on the speed) - to drive it round a map's roundabouts and bends
-        // and see where it falls through or leaves the road; each lane taken is the
-        // straightest on
+        // that speed - to drive it round a map's roundabouts and bends and see where it
+        // falls through or leaves the road
         if let (Some(kmh), Some(net)) = (omsi_cfg::flags::OMSI_AUTOPILOT.parse::<f32>(), traffic.as_ref().map(|t| &t.net)) {
-            let v = &player.vehicle;
-            let h = v.heading.to_radians();
-            let fwd = DVec3::new(h.sin(), h.cos(), 0.0);
-            let probe = v.position + fwd * 3.0;
-            if let Some((mut lane, mut s, _)) = net.nearest_lane(probe, omsi_sim::traffic::LaneKind::Street) {
-                // (the lane that runs our way)
-                let lh = net.lanes[lane].at(s).1 as f64;
-                let dh = (lh - v.heading + 540.0).rem_euclid(360.0) - 180.0;
-                if dh.abs() > 100.0 {
-                    if let Some((l2, s2, _)) = (0..net.lanes.len()).filter(|&k| net.lanes[k].kind == omsi_sim::traffic::LaneKind::Street).filter_map(|k| net.lanes[k].nearest_point(probe).map(|(s, d)| (k, s, d))).filter(|(k, s, d)| *d < 6.0 && ((net.lanes[*k].at(*s).1 as f64 - v.heading + 540.0).rem_euclid(360.0) - 180.0).abs() < 80.0).min_by(|a, b| a.2.total_cmp(&b.2)) {
-                        lane = l2;
-                        s = s2;
-                    }
-                }
-                let mut ahead = 12.0f32;
-                loop {
-                    let len = net.lanes[lane].length();
-                    if s + ahead <= len || net.lanes[lane].next.is_empty() {
-                        s = (s + ahead).min(len);
-                        break;
-                    }
-                    ahead -= len - s;
-                    let here = net.lanes[lane].at(len).1;
-                    lane = *net.lanes[lane].next.iter().min_by(|a, b| {
-                        let da = (net.lanes[**a].at(0.0).1 - here + 540.0).rem_euclid(360.0) - 180.0;
-                        let db = (net.lanes[**b].at(0.0).1 - here + 540.0).rem_euclid(360.0) - 180.0;
-                        da.abs().total_cmp(&db.abs())
-                    }).unwrap();
-                    s = 0.0;
-                }
-                let target = net.lanes[lane].at(s).0;
-                let d = (target - v.position).truncate();
-                let want = d.x.atan2(d.y).to_degrees();
-                let alpha = ((want - v.heading + 540.0).rem_euclid(360.0) - 180.0) as f32;
-                let speed = v.physics.velocity_kmh();
-                controls.steering = (alpha / 30.0).clamp(-1.0, 1.0);
-                controls.throttle = ((kmh - speed) / 10.0).clamp(0.0, 1.0);
-                controls.brake = ((speed - kmh - 3.0) / 10.0).clamp(0.0, 1.0);
+            if let Some((steering, throttle, brake)) = crate::autopilot::lane_controls(net, &player.vehicle, kmh) {
+                controls.steering = steering;
+                controls.throttle = throttle;
+                controls.brake = brake;
             }
         }
         controls

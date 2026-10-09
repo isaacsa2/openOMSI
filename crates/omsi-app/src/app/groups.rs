@@ -201,6 +201,8 @@ pub(crate) struct ViewState {
 /// controller driving, head tracking, the phone's touch controls and the switch being
 /// dragged.
 pub(crate) struct InputState {
+    /// OMSI_AUTOPILOT: the bus driving itself.
+    pub(crate) autopilot: crate::autopilot::Autopilot,
     pub(crate) cursor: (f32, f32),
     pub(crate) window_focused: bool,
     /// The window lost the focus or was minimised or hidden: the keyboard and the mouse
