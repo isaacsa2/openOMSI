@@ -6,6 +6,8 @@ use glam::{Affine3A, Vec3};
 use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
 use omsi_sim::people::{pax::Task, BusId};
 
+mod floor;
+
 fn is_procedural_mode(value: &str) -> bool {
     matches!(value.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
 }
@@ -34,7 +36,7 @@ fn seated_pose(model_height: f32, place_height: f32, seat_front: f32, seat_lift:
 
 /// The previous foot-planted / IK pose system, driven by the current people's state.
 /// This changes only how bodies are skinned, never boarding, movement or ticket logic.
-pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
+pub(super) fn bones(p: &mut Person, dt: f32, world: &World, buses: &HashMap<BusId, &omsi_sim::people::cabin::BusNow>) -> [Affine3A; SLOTS] {
     let (origin, heading, frame) = match p.place {
         Place::Ground => (p.position, p.heading, 0),
         Place::Bus(bus, at) => {
@@ -75,6 +77,16 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
         }
         _ => (p.activity, None, None, 0.0, 0.0),
     };
+    let bus = match p.place {
+        Place::Bus(id, _) => buses.get(&id).copied(),
+        Place::Ground => None,
+    };
+    // A seated renderer anchor is [passpos] - human [seatheight], not the floor.
+    let level = match &p.state {
+        State::Pax(x) if x.pax_state.round() >= 1.5 => origin.z + (p.ty.def.seat_height - x.seat_h) as f64,
+        _ => origin.z,
+    };
+    let sample = |at| floor::sample(world, bus, at, level);
     let input = PoseInput {
         activity,
         // The simulation's renderer still places a seated person at hip - model height.
@@ -86,20 +98,24 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
         seat,
         reach,
         hold,
+        floor: Some(&sample),
         ..PoseInput::default()
     };
     let seed = p.id;
     let pose = p.procedural.get_or_insert_with(|| Pose::new(seed));
     pose.advance(&p.ty.rig, &input, dt);
-    let mut bones = pose.bones(&p.ty.rig).bones;
+    let mut posed = pose.bones(&p.ty.rig);
     // Shift the local pose back to the renderer's original anchor; no game logic moves.
     if floor_lift != 0.0 {
         let lift = Affine3A::from_translation(Vec3::Z * floor_lift);
-        for bone in &mut bones {
+        for bone in &mut posed.bones {
             *bone = lift * *bone;
         }
+        posed.ankle = posed.ankle.map(|a| lift.transform_point3(a));
     }
-    bones
+    // OMSI_TRACE_PAX records the deformed ankles rather than the untouched spawn markers.
+    p.ankles = posed.ankle;
+    posed.bones
 }
 
 #[cfg(test)]
