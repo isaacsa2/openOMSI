@@ -482,6 +482,7 @@ impl PeopleSim {
             pace,
             activity: Activity::Stand,
             anim: OmsiAnim::default(),
+            procedural: None,
             state,
             t_state: 0.0,
             skins: Vec::new(),
