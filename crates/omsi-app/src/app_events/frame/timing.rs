@@ -196,7 +196,7 @@ impl App {
                 hud.update(r, scene, &lines);
                 if let wgpu::CurrentSurfaceTexture::Success(frame)
                 | wgpu::CurrentSurfaceTexture::Suboptimal(frame) =
-                    s.surface.get_current_texture()
+                    s.acquire()
                 {
                     let view = frame.texture.create_view(&Default::default());
                     let cam = Camera {
@@ -221,7 +221,7 @@ impl App {
                         &lighting,
                     );
                     win.pre_present_notify();
-                    frame.present();
+                    s.present(frame);
                 }
             }
             return false;

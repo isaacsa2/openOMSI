@@ -152,7 +152,7 @@ impl App {
         let hidden_now = hide_test
             .map(|(a, b)| (a..b).contains(&self.started.elapsed().as_secs_f32()))
             .unwrap_or(false);
-        let acquired = match s.surface.get_current_texture() {
+        let acquired = match s.acquire() {
             wgpu::CurrentSurfaceTexture::Success(_)
             | wgpu::CurrentSurfaceTexture::Suboptimal(_)
             if hidden_now =>
@@ -328,7 +328,7 @@ impl App {
                 if self.settings.vsync {
                     win.pre_present_notify();
                 }
-                frame.present();
+                s.present(frame);
             }
             None => {
                 let _ = omsi_render::wait_gpu(&r.device, None);

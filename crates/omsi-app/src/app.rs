@@ -613,7 +613,7 @@ impl App {
                 "",
                 done as f32 / total.max(1) as f32,
             );
-            let acquired = s.surface.get_current_texture();
+            let acquired = s.acquire();
             // a swapchain that no longer fits the window (Vulkan says so after the switch
             // to full screen, without a resize event) is made again, as the game's own
             // frames do: left as it was, every later frame of the loading screen failed
@@ -647,7 +647,7 @@ impl App {
                     &lighting,
                 );
                 win.pre_present_notify();
-                frame.present();
+                s.present(frame);
                 self.renderer = Some(renderer);
             } else {
                 self.renderer = Some(renderer);

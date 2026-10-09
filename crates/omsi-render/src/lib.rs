@@ -4,6 +4,7 @@ pub mod atmosphere;
 pub mod clouds;
 mod passes;
 mod pipeline_cache;
+mod present_thread;
 use passes::{Encoders, FrameArgs, FrameEnv, PassTimers, StageClock};
 mod pipelines;
 mod puddles;
@@ -9164,10 +9165,14 @@ pub struct SurfaceState<'w> {
     pub config: wgpu::SurfaceConfiguration,
     /// The renderer's `device_lost`.
     lost: Arc<std::sync::Mutex<Option<String>>>,
+    /// OMSI_PRESENT_THREAD: the frames presented from a thread of their own.
+    presenter: Option<present_thread::PresentThread>,
 }
 
 impl Drop for SurfaceState<'_> {
     fn drop(&mut self) {
+        // (the frame handed to the present thread shown before the surface goes)
+        self.presenter = None;
         // After a lost device the frame it was drawing never finishes, and its swapchain
         // image with it: letting the surface go (or configuring it again) then tears the
         // swapchain down under that image - "Trying to destroy a SwapchainAcquireSemaphore
@@ -9225,10 +9230,32 @@ impl<'w> SurfaceState<'w> {
         config.width = width.max(1);
         config.height = height.max(1);
         surface.configure(&renderer.device, &config);
-        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone() })
+        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone(), presenter: present_thread::PresentThread::wanted() })
+    }
+
+    /// The window's next picture, once the last one is shown.
+    pub fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
+        self.wait_presented();
+        self.surface.get_current_texture()
+    }
+
+    /// Shows `frame`: from the present thread where there is one (OMSI_PRESENT_THREAD).
+    pub fn present(&self, frame: wgpu::SurfaceTexture) {
+        match &self.presenter {
+            Some(p) => p.present(frame),
+            None => frame.present(),
+        }
+    }
+
+    /// Returns when the frame handed to the present thread is shown.
+    pub fn wait_presented(&self) {
+        if let Some(p) = &self.presenter {
+            p.wait();
+        }
     }
 
     pub fn resize(&mut self, renderer: &Renderer, width: u32, height: u32) {
+        self.wait_presented();
         self.config.width = width.max(1);
         self.config.height = height.max(1);
         // (not after a lost device: see `drop`)
@@ -9239,6 +9266,7 @@ impl<'w> SurfaceState<'w> {
     }
 
     pub fn set_vsync(&mut self, renderer: &Renderer, enabled: bool) {
+        self.wait_presented();
         let mode = if enabled { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
         if self.config.present_mode == mode || renderer.device_lost().is_some() {
             return;
