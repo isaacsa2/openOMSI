@@ -107,10 +107,11 @@ impl SrgbEncode {
         stand_in.as_ref().map(|(_, v, _)| v.clone()).expect("stand-in")
     }
 
-    /// Encodes the stand-in into the window's `frame`.
-    pub(crate) fn encode(&self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &wgpu::SurfaceTexture) {
+    /// The commands that encode the stand-in into the window's `frame` (submitted before
+    /// it is presented).
+    pub(crate) fn encode(&self, device: &wgpu::Device, frame: &wgpu::SurfaceTexture) -> Option<wgpu::CommandBuffer> {
         let stand_in = self.stand_in.borrow();
-        let Some((_, _, group)) = stand_in.as_ref() else { return };
+        let (_, _, group) = stand_in.as_ref()?;
         let target = frame.texture.create_view(&Default::default());
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sRGB encode") });
         {
@@ -131,7 +132,7 @@ impl SrgbEncode {
             pass.set_bind_group(0, group, &[]);
             pass.draw(0..3, 0..1);
         }
-        queue.submit([encoder.finish()]);
+        Some(encoder.finish())
     }
 }
 

@@ -288,7 +288,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_VAR_SYNC` | bool | off | use | app | LAN: no variable sync. |
 | `OMSI_NO_WHEEL_SLIP` | bool | off | use | sim | Every wheel grips, as before wheels turned on their own (A/B). |
 | `OMSI_OLD_WORLD_GRID` | bool | off | use | map | Maps with world coordinates take the one tile size of 371.9 m (comparison). |
-| `OMSI_PRESENT_THREAD` | bool | off | use | render | Present the frames from a thread of their own (OpenGL, ANGLE: the present overlaps the next frame's step). |
+| `OMSI_PRESENT_THREAD` | bool | off | use | render | Submit and present the frames from a thread of their own (OpenGL, ANGLE: the driver's work on one frame overlaps the next frame's step). |
 | `OMSI_REPAIR_BODY_DEPTH` | bool | off | use | app | The old guess for [matl_alpha] 2 vehicle bodies (A/B). |
 | `OMSI_ROAD_CUT` | bool | off | once | geometry | Take the ground away under every road surface (Omsi.exe does not). |
 | `OMSI_RT_REFL_HALF` | bool | off | use | render | Trace reflections at half size. |

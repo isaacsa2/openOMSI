@@ -388,7 +388,7 @@ flags! {
     OMSI_PLUGIN_HOST32: Text, Setup, Use, "beside the game", "Path of omsi-plugin-host32.exe.";
     OMSI_POPULATION_SHOTS: Bool, Test, Use, "off", "Offscreen: pictures of the framed population spawns.";
     OMSI_PRESENCE_URL: Text, Setup, Use, "built-in", "Base URL of the presence (\"playing now\") service.";
-    OMSI_PRESENT_THREAD: Bool, Switch, Use, "off", "Present the frames from a thread of their own (OpenGL, ANGLE: the present overlaps the next frame's step).";
+    OMSI_PRESENT_THREAD: Bool, Switch, Use, "off", "Submit and present the frames from a thread of their own (OpenGL, ANGLE: the driver's work on one frame overlaps the next frame's step).";
     OMSI_PROBE: Text, Test, Use, "-", "x0,y0,x1,y1[,n]: print terrain and road surface heights along a line.";
     OMSI_PROBE_GRID: Text, Test, Use, "-", "x,y,half,step: the wheels' ground on a grid around a point.";
     OMSI_PROFILE: Bool, Debug, Use, "off", "Time per stage of the frame, logged.";

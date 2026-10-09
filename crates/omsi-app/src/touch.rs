@@ -1056,8 +1056,13 @@ impl App {
 
 impl Touch {
     /// Draw the controls painted last over the frame (`view`, `w` x `h`).
+    /// Whether [`Self::render`] draws anything.
+    pub(crate) fn draws(&self) -> bool {
+        self.enabled && !self.painter.is_empty()
+    }
+
     pub(crate) fn render(&mut self, r: &Renderer, view: &wgpu::TextureView, w: u32, h: u32) {
-        if !self.enabled || self.painter.is_empty() {
+        if !self.draws() {
             return;
         }
         let format = r.format();

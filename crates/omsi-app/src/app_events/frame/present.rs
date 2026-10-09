@@ -298,6 +298,9 @@ impl App {
                 &rig,
             );
         } else if !mirrored {
+            // (OMSI_PRESENT_THREAD: the picture is submitted from the present thread while
+            // this one steps the next frame)
+            r.hold_window_submit(frame.is_some() && s.presents_on_thread() && !omsi_cfg::flags::OMSI_PROFILE_GPU.is_set());
             r.render(
                 scene,
                 &view,
@@ -306,8 +309,13 @@ impl App {
                 cam,
                 lighting,
             );
+            r.hold_window_submit(false);
         }
-        // the on-screen controls over the picture (a phone)
+        let mut held = r.take_held();
+        // the on-screen controls over the picture (a phone), after it
+        if !held.is_empty() && self.input.touch.draws() {
+            r.queue.submit(std::mem::take(&mut held));
+        }
         self.input.touch.render(r, &view, s.config.width, s.config.height);
         *self.perf.profile.entry("render").or_default() += __t.elapsed().as_secs_f64();
         if omsi_cfg::flags::OMSI_PROFILE_GPU.is_set() {
@@ -323,9 +331,12 @@ impl App {
                 if self.settings.vsync {
                     win.pre_present_notify();
                 }
-                s.present(&r.device, &r.queue, frame);
+                s.present_after(&r.device, &r.queue, held, frame);
             }
             None => {
+                if !held.is_empty() {
+                    r.queue.submit(held);
+                }
                 let _ = omsi_render::wait_gpu(&r.device, None);
             }
         }
