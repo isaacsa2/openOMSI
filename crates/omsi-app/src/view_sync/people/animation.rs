@@ -5,21 +5,17 @@ use super::*;
 use glam::{Affine3A, Vec3};
 use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
 use omsi_sim::people::BusId;
-use std::sync::OnceLock;
 
 fn is_procedural_mode(value: &str) -> bool {
     matches!(value.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
 }
 
 pub(super) fn enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        // The explicit environment override is useful for A/B testing without changing
-        // the launcher's persistent choice (and works for direct --map launches).
-        let mode = std::env::var("OMSI_PAX_ANIMATION")
-            .unwrap_or_else(|_| crate::settings::Settings::load().passenger_animation);
-        is_procedural_mode(&mode)
-    })
+    // Read once per game session (PeopleView::new), not once per process: on Android
+    // another game is started in the launcher's existing process.
+    let mode = std::env::var("OMSI_PAX_ANIMATION")
+        .unwrap_or_else(|_| crate::settings::Settings::load().passenger_animation);
+    is_procedural_mode(&mode)
 }
 
 /// The previous foot-planted / IK pose system, driven by the current people's state.
