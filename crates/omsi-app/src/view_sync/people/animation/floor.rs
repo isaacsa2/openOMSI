@@ -1,6 +1,6 @@
 //! Foot support in the same frame as PoseInput::origin; never move simulation positions.
 use crate::scene::World;
-use glam::{DVec2, Vec3};
+use glam::{DVec2, DVec3, Vec3};
 use omsi_sim::people::cabin::{BusNow, Cabin};
 
 pub(super) fn sample(world: &World, bus: Option<&BusNow>, at: DVec2, level: f64) -> Option<f64> {
@@ -8,13 +8,43 @@ pub(super) fn sample(world: &World, bus: Option<&BusNow>, at: DVec2, level: f64)
         return world.walk_height_near(at.x, at.y, level);
     };
     if at.x.abs() > bus.half.x - 0.05 {
-        // Beside a door, query the pavement in world space, then return cabin-local z.
-        // Subtracting world z alone is wrong when a bus/section is pitched or banked.
-        let base = bus.world(Vec3::new(at.x as f32, at.y as f32, level as f32));
-        let z = world.walk_height_near(base.x, base.y, base.z)?;
-        return Some(bus.to_local(glam::DVec3::new(base.x, base.y, z)).z as f64);
+        // Intersect along cabin-local z, keeping the foot's local x/y fixed. An inverse
+        // world-vertical projection changes x/y on a tilted floor and is not this support.
+        return ground_in_frame(
+            level,
+            |z| bus.world(Vec3::new(at.x as f32, at.y as f32, z as f32)),
+            |p| world.walk_height_near(p.x, p.y, p.z),
+        );
     }
     cabin_floor(&bus.cabin, at, level)
+}
+
+fn ground_in_frame(
+    level: f64,
+    project: impl Fn(f64) -> DVec3,
+    ground: impl Fn(DVec3) -> Option<f64>,
+) -> Option<f64> {
+    let base = project(level);
+    // world() includes the articulated section/blend at this fixed local x/y.
+    let dz = (project(level + 1.0) - base).z;
+    if !dz.is_finite() || dz <= 1e-5 {
+        return None;
+    }
+    let mut z = level;
+    // Flat ground converges immediately; repeat at the changed world x/y for a ramp.
+    // Bounded work, only for supports beside doors, never a whole-mesh scan.
+    for _ in 0..4 {
+        let p = project(z);
+        let error = ground(p)? - p.z;
+        if !error.is_finite() {
+            return None;
+        }
+        z += error / dz;
+        if error.abs() < 1e-5 {
+            break;
+        }
+    }
+    Some(z)
 }
 
 fn cabin_floor(cabin: &Cabin, at: DVec2, level: f64) -> Option<f64> {
@@ -70,6 +100,20 @@ fn support(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tilted_cabin_support_keeps_local_xy_on_flat_and_sloped_pavement() {
+        let rot = glam::DMat3::from_rotation_y(0.35) * glam::DMat3::from_rotation_x(-0.15);
+        let project = |z| DVec3::new(10000.0, -20000.0, 0.8) + rot * DVec3::new(1.4, -6.0, z);
+        for slope in [0.0, 0.08] {
+            let ground = |p: DVec3| Some(0.25 + slope * (p.x - 10000.0));
+            let z = ground_in_frame(0.45, project, ground).unwrap();
+            let p = project(z);
+            assert!((p.z - ground(p).unwrap()).abs() < 1e-5);
+            let local = rot.inverse() * (p - DVec3::new(10000.0, -20000.0, 0.8));
+            assert!(local.truncate().abs_diff_eq(DVec2::new(1.4, -6.0), 1e-8));
+        }
+        assert_eq!(ground_in_frame(0.0, |_| DVec3::ZERO, |_| Some(0.0)), None);
+    }
     #[test]
     fn stairs_interpolate_and_decks_do_not_cross() {
         let p = [
