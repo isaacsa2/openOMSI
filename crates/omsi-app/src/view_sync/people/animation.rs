@@ -4,7 +4,7 @@
 use super::*;
 use glam::{Affine3A, Vec3};
 use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
-use omsi_sim::people::{pax::Task, BusId};
+use omsi_sim::people::BusId;
 
 fn is_procedural_mode(value: &str) -> bool {
     matches!(value.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
@@ -39,7 +39,7 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
             (at.as_dvec3(), p.lheading, frame)
         }
     };
-    let (activity, seat, reach, floor_lift, hold) = match &p.state {
+    let (activity, seat, reach, floor_lift) = match &p.state {
         State::Pax(x) => {
             let kind = x.pax_state.round().clamp(0.0, 2.0) as u8;
             let activity = match kind {
@@ -59,16 +59,9 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
                 let (s, c) = x.yaw.sin_cos();
                 Vec3::new((d.x * c - d.y * s) as f32, (d.x * s + d.y * c) as f32, d.z as f32)
             });
-            // Standing riders at their assigned places can grip a pole or handrail.
-            // The procedural pose chooses the upper rail if reachable, otherwise a pole.
-            let hold = if x.inside.is_some() && x.task == Task::SittingInBus && kind == 0 && !x.reach {
-                1.0
-            } else {
-                0.0
-            };
-            (activity, seat, reach, floor_lift, hold)
+            (activity, seat, reach, floor_lift)
         }
-        _ => (p.activity, None, None, 0.0, 0.0),
+        _ => (p.activity, None, None, 0.0),
     };
     let input = PoseInput {
         activity,
@@ -80,7 +73,6 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
         velocity: p.vel,
         seat,
         reach,
-        hold,
         ..PoseInput::default()
     };
     let seed = p.id;
