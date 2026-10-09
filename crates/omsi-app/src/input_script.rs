@@ -22,6 +22,9 @@ pub(crate) fn is_game_action(name: &str) -> bool {
         )
 }
 
+/// How far (m) a click reaches a scenery object with a `[mouseevent]`.
+pub(crate) const SCENERY_OBJECT_REACH: f32 = 50.0;
+
 impl App {
     /// A key of the window, or of an `OMSI_INPUT` script.
     pub(crate) fn on_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, pressed: bool, repeat: bool) {

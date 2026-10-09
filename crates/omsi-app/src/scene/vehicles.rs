@@ -1464,7 +1464,9 @@ fn slot_extra(
     // (while it snows the film is the snow-crystal texture, drawn as it is)
     // (all three graphics: OMSI 2's own rain, its texture sliding down the
     // pane, looked like wet paper next to drops that bend the street)
-    extra.rain_film = rain_layer && !snowing() && !omsi_cfg::flags::OMSI_TEXTURE_RAIN.is_set();
+    // (rain quality Low: OMSI 2's own texture rain, no drops to simulate and no picture
+    // behind the glass to copy)
+    extra.rain_film = rain_layer && !snowing() && !omsi_cfg::flags::OMSI_TEXTURE_RAIN.is_set() && crate::rain::quality() > 0;
     // Some mod buses put [matl_noZcheck] on the complete body mesh.
     // That flag is for decals; on a body it disables depth writing and
     // lets the cabin bleed through the outside shell. Keep it on genuine

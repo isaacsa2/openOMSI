@@ -32,8 +32,7 @@ mod updater;
 mod update_watch;
 mod presence;
 mod ambience;
-mod ambient_assets;
-mod ambient_sound;
+mod wheel_surface;
 mod camera_arm;
 mod career;
 mod describe;
@@ -507,6 +506,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
 /// The game's App for `args` and `settings`, every part of it as it starts (the window comes
 /// later).
 fn assemble_app(args: Args, settings: settings::Settings) -> App {
+    rain::set_quality(&settings.rain_quality);
     let view = args.view.clone();
     let args_root_for_keys = args.root.clone();
     let clock_note = args.clock_moved.clone();
@@ -515,6 +515,10 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
     let is_server = args.server.is_some();
     // What loads, starts or reads the clock, made one after the other in a fixed order before
     // the App and its groups are put together (their logs and threads come in this order).
+    // Steam must be initialized before the graphics instance and window so its overlay can
+    // hook the rendering process before the first surface is created.
+    #[cfg(steam)]
+    let steam = if is_server { None } else { crate::steam::Steam::start() };
     let instance = graphics_instance();
     let vr_nav_profiles = crate::vr_navigator::Profiles::load();
     let ui = ui::Ui::new();
@@ -685,7 +689,6 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             radio,
             audio: None,
             ambience: None,
-            ambient_sound: None,
             voice: None,
         },
         clock: omsi_sim::SimClock::default(),
@@ -728,6 +731,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             dragging: false,
             html_pressed: None,
             html_object_pressed: None,
+            pressed_scenery_object: None,
             drag_delta: (0.0, 0.0),
             cursor_kind: 0,
             touch,
@@ -745,7 +749,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             discord: None,
             discord_t: 0.0,
             #[cfg(steam)]
-            steam: None,
+            steam,
             update_watch,
             presence,
             plugins: None,
