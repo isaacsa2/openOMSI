@@ -377,6 +377,7 @@ flags! {
     OMSI_ORIGINAL: Text, Test, Test, "-", "vehicle_vars example: the original OMSI folder.";
     OMSI_PARKED_PULL_OUT: Num, Tuning, Use, "0.035", "Chance per step a parked car pulls out.";
     OMSI_PARK_IN: Num, Tuning, Use, "0.04", "Chance per step a car parks.";
+    OMSI_PAX_ANIMATION: Text, Tuning, Use, "settings", "Override the passenger animation for a game session: original (OMSI) or enhanced (procedural IK).";
     OMSI_PAX_CAM: Num, Test, Use, "-", "Offscreen --view pax: the n-th passenger camera.";
     OMSI_PAX_CROSS: Text, Test, Use, "-", "x,y: send pedestrians across the signalised crossing nearest that point.";
     OMSI_PAX_WAITING: Num, Test, Use, "-", "Number of passengers waiting at each stop.";
