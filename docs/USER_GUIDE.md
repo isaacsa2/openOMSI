@@ -437,6 +437,13 @@ OMSI, and the puddles' spray on top. Spray is thrown
 within 100 m of the camera (less of it farther off), at most 1400 puffs at once; none shows
 inside the bus the camera is in.
 
+Rain costs frames, so Graphics → *Rain quality* (`rain_quality`) sets how much of it is drawn:
+**High** (the default) paints the drops on the glass 30 times a second, lets every vehicle
+throw spray and fills the air with the full curtain of falling streaks; **Medium** paints the
+glass 15 times a second, keeps only your own bus's spray and draws half the streaks; **Low**
+shows OMSI 2's own texture rain on the glass instead of the drops (from the next bus loaded),
+throws no spray and draws a quarter of the streaks.
+
 The vanilla look stays the default. The navigator (`crates/omsi-app/src/navigator.rs`) sits in a corner of the screen (lower
 left by default), after the Route Advisor of Euro Truck Simulator 2: small, dark and half
 transparent, a tilted 3D map that turns with the bus and zooms out with speed - the roads
@@ -566,43 +573,6 @@ before (the model starts three days back), with the season's and the latitude's 
 It sets everything a weather sets - visibility, wind, temperature, rain or snow, the wet
 road - for every graphics mode; Enhanced and Enhanced+ also take its cloud amounts and its
 air. `OMSI_DAY_AIR=haze,angstrom[,height,strat]` fixes the air for comparisons.
-
-## Ambience
-
-On top of the sounds OMSI 2 plays itself (each bus's own sound configuration, the traffic's,
-the scenery's, the rain in the street), openOMSI adds an ambience of its own: Settings →
-Sound → *Ambience* switches it on or off (`ambient=1`, on by default) and *Ambience volume*
-sets how loud it is (`vol_ambient`, 0..1, 0.8 by default), on top of the master volume.
-It is synthesised while you play from what the game knows of the moment, so it follows the
-weather, the time and the road continuously and never loops:
-
-- **Wind and gusts** from the weather's wind: weaker between houses than over open land,
-  roaring in gusts in a storm; overhead wires sing in a strong wind in town; inside a moving
-  bus the air rushing past its doors and windows.
-- **Leaves** rustling in the trees around you, from a few leaves in a breeze to a roar in a
-  gale; green in summer, crisp and dry in autumn, nothing on bare winter trees.
-- **Rain drops** near you: on the ground and in the puddles in the street, on the glass by
-  your ear in the bus, and on the roof for a bus whose own sounds have no rain on its roof -
-  sparse in a drizzle, dense in a downpour. Thunder rolls in a thunderstorm, near strikes
-  cracking, far ones rumbling.
-- **Birds** by day (most at dawn in spring, little in winter, quiet in rain and wind),
-  **crickets** on warm summer nights (chirping faster the warmer it is) and the **far hum of
-  the town's traffic**, busier in the rush hours than at night.
-- **The tyres on the road**: what the surface under each wheel of your bus sounds like at
-  the speed it rolls - asphalt, concrete slabs (a knock at every joint), cobblestones (a knock
-  a stone), gravel (crunching, a stone now and then against the wheel arch), dirt and mud,
-  grass, snow (squeaking in hard frost; a road the weather has covered in snow crunches as snow),
-  the hiss of a wet road and the swash of the puddles.
-  The surface is the one OMSI 2 itself knows for the scripts (the `[surface]` of the road's or
-  the ground's texture, `Axle_SurfaceID_` - which your bus's scripts now read too); a texture
-  without one is told by its name, and an unknown one is asphalt.
-
-Everything outside is heard through the bus's bodywork when you sit in it - quieter and
-duller, opening up as the doors or the driver's window open - and echoes in a tunnel. What a
-bus or the map already plays is not doubled: a bus with its own rain on the roof, wet-road
-hiss or rolling noise keeps those, and the street's rain stays OMSI's `rain_outside.wav`.
-The bird recordings are free (CC0 / public domain, see `assets/sounds/ambient/CREDITS.md`);
-everything else is synthesised.
 
 ## Radio
 
