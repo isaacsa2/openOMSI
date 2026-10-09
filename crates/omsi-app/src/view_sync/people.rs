@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod animation;
+mod floor_align;
 
 /// The renderer's side of the people, kept apart from the simulation (`view_sync::SimView`):
 /// it starts afresh with every `Humans` (`PeopleView::new`, by `Humans::new`).
@@ -316,6 +317,11 @@ impl Humans {
         let n_due = due.iter().filter(|d| **d).count();
         let enhanced = view.enhanced_poses;
         let pose_one = |p: &mut Person| {
+            // Limit shoe mesh calibration to stationary non-seated procedural people.
+            // Walking feet remain governed by IK so gait and foot planting stay smooth.
+            let standing = p.vel.length_squared() < 0.01
+                && !matches!(&p.state, State::Pax(x) if x.pax_state.round() >= 1.5);
+            let align = enhanced && p.puppet.is_none() && standing;
             // Preserve the OMSI-original pose unless the enhanced A/B mode is requested.
             let bones = if enhanced && p.puppet.is_none() {
                 let dt = (sdt * p.since_posed.max(1) as f32).min(0.25);
@@ -337,6 +343,9 @@ impl Humans {
             for (k, m) in ty.meshes.iter().enumerate() {
                 let (pos, nrm) = &mut skins[k];
                 skin(m, &bones, pos, nrm);
+            }
+            if align {
+                floor_align::align_standing(ty, skins);
             }
             *skin_bones = Some(bones);
             *pose_changed = true;
