@@ -127,7 +127,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 
 | Name | Type | Default | Read | Crates | Description |
 |---|---|---|---|---|---|
-| `OMSI_AMBIENT_LEVELS` | bool | off | test | audio | cargo test -p omsi-audio ambient_levels: print the ambience's level table (its calibration). |
 | `OMSI_API_BLESS` | bool | off | use | plugin | cargo test -p omsi-plugin api_manifest: write docs/plugin-api.json and the reference tables of docs/PLUGINS.md again from the plugin API registry. |
 | `OMSI_AUDIT_LINE` | num | - | test | sim | bus_audit example: the line (number and letter code) the IBIS typist enters instead of the bus's own. |
 | `OMSI_AUTOPILOT` | num | - | use | app | Offscreen: the player's bus follows the lanes at this speed in km/h (finds where it falls through or leaves the road). |
@@ -233,11 +232,12 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_GL_TEXTURE_UNITS` | bool | off | use | render | Use the texture-unit layout of the OpenGL backend on any device. |
 | `OMSI_GPU_ARRAYS` | text | - | use | render | textures or nostorage: take that texture array path on any device. |
 | `OMSI_HEIGHTPROFILE_GROUND` | bool | off | once | app | The wheels stand on the splines' [heightprofile]s again (A/B). |
+| `OMSI_HTML_FALLBACK_FONT` | text | - | use | sim | Font file for the html pages' characters Roboto lacks (Hangul, CJK); else Malgun Gothic (Windows) or AppleGothic (macOS). |
+| `OMSI_HTML_FALLBACK_FONT_BOLD` | text | - | use | sim | With OMSI_HTML_FALLBACK_FONT: its bold face. |
 | `OMSI_INTEL_FULL_GPU` | bool | off | use | render | Keep the requested settings on an Intel Vulkan adapter. |
 | `OMSI_KEEP_ALLOCATOR` | bool | off | use | app | Skip the restart that swaps in the faster allocator at start. |
 | `OMSI_MIRROR_ENHANCED` | bool | off | frame | app, render | Draw the mirrors with the enhanced shading again. |
 | `OMSI_NOZCHECK_BIAS` | bool | off | use | app | The old reading of [matl_noZcheck] (A/B). |
-| `OMSI_NO_AMBIENT` | bool | off | use | app | Leave openOMSI's ambience out (wind, nature, road surfaces), whatever the settings say. |
 | `OMSI_NO_ANIMPARENT` | bool | off | use | sim | Every mesh animated on its own, without [animparent] (A/B). |
 | `OMSI_NO_AO` | bool | off | frame | render | No ambient occlusion pass. |
 | `OMSI_NO_ATTACH_FALLBACK` | bool | off | use | app | Drop attachments that have no fallback instead of placing them (A/B). |

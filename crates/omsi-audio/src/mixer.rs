@@ -125,12 +125,6 @@ struct Shared {
     /// `OMSI_MUTE`: everything is mixed as usual (voices play and end), nothing is heard -
     /// for test runs on a machine somebody is working at.
     muted: bool,
-    /// openOMSI's ambience layer (see `ambient`), made on the first block that wants it,
-    /// and what the game last asked of it.
-    ambient: Mutex<Option<crate::ambient::Ambient>>,
-    ambient_params: Mutex<Option<crate::ambient::AmbientParams>>,
-    ambient_birds: Mutex<Option<Vec<Arc<Clip>>>>,
-    ambient_levels: Mutex<[f32; crate::ambient::PARTS.len()]>,
     /// A recording run's clock (see `AudioEngine::capture`): microseconds of mixed sound,
     /// counted from `epoch`, stand in for the wall clock - the Doppler shift is worked out
     /// from how far a source moved between two parameter updates, and a run that renders
@@ -150,10 +144,6 @@ impl Shared {
             sample_rate: AtomicU32::new(rate),
             channels: AtomicUsize::new(channels),
             muted,
-            ambient: Mutex::new(None),
-            ambient_params: Mutex::new(None),
-            ambient_birds: Mutex::new(None),
-            ambient_levels: Mutex::new([0.0; crate::ambient::PARTS.len()]),
             capture_us: capture.then(|| AtomicU64::new(0)),
             epoch: std::time::Instant::now(),
         }
@@ -167,29 +157,6 @@ impl Shared {
         }
     }
 
-    /// The ambience into `out` (before the echo, so a tunnel's reverberation takes it too).
-    fn render_ambient(&self, out: &mut [f32], ch: usize, rate: u32, master: f32) {
-        let params = self.ambient_params.lock().take();
-        let mut amb = self.ambient.lock();
-        if amb.is_none() {
-            // (nothing asked for yet: nothing to make)
-            if params.is_none_or(|p| !p.enabled) {
-                return;
-            }
-        }
-        if amb.as_ref().is_some_and(|a| a.rate() != rate) || amb.is_none() {
-            *amb = Some(crate::ambient::Ambient::new(rate));
-        }
-        let Some(a) = amb.as_mut() else { return };
-        if let Some(p) = params {
-            a.set_params(p);
-        }
-        if let Some(clips) = self.ambient_birds.lock().take() {
-            a.set_bird_clips(clips);
-        }
-        a.render(out, ch, master);
-        *self.ambient_levels.lock() = a.levels();
-    }
 }
 
 impl Shared {
@@ -355,7 +322,6 @@ impl Shared {
         }
         voices.retain(|v| !v.finished);
         drop(voices);
-        self.render_ambient(out, ch, rate, listener.master);
         if listener.reverb_mix > 0.001 && listener.reverb_time > 0.05 {
             self.reverb.lock().process(out, ch, rate, listener.reverb_time.min(3.0), listener.reverb_mix.min(1.0));
         }
@@ -546,34 +512,6 @@ impl AudioEngine {
     /// The device's (or the capture's) sample rate.
     pub fn sample_rate(&self) -> u32 {
         self.shared.sample_rate.load(Ordering::Relaxed)
-    }
-
-    /// The ambience's parameters for the next block (see [`crate::ambient`]).
-    pub fn set_ambient(&self, p: crate::ambient::AmbientParams) {
-        *self.shared.ambient_params.lock() = Some(p);
-    }
-
-    /// The bird recordings the ambience scatters by day.
-    pub fn set_ambient_birds(&self, clips: Vec<Arc<Clip>>) {
-        *self.shared.ambient_birds.lock() = Some(clips);
-    }
-
-    /// The bird recordings, made by `load` on a thread of their own (decoding them takes a
-    /// moment the frame should not wait for).
-    pub fn set_ambient_birds_later(&self, load: impl FnOnce() -> Vec<Arc<Clip>> + Send + 'static) {
-        let shared = self.shared.clone();
-        let spawned = std::thread::Builder::new().name("ambience loader".into()).spawn(move || {
-            let clips = load();
-            *shared.ambient_birds.lock() = Some(clips);
-        });
-        if let Err(e) = spawned {
-            log::warn!("ambience: no thread for the recordings: {e}");
-        }
-    }
-
-    /// The ambience's parts' levels (RMS over the last second, see `ambient::PARTS`).
-    pub fn ambient_levels(&self) -> [f32; crate::ambient::PARTS.len()] {
-        *self.shared.ambient_levels.lock()
     }
 
     /// Open the default output device. Returns a silent engine if none is available.
@@ -979,9 +917,9 @@ mod tests {
         v
     }
 
-    /// A capture engine mixes on demand, with its own clock, and the ambience in it.
+    /// A capture engine mixes on demand, with its own clock.
     #[test]
-    fn a_capture_mixes_voices_and_the_ambience_on_demand() {
+    fn a_capture_mixes_voices_on_demand() {
         let e = AudioEngine::capture(48_000);
         let clip = Arc::new(Clip { sample_rate: 48_000, channels: 1, samples: vec![8_192; 4_800] });
         e.play(clip, VoiceParams { gain: 1.0, looping: true, ..Default::default() });
@@ -990,14 +928,6 @@ mod tests {
         assert_eq!(a.len(), 9_600);
         assert!((e.shared.now() - t0).as_millis() == 100, "the clock moves with the sound");
         assert!(a[2000..].iter().all(|x| (*x - 0.25).abs() < 0.01));
-        e.set_ambient(crate::ambient::AmbientParams { enabled: true, wind_10m: 15.0, roughness: 0.1, ..Default::default() });
-        let mut b = Vec::new();
-        for _ in 0..20 {
-            b.extend(e.render_capture(4_800));
-        }
-        let wind: f32 = b[48_000..].iter().map(|x| (x - 0.25).abs()).sum::<f32>() / b[48_000..].len() as f32;
-        assert!(wind > 1.0e-3, "{wind}");
-        assert!(e.ambient_levels()[0] > 0.0);
         assert!(AudioEngine::new_for_test_device_less().render_capture(10).is_empty());
     }
 

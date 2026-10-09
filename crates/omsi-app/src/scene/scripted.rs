@@ -223,6 +223,109 @@ impl World {
         }
     }
 
+    /// Finds the closest scenery object mesh carrying a `[mouseevent]` under a ray.
+    pub fn scenery_object_hit(&self, origin: DVec3, dir: glam::Vec3, reach: f32, spread: f32) -> Option<SceneryHit> {
+        let scripted = self.scripted.lock();
+        let mut best: Option<SceneryHit> = None;
+        let right = glam::Vec3::new(-dir.y, dir.x, 0.0).normalize_or_zero();
+        let up = dir.cross(right).normalize_or_zero();
+        let dirs = if spread > 0.0 {
+            vec![
+                dir,
+                (dir + right * spread).normalize(),
+                (dir - right * spread).normalize(),
+                (dir + up * spread).normalize(),
+                (dir - up * spread).normalize(),
+            ]
+        } else {
+            vec![dir]
+        };
+        for o in scripted.iter().filter(|o| o.ty.has_mouse_events) {
+            if (o.pos - origin).length() > reach as f64 + 60.0 {
+                continue;
+            }
+            let local = (origin - o.pos).as_vec3();
+            for mi in 0..o.ty.meshes.len() {
+                let Some((data, _, _)) = o.ty.meshes.get(mi) else { continue };
+                if !o.inst.mesh_visible.get(mi).copied().unwrap_or(true) {
+                    continue;
+                }
+                let Some(&def_idx) = o.ty.mesh_def_index.get(mi) else { continue };
+                let Some(event) = o.ty.model.meshes.get(def_idx).and_then(|m| m.mouse_event.as_ref()) else { continue };
+                let xf = o.xf * o.inst.mesh_transforms.get(mi).copied().unwrap_or(Mat4::IDENTITY);
+                for d in &dirs {
+                    if let Some(t) = omsi_geometry::ray_mesh(local, *d, data, &xf) {
+                        if t <= reach && best.as_ref().map_or(true, |b| t < b.t) {
+                            best = Some(SceneryHit {
+                                map_id: o.map_id,
+                                mesh_index: mi,
+                                event: event.clone(),
+                                t,
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    /// Click down on a scenery object's `[mouseevent]` switch or button.
+    pub fn scenery_object_click(&self, map_id: i64, event: &str) -> bool {
+        let mut scripted = self.scripted.lock();
+        let Some(o) = scripted.iter_mut().find(|o| o.map_id == map_id) else {
+            return false;
+        };
+        log::info!("scenery mouse event {event} on object {map_id}");
+        let ok = o.inst.trigger(event);
+        let drag = format!("{event}_drag");
+        let low = event.to_ascii_lowercase();
+        if (low.contains("taste") || low.contains("button") || low.contains("click"))
+            && o.inst.program.trigger(&drag).is_some()
+        {
+            o.inst.host.mouse = (0.0, 0.0);
+            o.inst.trigger(&drag);
+            o.inst.host.mouse = (0.0, 0.0);
+        }
+        ok
+    }
+
+    /// Mouse dragged while holding down a scenery object switch.
+    pub fn scenery_object_drag(&self, map_id: i64, event: &str, dx: f32, dy: f32) -> bool {
+        let mut scripted = self.scripted.lock();
+        let Some(o) = scripted.iter_mut().find(|o| o.map_id == map_id) else {
+            return false;
+        };
+        let drag = format!("{event}_drag");
+        o.inst.host.mouse = (dx, dy);
+        let ok = o.inst.trigger(&drag);
+        o.inst.host.mouse = (0.0, 0.0);
+        ok
+    }
+
+    /// Mouse button released from a scenery object switch (`<event>_off`).
+    pub fn scenery_object_release(&self, map_id: i64, event: &str) -> bool {
+        let mut scripted = self.scripted.lock();
+        let Some(o) = scripted.iter_mut().find(|o| o.map_id == map_id) else {
+            return false;
+        };
+        let off = format!("{event}_off");
+        o.inst.trigger(&off)
+    }
+
+    /// Mouse wheel notch over a scenery object switch.
+    pub fn scenery_object_wheel(&self, map_id: i64, event: &str, amount: f32) -> bool {
+        let mut scripted = self.scripted.lock();
+        let Some(o) = scripted.iter_mut().find(|o| o.map_id == map_id) else {
+            return false;
+        };
+        o.inst.host.mouse = (0.0, amount);
+        let _ = o.inst.trigger(&format!("{event}_drag"));
+        o.inst.host.mouse = (0.0, 0.0);
+        o.inst.trigger(&format!("{event}_off"))
+    }
+
     /// The colour the tile's night light map (its own part, see [`own_tile_of_light_map`])
     /// has at `pos` (0..1, bilinear), or `None` where no light map is loaded: the light it
     /// throws on a vehicle standing there (Omsi.exe samples it at the vehicle's place,

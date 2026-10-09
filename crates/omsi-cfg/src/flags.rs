@@ -141,7 +141,6 @@ macro_rules! flags {
 flags! {
     OMSI_AI_MODEL_LOCK: Bool, Switch, Use, "off", "AI cars steer no further than their model's own steering lock (no 60 degree allowance for tight turns).";
     OMSI_AI_WAY_ONLY: Bool, Switch, Use, "off", "AI vehicles stand on their way with the plain ground sampler, as before (A/B).";
-    OMSI_AMBIENT_LEVELS: Bool, Test, Test, "off", "cargo test -p omsi-audio ambient_levels: print the ambience's level table (its calibration).";
     OMSI_API_BLESS: Bool, Test, Use, "off", "cargo test -p omsi-plugin api_manifest: write docs/plugin-api.json and the reference tables of docs/PLUGINS.md again from the plugin API registry.";
     OMSI_AUDIT_LINE: Num, Test, Test, "-", "bus_audit example: the line (number and letter code) the IBIS typist enters instead of the bus's own.";
     OMSI_AUTOPILOT: Num, Test, Use, "-", "Offscreen: the player's bus follows the lanes at this speed in km/h (finds where it falls through or leaves the road).";
@@ -290,6 +289,8 @@ flags! {
     OMSI_HIDE_MESH: Text, Test, Use, "-", "a|b: leave out the meshes whose file names contain one of the parts.";
     OMSI_HIDE_WINDOW: Text, Test, Use, "-", "from,to: treat the window as hidden between these seconds.";
     OMSI_HOLE_PHOTO: Bool, Test, Use, "off", "With OMSI_ROAD_PHOTO: photograph from above down to 25 m under the lane (holes in the world).";
+    OMSI_HTML_FALLBACK_FONT: Text, Switch, Use, "-", "Font file for the html pages' characters Roboto lacks (Hangul, CJK); else Malgun Gothic (Windows) or AppleGothic (macOS).";
+    OMSI_HTML_FALLBACK_FONT_BOLD: Text, Switch, Use, "-", "With OMSI_HTML_FALLBACK_FONT: its bold face.";
     OMSI_IBIS_BUDGET: Num, Tuning, Use, "10", "Seconds the IBIS typist may take per entry.";
     OMSI_INPUT: Text, Test, Use, "-", "Scripted keyboard, mouse and camera input for window runs.";
     OMSI_INSTANCE: Text, Setup, Use, "-", "The id of a game instance started by the launcher (set for the child process).";
@@ -320,7 +321,6 @@ flags! {
     OMSI_NAV_PROBE: Text, Test, Use, "-", "x,y[,r]: the network lanes that start or end within r of that point.";
     OMSI_NAV_SCHEDULE: Bool, Test, Use, "off", "Navigation map shows the schedule.";
     OMSI_NOZCHECK_BIAS: Bool, Switch, Use, "off", "The old reading of [matl_noZcheck] (A/B).";
-    OMSI_NO_AMBIENT: Bool, Switch, Use, "off", "Leave openOMSI's ambience out (wind, nature, road surfaces), whatever the settings say.";
     OMSI_NO_ANIMPARENT: Bool, Switch, Use, "off", "Every mesh animated on its own, without [animparent] (A/B).";
     OMSI_NO_AO: Bool, Switch, Frame, "off", "No ambient occlusion pass.";
     OMSI_NO_ATTACH_FALLBACK: Bool, Switch, Use, "off", "Drop attachments that have no fallback instead of placing them (A/B).";
