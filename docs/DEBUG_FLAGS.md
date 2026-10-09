@@ -308,6 +308,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_OPENXR_SCALE` | num | settings | use | app | VR: render scale of the eyes. |
 | `OMSI_PARKED_PULL_OUT` | num | 0.035 | use | app | Chance per step a parked car pulls out. |
 | `OMSI_PARK_IN` | num | 0.04 | use | app | Chance per step a car parks. |
+| `OMSI_PAX_ANIMATION` | text | settings | use | app | Override the passenger animation for a game session: original (OMSI) or enhanced (procedural IK). |
 | `OMSI_PUDDLE_F0` | num | 0.08 | use | render | Puddle reflectance at normal incidence (0.02 to 0.2). |
 | `OMSI_PUDDLE_THICKNESS` | num | 0.12 | use | render | Puddle water film thickness. |
 | `OMSI_SURFACE_BIAS` | num | -24 | use | render | Depth bias of road surfaces. |
