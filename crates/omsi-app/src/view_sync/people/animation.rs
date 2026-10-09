@@ -4,7 +4,7 @@
 use super::*;
 use glam::{Affine3A, Vec3};
 use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
-use omsi_sim::people::BusId;
+use omsi_sim::people::{pax::Task, BusId};
 
 fn is_procedural_mode(value: &str) -> bool {
     matches!(value.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
@@ -16,6 +16,12 @@ pub(super) fn enabled() -> bool {
     let mode = omsi_cfg::flags::OMSI_PAX_ANIMATION.live_var()
         .unwrap_or_else(|_| crate::settings::Settings::load().passenger_animation);
     is_procedural_mode(&mode)
+}
+
+/// Only riders assigned a standing place should hold a pole. Queued and walking
+/// passengers must keep their hands free to use the doors and ticket machines.
+fn grip_for_standing_rider(inside: bool, assigned_standing: bool, walking: bool, reaching: bool) -> f32 {
+    if inside && assigned_standing && !walking && !reaching { 1.0 } else { 0.0 }
 }
 
 /// The previous foot-planted / IK pose system, driven by the current people's state.
@@ -31,7 +37,7 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
             (at.as_dvec3(), p.lheading, frame)
         }
     };
-    let (activity, seat, reach) = match &p.state {
+    let (activity, seat, reach, hold) = match &p.state {
         State::Pax(x) => {
             let kind = x.pax_state.round().clamp(0.0, 2.0) as u8;
             let activity = match kind {
@@ -46,9 +52,15 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
                 let (s, c) = x.yaw.sin_cos();
                 Vec3::new((d.x * c - d.y * s) as f32, (d.x * s + d.y * c) as f32, d.z as f32)
             });
-            (activity, seat, reach)
+            let hold = grip_for_standing_rider(
+                x.inside.is_some(),
+                x.task == Task::SittingInBus && kind == 0,
+                kind == 1,
+                x.reach,
+            );
+            (activity, seat, reach, hold)
         }
-        _ => (p.activity, None, None),
+        _ => (p.activity, None, None, 0.0),
     };
     let input = PoseInput {
         activity,
@@ -58,6 +70,7 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
         velocity: p.vel,
         seat,
         reach,
+        hold,
         ..PoseInput::default()
     };
     let seed = p.id;
@@ -69,6 +82,15 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_stationary_standing_riders_hold_the_rail() {
+        assert_eq!(grip_for_standing_rider(true, true, false, false), 1.0);
+        assert_eq!(grip_for_standing_rider(true, false, false, false), 0.0);
+        assert_eq!(grip_for_standing_rider(true, true, true, false), 0.0);
+        assert_eq!(grip_for_standing_rider(true, true, false, true), 0.0);
+        assert_eq!(grip_for_standing_rider(false, true, false, false), 0.0);
+    }
 
     #[test]
     fn enhanced_pose_requires_explicit_opt_in() {
