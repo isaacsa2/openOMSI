@@ -38,28 +38,6 @@ pub fn instance(mut descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
     }
     descriptor.backends = wgpu::Backends::GL;
     descriptor.backend_options.gl.platform = wgpu::GlPlatform::Angle;
-    // OpenGL ES 3.1 where ANGLE's Direct3D 11 renderer offers it (feature level 11_0 and
-    // up): its storage buffers let the lamps light pixels of their own, which on the ES
-    // 3.0 context asked for by default they did not. Else ES 3.0, as before;
-    // WGPU_GLES_MINOR_VERSION=0 keeps ES 3.0.
-    let asked = wgpu::Gles3MinorVersion::from_env().unwrap_or(descriptor.backend_options.gl.gles_minor_version);
-    descriptor.backend_options.gl.gles_minor_version = asked;
-    if asked == wgpu::Gles3MinorVersion::Automatic && descriptor.display.is_none() {
-        let mut es31 = wgpu::InstanceDescriptor {
-            backends: descriptor.backends,
-            flags: descriptor.flags,
-            memory_budget_thresholds: descriptor.memory_budget_thresholds,
-            backend_options: descriptor.backend_options.clone(),
-            display: None,
-        };
-        es31.backend_options.gl.gles_minor_version = wgpu::Gles3MinorVersion::Version1;
-        let instance = wgpu::Instance::new(es31);
-        if !pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)).is_empty() {
-            log::info!("ANGLE: OpenGL ES 3.1");
-            return instance;
-        }
-        log::info!("ANGLE: no OpenGL ES 3.1 context; OpenGL ES 3.0");
-    }
     wgpu::Instance::new(descriptor)
 }
 
