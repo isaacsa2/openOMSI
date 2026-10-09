@@ -2109,6 +2109,7 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
             "ai_max_parked" => v[&k] = json!(val.parse::<f64>().map(|x| x.max(-1.0) as i64).unwrap_or(0)),
             "ai_max_humans" => v[&k] = json!(val.parse::<f64>().map(|x| x.max(1.0) as i64).unwrap_or(200)),
             "drive_keys" | "navigator_corner" | "boarding" | "render_scale" | "pax_voices" => v[&k] = json!(val),
+            "passenger_animation" => v[&k] = json!(if val.eq_ignore_ascii_case("enhanced") { "enhanced" } else { "original" }),
             "ctrl_off" => v[&k] = json!(val),
             "metar_station" => v[&k] = json!(val.chars().filter(|c| c.is_ascii_alphabetic()).take(4).collect::<String>().to_ascii_uppercase()),
             "discord_app_id" => v[&k] = json!(val),
@@ -2554,6 +2555,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!("windy_trees={}\n", b("windy_trees", true)));
     text.push_str(&format!("ai_wait_timed_stops_only={}\n", b("ai_wait_timed_stops_only", false)));
     text.push_str(&format!("triple_left_angle_deg={}\ntriple_right_angle_deg={}\ntriple_eye_height_mm={}\n", f("triple_left_angle_deg", 45.0).clamp(0.0, 90.0), f("triple_right_angle_deg", 45.0).clamp(0.0, 90.0), f("triple_eye_height_mm", 0.0).clamp(-500.0, 500.0)));
+    text.push_str(&format!("passenger_animation={}\n", if v.get("passenger_animation").and_then(|x| x.as_str()) == Some("enhanced") { "enhanced" } else { "original" }));
     let written: Vec<String> = text.lines().filter_map(|l| l.split_once('=')).map(|(k, _)| k.trim().to_ascii_lowercase()).collect();
     for line in old.unwrap_or("").lines() {
         let t = line.trim();
