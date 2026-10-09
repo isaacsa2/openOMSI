@@ -6,6 +6,8 @@ use glam::{Affine3A, Vec3};
 use omsi_sim::human::{Activity, Pose, PoseInput, SLOTS};
 use omsi_sim::people::BusId;
 
+mod floor;
+
 fn is_procedural_mode(value: &str) -> bool {
     matches!(value.to_ascii_lowercase().as_str(), "procedural" | "enhanced" | "1")
 }
@@ -20,7 +22,7 @@ pub(super) fn enabled() -> bool {
 
 /// The previous foot-planted / IK pose system, driven by the current people's state.
 /// This changes only how bodies are skinned, never boarding, movement or ticket logic.
-pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
+pub(super) fn bones(p: &mut Person, dt: f32, world: &World, buses: &HashMap<BusId, &omsi_sim::people::cabin::BusNow>) -> [Affine3A; SLOTS] {
     let (origin, heading, frame) = match p.place {
         Place::Ground => (p.position, p.heading, 0),
         Place::Bus(bus, at) => {
@@ -50,6 +52,16 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
         }
         _ => (p.activity, None, None),
     };
+    let bus = match p.place {
+        Place::Bus(id, _) => buses.get(&id).copied(),
+        Place::Ground => None,
+    };
+    // A seated renderer anchor is [passpos] - human [seatheight], not the floor.
+    let level = match &p.state {
+        State::Pax(x) if x.pax_state.round() >= 1.5 => origin.z + (p.ty.def.seat_height - x.seat_h) as f64,
+        _ => origin.z,
+    };
+    let sample = |at| floor::sample(world, bus, at, level);
     let input = PoseInput {
         activity,
         origin,
@@ -58,12 +70,16 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
         velocity: p.vel,
         seat,
         reach,
+        floor: Some(&sample),
         ..PoseInput::default()
     };
     let seed = p.id;
     let pose = p.procedural.get_or_insert_with(|| Pose::new(seed));
     pose.advance(&p.ty.rig, &input, dt);
-    pose.bones(&p.ty.rig).bones
+    let posed = pose.bones(&p.ty.rig);
+    // OMSI_TRACE_PAX records the deformed ankles rather than the untouched spawn markers.
+    p.ankles = posed.ankle;
+    posed.bones
 }
 
 #[cfg(test)]

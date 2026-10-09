@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod animation;
-mod floor_align;
 
 /// The renderer's side of the people, kept apart from the simulation (`view_sync::SimView`):
 /// it starts afresh with every `Humans` (`PeopleView::new`, by `Humans::new`).
@@ -266,7 +265,7 @@ impl Humans {
     /// Skin the people due for a new pose and push transforms to the renderer. Near people
     /// are posed every frame, far ones every few frames and people out of view rarely; the
     /// posing and skinning run in parallel.
-    pub(super) fn sync(&mut self, view: &mut PeopleView, renderer: &Renderer, scene: &mut Scene, camera: DVec3) {
+    pub(super) fn sync(&mut self, view: &mut PeopleView, world: &World, renderer: &Renderer, scene: &mut Scene, camera: DVec3) {
         self.catch_up_bodies(view, renderer, scene);
         for inst in view.hidden.drain(..) {
             renderer.set_params(scene, inst, &[], false, &[]);
@@ -316,16 +315,16 @@ impl Humans {
         }
         let n_due = due.iter().filter(|d| **d).count();
         let enhanced = view.enhanced_poses;
+        let buses: HashMap<_, _> = if enhanced {
+            self.sim.last_buses.iter().map(|b| (b.id, b)).collect()
+        } else {
+            HashMap::new()
+        };
         let pose_one = |p: &mut Person| {
-            // Limit shoe mesh calibration to stationary non-seated procedural people.
-            // Walking feet remain governed by IK so gait and foot planting stay smooth.
-            let standing = p.vel.length_squared() < 0.01
-                && !matches!(&p.state, State::Pax(x) if x.pax_state.round() >= 1.5);
-            let align = enhanced && p.puppet.is_none() && standing;
             // Preserve the OMSI-original pose unless the enhanced A/B mode is requested.
             let bones = if enhanced && p.puppet.is_none() {
                 let dt = (sdt * p.since_posed.max(1) as f32).min(0.25);
-                animation::bones(p, dt)
+                animation::bones(p, dt, world, &buses)
             } else {
                 omsi_sim::human::slots_from_omsi(&p.anim.bones(&p.ty.omsi))
             };
@@ -343,9 +342,6 @@ impl Humans {
             for (k, m) in ty.meshes.iter().enumerate() {
                 let (pos, nrm) = &mut skins[k];
                 skin(m, &bones, pos, nrm);
-            }
-            if align {
-                floor_align::align_standing(ty, skins);
             }
             *skin_bones = Some(bones);
             *pose_changed = true;
