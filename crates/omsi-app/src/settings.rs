@@ -997,6 +997,15 @@ mod tests {
     }
 
     #[test]
+    fn passenger_animation_setting_round_trip() {
+        assert_eq!(Settings::default().passenger_animation, "original");
+        let s = Settings::from_text("passenger_animation=enhanced\n");
+        assert_eq!(s.passenger_animation, "enhanced");
+        assert_eq!(Settings::from_text(&s.to_text()), s);
+        assert_eq!(Settings::from_text("passenger_animation=invalid\n").passenger_animation, "original");
+    }
+
+    #[test]
     fn graphics_modes() {
         // an old file: its vanilla renderer is Vanilla+ now, enhanced stays enhanced
         assert_eq!(Settings::from_text("enhanced=0\n").graphics, "vanilla_plus");
