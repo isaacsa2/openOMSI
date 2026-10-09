@@ -12,6 +12,7 @@ use gpu_memory::adapter_vram_mb;
 mod pipelines;
 mod puddles;
 mod rt;
+mod srgb_encode;
 mod triple;
 pub use triple::{panel_width, ScreenView, TripleScreen};
 
@@ -9051,6 +9052,8 @@ pub struct SurfaceState<'w> {
     pub config: wgpu::SurfaceConfiguration,
     /// The renderer's `device_lost`.
     lost: Arc<std::sync::Mutex<Option<String>>>,
+    /// On ANGLE: the frames' sRGB stand-in, encoded into the plain window (see there).
+    encode: Option<srgb_encode::SrgbEncode>,
 }
 
 impl Drop for SurfaceState<'_> {
@@ -9090,9 +9093,10 @@ impl<'w> SurfaceState<'w> {
         vsync: bool,
     ) -> Result<Self> {
         let surface = instance.create_surface(window).context("create_surface")?;
+        let encode = srgb_encode::SrgbEncode::wanted(renderer, renderer.format());
         let mut config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: renderer.format(),
+            format: encode.as_ref().map_or(renderer.format(), |e| e.window_format()),
             width: width.max(1),
             height: height.max(1),
             present_mode: if vsync {
@@ -9112,7 +9116,23 @@ impl<'w> SurfaceState<'w> {
         config.width = width.max(1);
         config.height = height.max(1);
         surface.configure(&renderer.device, &config);
-        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone() })
+        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone(), encode })
+    }
+
+    /// The view `frame` is drawn into (of the renderer's format).
+    pub fn view(&self, device: &wgpu::Device, frame: &wgpu::SurfaceTexture) -> wgpu::TextureView {
+        match &self.encode {
+            Some(e) => e.view(device, frame.texture.size()),
+            None => frame.texture.create_view(&Default::default()),
+        }
+    }
+
+    /// Shows `frame`, drawn into [`Self::view`].
+    pub fn present(&self, device: &wgpu::Device, queue: &wgpu::Queue, frame: wgpu::SurfaceTexture) {
+        if let Some(e) = &self.encode {
+            e.encode(device, queue, &frame);
+        }
+        frame.present();
     }
 
     pub fn resize(&mut self, renderer: &Renderer, width: u32, height: u32) {

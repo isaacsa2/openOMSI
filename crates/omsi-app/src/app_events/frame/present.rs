@@ -211,7 +211,7 @@ impl App {
         let shown_nothing = frame.is_none() && stand_in.is_none();
         let view = frame
             .as_ref()
-            .map(|f| f.texture.create_view(&Default::default()))
+            .map(|f| s.view(&r.device, f))
             .or(stand_in);
         (frame, view, shown_nothing)
     }
@@ -328,7 +328,7 @@ impl App {
                 if self.settings.vsync {
                     win.pre_present_notify();
                 }
-                frame.present();
+                s.present(&r.device, &r.queue, frame);
             }
             None => {
                 let _ = omsi_render::wait_gpu(&r.device, None);
