@@ -14,7 +14,11 @@ fn is_procedural_mode(value: &str) -> bool {
 pub(super) fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        std::env::var("OMSI_PAX_ANIMATION").is_ok_and(|value| is_procedural_mode(&value))
+        // The explicit environment override is useful for A/B testing without changing
+        // the launcher's persistent choice (and works for direct --map launches).
+        let mode = std::env::var("OMSI_PAX_ANIMATION")
+            .unwrap_or_else(|_| crate::settings::Settings::load().passenger_animation);
+        is_procedural_mode(&mode)
     })
 }
 
