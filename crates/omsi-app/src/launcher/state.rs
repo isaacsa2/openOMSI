@@ -1477,7 +1477,6 @@ mod launch_tests {
 }
 
 #[cfg(test)]
-#[path = "state/crash_tests.rs"]
 mod crash_tests;
 
 fn read_settings_file() -> Option<String> {
