@@ -101,8 +101,8 @@ pub(crate) struct PerfState {
     /// OMSI_PROFILE: process CPU seconds, time and frame count once the start-up is over,
     /// for the CPU time a frame costs (the wall time says little on a busy machine).
     pub(crate) cpu_mark: Option<(f64, Instant, u32)>,
-    /// OMSI_PROFILE: the stages when `cpu_mark` was taken, and every frame's time since
-    /// then (s), for the exit summary's percentiles (see `perf_report`).
+    /// OMSI_PROFILE: the stages when the warm-up ended (15 s after the start), and every
+    /// frame's time since then (s), for the exit summary's percentiles (see `perf_report`).
     pub(crate) profile_mark: Option<crate::perf_report::ProfileMark>,
     pub(crate) frame_times: Vec<f32>,
 }

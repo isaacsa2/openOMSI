@@ -521,8 +521,9 @@ impl App {
         let mut finish = false;
         self.perf.frames += 1;
         let profiling = omsi_cfg::flags::OMSI_PROFILE.is_set();
+        // (the warm-up's end is marked whether or not the CPU time can be read)
         if profiling
-            && self.perf.cpu_mark.is_none()
+            && self.perf.profile_mark.is_none()
             && self.started.elapsed().as_secs_f32() > 15.0
         {
             self.perf.cpu_mark =
