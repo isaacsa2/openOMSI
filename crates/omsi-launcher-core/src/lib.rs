@@ -2037,6 +2037,8 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
     v["resolution"] = json!("auto");
     // the game's information bar along the top, as the last session left it (#1164)
     v["info_bar"] = json!(false);
+    // Human posing; the original OMSI behavior remains the default.
+    v["passenger_animation"] = json!("original");
     // the trees' foliage bends and sways in the weather's wind
     v["windy_trees"] = json!(true);
     // an early timetable bus waits only at the stops the timetable times (off: at every
