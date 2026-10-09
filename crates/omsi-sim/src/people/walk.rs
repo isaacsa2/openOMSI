@@ -201,7 +201,11 @@ impl PeopleSim {
                 if let Some((net, leg)) = net.and_then(|net| {
                     self.ped.as_ref()
                         .and_then(|ped| ped.nearest(net, self.people[i].position, 16.0))
-                        .filter(|&(lane, _, _)| net.lanes[lane].length() > 0.35)
+                        .filter(|&(lane, at, _)| {
+                            let (target, _) = net.lanes[lane].at(at);
+                            net.lanes[lane].length() > 0.35
+                                && !crosses_street(net, self.people[i].position.truncate(), target.truncate())
+                        })
                         .map(|(lane, at, _)| (net, Leg { lane, a: at, b: at }))
                 }) {
                     let mut walk = PedWalk::new(vec![leg], true, 0.0);
