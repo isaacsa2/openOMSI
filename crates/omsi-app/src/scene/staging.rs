@@ -456,6 +456,8 @@ pub struct SplineType {
     pub dir: PathBuf,
     /// The `.surf` map of each of `def.textures` (see [`surf_map`]).
     pub surf: Vec<Option<Arc<omsi_geometry::HeightMap>>>,
+    /// The `[surface]` id of each of them (see [`surface_id`]).
+    pub surface: Vec<u8>,
 }
 
 #[derive(Debug, Default)]

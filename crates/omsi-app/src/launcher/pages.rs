@@ -33,6 +33,11 @@ pub struct PagesView {
     /// (section, index) of the binding waiting for a key.
     pub capturing: Option<(usize, usize)>,
     pub drop_hover: bool,
+    /// The Mods page's list: its search, its filter (see `MOD_FILTERS`), and the mod whose
+    /// deletion is asked about.
+    pub mod_search: String,
+    pub mod_filter: usize,
+    pub mod_confirm: Option<String>,
     pub setup_root: Option<String>,
     pub setup_game: Option<String>,
     /// The Controls page's tab: 0 the keyboard, 1 the game controllers.
@@ -699,6 +704,7 @@ fn driving_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, out: &mut Outside, c
         *dirty = 0.3;
     }
     toggle_setting(ui, s, dirty, c.row(), "Smooth mouse steering (off: the wheel follows the cursor at once, as in OMSI)", "mouse_smooth");
+    toggle_setting(ui, s, dirty, c.row(), "Hold the cursor while the mouse steers (off: the crosshair stays free, the window's edges are the lock)", "mouse_hold");
     toggle_setting(ui, s, dirty, c.row(), "A right click ends the mouse steering (as in OMSI)", "mouse_right_off");
     toggle_setting(ui, s, dirty, c.row(), "Indicators cancel themselves (as the bus's script does)", "blinker_cancel");
     toggle_setting(ui, s, dirty, c.row(), "The keyboard brake stays on until the throttle (as in OMSI)", "brake_hold");
@@ -1072,6 +1078,12 @@ fn sound_tab(ui: &mut Ui, s: &mut Value, dirty: &mut f32, cols: [Rect; 2]) -> [f
         }
     }
     toggle_setting(ui, s, dirty, c.row(), "Doppler effect", "doppler");
+    toggle_setting(ui, s, dirty, c.row(), "Ambience (wind, nature, road surfaces)", "ambient");
+    let mut amb = get(s, "vol_ambient").as_f64().unwrap_or(0.8) as f32;
+    if ui.slider("s-volamb", c.row(), &mut amb, 0.0, 1.0, 0.05, "Ambience volume", &|v| format!("{:.0}%", v * 100.0)) {
+        s["vol_ambient"] = json!((amb * 100.0).round() / 100.0);
+        *dirty = 0.3;
+    }
     sel_setting(ui, s, dirty, "s-voices", c.row(), "Passenger voices", "pax_voices", &[("all", "Greetings and tickets"), ("tickets", "Only the ticket asked for"), ("off", "Silent")]);
     [c.used(), radio_stations(ui, cols[1])]
 }
@@ -2391,9 +2403,20 @@ pub fn mods(l: &mut Launcher, area: Rect) {
         l.state.load_mods();
     }
     let body = l.page_title(area, "Mods", "A bus, a map, scenery, a whole OMSI folder - as a folder or a .zip, .7z or .rar. The original OMSI 2 folder is never written to.");
-    let cols = 3;
-    let cw = (body.w - GAP * 2.0 * (cols as f32 - 1.0)) / cols as f32;
-    let colr = |k: usize| Rect::new(body.x + k as f32 * (cw + GAP * 2.0), body.y, cw, body.h);
+    // (installing and the installs on the left, the list of every mod taking the rest)
+    let side = (body.w * 0.27).clamp(280.0, 380.0);
+    let list_w = body.w - 2.0 * (side + GAP * 2.0);
+    let colr = |k: usize| match k {
+        0 => Rect::new(body.x, body.y, side, body.h),
+        1 => Rect::new(body.x + side + GAP * 2.0, body.y, side, body.h),
+        _ => Rect::new(body.x + 2.0 * (side + GAP * 2.0), body.y, list_w, body.h),
+    };
+    // (asked again once an install has finished: the list shows what it put there)
+    let done = l.state.jobs.iter().filter(|j| j.finished.is_some()).count();
+    if done != l.state.mods_jobs_seen {
+        l.state.mods_jobs_seen = done;
+        l.state.load_mods();
+    }
     // install
     let c0 = colr(0);
     l.ui.panel(c0);
@@ -2522,42 +2545,145 @@ pub fn mods(l: &mut Launcher, area: Rect) {
         core::install::cancel(id);
         l.state.poll_now();
     }
-    // content folder
-    let c2 = colr(2);
-    l.ui.panel(c2);
-    let inner = l.ui.heading(Rect::new(c2.x + 18.0, c2.y + 14.0, c2.w - 36.0, c2.h - 28.0), "Content folder", Some("folder_open"));
-    let Some(m) = l.state.mods.clone() else {
-        l.ui.text_in("Reading…", Rect::new(inner.x, inner.y, inner.w, 20.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
+    // waiting packs, under the install column's text
+    if let Some(m) = l.state.mods.clone().filter(|m| !m.waiting.is_empty()) {
+        let c0 = colr(0);
+        let y0 = c0.bottom() - 24.0 - 22.0 * m.waiting.len().min(4) as f32;
+        l.ui.text_in("Waiting for their bus", Rect::new(c0.x + 18.0, y0 - 26.0, c0.w - 36.0, 22.0), 12.5, Weight::Bold, TEXT, Align::Left);
+        for (k, w) in m.waiting.iter().take(4).enumerate() {
+            l.ui.text_in(w, Rect::new(c0.x + 18.0, y0 + k as f32 * 22.0, c0.w - 36.0, 20.0), 12.0, Weight::Regular, TEXT_DIM, Align::Left);
+        }
+    }
+    mod_list(l, colr(2));
+}
+
+/// The Mods page's filters over the list.
+const MOD_FILTERS: [&str; 6] = ["All", "Buses", "Maps", "Archives", "Other", "Off"];
+
+fn mod_passes(m: &core::mods::Mod, filter: usize) -> bool {
+    use core::mods::Kind;
+    match filter {
+        1 => m.kind == Kind::Bus,
+        2 => m.kind == Kind::Map,
+        3 => m.kind == Kind::Archive,
+        4 => m.kind == Kind::Other,
+        5 => !m.enabled,
+        _ => true,
+    }
+}
+
+/// Every mod of the content folder (see `omsi_launcher_lib::mods`): found by a search and a
+/// filter, each switched off and on - its folders out of the game's sight, nothing deleted -
+/// or deleted after a question asked in its row.
+fn mod_list(l: &mut Launcher, c: Rect) {
+    use core::mods::Kind;
+    l.ui.panel(c);
+    let inner = l.ui.heading(Rect::new(c.x + 18.0, c.y + 14.0, c.w - 36.0, c.h - 28.0), "Installed mods", Some("extension"));
+    let Some(status) = l.state.mods.clone() else {
+        l.ui.text_in("Reading the content folder…", Rect::new(inner.x, inner.y, inner.w, 20.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
         return;
     };
+    let mods = status.installed.clone();
+    let on = mods.iter().filter(|m| m.enabled).count();
+    // the content folder: where, how much room
+    l.ui.text_in(&format!("{} mods, {on} on · {} free", mods.len(), fmt_bytes(status.free_bytes)), Rect::new(c.x + 220.0, c.y + 14.0, c.w - 238.0, 28.0), 12.0, Weight::Regular, TEXT_DIM, Align::Right);
     let mut y = inner.y;
-    y += l.ui.paragraph(&m.content_dir, Vec2::new(inner.x, y), inner.w, 12.0, Weight::Medium, TEXT_SOFT);
-    y += 6.0;
-    l.ui.text_in(&format!("{} free on this disk", fmt_bytes(m.free_bytes)), Rect::new(inner.x, y, inner.w, 20.0), 13.0, Weight::Bold, ACCENT, Align::Left);
-    y += 30.0;
-    for (f, n) in &m.folders {
-        l.ui.icon("folder_open", Vec2::new(inner.x + 9.0, y + 10.0), 16.0, TEXT_DIM);
-        l.ui.text_in(f, Rect::new(inner.x + 26.0, y, inner.w * 0.6, 20.0), 12.5, Weight::Medium, TEXT, Align::Left);
-        l.ui.text_in(&format!("{n} {}", if *n == 1 { "entry" } else { "entries" }), Rect::new(inner.x, y, inner.w, 20.0), 12.0, Weight::Regular, TEXT_DIM, Align::Right);
-        y += 24.0;
+    l.ui.text_in(&status.content_dir, Rect::new(inner.x, y, inner.w - 90.0, 18.0), 11.5, Weight::Regular, TEXT_FAINT, Align::Left);
+    if l.ui.button("mods-open-folder", Rect::new(inner.right() - 80.0, y - 4.0, 80.0, 26.0), "Open", Some("open_in_new"), ButtonKind::Ghost) {
+        crate::updater::open_url(&status.content_dir);
     }
-    if !m.archives.is_empty() {
-        y += 8.0;
-        l.ui.heading(Rect::new(inner.x, y, inner.w, 28.0), "Archives used in place", None);
-        y += 30.0;
-        for (n, b) in &m.archives {
-            l.ui.text_in(&format!("{n}  ({})", fmt_bytes(*b)), Rect::new(inner.x, y, inner.w, 20.0), 12.0, Weight::Regular, TEXT_SOFT, Align::Left);
-            y += 22.0;
-        }
+    y += 26.0;
+    // the search, and the filters with how many each holds
+    let mut q = std::mem::take(&mut l.pages.mod_search);
+    l.ui.text_input("mods-search", Rect::new(inner.x, y, inner.w, 34.0), &mut q, "Search mods…", Some("search"));
+    l.pages.mod_search = q.clone();
+    y += 42.0;
+    let labels: Vec<String> = MOD_FILTERS.iter().enumerate().map(|(k, f)| format!("{f} {}", mods.iter().filter(|m| mod_passes(m, k)).count())).collect();
+    let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+    let mut f = l.pages.mod_filter;
+    if l.ui.segmented("mods-filter", Rect::new(inner.x, y, inner.w, 32.0), &mut f, &refs) {
+        l.pages.mod_filter = f;
     }
-    if !m.waiting.is_empty() {
-        y += 8.0;
-        l.ui.heading(Rect::new(inner.x, y, inner.w, 28.0), "Waiting for their bus", None);
-        y += 30.0;
-        for w in &m.waiting {
-            l.ui.text_in(w, Rect::new(inner.x, y, inner.w, 20.0), 12.0, Weight::Regular, TEXT_DIM, Align::Left);
-            y += 22.0;
+    y += 42.0;
+    let q = q.to_lowercase();
+    let mut shown: Vec<core::mods::Mod> = mods.into_iter().filter(|m| mod_passes(m, l.pages.mod_filter)).filter(|m| q.is_empty() || m.name.to_lowercase().contains(&q) || m.paths.iter().any(|p| p.to_lowercase().contains(&q))).collect();
+    // (switched-on first, then by name)
+    shown.sort_by(|a, b| b.enabled.cmp(&a.enabled).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    let busy = l.state.mod_busy.clone();
+    let confirm = l.pages.mod_confirm.clone();
+    let empty = status.installed.is_empty();
+    // what the rows asked: (id, Some(on)) switch, (id, None) delete asked, delete confirmed
+    let mut toggle: Option<(String, bool)> = None;
+    let mut ask: Option<Option<String>> = None;
+    let mut delete: Option<String> = None;
+    let list = Rect::new(inner.x - 6.0, y, inner.w + 12.0, inner.bottom() - y);
+    l.ui.scroll_area("mods-list", list, &mut |ui, v| {
+        if shown.is_empty() {
+            let t = if empty { "No mods yet. Choose a folder or an archive on the left, or drop one onto the window." } else { "No mod matches." };
+            ui.paragraph(t, Vec2::new(v.x + 8.0, v.y + 6.0), v.w - 16.0, 12.5, Weight::Regular, TEXT_DIM);
+            return 40.0;
         }
+        let rh = 54.0;
+        for (k, m) in shown.iter().enumerate() {
+            let r = Rect::new(v.x + 6.0, v.y + k as f32 * rh, v.w - 16.0, rh - 6.0);
+            if r.bottom() < list.y - rh || r.y > list.bottom() + rh {
+                continue;
+            }
+            let asking = confirm.as_deref() == Some(m.id.as_str());
+            ui.p().rounded(r, 8.0, if asking { DANGER.alpha(0.12) } else { Color::WHITE.alpha(if m.enabled { 0.04 } else { 0.015 }) });
+            let icon = match m.kind {
+                Kind::Bus => "directions_bus",
+                Kind::Map => "map",
+                Kind::Archive => "inventory_2",
+                Kind::Other => "extension",
+            };
+            ui.icon(icon, Vec2::new(r.x + 22.0, r.center().y), 20.0, if m.enabled { ACCENT } else { TEXT_FAINT });
+            let tw = r.w - 230.0;
+            ui.text_in(&m.name, Rect::new(r.x + 44.0, r.y + 6.0, tw, 20.0), 13.5, Weight::Medium, if m.enabled { TEXT } else { TEXT_DIM }, Align::Left);
+            let mut sub = vec![m.paths.join(", "), fmt_bytes(m.bytes)];
+            if !m.enabled {
+                sub.insert(0, "OFF".into());
+            }
+            if m.installed > 0 {
+                sub.push(format!("installed {}", chrono_like(m.installed)));
+            } else if !m.noted {
+                sub.push("found in the content folder".into());
+            }
+            ui.text_in(&sub.join(" · "), Rect::new(r.x + 44.0, r.y + 26.0, tw, 16.0), 11.0, Weight::Regular, TEXT_FAINT, Align::Left);
+            if busy.as_deref() == Some(m.id.as_str()) {
+                ui.text_in("…", Rect::new(r.right() - 60.0, r.y, 40.0, r.h), 16.0, Weight::Bold, TEXT_DIM, Align::Center);
+                continue;
+            }
+            if asking {
+                // the question, in the row: deleting cannot be undone
+                if ui.button(&format!("mod-del-yes-{}", m.id), Rect::new(r.right() - 96.0, r.y + 9.0, 88.0, 30.0), "Delete", Some("delete"), ButtonKind::Danger) {
+                    delete = Some(m.id.clone());
+                }
+                if ui.button(&format!("mod-del-no-{}", m.id), Rect::new(r.right() - 190.0, r.y + 9.0, 86.0, 30.0), "Keep", None, ButtonKind::Normal) {
+                    ask = Some(None);
+                }
+                continue;
+            }
+            let mut on = m.enabled;
+            if ui.toggle(&format!("mod-on-{}", m.id), Rect::new(r.right() - 96.0, r.y + 10.0, 50.0, 28.0), &mut on, "") {
+                toggle = Some((m.id.clone(), on));
+            }
+            let dr = Rect::new(r.right() - 38.0, r.y + 10.0, 28.0, 28.0);
+            if ui.icon_button(&format!("mod-del-{}", m.id), dr.center(), 17.0, "delete", "Delete this mod (asks first; switch it off instead to keep it)") {
+                ask = Some(Some(m.id.clone()));
+            }
+        }
+        shown.len() as f32 * rh
+    });
+    if let Some((id, on)) = toggle {
+        l.state.mod_toggle(id, on);
+    }
+    if let Some(a) = ask {
+        l.pages.mod_confirm = a;
+    }
+    if let Some(id) = delete {
+        l.pages.mod_confirm = None;
+        l.state.mod_remove(id);
     }
 }
 
@@ -2829,7 +2955,7 @@ mod settings_tests {
             graphics.push("s-api");
         }
         let driving = vec![
-            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "s-mouse-pedal", "set-mouse_smooth", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-auto_shift", "set-momentary_gears", "s-go-keys",
+            "s-keys", "set-steering_linear", "set-old_steering", "set-red_steer_spd", "s-mouse", "s-mouse-pedal", "set-mouse_smooth", "set-mouse_hold", "set-mouse_right_off", "set-blinker_cancel", "set-brake_hold", "set-auto_clutch", "set-auto_shift", "set-momentary_gears", "s-go-keys",
             "s-wrange", "s-wlock", "s-pad-steer-smooth", "s-pad-steer-speed", "s-pad-deadzone", "set-pad_steer_linear", "s-pad-type", "set-pad_buttons", "set-arrows_switch_cams", "s-pedt", "s-pedb", "set-ff_enabled", "set-ff_invert", "s-ffroad", "s-ffeng", "s-fffade", "s-wreset", "s-go-pads",
         ];
         let mut camera = vec![
@@ -2874,7 +3000,7 @@ mod settings_tests {
             camera.extend(["set-vr", "s-vr-scale", "s-vr-head-smoothing", "s-vr-mirror-rate", "set-vr_desktop_mirror", "s-go-vr-keys"]);
         }
         // (the radio stations: one, see `frame`)
-        let sound = vec!["s-vol", "s-volai", "s-volsc", "set-doppler", "s-voices", "radio-name-0", "radio-url-0", "radio-del-0", "radio-add"];
+        let sound = vec!["s-vol", "s-volai", "s-volsc", "set-doppler", "set-ambient", "s-volamb", "s-voices", "radio-name-0", "radio-url-0", "radio-del-0", "radio-add"];
         let gameplay = vec![
             "s-board", "s-pax-animation", "set-exact_fare", "s-pax", "set-get_up", "s-unsched", "s-maxsched", "s-maxpark", "set-ai_wait_timed_stops_only",
             "s-maint", "set-collision_vehicles", "set-collision_objects", "set-collision_pedestrians", "set-use_real_time", "set-use_real_date", "set-time_sync", "set-metar_sync", "s-timespeed",

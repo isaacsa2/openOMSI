@@ -103,6 +103,11 @@ impl App {
     /// The cursor's new place in the window, as the window reported it or as the mouse
     /// steering's point stands in it.
     pub(super) fn cursor_moved_to(&mut self, x: f32, y: f32) {
+        // a plugin's slider or panel being dragged follows the cursor
+        if self.plugin_drag_move(x, y) {
+            self.input.cursor = (x, y);
+            return;
+        }
         // a mirror panel being dragged follows the cursor (nothing else of the cursor's
         // work is done meanwhile, and outside a drag none of it is touched)
         if self.gfx.mirror_hud.dragging() {

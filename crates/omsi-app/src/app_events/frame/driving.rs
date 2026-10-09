@@ -59,6 +59,7 @@ impl App {
                 self.cam.in_cab,
                 !matches!(self.view.as_str(), "free" | "foot"),
             );
+            crate::plugins::plugin_impacts(&p.vehicle, &mut self.integrations);
             steps::deliver_player_impacts(p, self.session.traffic.as_mut());
             // After scripts: zero-movement `_drag` for a held switch. Running this
             // *before* `tick` cleared Aachen ibox momentary flags (incl. digit 0 /

@@ -1,5 +1,6 @@
 //! Audio.
 
+pub mod ambient;
 pub mod mixer;
 pub mod radio;
 pub mod soundset;

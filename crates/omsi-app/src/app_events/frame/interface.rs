@@ -49,6 +49,14 @@ impl App {
         // under the game's own interface; not under its menus, nor in VR
         let plugin_focus = crate::plugin_ui::focused(&self.integrations.plugins);
         self.frame_plugin_panels(dt, hud, vr_active);
+        // the mirror panels (Ctrl+M): over the picture and the navigator, under the notes
+        // and the menus - drawn after them, they covered the pause menu (#1880)
+        if self.cam.in_cab {
+            if let (Some(r), Some(scene), Some(w)) = (self.renderer.as_ref(), self.scene.as_mut(), self.world.as_ref()) {
+                self.gfx.mirror_hud.ensure_frame(r, scene);
+                steps::push_mirror_hud(&self.gfx.mirror_hud, scene, w, hud, (self.input.cursor.0 - hud[0], self.input.cursor.1));
+            }
+        }
         self.frame_ui_draw(dt, hud, vr_active, plugin_focus, &notes, tooltip, menu_lines, menu_tabs);
         *self.perf.profile.entry("hud").or_default() += __t.elapsed().as_secs_f64();
         vr_nav_display

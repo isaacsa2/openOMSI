@@ -32,6 +32,8 @@ mod updater;
 mod update_watch;
 mod presence;
 mod ambience;
+mod ambient_assets;
+mod ambient_sound;
 mod camera_arm;
 mod career;
 mod describe;
@@ -107,6 +109,7 @@ mod on_foot;
 mod route_arrows;
 mod server;
 mod player;
+mod plugin_io;
 mod plugin_ui;
 mod plugins;
 mod services;
@@ -240,7 +243,7 @@ pub fn run() -> Result<()> {
         return launcher::run(graphics_instance());
     }
     let Some(app) = make_app(args, server_cfg)? else { return Ok(()) };
-    let event_loop = EventLoop::new()?;
+    let event_loop = game_event_loop()?;
     // SIGTERM (the launcher's Stop) and Ctrl+C end the session the way Escape does
     let proxy = event_loop.create_proxy();
     quit::install(move |_| {
@@ -252,6 +255,17 @@ pub fn run() -> Result<()> {
     lan_mods::clean_up();
     r?;
     Ok(())
+}
+
+/// The game's event loop. With OMSI_HIDDEN_WINDOW the process stays out of the Dock and the
+/// menu bar on macOS, as its window stays out of sight.
+fn game_event_loop() -> Result<EventLoop<()>> {
+    #[cfg(target_os = "macos")]
+    if omsi_cfg::flags::OMSI_HIDDEN_WINDOW.is_set() {
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        return Ok(EventLoop::builder().with_activation_policy(ActivationPolicy::Accessory).build()?);
+    }
+    Ok(EventLoop::new()?)
 }
 
 /// The showroom is drawn the way the game will be.
@@ -579,7 +593,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             career: Default::default(),
             journey: None,
             wetness: 0.0,
-            cloud_drift: [0.0; 2],
+            cloud_drift: [0.0; 4],
             weather_blend: None,
             weather_cycle: None,
             metar_rx: None,
@@ -660,7 +674,10 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             governor: (0.0, 0, 0.0),
             governor_low: 0,
             governor_wait_prev: 0.0,
+            play_started: None,
             cpu_mark: None,
+            thread_cpu_mark: None,
+            instructions_mark: None,
             profile_mark: None,
             frame_times: Vec::new(),
         },
@@ -668,6 +685,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             radio,
             audio: None,
             ambience: None,
+            ambient_sound: None,
             voice: None,
         },
         clock: omsi_sim::SimClock::default(),
@@ -719,6 +737,9 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
         integrations: Integrations {
             plugin_keys: Vec::new(),
             plugin_events: Vec::new(),
+            plugin_events_ex: Vec::new(),
+            plugin_voices: Vec::new(),
+            plugin_seen: Default::default(),
             plugin_command: false,
             plugin_panels: Default::default(),
             discord: None,

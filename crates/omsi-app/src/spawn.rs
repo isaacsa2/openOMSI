@@ -530,6 +530,8 @@ pub(crate) fn spawn_player_prepared(
         auto_shift: crate::settings::Settings::load().auto_shift,
         auto_shift_wait: 0.0,
         auto_shift_idle: 0.0,
+        auto_shift_max: 0.0,
+        auto_shift_climb: (0.0, 0.0),
         side_lights_by_l: false,
         driver: None,
         ibis_duty: None,
@@ -566,8 +568,9 @@ pub(crate) fn spawn_player_prepared(
         if let Some(km) = args.situation_odometer_km {
             p.vehicle.set_odometer_km(km);
         }
+        let pictures = crate::situation::situation_file(args).map(|f| crate::situation::restore_script_textures(&f, &mut p.vehicle)).unwrap_or(0);
         log::info!(
-            "situation: {numeric} of {} variables and {textual} of {} strings restored",
+            "situation: {numeric} of {} variables, {textual} of {} strings and {pictures} script textures restored",
             args.situation_vars.len(),
             args.situation_strvars.len()
         );
