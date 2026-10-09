@@ -257,6 +257,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_MODEL_ORDER` | bool | off | use | app | Draw the opaque parts of ordered models first again (A/B). |
 | `OMSI_NO_MSAA_PREPASS` | bool | off | frame | render | No depth prepass with multisampling. |
 | `OMSI_NO_PBR` | bool | off | use | app | No PBR materials. |
+| `OMSI_NO_PIPELINE_CACHE` | bool | off | use | render | No pipeline cache: the shaders compiled at every start. |
 | `OMSI_NO_PLUGINS` | bool | off | use | app | No plugins loaded. |
 | `OMSI_NO_POLL_THREAD` | bool | off | use | render | No device poll thread. |
 | `OMSI_NO_PRESENCE` | bool | off | use | app | No presence ("playing now") service. |

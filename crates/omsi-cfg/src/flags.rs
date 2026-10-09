@@ -343,6 +343,7 @@ flags! {
     OMSI_NO_MODEL_ORDER: Bool, Switch, Use, "off", "Draw the opaque parts of ordered models first again (A/B).";
     OMSI_NO_MSAA_PREPASS: Bool, Switch, Frame, "off", "No depth prepass with multisampling.";
     OMSI_NO_PBR: Bool, Switch, Use, "off", "No PBR materials.";
+    OMSI_NO_PIPELINE_CACHE: Bool, Switch, Use, "off", "No pipeline cache: the shaders compiled at every start.";
     OMSI_NO_PLUGINS: Bool, Switch, Use, "off", "No plugins loaded.";
     OMSI_NO_POLL_THREAD: Bool, Switch, Use, "off", "No device poll thread.";
     OMSI_NO_PRESENCE: Bool, Switch, Use, "off", "No presence (\"playing now\") service.";

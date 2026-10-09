@@ -3,6 +3,7 @@
 pub mod atmosphere;
 pub mod clouds;
 mod passes;
+mod pipeline_cache;
 use passes::{Encoders, FrameArgs, FrameEnv, PassTimers, StageClock};
 mod pipelines;
 mod puddles;
@@ -2745,6 +2746,7 @@ impl Renderer {
             // textures are decoded to RGBA by upload_texture on this device.
             required_features = wgpu::Features::empty();
         }
+        required_features |= pipeline_cache::wanted(&adapter, intel_vulkan_safe);
         // Enhanced+: hardware ray queries where the device has them (Apple silicon from the
         // M3/A17 on, RTX and RDNA 2 cards and newer through Vulkan and Direct3D 12 - with DXC,
         // which the Windows build ships beside the game); OMSI_NO_RT=1 leaves them out. Should
@@ -2796,6 +2798,7 @@ impl Renderer {
             .await
             .context("request_device")?;
         log::info!("graphics device opened; compiling renderer pipelines");
+        pipeline_cache::open(&device, &info);
         // the same choice wgpu-core makes when it validates a texture or a pipeline
         let adapter_table = device
             .features()
@@ -2931,6 +2934,7 @@ impl Renderer {
                     if remembered != Some((msaa, basic)) && (msaa != options.msaa || basic || remembered.is_some()) {
                         fallback_store(name, (msaa != options.msaa || basic).then_some((msaa, basic)));
                     }
+                    pipeline_cache::save(&renderer.device);
                     made = Ok(Renderer { mesh_pages, ..renderer });
                     break;
                 }
