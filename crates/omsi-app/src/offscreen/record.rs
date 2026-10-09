@@ -2,11 +2,11 @@
 //! picture every 1/fps second into `<out>_frames/` (JPEG) and everything the game would
 //! have played, mixed for the same simulated time, into `<out>.wav` - however long a
 //! picture takes to draw. The audio engine is a capture engine (`AudioEngine::capture`):
-//! the bus's own sound configuration, the traffic's, OMSI's rain in the street and the
-//! ambience, mixed step by step. `ffmpeg -framerate <fps> -i <out>_frames/f%05d.jpg -i
+//! the bus's own sound configuration, the traffic's, OMSI's rain in the street, mixed
+//! step by step. `ffmpeg -framerate <fps> -i <out>_frames/f%05d.jpg -i
 //! <out>.wav -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest film.mp4` makes the film.
 //! `OMSI_RECORD_FROM=<s>` starts the film that far into the drive (the bus started, the
-//! traffic come), `OMSI_NO_AMBIENT` leaves the ambience out (A/B).
+//! traffic come).
 
 use super::*;
 use crate::view_sync::{self, ViewSync};
@@ -17,7 +17,6 @@ const RATE: u32 = 48_000;
 pub(super) struct Recorder {
     audio: omsi_audio::AudioEngine,
     ambience: crate::ambience::Ambience,
-    ambient: crate::ambient_sound::AmbientSound,
     fps: f32,
     from: f32,
     dir: PathBuf,
@@ -31,7 +30,7 @@ pub(super) struct Recorder {
 
 impl Recorder {
     /// A recorder for the run writing to `out`, when `OMSI_RECORD` asks for one.
-    pub(super) fn new(out: &Path, player: Option<&mut Player>, root: &Path, settings: &settings::Settings) -> Option<Recorder> {
+    pub(super) fn new(out: &Path, player: Option<&mut Player>, root: &Path) -> Option<Recorder> {
         let fps = omsi_cfg::flags::OMSI_RECORD.parse::<f32>().filter(|f| *f > 0.0 && *f <= 60.0)?;
         let from = omsi_cfg::flags::OMSI_RECORD_FROM.parse::<f32>().unwrap_or(0.0).max(0.0);
         let stem = out.file_stem().and_then(|s| s.to_str()).unwrap_or("film").to_string();
@@ -45,10 +44,8 @@ impl Recorder {
             p.load_sounds(&audio);
         }
         let ambience = crate::ambience::Ambience::load(&audio, root);
-        let on = settings.ambient && !omsi_cfg::flags::OMSI_NO_AMBIENT.is_set();
-        let ambient = crate::ambient_sound::AmbientSound::new(on, settings.vol_ambient);
-        log::info!("record: {fps} pictures a second from {from} s into {}, the sound into {stem}.wav (ambience {})", dir.display(), if on { "on" } else { "off" });
-        Some(Recorder { audio, ambience, ambient, fps, from, dir, wav: out.with_file_name(format!("{stem}.wav")), samples: Vec::new(), mixed: 0, pictures: 0, peak: 0.0 })
+        log::info!("record: {fps} pictures a second from {from} s into {}, the sound into {stem}.wav", dir.display());
+        Some(Recorder { audio, ambience, fps, from, dir, wav: out.with_file_name(format!("{stem}.wav")), samples: Vec::new(), mixed: 0, pictures: 0, peak: 0.0 })
     }
 }
 
@@ -148,26 +145,6 @@ impl Offscreen<'_> {
             t.update_audio(a, cam.position, street, inside, None);
         }
         rec.ambience.update(a, dt, precip_of(&self.weather), inside, street, cam.position, &[]);
-        let daylight = omsi_sim::Daylight::compute(&self.run_clock, self.envir.as_ref());
-        let traffic_near = self.traffic.as_ref().map(|t| t.cars.iter().filter(|c| (c.vehicle.position - cam.position).length() < 300.0).count()).unwrap_or(0);
-        let wetness = puddles::road_wetness(self.wetness, self.weather.snow);
-        rec.ambient.update(
-            a,
-            crate::ambient_sound::Moment {
-                world: Some(&self.world),
-                weather: Some(&self.weather),
-                clock: &self.run_clock,
-                sun_elevation: daylight.altitude_deg,
-                wetness,
-                ear: cam.position,
-                right: cam.right(),
-                inside,
-                player: self.player.as_mut().map(|p| &mut p.vehicle),
-                traffic_near,
-                reverb_mix,
-                dt,
-            },
-        );
         // the sound of this step, to the sample (no drift between the picture and the sound)
         let due = (((i + 1) as f64) * dt as f64 * RATE as f64).round() as u64;
         let n = due.saturating_sub(rec.mixed) as usize;
@@ -181,8 +158,7 @@ impl Offscreen<'_> {
             }
         }
         if i.is_multiple_of(30) {
-            let parts: Vec<String> = omsi_audio::ambient::PARTS.iter().zip(a.ambient_levels()).filter(|(_, l)| *l > 1.0e-5).map(|(k, l)| format!("{k} {:.0}", 20.0 * l.log10())).collect();
-            log::info!("record: {:.1} s, {} [{}]", t_s, rec.ambient.last, parts.join(", "));
+            log::info!("record: {:.1} s", t_s);
         }
         // the pictures: one each 1/fps second of film
         let film_t = t_s - rec.from;

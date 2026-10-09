@@ -23,6 +23,7 @@ impl<'a> Offscreen<'a> {
             .unwrap_or((1600, 900));
         let view_aspect = w as f32 / h.max(1) as f32;
         let settings = settings::Settings::load();
+        crate::rain::set_quality(&settings.rain_quality);
         let instance = graphics_instance();
         let mut renderer = pollster::block_on(Renderer::new_with(
             &instance,
@@ -238,7 +239,7 @@ impl<'a> Offscreen<'a> {
         let wetness = initial_wetness(&weather);
         let cabin_air = crate::condensation::CabinAir::new();
         let real_time = RealTime::default();
-        let recorder = record::Recorder::new(out, player.as_mut(), &args.root, &settings);
+        let recorder = record::Recorder::new(out, player.as_mut(), &args.root);
         Ok(Offscreen {
             args,
             out,

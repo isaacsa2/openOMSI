@@ -997,7 +997,7 @@ mod embedded_light_tests {
             mesh_def_index: vec![1],
             sound_path: Default::default(), model_dir: Default::default(),
             mesh_visible: vec![None], mesh_pivots: vec![Mat4::IDENTITY],
-            mesh_shadow: vec![false], mesh_casts: vec![true], program: None,
+            mesh_shadow: vec![false], mesh_casts: vec![true], has_mouse_events: false, program: None,
             lower_lods: Vec::new(), lod0_min: 0.0, paint_scheme_count: 0,
             dynamic_textures: Vec::new(), holes: Vec::new(), deform: None,
             collision: None, paint: false, camera: Default::default(),
