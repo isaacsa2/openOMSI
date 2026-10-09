@@ -24,6 +24,8 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod animation;
+
 /// The renderer's side of the people, kept apart from the simulation (`view_sync::SimView`):
 /// it starts afresh with every `Humans` (`PeopleView::new`, by `Humans::new`).
 #[derive(Default)]
@@ -309,10 +311,17 @@ impl Humans {
             );
         }
         let n_due = due.iter().filter(|d| **d).count();
+        let enhanced = animation::enabled();
         let pose_one = |p: &mut Person| {
-            let Person { anim, ty, skins, skin_bones, pose_changed, .. } = p;
+            // Preserve the OMSI-original pose unless the enhanced A/B mode is requested.
+            let bones = if enhanced && p.puppet.is_none() {
+                let dt = (sdt * p.since_posed.max(1) as f32).min(0.25);
+                animation::bones(p, dt)
+            } else {
+                omsi_sim::human::slots_from_omsi(&p.anim.bones(&p.ty.omsi))
+            };
+            let Person { ty, skins, skin_bones, pose_changed, .. } = p;
             *pose_changed = false;
-            let bones = omsi_sim::human::slots_from_omsi(&anim.bones(&ty.omsi));
             if bones.iter().any(|b| !b.is_finite()) && !skins.is_empty() {
                 // keep the last good mesh (the rest pose would be the file's T-pose)
                 return;
