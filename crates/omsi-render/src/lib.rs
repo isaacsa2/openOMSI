@@ -8153,7 +8153,30 @@ fn sky_input_differs(a: &atmosphere::SkyInput, b: &atmosphere::SkyInput) -> bool
 /// is what `s_tile`'s clamp to edge gives; reading `t_trans`/`t_night` through both
 /// samplers fails the whole module ("Conflicting samplers").
 fn scene_shader_source(gl: bool) -> String {
-    arrays_as_textures(&scene_shader_text(gl), array_path())
+    scene_shader_for(gl, array_path())
+}
+
+fn scene_shader_for(gl: bool, path: ArrayPath) -> String {
+    let src = arrays_as_textures(&scene_shader_text(gl), path);
+    if gl && path == ArrayPath::NoStorage { compares_without_gather(&src) } else { src }
+}
+
+/// The sun's shadow tent with each gather of four depth comparisons taken as four single
+/// ones. OpenGL without storage buffers is GLES 3.0 or GL 3.3 (ANGLE on Direct3D 11 among
+/// them), which have no textureGather: the scene pipelines failed to compile there ("no
+/// matching overloaded function found") and DirectX 11 drew nothing. Each texel is read at
+/// its centre, where the comparison sampler's filter takes that texel alone.
+fn compares_without_gather(src: &str) -> String {
+    let mut out = src.to_string();
+    for t in ["t_shadow", "t_shadow_far"] {
+        let at = |x: f32, y: f32| format!("textureSampleCompareLevel({t}, s_shadow, a + vec2<f32>({x:?}, {y:?}) / dims, zr)");
+        let gather = format!("textureGatherCompare({t}, s_shadow, a, zr)");
+        assert!(out.contains(&gather), "scene shader: {gather} not found");
+        // (in the gather's order: (0, 1), (1, 1), (1, 0), (0, 0) of the quad around `a`)
+        let four = format!("vec4<f32>({}, {}, {}, {})", at(-0.5, 0.5), at(0.5, 0.5), at(0.5, -0.5), at(-0.5, -0.5));
+        out = out.replace(&gather, &four);
+    }
+    out
 }
 
 /// The scene module with its arrays read as `path` has them (see `ArrayPath`): each
@@ -11706,7 +11729,7 @@ mod tests {
             (ArrayPath::VertexTextures, [glsl::Version::Embedded { version: 310, is_webgl: false }, glsl::Version::Desktop(430)]),
             (ArrayPath::NoStorage, [glsl::Version::Embedded { version: 300, is_webgl: false }, glsl::Version::Desktop(330)]),
         ] {
-            let src = arrays_as_textures(&scene_shader_text(true), path);
+            let src = scene_shader_for(true, path);
             assert!(!src.contains("models[") && !src.contains("inst_params[") && !src.contains("draw_list["));
             assert_eq!(src.contains("var<storage"), path == ArrayPath::VertexTextures, "{path:?}");
             let module = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{path:?}: {}", e.emit_to_string(&src)));
@@ -11726,6 +11749,9 @@ mod tests {
                     let vertex = entry.stage == naga::ShaderStage::Vertex;
                     if vertex || path == ArrayPath::NoStorage {
                         assert!(!out.contains(" buffer "), "{path:?} {version:?} {}: a storage block", entry.name);
+                    }
+                    if path == ArrayPath::NoStorage {
+                        assert!(!out.contains("textureGather"), "{path:?} {version:?} {}: textureGather", entry.name);
                     }
                 }
             }
