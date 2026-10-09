@@ -103,7 +103,7 @@ pub(crate) fn build(device: &wgpu::Device, scene: &SceneBase, shadow_size: u32) 
                 compilation_options: Default::default(),
             }),
             multiview_mask: None,
-            cache: crate::pipeline_cache::current(device).as_ref(),
+            cache: crate::pipeline_cache::get(device).as_ref(),
         })
     };
     let shadow_clear_pipeline = clear_pipeline(device);
@@ -170,6 +170,6 @@ fn clear_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         multisample: Default::default(),
         fragment: None,
         multiview_mask: None,
-        cache: crate::pipeline_cache::current(device).as_ref(),
+        cache: crate::pipeline_cache::get(device).as_ref(),
     })
 }

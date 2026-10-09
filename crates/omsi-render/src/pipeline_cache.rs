@@ -1,105 +1,115 @@
-//! The pipelines compiled at a start kept for the next one: the driver's own compiled
-//! shaders (Vulkan's pipeline cache; on OpenGL and ANGLE the linked programs' binaries),
-//! in `~/.openomsi/cache`, one file per graphics chip and interface. On ANGLE the scene's
-//! pipelines took about 6 s each to compile, some 70 s of every start on a Radeon R7 200;
-//! a phone compiles them at every start as well. wgpu refuses data of another driver,
-//! chip or version itself (and starts empty), so an update or another card only costs
-//! one compiling start. OMSI_NO_PIPELINE_CACHE=1 compiles everything at every start.
+//! The driver's compiled pipelines kept between runs (`~/.openomsi/cache/pipelines-*.bin`).
+//!
+//! Vulkan and OpenGL (the fork's `PIPELINE_CACHE` for program binaries: ANGLE, phones) compile
+//! every pipeline from the shader text at each start; with the cache the second start takes the
+//! driver's binaries instead - seconds on a phone's GL driver. Metal and Direct3D 12 keep their
+//! own caches and do not offer the feature. Data from another driver or GPU is refused by wgpu
+//! (`fallback`), so a driver update only costs one slow start. OMSI_NO_PIPELINE_CACHE=1 leaves it
+//! out.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-/// The cache of the device the pipelines are made on now, and its file.
-static CACHE: Mutex<Option<(wgpu::Device, wgpu::PipelineCache, PathBuf)>> = Mutex::new(None);
+struct Slot {
+    device: wgpu::Device,
+    cache: wgpu::PipelineCache,
+    path: PathBuf,
+}
 
-/// The cache files are no bigger than this (a whole set is a few MB).
-const MAX_BYTES: u64 = 256 << 20;
+/// The cache of the device last opened (one game renderer at a time; a device opened again after
+/// a fallback, or a second renderer, replaces it - the other one's pipelines are made without).
+/// (Devices compare with their instance since the fork's oo/device-eq: two instances' devices
+/// had the same ids, and a test's device took another's cache, "PipelineCache does not exist".)
+static SLOT: Mutex<Option<Slot>> = Mutex::new(None);
 
-/// The feature to ask the device for: the cache where the adapter keeps one.
-pub(crate) fn wanted(adapter: &wgpu::Adapter, bare: bool) -> wgpu::Features {
-    if bare || omsi_cfg::flags::OMSI_NO_PIPELINE_CACHE.is_set() {
+/// Whether to ask the device for the feature.
+pub(crate) fn wanted(adapter: &wgpu::Adapter) -> wgpu::Features {
+    if omsi_cfg::flags::OMSI_NO_PIPELINE_CACHE.is_set() {
         return wgpu::Features::empty();
     }
     adapter.features() & wgpu::Features::PIPELINE_CACHE
 }
 
-/// The file of this chip, driver and interface.
 fn path(info: &wgpu::AdapterInfo) -> Option<PathBuf> {
-    use std::hash::{Hash, Hasher};
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     let home = PathBuf::from(home);
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (&info.name, info.vendor, info.device, &info.driver, &info.driver_info).hash(&mut h);
-    // (an unusable home: no cache rather than a file in the game's folder)
-    home.is_absolute().then(|| home.join(format!(".openomsi/cache/pipelines-{:?}-{:016x}.bin", info.backend, h.finish()).to_lowercase()))
+    home.is_absolute().then(|| home.join(".openomsi/cache").join(file_name(info.backend, info.vendor, info.device)))
 }
 
-/// The cache for `device`, from its file where there is one.
+// (one file per GPU: a laptop's two GPUs would throw each other's data away)
+fn file_name(backend: wgpu::Backend, vendor: u32, device: u32) -> String {
+    format!("pipelines-{}-{vendor:04x}-{device:04x}.bin", format!("{backend:?}").to_lowercase())
+}
+
+/// Open the cache of a device made with [`wanted`]'s feature, from last run's file.
 pub(crate) fn open(device: &wgpu::Device, info: &wgpu::AdapterInfo) {
-    let mut slot = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
     *slot = None;
-    let Some(path) = path(info).filter(|_| device.features().contains(wgpu::Features::PIPELINE_CACHE)) else { return };
+    if !device.features().contains(wgpu::Features::PIPELINE_CACHE) {
+        return;
+    }
+    let Some(path) = path(info) else { return };
+    // (a cache is a few MB; anything far bigger is not ours)
     let data = std::fs::metadata(&path)
         .ok()
-        .filter(|m| m.len() <= MAX_BYTES)
+        .filter(|m| m.len() < 256 << 20)
         .and_then(|_| std::fs::read(&path).ok());
-    // SAFETY: the data is only ever what `get_data` of a cache of this chip, driver and
-    // interface returned (see `path`), and wgpu checks its header against the device
+    // SAFETY: the data was written by `save` from `get_data` of a cache of this backend; wgpu
+    // checks its header against the adapter and driver and starts empty on a mismatch
+    // (`fallback`), and a file cut short fails the same check.
     let cache = unsafe {
-        device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor { label: Some("omsi pipelines"), data: data.as_deref(), fallback: true })
+        device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+            label: Some("omsi pipelines"),
+            data: data.as_deref(),
+            fallback: true,
+        })
     };
-    log::info!("pipeline cache: {} ({})", path.display(), match &data { Some(d) => format!("{} KB from the last start", d.len() >> 10), None => "new".into() });
-    *slot = Some((device.clone(), cache, path));
+    log::info!("pipeline cache: {} ({})", path.display(), match &data { Some(d) => format!("{} KB from the last run", d.len() / 1024), None => "new".into() });
+    *slot = Some(Slot { device: device.clone(), cache, path });
 }
 
-/// The cache to make pipelines with on `device`.
-pub(crate) fn current(device: &wgpu::Device) -> Option<wgpu::PipelineCache> {
-    let slot = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    slot.as_ref().filter(|(d, _, _)| d == device).map(|(_, c, _)| c.clone())
+/// The cache to build `device`'s pipelines with, if it has one.
+pub(crate) fn get(device: &wgpu::Device) -> Option<wgpu::PipelineCache> {
+    let slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+    slot.as_ref().filter(|s| &s.device == device).map(|s| s.cache.clone())
 }
 
-/// Writes the cache of `device` to its file (a copy put in place whole: a crash or another
-/// game writing at the same time leaves a complete file).
-pub(crate) fn save(device: &wgpu::Device) {
-    let Some((cache, path)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(d, _, _)| d == device).map(|(_, c, p)| (c.clone(), p.clone())) else {
+/// Write the cache to its file (after the pipelines were made, and at the end of the game, for
+/// the ones made later: puddles, Enhanced+). Nothing happens without a cache.
+pub fn save() {
+    let slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(s) = slot.as_ref() else { return };
+    let Some(data) = s.cache.get_data() else { return };
+    if data.is_empty() || std::fs::metadata(&s.path).is_ok_and(|m| m.len() == data.len() as u64) {
         return;
-    };
-    let Some(data) = cache.get_data().filter(|d| !d.is_empty() && d.len() as u64 <= MAX_BYTES) else { return };
-    let Some(parent) = path.parent() else { return };
-    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
-    let written = std::fs::create_dir_all(parent).and_then(|_| std::fs::write(&temp, &data)).and_then(|_| std::fs::rename(&temp, &path));
-    match written {
-        Ok(()) => log::info!("pipeline cache: {} KB written", data.len() >> 10),
+    }
+    if let Some(dir) = s.path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // written beside and renamed over: a game ended mid-write leaves the old file whole
+    let tmp = s.path.with_extension("tmp");
+    match std::fs::write(&tmp, &data).and_then(|_| std::fs::rename(&tmp, &s.path)) {
+        Ok(()) => log::info!("pipeline cache saved: {} KB", data.len() / 1024),
         Err(e) => {
-            let _ = std::fs::remove_file(&temp);
-            log::warn!("pipeline cache: {} could not be written: {e}", path.display());
+            let _ = std::fs::remove_file(&tmp);
+            log::warn!("pipeline cache not saved to {}: {e}", s.path.display());
         }
+    }
+}
+
+/// Forget `device`'s cache (the device is lost or failed to make the renderer).
+pub(crate) fn close(device: &wgpu::Device) {
+    let mut slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|s| &s.device == device) {
+        *slot = None;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    /// The file names one chip, driver and interface: another of any of them, another file.
     #[test]
-    fn each_chip_driver_and_interface_has_a_file_of_its_own() {
-        let info = |backend, driver: &str| wgpu::AdapterInfo {
-            name: "AMD Radeon R7 200 Series".into(),
-            vendor: 0x1002,
-            device: 0x6613,
-            device_type: wgpu::DeviceType::DiscreteGpu,
-            device_pci_bus_id: String::new(),
-            driver: driver.into(),
-            driver_info: String::new(),
-            backend,
-            subgroup_min_size: 64,
-            subgroup_max_size: 64,
-            transient_saves_memory: false,
-        };
-        let a = super::path(&info(wgpu::Backend::Gl, "27.20"));
-        let Some(a) = a else { return };
-        assert!(a.to_string_lossy().contains("pipelines-gl-"), "{}", a.display());
-        assert_eq!(Some(a.clone()), super::path(&info(wgpu::Backend::Gl, "27.20")));
-        assert_ne!(Some(a.clone()), super::path(&info(wgpu::Backend::Gl, "27.21")));
-        assert_ne!(Some(a), super::path(&info(wgpu::Backend::Vulkan, "27.20")));
+    fn file_names_backend_and_gpu() {
+        assert_eq!(super::file_name(wgpu::Backend::Gl, 0x5143, 0x43050a01), "pipelines-gl-5143-43050a01.bin");
+        assert_eq!(super::file_name(wgpu::Backend::Vulkan, 0x10de, 0x2684), "pipelines-vulkan-10de-2684.bin");
     }
 }

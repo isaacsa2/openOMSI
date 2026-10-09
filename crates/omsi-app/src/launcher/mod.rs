@@ -402,7 +402,10 @@ impl ApplicationHandler for Launcher {
             }
         }
         if omsi_cfg::flags::OMSI_BACKGROUND.is_set() {
-            attrs = attrs.with_active(false);
+            // (a test window is never shown either: OMSI_LAUNCHER_SHOT draws into a texture of
+            // its own, so the pictures of a hidden window come out the same, and nothing pops
+            // up on the screen of whoever runs the checks)
+            attrs = attrs.with_active(false).with_visible(false);
         }
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -443,9 +446,17 @@ impl ApplicationHandler for Launcher {
         if !matches!(event, WindowEvent::RedrawRequested) {
             self.last_input = Instant::now();
         }
+        // (the game opens on the screen the launcher stands on, #1959)
+        if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::Focused(true)) {
+            if let Some(w) = self.window.as_ref() {
+                let (at, size) = (w.outer_position().ok(), w.outer_size());
+                core::instances::set_screen_at(at.map(|p| (p.x + size.width as i32 / 2, p.y + size.height as i32 / 2)));
+            }
+        }
         match event {
             WindowEvent::CloseRequested => {
                 self.pages.pads.cancel_feedback_test();
+                showroom::clear_placing_mark();
                 event_loop.exit();
             }
             WindowEvent::Touch(t) => self.touch(t, scale),
@@ -993,6 +1004,7 @@ impl Launcher {
 
     fn check_exit(&mut self, event_loop: &ActiveEventLoop) {
         if self.exit_after.map(|e| self.started.elapsed().as_secs_f32() >= e).unwrap_or(false) {
+            showroom::clear_placing_mark();
             event_loop.exit();
         }
     }

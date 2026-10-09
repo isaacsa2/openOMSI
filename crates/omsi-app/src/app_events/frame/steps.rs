@@ -388,7 +388,7 @@ pub(crate) fn light_vehicles<'a>(
 pub(crate) fn picture_lighting(
     daylight: &omsi_sim::Daylight,
     weather: Option<&omsi_content::weather::Weather>,
-    cloud_drift: [f32; 2],
+    cloud_drift: [f32; 4],
     wetness: f32,
     world: Option<&World>,
     inside: Option<&omsi_sim::VehicleInstance>,

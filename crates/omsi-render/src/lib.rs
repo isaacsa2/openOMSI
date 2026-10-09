@@ -7,10 +7,10 @@ pub mod atmosphere;
 pub mod clouds;
 mod gpu_memory;
 mod passes;
-mod pipeline_cache;
 mod present_thread;
 use passes::{Encoders, FrameArgs, FrameEnv, PassTimers, StageClock};
 use gpu_memory::adapter_vram_mb;
+pub mod pipeline_cache;
 mod pipelines;
 mod puddles;
 mod rt;
@@ -84,6 +84,13 @@ struct CameraUniform {
     /// Windy trees: xy the weather's wind (m/s, world; 0 with the setting off), zw how far
     /// the air has carried the gusts since the start (m, modulo the shaders' PATTERN_PERIOD).
     tree_wind: [f32; 4],
+    /// The rear section of the player's articulated vehicle as `inside_*` (w of the third
+    /// 0 without one): the weather stays out of it as well (#1967: it snowed and rained in
+    /// the back of an articulated bus). Last, so that the shaders that do not read it can
+    /// leave it out of their copy of this struct.
+    inside2_a: [f32; 4],
+    inside2_b: [f32; 4],
+    inside2_c: [f32; 4],
 }
 
 /// The period the sky's cloud patterns repeat with (m): 5 x the cloud field (14 km), 8 x
@@ -687,6 +694,9 @@ pub struct Lighting {
     /// Cloud layer: density 0..1 and the texture offset (wind drift), 0 = no clouds.
     pub cloud_density: f32,
     pub cloud_offset: [f32; 2],
+    /// The weather of the classic sky (Vanilla, Vanilla+): its haze and its cloud layer, as
+    /// Omsi.exe draws them (sky.wgsl `fs_main`).
+    pub vanilla_sky: VanillaSky,
     /// Sun shadow map (off in mirrors and at night).
     pub shadows: bool,
     /// How wet the roads are (0..1): rain darkens them and makes them mirror the sky.
@@ -824,6 +834,7 @@ impl Default for Lighting {
             sky_weights: [1.0, 0.0, 0.0],
             cloud_density: 0.0,
             cloud_offset: [0.0; 2],
+            vanilla_sky: VanillaSky::default(),
             shadows: true,
             snowfall: 0.0,
             wind: Vec3::ZERO,
@@ -1361,6 +1372,14 @@ pub struct Scene {
     cpu_params: Vec<[f32; 4]>,
     /// The light grid and lights as last uploaded, so that unchanged ones are not sent again.
     last_grid: Vec<u32>,
+    /// The grid before that, the room the next one is made in: half a megabyte, made and
+    /// let go twice a frame (the window's picture and a mirror's), went back to the system
+    /// each time and came back as fresh pages to be faulted in.
+    grid_scratch: Vec<u32>,
+    /// The smoke's sprites, their order and the sorted list of the last `prepare_smoke`,
+    /// kept for the next: every car's exhaust is thousands of sprites, and lists made anew
+    /// each time grew by copying and went back to the system (see `grid_scratch`).
+    smoke_scratch: (Vec<(f64, GpuCorona)>, Vec<(f64, u32)>, Vec<GpuCorona>),
     /// The street lamps that had a shadow map last frame (their places in centimetres):
     /// they keep it against a lamp only a little stronger (`prepare_lights`).
     lamp_shadow_last: Vec<[i64; 3]>,
@@ -2006,6 +2025,8 @@ pub struct Renderer {
     corona_sampler: wgpu::Sampler,
     sky_layout: wgpu::BindGroupLayout,
     sky_sampler: wgpu::Sampler,
+    /// The classic sky's weather (`VanillaSkyUniform`, sky bind group binding 10).
+    vanilla_sky_buf: wgpu::Buffer,
     /// The enhanced clouds' noise (clouds.rs): the shape map, the detail volume and their
     /// repeating, mip-mapped sampler (sky bind group bindings 6-8).
     cloud_shape_view: wgpu::TextureView,
@@ -2433,6 +2454,42 @@ fn color_targets(format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>, w
     }
     v
 }
+/// The weather of the classic sky, the values Omsi.exe draws its haze and clouds from
+/// (its THimmel render 0x5d8e98 and the cloud layer 0x754e44).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct VanillaSky {
+    /// The weather's `[clouds]` height H (m over the map's zero): the apex of the cloud
+    /// cone, and the measure of the haze over the horizon - also with no clouds (-1).
+    pub cloud_height: f32,
+    /// The weather's `[fog]` range as the file gives it (m): the haze over the horizon.
+    pub fog_range: f32,
+    /// How far one sees (m: the fog range, shortened by rain and snow): the far clouds go
+    /// over into the fog colour.
+    pub visibility: f32,
+    /// The cloud type's size in `Weather/clouds.cfg` (m of ground a tile of its texture
+    /// covers); 0: no clouds.
+    pub cloud_size: f32,
+    /// The cloud type is an `ovc` one (its texture an opaque deck).
+    pub overcast: bool,
+    /// How far the wind has carried the clouds (m, east and north; modulo
+    /// `VANILLA_CLOUD_PERIOD`).
+    pub cloud_offset: [f32; 2],
+}
+
+/// The period the classic clouds' drift is kept in (m): a whole number of tiles of the stock
+/// cloud types (1000 and 2000 m), so that the wrap does not move them.
+pub const VANILLA_CLOUD_PERIOD: f32 = 10000.0;
+
+/// The classic sky's uniform (sky.wgsl `VanillaSkyUniform`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct VanillaSkyUniform {
+    /// cloud height, cloud size (0: none), drift east, drift north
+    cloud: [f32; 4],
+    /// fog range, visibility, 1 for an overcast type, the render origin's height
+    haze: [f32; 4],
+}
+
 /// Half size of the area around the camera covered by the near shadow cascade (m).
 pub const SHADOW_RANGE: f32 = 140.0;
 /// Half size of the far cascade (m): coarser, but reaches the whole visible street.
@@ -2642,7 +2699,10 @@ impl Renderer {
             // textures are decoded to RGBA by upload_texture on this device.
             required_features = wgpu::Features::empty();
         }
-        required_features |= pipeline_cache::wanted(&adapter, intel_vulkan_safe);
+        // the driver's compiled pipelines kept for the next start (Vulkan, OpenGL)
+        if !intel_vulkan_safe {
+            required_features |= pipeline_cache::wanted(&adapter);
+        }
         // Enhanced+: hardware ray queries where the device has them (Apple silicon from the
         // M3/A17 on, RTX and RDNA 2 cards and newer through Vulkan and Direct3D 12 - with DXC,
         // which the Windows build ships beside the game); OMSI_NO_RT=1 leaves them out. Should
@@ -2668,6 +2728,10 @@ impl Renderer {
             Some("nostorage") => ArrayPath::NoStorage,
             _ if !downlevel.contains(wgpu::DownlevelFlags::FRAGMENT_STORAGE) || storage < 2 => ArrayPath::NoStorage,
             _ if !downlevel.contains(wgpu::DownlevelFlags::VERTEX_STORAGE) || storage < 3 => ArrayPath::VertexTextures,
+            // (the draw list and the lamps' grid are arrays of u32, 4 bytes, which such a device
+            // cannot bind as storage buffers: ANGLE on Vulkan, an Exynos' Xclipse, failed the
+            // shadow pipeline with "a size that is a multiple of 16 bytes", #1857)
+            _ if !downlevel.contains(wgpu::DownlevelFlags::BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED) => ArrayPath::NoStorage,
             _ => ArrayPath::Storage,
         };
         ARRAY_PATH.store(path as u8, std::sync::atomic::Ordering::Relaxed);
@@ -2764,6 +2828,7 @@ impl Renderer {
         }
         if let Some(why) = made.as_ref().ok().and_then(|r| r.device_lost()) {
             drop(made);
+            pipeline_cache::close(&device);
             if basic_pipelines() {
                 return Err(anyhow!("the graphics device was lost while the pipelines were made: {why}"));
             }
@@ -2772,6 +2837,10 @@ impl Renderer {
             // (and so from the start next time, see `fallback_load`)
             fallback_store(&name, Some((1, true)));
             return Box::pin(Self::new_on(adapter, surface, asked_format, asked_options)).await;
+        }
+        match &made {
+            Ok(_) => pipeline_cache::save(),
+            Err(_) => pipeline_cache::close(&device),
         }
         made
     }
@@ -2835,7 +2904,6 @@ impl Renderer {
                     if remembered != Some((msaa, basic)) && (msaa != options.msaa || basic || remembered.is_some()) {
                         fallback_store(name, (msaa != options.msaa || basic).then_some((msaa, basic)));
                     }
-                    pipeline_cache::save(&renderer.device);
                     made = Ok(Renderer { mesh_pages, ..renderer });
                     break;
                 }
@@ -2986,6 +3054,7 @@ impl Renderer {
             corona_sampler: coronas.sampler,
             sky_layout: sky.layout,
             sky_sampler,
+            vanilla_sky_buf: sky.vanilla_buf,
             cloud_shape_view: sky.cloud_shape_view,
             cloud_detail_view: sky.cloud_detail_view,
             cloud_sampler: sky.cloud_sampler,
@@ -3174,6 +3243,8 @@ impl Renderer {
             cpu_models: Vec::new(),
             cpu_params: Vec::new(),
             last_grid: Vec::new(),
+            grid_scratch: Vec::new(),
+            smoke_scratch: Default::default(),
             lamp_shadow_last: Vec::new(),
             last_lights: Vec::new(),
             bind_groups: HashMap::new(),
@@ -4581,6 +4652,19 @@ impl Renderer {
         textures: [TextureId; 3],
         clouds: Option<TextureId>,
     ) {
+        self.set_sky_textures_vanilla(scene, textures, clouds, None)
+    }
+
+    /// Sky gradients, the cloud field (`clouds`, the enhanced sky's and its weather's
+    /// picture) and the weather's cloud type texture as it is (`vanilla_clouds`: the
+    /// classic sky's cloud layer, see `VanillaSky`).
+    pub fn set_sky_textures_vanilla(
+        &self,
+        scene: &mut Scene,
+        textures: [TextureId; 3],
+        clouds: Option<TextureId>,
+        vanilla_clouds: Option<TextureId>,
+    ) {
         let views: Vec<&wgpu::TextureView> =
             textures.iter().map(|t| &scene.textures[*t].view).collect();
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -4625,6 +4709,17 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 8,
                     resource: wgpu::BindingResource::Sampler(&self.cloud_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(match vanilla_clouds {
+                        Some(c) => &scene.textures[c].view,
+                        None => &self.black_texture.view,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: self.vanilla_sky_buf.as_entire_binding(),
                 },
             ],
         });
@@ -6076,7 +6171,9 @@ impl Renderer {
         for l in &scene.interior_lights {
             gpu_lights.push(gpu_light(l, (l.position - ro).as_vec3()));
         }
-        let mut grid = vec![u32::MAX; side * side * LIGHT_CELL_CAP];
+        let mut grid = std::mem::take(&mut scene.grid_scratch);
+        grid.clear();
+        grid.resize(side * side * LIGHT_CELL_CAP, u32::MAX);
         for l in &scene.lights {
             if !drawn_by(l, enhanced) {
                 continue;
@@ -6159,7 +6256,7 @@ impl Renderer {
         }
         scene.last_lights.clear();
         scene.last_lights.extend_from_slice(lbytes);
-        scene.last_grid = grid;
+        scene.grid_scratch = std::mem::replace(&mut scene.last_grid, grid);
         if rebuilt {
             self.rebuild_camera_bind_group(scene);
         }
@@ -6296,18 +6393,34 @@ impl Renderer {
     /// Upload this frame's smoke particles, farthest first (they are blended over each other).
     fn prepare_smoke(&self, scene: &mut Scene, eye: DVec3) {
         let ro = scene.render_origin;
-        let mut order: Vec<(f64, GpuCorona)> = scene
-            .smoke
-            .iter()
-            .filter_map(|p| smoke_sprite(p, ro).map(|g| (-(p.position - eye).length_squared(), g)))
-            .collect();
+        // (the order is sorted as keys with the sprite's place in the list, the sprites
+        // gathered after: sorting the 80-byte sprites themselves moved them about many
+        // times over, for the window's picture and again for each mirror; a stable sort of
+        // the same keys gives the same order)
+        let (mut sprites, mut order, mut data) = std::mem::take(&mut scene.smoke_scratch);
+        sprites.clear();
+        sprites.extend(
+            scene
+                .smoke
+                .iter()
+                .filter_map(|p| smoke_sprite(p, ro).map(|g| (-(p.position - eye).length_squared(), g))),
+        );
+        order.clear();
+        order.extend(sprites.iter().enumerate().map(|(i, (d, _))| (*d, i as u32)));
         order.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let data: Vec<GpuCorona> = order.into_iter().map(|(_, g)| g).collect();
+        data.clear();
+        data.extend(order.iter().map(|&(_, i)| sprites[i as usize].1));
         scene.smoke_count = data.len() as u32;
+        self.upload_smoke(scene, &data);
+        scene.smoke_scratch = (sprites, order, data);
+    }
+
+    /// The sorted smoke sprites into the smoke buffer, grown when they do not fit.
+    fn upload_smoke(&self, scene: &mut Scene, data: &[GpuCorona]) {
         if data.is_empty() {
             return;
         }
-        let bytes: &[u8] = bytemuck::cast_slice(&data);
+        let bytes: &[u8] = bytemuck::cast_slice(data);
         match &scene.smoke_buf {
             Some(b) if b.size() as usize >= bytes.len() => self.queue.write_buffer(b, 0, bytes),
             _ => {
