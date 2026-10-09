@@ -4,6 +4,48 @@ Every push to `main` is released as `MAJOR.MINOR.COMMIT` (see
 [docs/VERSIONING.md](docs/VERSIONING.md)); the downloads are on the
 [Releases](https://github.com/openOMSI-Project/openOMSI/releases) page.
 
+## 0.2.25 - 2026-10-09
+
+### Fixes
+- **Snow chosen while driving now covers the ground in Vanilla and Vanilla+.**
+  - Switching to a snowy weather mid-game already brought the falling snow and the winter textures on the roads, objects and trees.
+  - The plain ground kept its summer grass, because the material all tiles share was only made once. It is now made again for the new season's textures.
+  - Enhanced hid this under its own snow cover.
+- **Destination displays no longer show every variant at once.**
+  - Some buses stack several versions of a sign (other fonts or letter styles) as separate meshes and switch them by a variable they never declare.
+  - Omsi.exe creates such a variable at 0 when it reads the model, so only the variant for 0 shows. openOMSI used to leave all of them visible, faded over the correct one.
+  - Undeclared `[visible]` and `[alphascale]` variables now read 0 on vehicles and scenery objects, and `Colorscheme` is always available to a vehicle's model.
+- **AI cars no longer back up at junctions made of very short road pieces** ([#2041](https://github.com/openOMSI-org/openOMSI/pull/2041), by @SpicySpaceman). Two short paths linked both ways could send a car back onto the one it had just left. The cars now never choose that return. Seen on TH_Wald and Hamburg109.
+
+## 0.2.24 - 2026-10-09
+
+### New
+- **Rain quality setting.** Rain is expensive to draw, so Graphics → *Rain quality* (in the launcher and in the game) now sets how much of it is drawn.
+  - **High** (the default) is as before.
+  - **Medium** paints the drops on the glass 15 times a second instead of 30, keeps only your own bus's spray and draws half the falling streaks.
+  - **Low** shows OMSI 2's own texture rain on the glass (from the next bus you load), so there are no drops to simulate and no extra copy of the picture. It throws no spray and draws a quarter of the streaks.
+- **Trams** ([#1793](https://github.com/openOMSI-org/openOMSI/pull/1793), by @Maarceeli).
+  - Multi-car trams and trains follow the track on both bogies, and each car of a consist hangs where it should.
+  - A tram is put on the track running its own way, not the one beside it.
+  - Driving against the track's direction no longer flips the vehicle round.
+  - Rail vehicles' shadows lie flat.
+  - Drivable rail vehicles with a front coupler appear in the vehicle list.
+  - Consists that come back round to their first part (the eleven-part NF6D) are loaded whole.
+- **Clickable scenery objects** ([#1793](https://github.com/openOMSI-org/openOMSI/pull/1793)). Switches and buttons on scenery objects (`[mouseevent]`) can be clicked, dragged and turned with the wheel.
+- **More for html pages** ([#1992](https://github.com/openOMSI-org/openOMSI/pull/1992), by @pcy200409).
+  - Departures now say how many stops away each bus is, how full it is, how late it runs and whether it is the last trip of the day.
+  - Pages can read the weather and the depot's destination strings.
+- **Korean, Chinese and Japanese text on html pages** ([#1991](https://github.com/openOMSI-org/openOMSI/pull/1991), by @pcy200409). Characters the built-in font lacks are drawn with Malgun Gothic on Windows or AppleGothic on macOS, or with any font set in `OMSI_HTML_FALLBACK_FONT`.
+
+### Changes
+- **The ambience is removed.** The synthesised wind, leaves, raindrops, thunder, birds, crickets, town hum and tyre sounds added in 0.2.21 are gone, together with their settings. OMSI 2's own sounds play as they always did, and the bus scripts still learn what each wheel rolls on (`Axle_SurfaceID`).
+
+### Fixes
+- **Objects placed along a spline** stand where the map puts them, without gaps or overlaps where a row crosses into the next tile ([#2032](https://github.com/openOMSI-org/openOMSI/pull/2032), by @KYChung1287). This covers bridge piers, street lamps, catenary masts, fences and road markings.
+- **Scenery shows its own textures** ([#2006](https://github.com/openOMSI-org/openOMSI/pull/2006), by @KYChung1287). A texture missing from an object's folders is no longer borrowed from another folder (a gantry wearing the pack's stock sign, a plate wearing asphalt). Fully opaque sign pictures no longer fade into the background.
+- **Steam overlay** opens with Shift+Tab, because Steam now starts before the graphics and the window ([#2001](https://github.com/openOMSI-org/openOMSI/pull/2001), by @shamough1792).
+- **The French menu title** is plain "openOMSI" ([#2024](https://github.com/openOMSI-org/openOMSI/pull/2024), by @Showtc).
+
 ## 0.2.23 - 2026-10-09
 
 ### Changes

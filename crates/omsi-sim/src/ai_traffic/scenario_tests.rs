@@ -323,3 +323,67 @@ fn a_car_at_a_merge_gets_its_turn_in_a_rolling_queue() {
         assert!(at.is_some_and(|t| t < 30.0), "queue at {v} m/s: merged after {at:?} s");
     }
 }
+
+#[test]
+fn short_consecutive_paths_do_not_send_cars_backwards() {
+    let f = Fixture::new();
+    // Artificial straight road with two pieces shorter than the linking tolerance.
+    // A backward link makes the planned way jump back and leaves the body following
+    // a folded path, even though there is no obstacle on the road.
+    let mut lanes = Vec::new();
+    let mut y = 0.0;
+    for len in [30.0, 0.47, 1.0, 25.0, 600.0] {
+        lanes.push(street(DVec3::new(0.0, y, 0.0), 0.0, len));
+        y += len;
+    }
+    let mut net = Network { lanes, ..Default::default() };
+    net.link(1.5);
+    for seed in 1..=16 {
+        let mut copy = Network { lanes: net.lanes.clone(), ..Default::default() };
+        copy.link(1.5);
+        let mut t = traffic(&f, copy);
+        let id = add_car(&mut t, &f, 0, 26.0, seed, Some(5.0));
+        let mut previous = 26.0;
+        for _ in 0..200 {
+            t.tick(0.05, None);
+            let car = t.cars.iter().find(|c| c.id == id).expect("continuous road");
+            let y = car.state.way_point(&t.net, 0.0).y;
+            assert!(y >= previous - 0.01, "seed {seed}: {previous} -> {y}");
+            previous = y;
+        }
+        assert!(previous > 60.0, "seed {seed} stuck at {previous}");
+        let car = t.cars.iter().find(|c| c.id == id).unwrap();
+        assert!(car.vehicle.position.y > 60.0, "seed {seed}: body stuck at {:?}", car.vehicle.position);
+    }
+}
+
+#[test]
+fn cars_still_cross_a_finite_exit_when_its_short_return_is_not_chosen() {
+    let f = Fixture::new();
+    let a = street(DVec3::ZERO, 0.0, 30.0);
+    let finite = street(a.end(), 10.0, 20.0);
+    let short = street(finite.end(), 10.0, 0.47);
+    let next = street(short.end(), 10.0, 1.0);
+    let exit = street(next.end(), 10.0, 280.0);
+    let long = street(a.end(), 350.0, 700.0);
+    let lanes = vec![a, finite, short, next, exit, long];
+    let mut crossed = [0; 2];
+    for seed in 1..=32 {
+        let mut net = Network { lanes: lanes.clone(), ..Default::default() };
+        net.link(1.5);
+        let mut t = traffic(&f, net);
+        let id = add_car(&mut t, &f, 0, 26.0, seed, Some(5.0));
+        run(&mut t, 15.0);
+        let car = t.cars.iter().find(|c| c.id == id).expect("ample road beyond the join");
+        match car.state.lane {
+            4 => {
+                crossed[0] += 1;
+                assert!(car.state.s > 30.0, "car did not drive past the short join");
+                assert!(car.vehicle.position.y > 70.0, "body did not cross the join");
+            }
+            5 => crossed[1] += 1,
+            other => panic!("car is still on approach lane {other}"),
+        }
+    }
+    assert!(crossed.iter().all(|&n| n > 0), "a usable exit lost its traffic: {crossed:?}");
+}
