@@ -36,6 +36,11 @@ use crate::traffic::Traffic;
 
 // neutral dark, half transparent, calm
 const NAV_REDRAW_S: f32 = 1.0 / 30.0;
+/// Frames between two drawings of the navigator at least. Below 30 fps it was drawn every
+/// frame, and a drawing is a pass of its own (4x MSAA, its own submit): on OpenGL, where
+/// wgpu makes the GL calls in the submit, 4.2 ms of a 43 ms frame (a Radeon R7 200, 23
+/// fps), against 0.6 ms on Vulkan. Every other frame halves that where frames are slow.
+const NAV_REDRAW_FRAMES: u32 = 2;
 const PANEL: Color = Color::rgba(10, 10, 10, 0.70);
 // (the bars under the texts darken whatever the opacity setting leaves of the panel: at a
 // third the cab showed through behind the next stop)
@@ -283,6 +288,8 @@ pub struct Navigator {
     pub panel_overlay: Option<usize>,
     pub cockpit_display: bool,
     drawn_at: f32,
+    /// Frames since the last drawing (see `NAV_REDRAW_FRAMES`).
+    frames_since_drawn: u32,
     pub enabled: bool,
     /// The next stops with their times under the map (Shift+N cycles map, map and
     /// schedule, off).
@@ -419,6 +426,7 @@ impl Navigator {
             panel_overlay: None,
             cockpit_display: false,
             drawn_at: f32::MIN,
+            frames_since_drawn: u32::MAX,
             enabled,
             schedule: false,
             speed_avg: 8.0,
@@ -992,8 +1000,11 @@ impl Navigator {
         }
         let (tex, _, _) = self.target.unwrap();
         let Some(view) = renderer.texture_view(scene, tex) else { return };
-        if !self.city.open && (resized || self.time - self.drawn_at >= NAV_REDRAW_S) {
+        self.frames_since_drawn = self.frames_since_drawn.saturating_add(1);
+        let due = self.time - self.drawn_at >= NAV_REDRAW_S && self.frames_since_drawn >= NAV_REDRAW_FRAMES;
+        if !self.city.open && (resized || due) {
             self.drawn_at = self.time;
+            self.frames_since_drawn = 0;
             self.draw(renderer, &view, (w, h), map_h, f);
         }
         // (the small navigator steps aside while the city map is open)
