@@ -55,6 +55,16 @@ pub(crate) struct PauseView<'a> {
     pub keys: bool,
 }
 
+/// The camera menu does not cover the view it is adjusting. Its narrower
+/// panel also keeps its controls in a single vertical column.
+fn pause_page_width(available: f32, camera_settings: bool) -> f32 {
+    if camera_settings && available >= 1000.0 {
+        (available * 0.58).min(800.0)
+    } else {
+        available
+    }
+}
+
 /// The Material icon of a line of the game menu (the launcher's icon set).
 pub(crate) fn rail_icon(id: &str) -> &'static str {
     match id {
@@ -94,7 +104,13 @@ pub(crate) fn draw(sh: &mut Shell, v: &PauseView) {
     let full = Rect::new(0.0, 0.0, size.x, size.y);
     // the picture beside the rail, dimmed a little; an open list is a page of its own
     sh.ui.p().rect(full, Color::rgba(0, 0, 0, if v.list.is_some() { 0.0 } else { 0.38 }));
-    let page = Rect::new(RAIL_W, 0.0, (size.x - RAIL_W).max(0.0), size.y);
+    // Camera adjustments need the scene in view, not an opaque page covering it.
+    // On wider displays keep a single-column camera panel beside a live view of
+    // the bus; small screens retain the full-width page and usable touch targets.
+    let camera_settings = v.rail_open == Some("camera")
+        && v.list.as_ref().is_some_and(|list| matches!(list.kind, MenuKind::Options));
+    let available = (size.x - RAIL_W).max(0.0);
+    let page = Rect::new(RAIL_W, 0.0, pause_page_width(available, camera_settings), size.y);
     match v.list.as_ref() {
         Some(list) => {
             sh.ui.solid(page);
@@ -727,6 +743,15 @@ fn preview(sh: &mut Shell, p: &Preview, list: &ListView, r: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_camera_settings_leave_the_scene_visible_on_wide_screens() {
+        assert_eq!(pause_page_width(1600.0, true), 800.0);
+        assert_eq!(pause_page_width(1100.0, true), 638.0);
+        // A phone-sized window keeps the full page, as do other settings.
+        assert_eq!(pause_page_width(700.0, true), 700.0);
+        assert_eq!(pause_page_width(1600.0, false), 1600.0);
+    }
 
     #[test]
     fn a_label_that_opens_more_loses_its_dots() {
