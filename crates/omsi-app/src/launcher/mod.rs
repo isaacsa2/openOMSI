@@ -979,7 +979,7 @@ impl Launcher {
         }
         let Some(renderer) = self.renderer.as_mut() else { return };
         let surface = self.surface.as_mut().unwrap();
-        let frame = match surface.acquire() {
+        let frame = match surface.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 surface.resize(renderer, pw, ph);
@@ -987,14 +987,14 @@ impl Launcher {
             }
             _ => return,
         };
-        let view = surface.view(&renderer.device, &frame);
+        let view = frame.texture.create_view(&Default::default());
         if let Some(gpu) = self.gpu.as_mut() {
             let mut enc = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("launcher") });
             gpu.render(&renderer.device, &renderer.queue, &mut enc, &view, (pw, ph), Some(bg), &layers, &draws);
             renderer.queue.submit([enc.finish()]);
         }
         window.pre_present_notify();
-        surface.present(&renderer.device, &renderer.queue, frame);
+        frame.present();
         self.shown = Some((verts, key, Instant::now()));
         if std::mem::take(&mut self.first_frame) {
             log::info!("launcher: first frame presented in {:.2} s", self.started.elapsed().as_secs_f64());
