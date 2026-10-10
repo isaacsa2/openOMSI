@@ -4,9 +4,9 @@ use crate::DEPTH_FORMAT;
 
 /// A native compiler can abort before wgpu returns an error. Record both sides of each
 /// operation so the last unfinished one identifies the module/entry point, not just "sky"
-/// (at info level on OpenGL, where that happened; the texts are only made when logged).
+/// (at debug level: two lines a shader and a pipeline; the texts are only made when logged).
 fn logged<T>(begin: impl FnOnce() -> String, end: impl FnOnce() -> String, op: impl FnOnce() -> T) -> T {
-    let level = if crate::gl_backend() { log::Level::Info } else { log::Level::Debug };
+    let level = log::Level::Debug;
     if !log::log_enabled!(level) {
         return op();
     }

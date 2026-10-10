@@ -1517,6 +1517,12 @@ pub fn gl_backend() -> bool {
     GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// The adapter is ANGLE's (OpenGL ES over Direct3D 11, Windows): its pipelines are made on
+/// a thread of its own (see `angle::compile`).
+fn is_angle(info: &wgpu::AdapterInfo) -> bool {
+    cfg!(windows) && info.backend == wgpu::Backend::Gl && info.name.contains("ANGLE")
+}
+
 /// How the per-draw arrays (the model matrices, the instance parameters, the draw list) and
 /// the point lights reach the scene shader on this device (set in `Renderer::new_on`).
 /// Older OpenGL chips cannot read a storage buffer in a vertex shader - an Intel HD 2500, a
@@ -2863,21 +2869,24 @@ impl Renderer {
             if basic {
                 BASIC_PIPELINES.store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
-            let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let build = || Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
-            let renderer = if cfg!(windows) && info.backend == wgpu::Backend::Gl && info.name.contains("ANGLE") {
-                angle::compile(device, build)
-            } else {
-                build()
+            // (the error scopes are the thread's own: pushed and popped where the pipelines
+            // are made, on ANGLE the compiler thread - from the calling thread they caught
+            // nothing there, and a failed build was taken for a working one)
+            let build = || {
+                let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+                let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+                let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+                let renderer = Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
+                // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
+                #[cfg(feature = "test-hooks")]
+                if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
+                    let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("test"), source: wgpu::ShaderSource::Wgsl("fn broken( {".into()) });
+                }
+                (renderer, [validation.pop(), memory.pop(), internal.pop()])
             };
-            // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
-            #[cfg(feature = "test-hooks")]
-            if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
-                let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("test"), source: wgpu::ShaderSource::Wgsl("fn broken( {".into()) });
-            }
-            let errors = [validation.pop().await, memory.pop().await, internal.pop().await];
+            let (renderer, scopes) = if is_angle(info) { angle::compile(device, build) } else { build() };
+            let [validation, memory, internal] = scopes;
+            let errors = [validation.await, memory.await, internal.await];
             match errors.iter().flatten().next() {
                 None => {
                     if msaa != options.msaa || basic {
@@ -6568,6 +6577,18 @@ impl Renderer {
         None
     }
 
+    /// `Self::build` again with `options`: on ANGLE on the compiler thread of its own (see
+    /// `angle::compile`: on this thread's stack the D3D compiler overflowed it).
+    fn rebuilt(&self, options: RenderOptions) -> Renderer {
+        let (device, queue, name, format) = (self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format);
+        let build = move || Self::build(device, queue, name, format, options);
+        if cfg!(windows) && gl_backend() && self.adapter_name.contains("ANGLE") {
+            angle::compile(&self.device, build)
+        } else {
+            build()
+        }
+    }
+
     /// Rebuild without the ray tracing after a GPU error while it was on (see `rt_error`).
     fn fall_back_without_ray_tracing(&mut self, scene: &mut Scene) {
         log::error!("ray tracing failed on {}; Enhanced+ draws as Enhanced from now on", self.adapter_name);
@@ -6576,7 +6597,7 @@ impl Renderer {
         // (the meshes' shared pages stay on, as after the multisampling fallback below)
         let mesh_pages = self.mesh_pages;
         let in_flight = self.in_flight.take();
-        *self = Renderer { mesh_pages, in_flight: in_flight.into(), ..Self::build(self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format, options) };
+        *self = Renderer { mesh_pages, in_flight: in_flight.into(), ..self.rebuilt(options) };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
@@ -6611,13 +6632,7 @@ impl Renderer {
         };
         let mesh_pages = self.mesh_pages;
         let in_flight = self.in_flight.take();
-        *self = Renderer { mesh_pages, in_flight: in_flight.into(), ..Self::build(
-            self.device.clone(),
-            self.queue.clone(),
-            self.adapter_name.clone(),
-            self.format,
-            options,
-        ) };
+        *self = Renderer { mesh_pages, in_flight: in_flight.into(), ..self.rebuilt(options) };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
