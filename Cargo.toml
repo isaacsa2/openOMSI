@@ -28,6 +28,8 @@ exclude = ["launcher/src-tauri"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+# the oldest compiler the locked dependencies build with (reedsolomon-rs asks for 1.97.1)
+rust-version = "1.97.1"
 license = "MIT"
 
 # Every dependency that more than one crate uses is declared here once, so an update (by

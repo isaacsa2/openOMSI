@@ -1,6 +1,7 @@
 [package]
 name = "omsi-o3d"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Loader for OMSI .o3d binary meshes and DirectX .x text meshes"

@@ -1,6 +1,7 @@
 [package]
 name = "omsi-model"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "model.cfg parser: meshes, materials, animations, lights, text textures (unit mc_complobj)"
