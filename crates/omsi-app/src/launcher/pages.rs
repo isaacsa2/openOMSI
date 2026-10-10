@@ -357,6 +357,11 @@ thread_local! {
     static SETTINGS_COL_H: std::cell::Cell<[[f32; 2]; SETTINGS_TABS.len()]> = const { std::cell::Cell::new([[0.0; 2]; SETTINGS_TABS.len()]) };
 }
 
+/// Narrow screens always stack; wide screens honour the player's saved preference.
+fn settings_should_stack(width: f32, single_column: bool) -> bool {
+    width < 900.0 || single_column
+}
+
 pub fn settings(l: &mut Launcher, area: Rect) {
     let body = l.page_title(area, "Settings", "Every change is saved at once; the game reads them when it starts.");
     // (one tab at a time: the whole page in three columns was taller than two screens, and a
@@ -370,15 +375,26 @@ pub fn settings(l: &mut Launcher, area: Rect) {
     let s = &mut l.state.settings;
     let dirty = &mut l.state.settings_dirty;
     let mut out = Outside { update: l.update.status(), check_updates: false, reset: false, controls: None };
-    // (two columns side by side; where they would be too narrow to read - a phone - one
-    // under the other, each as high as it was the frame before)
-    let stacked = body.w < 900.0;
-    // (each tab scrolled where it was left, not where another one was)
+    // Fewer settings at a glance, without removing any advanced controls.
+    // Keep the two-column view available for players who prefer it.
+    let mut single_column = get(s, "settings_single_column").as_bool().unwrap_or(true);
+    if body.w >= 900.0 && l.ui.toggle(
+        "settings-single-column",
+        Rect::new(body.right() - 208.0, bar.y, 200.0, 36.0),
+        &mut single_column,
+        "Single column",
+    ) {
+        s["settings_single_column"] = json!(single_column);
+        *dirty = 0.3;
+    }
+    let stacked = settings_should_stack(body.w, single_column);
+    // Each tab remembers its scroll position; stacked panels remain compact and centred.
     l.ui.scroll_area(&format!("settings-page-{tab}"), body, &mut |ui, v| {
         let hs = SETTINGS_COL_H.with(|c| c.get())[tab];
-        let w = v.w - 8.0;
+        let w = if stacked { (v.w - 8.0).min(760.0) } else { v.w - 8.0 };
+        let x = if stacked { v.x + ((v.w - 8.0) - w).max(0.0) * 0.5 } else { v.x };
         let (cols, h) = if stacked {
-            ([Rect::new(v.x, v.y, w, hs[0]), Rect::new(v.x, v.y + hs[0] + GAP * 2.0, w, hs[1])], hs[0] + hs[1] + GAP * 2.0)
+            ([Rect::new(x, v.y, w, hs[0]), Rect::new(x, v.y + hs[0] + GAP * 2.0, w, hs[1])], hs[0] + hs[1] + GAP * 2.0)
         } else {
             let cw = (w - GAP * 2.0) / 2.0;
             let h = v.h.max(hs[0]).max(hs[1]);
@@ -2975,6 +2991,16 @@ mod wizard_tests {
         let a = super::wizard_result(&rest, &[[Some(0.9), Some(0.0), None, None, None, None, None, None], [Some(0.0), Some(-1.0), None, None, None, None, None, None], [Some(0.0), Some(1.0), None, None, None, None, None, None], [None; 8]]);
         assert_eq!(a[0], Some((Func::Steering, true)));
         assert_eq!(a[1], Some((Func::ThrottleBrake, true)));
+    }
+}
+
+#[cfg(test)]
+mod settings_layout_tests {
+    #[test]
+    fn a_single_column_is_the_default_and_small_screens_always_stack() {
+        assert!(super::settings_should_stack(1440.0, true));
+        assert!(super::settings_should_stack(600.0, false));
+        assert!(!super::settings_should_stack(1440.0, false));
     }
 }
 
