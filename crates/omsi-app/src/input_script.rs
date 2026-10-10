@@ -429,11 +429,6 @@ impl App {
                     self.skip_next_stop();
                     return true;
                 }
-                // the AI drives the bus, or hands it back (`crate::autopilot`)
-                KeyCode::KeyA if ctrl && shift_now && !alt && !self.chord_bound(code, shift_now, ctrl, alt) => {
-                    self.toggle_autopilot();
-                    return true;
-                }
                 // the object editor (`crate::editor`)
                 KeyCode::KeyE if ctrl && shift_now => {
                     self.toggle_editor();

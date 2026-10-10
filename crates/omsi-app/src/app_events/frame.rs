@@ -49,8 +49,6 @@ impl App {
         let __t = Instant::now();
         let (analog, actions) = self.frame_controllers(dt);
         let analog = self.frame_mouse_drive(dt, analog);
-        // the AI at the wheel (Ctrl+Shift+A, OMSI_AUTOPILOT)
-        let analog = self.frame_autopilot(dt, analog);
         self.frame_pad_actions(analog, actions);
         self.frame_player(dt);
         self.frame_audio(dt);

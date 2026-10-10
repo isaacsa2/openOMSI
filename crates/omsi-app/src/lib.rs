@@ -103,7 +103,6 @@ mod launcher_link;
 mod lan_mods;
 mod memory;
 mod offscreen;
-mod autopilot;
 mod ground_gap;
 mod on_foot;
 mod route_arrows;
@@ -696,7 +695,6 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
         started,
         view,
         input: InputState {
-            autopilot: Default::default(),
             cursor: (0.0, 0.0),
             window_focused: false,
             input_away: false,

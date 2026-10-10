@@ -129,7 +129,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 |---|---|---|---|---|---|
 | `OMSI_API_BLESS` | bool | off | use | plugin | cargo test -p omsi-plugin api_manifest: write docs/plugin-api.json and the reference tables of docs/PLUGINS.md again from the plugin API registry. |
 | `OMSI_AUDIT_LINE` | num | - | test | sim | bus_audit example: the line (number and letter code) the IBIS typist enters instead of the bus's own. |
-| `OMSI_AUTOPILOT` | num | - | use | app | The player's bus drives itself along the lanes at this speed in km/h, behind the traffic and stopping at red lights (a measured window run nobody drives; offscreen: finds where it falls through or leaves the road). |
+| `OMSI_AUTOPILOT` | num | - | use | app | Offscreen: the player's bus follows the lanes at this speed in km/h (finds where it falls through or leaves the road). |
 | `OMSI_BACKGROUND` | bool | off | use | app | A test window that does not take the keyboard focus (OMSI_INPUT drives the handlers directly). |
 | `OMSI_BATCH` | num | - | use | app | Offscreen: prepare the map tiles this many at a time, as the window's streaming does. |
 | `OMSI_BENCH` | num | - | use | app | Offscreen: draw the final picture this many more times and log the median CPU and GPU-wait time. |
