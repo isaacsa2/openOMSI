@@ -1,8 +1,6 @@
 //! wgpu renderer.
 
 pub mod angle;
-#[cfg(test)]
-mod angle_bisect;
 pub mod atmosphere;
 pub mod clouds;
 mod gpu_memory;
