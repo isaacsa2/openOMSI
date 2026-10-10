@@ -379,9 +379,7 @@ pub(crate) fn terminus_match_score(t: &omsi_vehicle::hof::Terminus, wanted: &str
         let wanted_lower = wanted.to_lowercase();
         if candidate_lower == wanted_lower {
             score = score.max(if k < 2 || Some(k - 2) == shown { 3 } else { 2 });
-        } else if wanted_lower.starts_with(&(candidate_lower.clone() + " ")) {
-            score = score.max(1);
-        } else if candidate_lower.starts_with(&(wanted_lower + " ")) {
+        } else if wanted_lower.starts_with(&(candidate_lower.clone() + " ")) || candidate_lower.starts_with(&(wanted_lower + " ")) {
             score = score.max(1);
         }
     }

@@ -789,7 +789,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let var = |n: &str| Some(if n == "a" { 0.5 } else { 0.5 });
+        let var = |_: &str| Some(0.5);
         let e = eval(&ctx(1, false), def, &var);
         // 0.5 * 0.5 * (2 / 8), the distance left to the mixer: 0.25 given to the voice
         assert!((e.gain - 0.25).abs() < 1e-3, "{}", e.gain);
