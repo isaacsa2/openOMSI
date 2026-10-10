@@ -85,13 +85,8 @@ impl Renderer {
             }
         }
         clock.stage(self, "finish", "mirror.finish");
-        let all = [shadow_commands, prepass_commands].into_iter().chain(part_commands).chain([commands]);
-        if with_overlays && self.hold_submit {
-            // (submitted from the present thread with the frame: OMSI_PRESENT_THREAD)
-            self.held.extend(all);
-        } else {
-            self.queue.submit(all);
-        }
+        self.queue
+            .submit([shadow_commands, prepass_commands].into_iter().chain(part_commands).chain([commands]));
         clock.stage(self, "submit", "mirror.submit");
         let timed = timers.timed;
         if let (Some(t), false) = (

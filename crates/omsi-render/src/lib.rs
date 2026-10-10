@@ -6,7 +6,6 @@ pub mod clouds;
 mod gpu_memory;
 mod passes;
 mod device_selection;
-mod present_thread;
 use passes::{Encoders, FrameArgs, FrameEnv, PassTimers, StageClock};
 use gpu_memory::adapter_vram_mb;
 pub mod pipeline_cache;
@@ -2237,12 +2236,6 @@ pub struct Renderer {
     rt: Option<rt::RayTracer>,
     /// Meshes share pages of buffers (the adapter draws with a base vertex).
     mesh_pages: bool,
-    /// OMSI_PRESENT_THREAD: the window picture's command buffers are kept (`hold_submit`,
-    /// set around one `render`) for the present thread to submit with the frame.
-    hold_submit: bool,
-    held: Vec<wgpu::CommandBuffer>,
-    /// The present thread of the window drawn into, if any (see `settle`).
-    in_flight: std::cell::RefCell<std::sync::Weak<present_thread::PresentThread>>,
 }
 
 /// The placeholders freed scene slots share: an empty vertex and index buffer and a plain
@@ -3094,9 +3087,6 @@ impl Renderer {
             freed: std::cell::OnceCell::new(),
             rt,
             mesh_pages: false,
-            hold_submit: false,
-            held: Vec::new(),
-            in_flight: Default::default(),
         }
     }
 
@@ -3324,8 +3314,6 @@ impl Renderer {
     }
 
     pub fn add_mesh(&self, scene: &mut Scene, data: &MeshData) -> MeshId {
-        // (a freed place in a page may still be drawn by the frame on the present thread)
-        self.settle();
         let (vb, ib) = mesh_page_bytes(data);
         let mesh = if vb > MESH_PAGE_VERTEX_BYTES / 4 || ib > MESH_PAGE_INDEX_BYTES / 4 || !self.mesh_pages {
             make_meshes(&self.device, &self.queue, &[data], true).pop().expect("one mesh")
@@ -6449,8 +6437,6 @@ impl Renderer {
                 }
             }
         }
-        // (the slot may be another tile's in the frame still on the present thread)
-        self.settle();
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &self.lm_atlas, mip_level: 0, origin: wgpu::Origin3d { x: slot.0 * LM_TILE_PX, y: slot.1 * LM_TILE_PX, z: 0 }, aspect: wgpu::TextureAspect::All },
             &px,
@@ -6596,8 +6582,7 @@ impl Renderer {
         RT_BUFFERS.store(false, std::sync::atomic::Ordering::Relaxed);
         // (the meshes' shared pages stay on, as after the multisampling fallback below)
         let mesh_pages = self.mesh_pages;
-        let in_flight = self.in_flight.take();
-        *self = Renderer { mesh_pages, in_flight: in_flight.into(), ..self.rebuilt(options) };
+        *self = Renderer { mesh_pages, ..self.rebuilt(options) };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
@@ -6631,8 +6616,7 @@ impl Renderer {
             ..self.options
         };
         let mesh_pages = self.mesh_pages;
-        let in_flight = self.in_flight.take();
-        *self = Renderer { mesh_pages, in_flight: in_flight.into(), ..self.rebuilt(options) };
+        *self = Renderer { mesh_pages, ..self.rebuilt(options) };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
@@ -7012,8 +6996,6 @@ impl Renderer {
         projection: Option<Mat4>,
         second_eye: bool,
     ) {
-        // (the window picture handed to the present thread is submitted first)
-        self.settle();
         // the frame's switches from the environment, each read once
         let env = FrameEnv::read();
         if !self.frame_hooks(scene, &env, with_overlays) {
@@ -9222,16 +9204,12 @@ pub struct SurfaceState<'w> {
     pub config: wgpu::SurfaceConfiguration,
     /// The renderer's `device_lost`.
     lost: Arc<std::sync::Mutex<Option<String>>>,
-    /// OMSI_PRESENT_THREAD: the frames submitted and presented from a thread of their own.
-    presenter: Option<Arc<present_thread::PresentThread>>,
     /// On ANGLE: the frames' sRGB stand-in, encoded into the plain window (see there).
     encode: Option<srgb_encode::SrgbEncode>,
 }
 
 impl Drop for SurfaceState<'_> {
     fn drop(&mut self) {
-        // (the frame handed to the present thread shown before the surface goes)
-        self.presenter = None;
         // After a lost device the frame it was drawing never finishes, and its swapchain
         // image with it: letting the surface go (or configuring it again) then tears the
         // swapchain down under that image - "Trying to destroy a SwapchainAcquireSemaphore
@@ -9290,12 +9268,11 @@ impl<'w> SurfaceState<'w> {
         config.width = width.max(1);
         config.height = height.max(1);
         surface.configure(&renderer.device, &config);
-        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone(), presenter: present_thread::PresentThread::wanted(renderer), encode })
+        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone(), encode })
     }
 
-    /// The window's next picture, once the last one is shown.
+    /// The window's next picture.
     pub fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
-        self.wait_presented();
         self.surface.get_current_texture()
     }
 
@@ -9307,43 +9284,15 @@ impl<'w> SurfaceState<'w> {
         }
     }
 
-    /// Shows `frame`, drawn into [`Self::view`]: from the present thread where there is one
-    /// (OMSI_PRESENT_THREAD).
+    /// Shows `frame`, drawn into [`Self::view`].
     pub fn present(&self, device: &wgpu::Device, queue: &wgpu::Queue, frame: wgpu::SurfaceTexture) {
-        self.present_after(device, queue, Vec::new(), frame);
-    }
-
-    /// Submits `commands` (the picture kept by `Renderer::hold_window_submit`) and shows
-    /// `frame`: both from the present thread where there is one.
-    pub fn present_after(&self, device: &wgpu::Device, queue: &wgpu::Queue, mut commands: Vec<wgpu::CommandBuffer>, frame: wgpu::SurfaceTexture) {
         if let Some(e) = &self.encode {
-            commands.extend(e.encode(device, &frame));
+            e.encode(device, queue, &frame);
         }
-        match &self.presenter {
-            Some(p) => p.present(commands, frame),
-            None => {
-                if !commands.is_empty() {
-                    queue.submit(commands);
-                }
-                frame.present();
-            }
-        }
-    }
-
-    /// Whether the frames are submitted from a thread of their own (OMSI_PRESENT_THREAD).
-    pub fn presents_on_thread(&self) -> bool {
-        self.presenter.is_some()
-    }
-
-    /// Returns when the frame handed to the present thread is shown.
-    pub fn wait_presented(&self) {
-        if let Some(p) = &self.presenter {
-            p.wait();
-        }
+        frame.present();
     }
 
     pub fn resize(&mut self, renderer: &Renderer, width: u32, height: u32) {
-        self.wait_presented();
         self.config.width = width.max(1);
         self.config.height = height.max(1);
         // (not after a lost device: see `drop`)
@@ -9354,7 +9303,6 @@ impl<'w> SurfaceState<'w> {
     }
 
     pub fn set_vsync(&mut self, renderer: &Renderer, enabled: bool) {
-        self.wait_presented();
         let mode = if enabled { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
         if self.config.present_mode == mode || renderer.device_lost().is_some() {
             return;
