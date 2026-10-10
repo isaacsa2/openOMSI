@@ -78,15 +78,18 @@ pub(super) fn bones(p: &mut Person, dt: f32) -> [Affine3A; SLOTS] {
     let seed = p.id;
     let pose = p.procedural.get_or_insert_with(|| Pose::new(seed));
     pose.advance(&p.ty.rig, &input, dt);
-    let mut bones = pose.bones(&p.ty.rig).bones;
+    let mut posed = pose.bones(&p.ty.rig);
     // Shift the local pose back to the renderer's original anchor; no game logic moves.
     if floor_lift != 0.0 {
         let lift = Affine3A::from_translation(Vec3::Z * floor_lift);
-        for bone in &mut bones {
+        for bone in &mut posed.bones {
             *bone = lift * *bone;
         }
+        posed.ankle = posed.ankle.map(|a| lift.transform_point3(a));
     }
-    bones
+    // Keep diagnostics in the same renderer frame as the seated mesh.
+    p.ankles = posed.ankle;
+    posed.bones
 }
 
 #[cfg(test)]
