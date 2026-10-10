@@ -75,6 +75,8 @@ pub struct Showroom {
     dirty: bool,
     /// Bumped whenever `target` was made anew (the interface binds it again).
     pub generation: u64,
+    /// Bumped at every drawing of the picture (the launcher shows an unchanged one only once).
+    pub drawn: u64,
 }
 
 /// Names the bus whose preview is being read and placed, until it is in the picture.
@@ -140,6 +142,7 @@ impl Showroom {
             target: None,
             dirty: true,
             generation: 0,
+            drawn: 0,
         }
     }
 
@@ -366,6 +369,7 @@ impl Showroom {
         }
         if self.dirty {
             self.dirty = false;
+            self.drawn += 1;
             let view = self.target.as_ref().unwrap().1.clone();
             self.render(renderer, &view, w, h);
         }

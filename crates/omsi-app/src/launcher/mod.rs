@@ -138,6 +138,9 @@ pub struct Launcher {
     map_rect: Option<Rect>,
     map_tex: Option<usize>,
     map_gen: u64,
+    /// The picture last shown (its interface, layers, preview and atlas) and when: idle,
+    /// the same picture is not drawn and shown again (see `frame`).
+    shown: Option<(Vec<omsi_ui::Vertex>, String, Instant)>,
     /// The window has the keyboard / is hidden: without focus it is drawn ten times a
     /// second, hidden not at all (a game started from it is being played).
     focused: bool,
@@ -226,6 +229,7 @@ impl Launcher {
         map_rect: None,
         map_tex: None,
         map_gen: 0,
+        shown: None,
         focused: true,
         occluded: false,
         awake_in_game: false,
@@ -943,6 +947,18 @@ impl Launcher {
                 self.icons.insert(addr, id);
             }
         }
+        // Idle (no input for 3 s), a picture the same as the one on the screen is not drawn and
+        // presented again - the window keeps it: the launcher left open redrew the same
+        // picture 20 times a second, a pass with 4x MSAA and a present each, which on OpenGL
+        // and DirectX 11 cost as much as a frame of the game's interface. Once a second it is
+        // drawn all the same.
+        // (the map is drawn every frame it is open: its markers follow the mouse)
+        let key = format!("{pw}x{ph} {} {} {} {layers:?} {ranges:?}", self.preview_gen, self.showroom.drawn, self.ui.atlas.generation);
+        let idle = self.last_input.elapsed().as_secs_f32() > 3.0 && self.dragging.is_none() && self.shot.is_none() && self.map_rect.is_none();
+        if idle && self.shown.as_ref().is_some_and(|(v, k, at)| *v == verts && *k == key && at.elapsed().as_secs_f32() < 1.0) {
+            self.check_exit(event_loop);
+            return;
+        }
         let draws: Vec<Draw> = ranges.iter().enumerate().map(|(k, (r, tex))| Draw { buffer: 0, range: r.clone(), layer: k, texture: *tex }).collect();
         let bg = wgpu::Color { r: 0.0056, g: 0.0056, b: 0.0056, a: 1.0 };
         if let Some(gpu) = self.gpu.as_mut() {
@@ -963,7 +979,7 @@ impl Launcher {
         }
         let Some(renderer) = self.renderer.as_mut() else { return };
         let surface = self.surface.as_mut().unwrap();
-        let frame = match surface.surface.get_current_texture() {
+        let frame = match surface.acquire() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 surface.resize(renderer, pw, ph);
@@ -971,14 +987,15 @@ impl Launcher {
             }
             _ => return,
         };
-        let view = frame.texture.create_view(&Default::default());
+        let view = surface.view(&renderer.device, &frame);
         if let Some(gpu) = self.gpu.as_mut() {
             let mut enc = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("launcher") });
             gpu.render(&renderer.device, &renderer.queue, &mut enc, &view, (pw, ph), Some(bg), &layers, &draws);
             renderer.queue.submit([enc.finish()]);
         }
         window.pre_present_notify();
-        frame.present();
+        surface.present(&renderer.device, &renderer.queue, frame);
+        self.shown = Some((verts, key, Instant::now()));
         if std::mem::take(&mut self.first_frame) {
             log::info!("launcher: first frame presented in {:.2} s", self.started.elapsed().as_secs_f64());
         }
