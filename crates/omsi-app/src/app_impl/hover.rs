@@ -153,9 +153,7 @@ impl App {
             && self.player.is_some()
             && self.input.both_drag.is_none()
             && matches!(self.view.as_str(), "driver" | "outside" | "pax" | "free");
-        let kind: u8 = if self.input.both_drag.is_some() && self.menus.game_menu.is_none() {
-            4
-        } else if rmb_zoom && self.menus.game_menu.is_none() {
+        let kind: u8 = if (self.input.both_drag.is_some() || rmb_zoom) && self.menus.game_menu.is_none() {
             4
         } else if self.input.mouse_look && self.menus.game_menu.is_none() {
             3

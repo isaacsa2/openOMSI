@@ -316,9 +316,7 @@ fn check_models(root: &Path, verbose: bool) {
         .filter_map(|p| match omsi_model::Model::load(p) {
             Ok(m) => {
                 let unknown: Vec<String> = m.unknown_keywords.iter().filter(|(k, _)| !matches!(k.as_str(), "passpos" | "drivpos" | "entry" | "exit" | "pathpnt" | "pathlink" | "stepsoundpack" | "texchanges" | "newtexchangemaster" | "entries" | "stamper" | "ticket_sale" | "ticket_sale_money_point" | "ticket_sale_change_point" | "linktonextveh" | "linktoprevveh" | "next_roomheight" | "next_stepsound" | "pathlink_oneway" | "ticket_sale_money_point_2" | "ticket_sale_change_point_2")).map(|(k, l)| format!("[{k}]@{l}")).collect();
-                if unknown.is_empty() && !m.meshes.is_empty() {
-                    None
-                } else if m.meshes.is_empty() && unknown.is_empty() {
+                if unknown.is_empty() {
                     None
                 } else {
                     Some(format!("{}: unknown keywords {}", rel(root, p), unknown.join(" ")))
@@ -364,9 +362,7 @@ fn check_scenery(root: &Path, verbose: bool) {
         .par_iter()
         .filter_map(|p| match omsi_scenery::Spline::load(p) {
             Ok(s) => {
-                if s.unknown_keywords.is_empty() && !s.profiles.is_empty() {
-                    None
-                } else if s.unknown_keywords.is_empty() {
+                if s.unknown_keywords.is_empty() {
                     None
                 } else {
                     Some(format!("{}: unknown keywords {:?}", rel(root, p), s.unknown_keywords))

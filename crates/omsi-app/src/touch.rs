@@ -273,7 +273,7 @@ impl App {
         let left_end = x - step + r;
         let mut x = w - pad - r;
         let hidden = t.hidden;
-        push(&mut b, Btn::Hide, rb(x, y, r), if hidden { "visibility" } else { "visibility" }, "", hidden, true);
+        push(&mut b, Btn::Hide, rb(x, y, r), "visibility", "", hidden, true);
         if hidden {
             t.info_room = Some(info_room(w, pad, left_end, x - r, pad + r * 2.0, u));
             t.buttons = b;
