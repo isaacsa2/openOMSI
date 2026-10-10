@@ -674,9 +674,37 @@ fn aside_of(target: &Path) -> PathBuf {
 }
 
 /// Unpack `zip` into `to` (a fresh folder), with the files' Unix modes and links.
+/// Whether the link `link` (inside `root`) pointing to `target` stays inside `root`: a
+/// relative target whose `..` never climb above `root`. An absolute one never does.
+#[cfg(unix)]
+fn link_stays_inside(root: &Path, link: &Path, target: &str) -> bool {
+    use std::path::Component;
+    let t = Path::new(target);
+    if t.is_absolute() || target.contains('\0') {
+        return false;
+    }
+    let Some(parent) = link.parent().and_then(|p| p.strip_prefix(root).ok()) else { return false };
+    let mut depth = parent.components().filter(|c| matches!(c, Component::Normal(_))).count() as i64;
+    for c in t.components() {
+        match c {
+            Component::Normal(_) => depth += 1,
+            Component::ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            Component::CurDir => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 fn unpack(zip: &Path, to: &Path) -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(to);
     std::fs::create_dir_all(to)?;
+    let real_root = to.canonicalize()?;
     let mut a = zip::ZipArchive::new(std::fs::File::open(zip)?)?;
     for i in 0..a.len() {
         let mut e = a.by_index(i)?;
@@ -692,6 +720,9 @@ fn unpack(zip: &Path, to: &Path) -> anyhow::Result<()> {
         }
         if let Some(p) = out.parent() {
             std::fs::create_dir_all(p)?;
+            // (an earlier entry may have made a link of a folder: whatever a name says, a
+            // file is written inside the folder being unpacked into, never through a link out)
+            anyhow::ensure!(p.canonicalize()?.starts_with(&real_root), "the archive's entry {} leads out of its folder", rel.display());
         }
         let mode = e.unix_mode();
         #[cfg(unix)]
@@ -699,6 +730,7 @@ fn unpack(zip: &Path, to: &Path) -> anyhow::Result<()> {
             if m & 0o170000 == 0o120000 {
                 let mut target = String::new();
                 e.read_to_string(&mut target)?;
+                anyhow::ensure!(link_stays_inside(to, &out, &target), "the archive's link {} points out of its folder ({target})", rel.display());
                 std::os::unix::fs::symlink(target, &out)?;
                 continue;
             }
@@ -709,7 +741,7 @@ fn unpack(zip: &Path, to: &Path) -> anyhow::Result<()> {
         #[cfg(unix)]
         if let Some(m) = mode {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(m & 0o7777))?;
+            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(m & 0o777))?;
         }
         #[cfg(not(unix))]
         let _ = mode;
@@ -1046,6 +1078,51 @@ mod tests {
         }
         assert!(install_archive(&bad, &place).is_err());
         assert_eq!(std::fs::read_to_string(dir.join("openomsi")).unwrap(), "new game");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_archive_cannot_write_through_a_link_out_of_its_folder() {
+        let root = std::env::temp_dir().join(format!("omsi_update_link_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let o = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
+        let plain = zip::write::SimpleFileOptions::default();
+        // a link to an absolute folder, then a file "inside" it
+        for target in [outside.to_string_lossy().to_string(), "../../outside".to_string()] {
+            let zip_path = root.join("evil.zip");
+            {
+                let mut z = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+                z.start_file("openomsi", o).unwrap();
+                z.write_all(b"x").unwrap();
+                z.add_symlink("lib", &target, plain).unwrap();
+                z.start_file("lib/pwned.txt", o).unwrap();
+                z.write_all(b"pwned").unwrap();
+                z.finish().unwrap();
+            }
+            let err = unpack(&zip_path, &root.join("staging")).expect_err("the link must be refused").to_string();
+            assert!(err.contains("out of its folder"), "{target}: refused for another reason: {err}");
+            assert!(!outside.join("pwned.txt").exists(), "{target}: written outside");
+        }
+        // a link that stays inside is fine (a macOS bundle has them)
+        assert!(link_stays_inside(&root, &root.join("a/b"), "../c"));
+        assert!(!link_stays_inside(&root, &root.join("a/b"), "../../c"));
+        assert!(!link_stays_inside(&root, &root.join("a"), "/etc"));
+        // and the set-user-id bit is not carried over
+        let zip_path = root.join("suid.zip");
+        {
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+            z.start_file("openomsi", zip::write::SimpleFileOptions::default().unix_permissions(0o104755)).unwrap();
+            z.write_all(b"x").unwrap();
+            z.finish().unwrap();
+        }
+        unpack(&zip_path, &root.join("staging2")).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(root.join("staging2/openomsi")).unwrap().permissions().mode() & 0o7777, 0o755);
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 }
