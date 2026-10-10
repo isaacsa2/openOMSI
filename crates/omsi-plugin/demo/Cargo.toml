@@ -1,6 +1,7 @@
 [package]
 name = "omsi-demo-plugin"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "A plugin with OMSI's plugin interface, for the tests of omsi-plugin"

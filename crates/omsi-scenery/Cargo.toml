@@ -1,6 +1,7 @@
 [package]
 name = "omsi-scenery"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Scenery object (.sco) and spline (.sli) definitions (units mc_complMapObj, mc_splines, mc_path)"
