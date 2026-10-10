@@ -108,6 +108,14 @@ jobs:
           }
           Copy-Item (Join-Path $dir.FullName "libEGL.dll"), (Join-Path $dir.FullName "libGLESv2.dll"), (Join-Path $dir.FullName "LICENSE-ANGLE.txt") dist/windows/
           Get-ChildItem dist/windows
+      - name: ANGLE DirectX 11 startup regression (WARP)
+        if: matrix.arch == 'x64' && github.event_name == 'pull_request'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          ANGLE_TEST_LIBRARY_DIRECTORY: ${{ github.workspace }}/dist/windows
+        run: |
+          cargo test --locked --release --target x86_64-pc-windows-msvc -p omsi-render --test angle_startup -- --ignored --nocapture
       # The Visual C++ runtime beside the program (Microsoft allows it to be shipped
       # app-locally): without it a PC lacking the Redistributable refused to start the game
       # ("VCRUNTIME140_1.dll was not found"). It cannot be linked in instead - the OpenXR

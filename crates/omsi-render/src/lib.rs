@@ -1,13 +1,18 @@
 //! wgpu renderer.
 
+pub mod angle;
 pub mod atmosphere;
 pub mod clouds;
+mod gpu_memory;
 mod passes;
+mod device_selection;
 use passes::{Encoders, FrameArgs, FrameEnv, PassTimers, StageClock};
+use gpu_memory::adapter_vram_mb;
 pub mod pipeline_cache;
 mod pipelines;
 mod puddles;
 mod rt;
+mod srgb_encode;
 mod triple;
 pub use triple::{panel_width, ScreenView, TripleScreen};
 
@@ -1511,6 +1516,12 @@ pub fn gl_backend() -> bool {
     GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// The adapter is ANGLE's (OpenGL ES over Direct3D 11, Windows): its pipelines are made on
+/// a thread of its own (see `angle::compile`).
+fn is_angle(info: &wgpu::AdapterInfo) -> bool {
+    cfg!(windows) && info.backend == wgpu::Backend::Gl && info.name.contains("ANGLE")
+}
+
 /// How the per-draw arrays (the model matrices, the instance parameters, the draw list) and
 /// the point lights reach the scene shader on this device (set in `Renderer::new_on`).
 /// Older OpenGL chips cannot read a storage buffer in a vertex shader - an Intel HD 2500, a
@@ -1704,8 +1715,8 @@ fn sixteen_texture_units() -> bool {
 
 /// The camera group's entries on a device whose arrays take `path`, without the enhanced
 /// path's textures where `omit_enhanced`: on the sixteen-texture-unit path (see
-/// `sixteen_texture_units`) and in the launcher's preview, which has no enhanced pipeline
-/// or reflection probe (`RenderOptions::preview_only`).
+/// `sixteen_texture_units`) and whenever no enhanced pipelines or reflection probe are
+/// prepared (the launcher's preview, or the vanilla GL path).
 fn camera_layout_entries(path: ArrayPath, omit_enhanced: bool) -> Vec<wgpu::BindGroupLayoutEntry> {
     let mut camera_entries = vec![
             wgpu::BindGroupLayoutEntry {
@@ -1991,88 +2002,6 @@ const GL_WAIT_SLICE: std::time::Duration = std::time::Duration::from_millis(20);
 fn gl_worker_turn() -> Option<std::sync::MutexGuard<'static, ()>> {
     static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
     gl_backend().then(|| TURN.lock().unwrap_or_else(|e| e.into_inner()))
-}
-
-/// The card's own memory in MB where the system tells it: Windows, through DXGI, for
-/// whichever backend draws; Linux, through the DRM driver's sysfs (amdgpu; not
-/// NVIDIA's own driver, whose memory [`vulkan_vram_mb`] reads from Vulkan instead).
-fn dedicated_vram_mb(info: &wgpu::AdapterInfo) -> Option<u64> {
-    #[cfg(windows)]
-    unsafe {
-        use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
-        let f: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
-        let mut i = 0;
-        while let Ok(a) = f.EnumAdapters1(i) {
-            i += 1;
-            let Ok(d) = a.GetDesc1() else { continue };
-            if d.VendorId == info.vendor && d.DeviceId == info.device {
-                return Some(d.DedicatedVideoMemory as u64 >> 20);
-            }
-        }
-        None
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let hex = |p: std::path::PathBuf| {
-            let t = std::fs::read_to_string(p).ok()?;
-            u32::from_str_radix(t.trim().trim_start_matches("0x"), 16).ok()
-        };
-        for e in std::fs::read_dir("/sys/class/drm").ok()?.flatten() {
-            // (card0, card1, ...; not their connectors, card1-DP-1)
-            let name = e.file_name();
-            let name = name.to_string_lossy();
-            if !name.starts_with("card") || name.contains('-') {
-                continue;
-            }
-            let dev = e.path().join("device");
-            if hex(dev.join("vendor")) != Some(info.vendor) || hex(dev.join("device")) != Some(info.device) {
-                continue;
-            }
-            let bytes = std::fs::read_to_string(dev.join("mem_info_vram_total"))
-                .ok()
-                .and_then(|t| t.trim().parse::<u64>().ok());
-            if let Some(b) = bytes.filter(|b| *b > 0) {
-                return Some(b >> 20);
-            }
-        }
-        None
-    }
-    #[cfg(not(any(windows, target_os = "linux")))]
-    {
-        let _ = info;
-        None
-    }
-}
-
-/// The largest device-local memory heap of a Vulkan adapter (MB).
-#[cfg(target_os = "linux")]
-fn vulkan_vram_mb(adapter: &wgpu::Adapter) -> Option<u64> {
-    // SAFETY: the adapter outlives the borrow, and only its memory properties are read
-    let hal = unsafe { adapter.as_hal::<wgpu::hal::api::Vulkan>() }?;
-    // SAFETY: the physical device belongs to this instance
-    let props = unsafe { hal.shared_instance().raw_instance().get_physical_device_memory_properties(hal.raw_physical_device()) };
-    props.memory_heaps[..props.memory_heap_count as usize]
-        .iter()
-        .filter(|h| h.flags.contains(ash::vk::MemoryHeapFlags::DEVICE_LOCAL))
-        .map(|h| h.size >> 20)
-        .max()
-}
-
-#[cfg(not(target_os = "linux"))]
-fn vulkan_vram_mb(_adapter: &wgpu::Adapter) -> Option<u64> {
-    None
-}
-
-/// The card's own memory in MB: wgpu's report on DirectX 12 (the adapter's DXGI
-/// `DedicatedVideoMemory`, the number [`dedicated_vram_mb`] reads), else what the system
-/// tells. (wgpu's Vulkan report sums every device-local heap where [`vulkan_vram_mb`] takes
-/// the largest, and Metal's is the working set the system recommends, not the card's own
-/// memory: those keep their own paths, so the texture budgets stay as they were.)
-fn adapter_vram_mb(adapter: &wgpu::Adapter, info: &wgpu::AdapterInfo, mem: Option<&wgpu::AdapterMemoryInfo>) -> Option<u64> {
-    match mem {
-        Some(m) if info.backend == wgpu::Backend::Dx12 => Some(m.dedicated_bytes >> 20),
-        _ => dedicated_vram_mb(info).or_else(|| vulkan_vram_mb(adapter)),
-    }
 }
 
 pub struct Renderer {
@@ -2369,10 +2298,11 @@ pub struct RenderOptions {
     /// The materials' reflection maps (`[matl_envmap]`: the shine of paint, chrome and
     /// glass). Off, nothing mirrors the sky photo - some players find it too strong.
     pub reflections: bool,
-    /// Enhanced graphics are not asked for: a phone or OpenGL then leaves their pipelines
-    /// out (they would never be drawn, and compiling the ray-marched clouds' sky killed
+    /// Enhanced graphics are not asked for: a phone or OpenGL then leaves their pipelines,
+    /// sky shader, cloud noise and probe out (compiling the ray-marched clouds' sky killed
     /// Mali and Adreno drivers before the first frame, #364, #333, #316, #371). Asked for,
-    /// they are built on every device and graphics API; a computer always builds them.
+    /// they are built where the texture layout supports them. Native desktop backends
+    /// keep them available for switching modes in-game.
     pub no_enhanced: bool,
     /// The launcher's preview (the showroom), which always draws Vanilla+ (see
     /// `showroom::lighting_for`): no enhanced pipelines, reflection probe or cloud noise
@@ -2643,16 +2573,7 @@ impl Renderer {
         // system's memory, Apple's generously
         let mem = adapter.memory_info();
         let vram = adapter_vram_mb(&adapter, &info, mem.as_ref());
-        let guess_mb: u64 = match info.device_type {
-            // (a card of 2 or 3 GB, where Windows says: half of it - 1600 MB of a GTX 1050's
-            // 2 GB left too little for the rest, and its Vulkan device was lost at the start;
-            // a card of 2 GB a third of it - with half, 4x MSAA, SSAO and the shadows its
-            // DirectX 12 device still ran out of memory on Grundorf within seconds, #114)
-            wgpu::DeviceType::DiscreteGpu => vram.filter(|v| *v >= 512).map_or(1600, |v| if v <= 2560 { v * 35 / 100 } else if v <= 6144 { (v / 2).min(1600) } else { v * 3 / 10 }),
-            wgpu::DeviceType::IntegratedGpu if info.backend == wgpu::Backend::Metal => 3000,
-            wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu => 1000,
-            _ => 800,
-        };
+        let guess_mb = gpu_memory::texture_allowance_mb(&info, vram);
         ADAPTER_TEXTURE_MB.store(guess_mb, std::sync::atomic::Ordering::Relaxed);
         let discrete_vram = vram.filter(|_| info.device_type == wgpu::DeviceType::DiscreteGpu).unwrap_or(0);
         ADAPTER_VRAM_MB.store(discrete_vram, std::sync::atomic::Ordering::Relaxed);
@@ -2686,30 +2607,9 @@ impl Renderer {
         } else {
             options
         };
-        // A small or shared graphics chip (the processor's graphics outside a Mac, a phone,
-        // a card of up to 2.5 GB, anything on OpenGL) gets a lighter picture whatever the
-        // settings ask: no SSAO and no multisampling, smaller shadow maps; a card of up to
-        // 4 GB no SSAO and at most 2x. (The settings' "High" on such a machine ran out of
-        // memory or at a dozen frames a second.) OMSI_FULL_GPU=1 asks for the settings as
-        // they are.
+        // a small or shared graphics chip gets a lighter picture (see `lighter_picture`)
         GL_BACKEND.store(info.backend == wgpu::Backend::Gl, std::sync::atomic::Ordering::Relaxed);
-        let full = omsi_cfg::flags::OMSI_FULL_GPU.is_set();
-        let weak = !full
-            && (info.backend == wgpu::Backend::Gl
-                // (a phone's chip, whatever type its driver reports: some say "other")
-                || cfg!(target_os = "android")
-                || (info.device_type == wgpu::DeviceType::IntegratedGpu && info.backend != wgpu::Backend::Metal)
-                || vram.is_some_and(|v| v <= 2560));
-        let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
-        let options = if weak {
-            log::warn!("{}: a small or shared graphics chip - no SSAO, no MSAA, shadow maps of at most 1024 (OMSI_FULL_GPU=1 keeps the settings)", info.name);
-            RenderOptions { msaa: 1, ssao: false, shadow_size: options.shadow_size.min(1024), ..options }
-        } else if modest {
-            log::info!("{}: {} MB of its own - no SSAO, at most 2x MSAA and 2048 shadow maps (OMSI_FULL_GPU=1 keeps the settings)", info.name, vram.unwrap_or(0));
-            RenderOptions { msaa: options.msaa.min(2), ssao: false, shadow_size: options.shadow_size.min(2048), ..options }
-        } else {
-            options
-        };
+        let (options, lighter) = gpu_memory::lighter_picture(&info, vram, options);
         let shadow_size = options
             .shadow_size
             .clamp(512, if intel_vulkan_safe { 2048 } else { 8192 });
@@ -2822,28 +2722,7 @@ impl Renderer {
         } else if options.ray_tracing {
             log::warn!("{}: no hardware ray queries; Enhanced+ is drawn as Enhanced", info.name);
         }
-        // the per-draw arrays as storage buffers where the device reads them in a vertex
-        // shader (three there, two lights arrays in a fragment shader), else as textures;
-        // OMSI_GPU_ARRAYS=textures|nostorage takes those paths on any device
-        let downlevel = adapter.get_downlevel_capabilities().flags;
-        let storage = limits.max_storage_buffers_per_shader_stage;
-        let path = match omsi_cfg::flags::OMSI_GPU_ARRAYS.var() {
-            Some("textures") => ArrayPath::VertexTextures,
-            Some("nostorage") => ArrayPath::NoStorage,
-            _ if !downlevel.contains(wgpu::DownlevelFlags::FRAGMENT_STORAGE) || storage < 2 => ArrayPath::NoStorage,
-            _ if !downlevel.contains(wgpu::DownlevelFlags::VERTEX_STORAGE) || storage < 3 => ArrayPath::VertexTextures,
-            // (the draw list and the lamps' grid are arrays of u32, 4 bytes, which such a device
-            // cannot bind as storage buffers: ANGLE on Vulkan, an Exynos' Xclipse, failed the
-            // shadow pipeline with "a size that is a multiple of 16 bytes", #1857)
-            _ if !downlevel.contains(wgpu::DownlevelFlags::BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED) => ArrayPath::NoStorage,
-            _ => ArrayPath::Storage,
-        };
-        ARRAY_PATH.store(path as u8, std::sync::atomic::Ordering::Relaxed);
-        match path {
-            ArrayPath::Storage => {}
-            ArrayPath::VertexTextures => log::warn!("{}: no storage buffers in vertex shaders; the scene's arrays are read from textures", info.name),
-            ArrayPath::NoStorage => log::warn!("{}: no storage buffers; the scene's arrays are read from textures and the lamps light no pixels of their own", info.name),
-        }
+        device_selection::select_array_path(&adapter, &limits, &info);
         log::info!("opening graphics device: {} ({:?}, vendor {:#06x}, device {:#06x}), features {:?}, max buffer {} MB, max storage binding {} MB", info.name, info.backend, info.vendor, info.device, required_features, limits.max_buffer_size / 1_000_000, limits.max_storage_buffer_binding_size as u64 / 1_000_000);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -2854,7 +2733,7 @@ impl Renderer {
                 // left hundreds of MB reserved and unused, and 2 GB cards lost the device to
                 // "Out of memory" in the first frames with the textures well under budget,
                 // #332, #295)
-                memory_hints: if weak || modest || vram.is_some_and(|v| v <= 4200) { wgpu::MemoryHints::MemoryUsage } else { wgpu::MemoryHints::Performance },
+                memory_hints: if lighter || vram.is_some_and(|v| v <= 4200) { wgpu::MemoryHints::MemoryUsage } else { wgpu::MemoryHints::Performance },
                 // (the ray queries are still an experimental feature of wgpu)
                 experimental_features: if ray_query { unsafe { wgpu::ExperimentalFeatures::enabled() } } else { wgpu::ExperimentalFeatures::disabled() },
                 ..Default::default()
@@ -2983,16 +2862,24 @@ impl Renderer {
             if basic {
                 BASIC_PIPELINES.store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
-            let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let renderer = Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
-            // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
-            #[cfg(feature = "test-hooks")]
-            if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
-                let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("test"), source: wgpu::ShaderSource::Wgsl("fn broken( {".into()) });
-            }
-            let errors = [validation.pop().await, memory.pop().await, internal.pop().await];
+            // (the error scopes are the thread's own: pushed and popped where the pipelines
+            // are made, on ANGLE the compiler thread - from the calling thread they caught
+            // nothing there, and a failed build was taken for a working one)
+            let build = || {
+                let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+                let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+                let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+                let renderer = Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options });
+                // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
+                #[cfg(feature = "test-hooks")]
+                if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
+                    let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("test"), source: wgpu::ShaderSource::Wgsl("fn broken( {".into()) });
+                }
+                (renderer, [validation.pop(), memory.pop(), internal.pop()])
+            };
+            let (renderer, scopes) = if is_angle(info) { angle::compile(device, build) } else { build() };
+            let [validation, memory, internal] = scopes;
+            let errors = [validation.await, memory.await, internal.await];
             match errors.iter().flatten().next() {
                 None => {
                     if msaa != options.msaa || basic {
@@ -3028,16 +2915,20 @@ impl Renderer {
         let (msaa, shadow_size) = (options.msaa, options.shadow_size);
         RT_GBUF.store(options.ray_tracing, std::sync::atomic::Ordering::Relaxed);
         let errors = errors::install(&device, format, &options);
-        let scene = scene::SceneBase::new(&device, sixteen_texture_units() || options.preview_only);
+        let leave_out_enhanced = passes::leave_out_enhanced(&options, &adapter_name);
+        if sixteen_texture_units() && !options.no_enhanced && !options.preview_only {
+            log::warn!("renderer: the enhanced graphics take more textures than OpenGL has units for on {adapter_name}; drawing vanilla+");
+        }
+        let scene = scene::SceneBase::new(&device, leave_out_enhanced);
         let hdr_format = wgpu::TextureFormat::Rgba16Float;
         let shadows = shadows::build(&device, &scene, shadow_size);
         let defaults = defaults::build(&device, &queue, options.anisotropy);
         let (coronas, corona_texture) = coronas::Coronas::new(&device, &queue, &scene);
         let snow = coronas::Snow::new(&device, &scene.camera_layout);
         drop(corona_texture);
-        let sky = sky::SkyBase::new(&device, &queue, &scene.camera_layout, options.preview_only);
+        let sky = sky::SkyBase::new(&device, &queue, &scene.camera_layout, !leave_out_enhanced);
         let passes = passes::PassKit { device: &device, scene: &scene, coronas: &coronas, snow: &snow, sky: &sky, msaa }
-            .build(format, hdr_format, &options, &adapter_name);
+            .build(format, hdr_format, leave_out_enhanced);
         let (sky_sampler, sky_mesh) = sky::dome(&device, &queue);
         let overlays = overlays::Overlays::new(&device, format, msaa);
         let gl = GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed);
@@ -3046,7 +2937,7 @@ impl Renderer {
         let prepass = scene::prepass(&device, &scene, msaa);
         let mip = mip::build(&device);
         let post = post::build(&device, format, hdr_format, &defaults.white_texture);
-        let enhanced = enhanced::build(&device, &queue, hdr_format, &defaults.camera_buf, &sky, !options.preview_only);
+        let enhanced = enhanced::build(&device, &queue, hdr_format, &defaults.camera_buf, &sky, !leave_out_enhanced);
         let (overlay_pipeline_1x, xr_ui_pipeline) = overlays.single_sampled(&device, format);
         let upscale = upscale::build(&device, format);
         let gpu_timers = [GpuTimers::new(&device), GpuTimers::new(&device)];
@@ -6672,6 +6563,18 @@ impl Renderer {
         None
     }
 
+    /// `Self::build` again with `options`: on ANGLE on the compiler thread of its own (see
+    /// `angle::compile`: on this thread's stack the D3D compiler overflowed it).
+    fn rebuilt(&self, options: RenderOptions) -> Renderer {
+        let (device, queue, name, format) = (self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format);
+        let build = move || Self::build(device, queue, name, format, options);
+        if cfg!(windows) && gl_backend() && self.adapter_name.contains("ANGLE") {
+            angle::compile(&self.device, build)
+        } else {
+            build()
+        }
+    }
+
     /// Rebuild without the ray tracing after a GPU error while it was on (see `rt_error`).
     fn fall_back_without_ray_tracing(&mut self, scene: &mut Scene) {
         log::error!("ray tracing failed on {}; Enhanced+ draws as Enhanced from now on", self.adapter_name);
@@ -6679,7 +6582,7 @@ impl Renderer {
         RT_BUFFERS.store(false, std::sync::atomic::Ordering::Relaxed);
         // (the meshes' shared pages stay on, as after the multisampling fallback below)
         let mesh_pages = self.mesh_pages;
-        *self = Renderer { mesh_pages, ..Self::build(self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format, options) };
+        *self = Renderer { mesh_pages, ..self.rebuilt(options) };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
@@ -6713,13 +6616,7 @@ impl Renderer {
             ..self.options
         };
         let mesh_pages = self.mesh_pages;
-        *self = Renderer { mesh_pages, ..Self::build(
-            self.device.clone(),
-            self.queue.clone(),
-            self.adapter_name.clone(),
-            self.format,
-            options,
-        ) };
+        *self = Renderer { mesh_pages, ..self.rebuilt(options) };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
@@ -8390,10 +8287,17 @@ fn scene_shader_text(gl: bool) -> String {
              vec2<f32>(1.0) - 0.5 / vec2<f32>(textureDimensions({t}))))"
         )
     };
+    // No SSAO and no ray tracing on OpenGL (camera.clouds.w stays 0, see `lighter_picture`):
+    // their lookups are left out of the module. With them in the scene fragment shader, the
+    // D3D compiler under ANGLE (fxc) recursed without end in CProgram::CheckAssertion_Group
+    // and the game closed before its first frame (#197).
     let out = src
         .replace("textureSample(t_trans, s_tile, uv)", &clamped("t_trans"))
-        .replace("textureSample(t_night, s_tile, uv)", &clamped("t_night"));
+        .replace("textureSample(t_night, s_tile, uv)", &clamped("t_night"))
+        .replace("ao = ao_at(in.clip.xy, in.world);", "ao = 1.0;")
+        .replace("rt_at(in.clip.xy, in.world)", "vec4<f32>(1.0, 0.0, -1.0, 0.0)");
     debug_assert!(!out.contains("s_tile, uv)"));
+    debug_assert!(!out.contains("ao_at(in.") && !out.contains("rt_at(in."));
     out
 }
 
@@ -9300,6 +9204,8 @@ pub struct SurfaceState<'w> {
     pub config: wgpu::SurfaceConfiguration,
     /// The renderer's `device_lost`.
     lost: Arc<std::sync::Mutex<Option<String>>>,
+    /// On ANGLE: the frames' sRGB stand-in, encoded into the plain window (see there).
+    encode: Option<srgb_encode::SrgbEncode>,
 }
 
 impl Drop for SurfaceState<'_> {
@@ -9339,9 +9245,10 @@ impl<'w> SurfaceState<'w> {
         vsync: bool,
     ) -> Result<Self> {
         let surface = instance.create_surface(window).context("create_surface")?;
+        let encode = srgb_encode::SrgbEncode::wanted(renderer, renderer.format());
         let mut config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: renderer.format(),
+            format: encode.as_ref().map_or(renderer.format(), |e| e.window_format()),
             width: width.max(1),
             height: height.max(1),
             present_mode: if vsync {
@@ -9361,7 +9268,28 @@ impl<'w> SurfaceState<'w> {
         config.width = width.max(1);
         config.height = height.max(1);
         surface.configure(&renderer.device, &config);
-        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone() })
+        Ok(SurfaceState { surface: std::mem::ManuallyDrop::new(surface), config, lost: renderer.device_lost.clone(), encode })
+    }
+
+    /// The window's next picture.
+    pub fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
+        self.surface.get_current_texture()
+    }
+
+    /// The view `frame` is drawn into (of the renderer's format).
+    pub fn view(&self, device: &wgpu::Device, frame: &wgpu::SurfaceTexture) -> wgpu::TextureView {
+        match &self.encode {
+            Some(e) => e.view(device, frame.texture.size()),
+            None => frame.texture.create_view(&Default::default()),
+        }
+    }
+
+    /// Shows `frame`, drawn into [`Self::view`].
+    pub fn present(&self, device: &wgpu::Device, queue: &wgpu::Queue, frame: wgpu::SurfaceTexture) {
+        if let Some(e) = &self.encode {
+            e.encode(device, queue, &frame);
+        }
+        frame.present();
     }
 
     pub fn resize(&mut self, renderer: &Renderer, width: u32, height: u32) {
@@ -11260,6 +11188,62 @@ mod tests {
             },
         ));
         assert!(res.is_ok(), "renderer should initialize on noop backend: {:?}", res.err());
+    }
+
+    /// The GL fallback must omit probe resources and match its camera bind group to the
+    /// vanilla pipelines. Exercise the full build and a frame, rather than the policy alone.
+    #[test]
+    fn vanilla_gl_build_omits_unused_enhanced_resources() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::NOOP;
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+        let instance = wgpu::Instance::new(descriptor);
+        let base = pollster::block_on(Renderer::new_with(
+            &instance,
+            None,
+            Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            RenderOptions {
+                msaa: 1,
+                shadow_size: 256,
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        let mut renderer = Renderer::build(
+            base.device.clone(),
+            base.queue.clone(),
+            "OpenGL regression adapter".into(),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            RenderOptions {
+                msaa: 1,
+                shadow_size: 256,
+                no_enhanced: true,
+                ..Default::default()
+            },
+        );
+        assert!(renderer.hdr_pass.is_none());
+        assert!(renderer.probe.is_none());
+        assert!(renderer.cloud_shape_cpu.is_empty());
+        let mut scene = renderer.new_scene();
+        let camera = Camera {
+            position: DVec3::new(0.0, -35.0, 30.0),
+            yaw: 0.0,
+            pitch: -40.0,
+            roll: 0.0,
+            fov_deg: 60.0,
+            near: 0.1,
+            far: 1000.0,
+        };
+        let scope = renderer
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        renderer
+            .render_to_image(&mut scene, 16, 16, &camera, &Lighting::default())
+            .unwrap();
+        assert!(pollster::block_on(scope.pop()).is_none());
+        // A desktop's native backend still prepares Enhanced for changing modes in-game.
+        assert!(base.hdr_pass.is_some());
+        assert!(base.probe.is_some());
     }
 
     #[test]

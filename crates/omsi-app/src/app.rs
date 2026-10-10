@@ -614,7 +614,7 @@ impl App {
                 "",
                 done as f32 / total.max(1) as f32,
             );
-            let acquired = s.surface.get_current_texture();
+            let acquired = s.acquire();
             // a swapchain that no longer fits the window (Vulkan says so after the switch
             // to full screen, without a resize event) is made again, as the game's own
             // frames do: left as it was, every later frame of the loading screen failed
@@ -623,7 +623,7 @@ impl App {
             if let wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) = acquired
             {
-                let view = frame.texture.create_view(&Default::default());
+                let view = s.view(&renderer.device, &frame);
                 // the tiles loaded so far stay out of the picture: the camera looks at nothing
                 let blank = Camera {
                     position: DVec3::new(0.0, 0.0, -1.0e6),
@@ -648,7 +648,7 @@ impl App {
                     &lighting,
                 );
                 win.pre_present_notify();
-                frame.present();
+                s.present(&renderer.device, &renderer.queue, frame);
                 self.renderer = Some(renderer);
             } else {
                 self.renderer = Some(renderer);

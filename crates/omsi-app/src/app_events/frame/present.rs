@@ -156,7 +156,7 @@ impl App {
         let hidden_now = hide_test
             .map(|(a, b)| (a..b).contains(&self.started.elapsed().as_secs_f32()))
             .unwrap_or(false);
-        let acquired = match s.surface.get_current_texture() {
+        let acquired = match s.acquire() {
             wgpu::CurrentSurfaceTexture::Success(_)
             | wgpu::CurrentSurfaceTexture::Suboptimal(_)
             if hidden_now =>
@@ -215,7 +215,7 @@ impl App {
         let shown_nothing = frame.is_none() && stand_in.is_none();
         let view = frame
             .as_ref()
-            .map(|f| f.texture.create_view(&Default::default()))
+            .map(|f| s.view(&r.device, f))
             .or(stand_in);
         (frame, view, shown_nothing)
     }
@@ -323,7 +323,7 @@ impl App {
                 if self.settings.vsync {
                     win.pre_present_notify();
                 }
-                frame.present();
+                s.present(&r.device, &r.queue, frame);
             }
             None => {
                 let _ = omsi_render::wait_gpu(&r.device, None);
@@ -517,10 +517,11 @@ impl App {
         self.perf.frames += 1;
         let profiling = omsi_cfg::flags::OMSI_PROFILE.is_set();
         // (the warm-up: 15 s of play, not of the process - a big map's loading took most of
-        // 15 s, and the summary then held the first heavy frames of play)
+        // 15 s, and the summary then held the first heavy frames of play; marked whether or not
+        // the CPU time can be read)
         let playing = *self.perf.play_started.get_or_insert_with(Instant::now);
         if profiling
-            && self.perf.cpu_mark.is_none()
+            && self.perf.profile_mark.is_none()
             && playing.elapsed().as_secs_f32() > 15.0
         {
             self.perf.cpu_mark =
