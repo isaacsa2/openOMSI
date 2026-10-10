@@ -98,7 +98,7 @@ pub fn refuse_path(path: &str) -> Option<String> {
         return Some("not inside a content folder".into());
     }
     for c in &comps {
-        if c.is_empty() || *c == "." || *c == ".." || c.chars().any(|ch| ch.is_control() || matches!(ch, '<' | '>' | '"' | '|' | '?' | '*')) || c.trim() != *c && c.trim().is_empty() {
+        if c.is_empty() || *c == "." || *c == ".." || c.chars().any(|ch| ch.is_control() || matches!(ch, '<' | '>' | '"' | '|' | '?' | '*')) || c.trim() != *c || c.ends_with('.') {
             return Some(format!("bad name component {c:?}"));
         }
     }
@@ -460,11 +460,19 @@ const MAX_CONNECTIONS: usize = 16;
 /// The longest request line (they are a few words).
 const MAX_LINE: u64 = 256;
 
+/// The longest reply line a host may send (a greeting, a size, or the reason for a refusal).
+const MAX_REPLY_LINE: u64 = 1024;
+
 /// One line of at most `MAX_LINE` bytes (a longer one ends the connection).
 fn read_line_limited(input: &mut impl BufRead, line: &mut String) -> std::io::Result<usize> {
-    let n = input.by_ref().take(MAX_LINE).read_line(line)?;
-    if n as u64 >= MAX_LINE && !line.ends_with('\n') {
-        return Err(std::io::Error::other("request line too long"));
+    read_line_max(input, line, MAX_LINE)
+}
+
+/// One line of at most `max` bytes: a peer that never ends its line gets no more memory than that.
+fn read_line_max(input: &mut impl BufRead, line: &mut String, max: u64) -> std::io::Result<usize> {
+    let n = input.by_ref().take(max).read_line(line)?;
+    if n as u64 >= max && !line.ends_with('\n') {
+        return Err(std::io::Error::other("line too long"));
     }
     Ok(n)
 }
@@ -639,7 +647,7 @@ pub struct Report {
 
 fn read_reply(input: &mut impl BufRead) -> Result<Option<u64>, String> {
     let mut line = String::new();
-    input.read_line(&mut line).map_err(|e| e.to_string())?;
+    read_line_max(input, &mut line, MAX_REPLY_LINE).map_err(|e| e.to_string())?;
     let t = line.trim();
     if let Some(rest) = t.strip_prefix("OK") {
         let rest = rest.trim();
@@ -689,7 +697,7 @@ fn open(host: SocketAddr, session: u64) -> Result<Connection, String> {
     let keys = channel::Handshake::new().map_err(|e| e.to_string())?;
     writeln!(out, "{} {} {}", channel::MAGIC, omsi_net::session_hex(session), keys.public_hex()).map_err(|e| e.to_string())?;
     let mut line = String::new();
-    input.read_line(&mut line).map_err(|e| e.to_string())?;
+    read_line_max(&mut input, &mut line, MAX_REPLY_LINE).map_err(|e| e.to_string())?;
     let t = line.trim();
     let Some(host_key) = t.strip_prefix("OK ") else {
         let said = t.strip_prefix("ERR").unwrap_or(t).trim();
@@ -721,8 +729,12 @@ pub fn fetch(args: &mut Args, host: SocketAddr, session: u64, progress: &mut dyn
     if len > 256 << 20 {
         return Err("the list is too large".into());
     }
-    let mut body = vec![0u8; len as usize];
-    input.read_exact(&mut body).map_err(|e| e.to_string())?;
+    // (grown as the bytes come: a host that claims 256 MB and sends nothing costs nothing)
+    let mut body = Vec::new();
+    let got = input.by_ref().take(len).read_to_end(&mut body).map_err(|e| e.to_string())?;
+    if got as u64 != len {
+        return Err(format!("the list ended after {got} of {len} bytes"));
+    }
     let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| format!("bad list: {e}"))?;
     if manifest.entries.len() > MAX_FILES {
         return Err(format!("{} files are too many", manifest.entries.len()));
@@ -917,6 +929,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_host_cannot_send_an_endless_reply_line() {
+        let mut endless = std::io::Cursor::new(vec![b'x'; 1 << 20]);
+        let mut line = String::new();
+        assert!(read_line_max(&mut endless, &mut line, MAX_REPLY_LINE).is_err());
+        assert!(line.len() as u64 <= MAX_REPLY_LINE);
+        let mut ok = std::io::Cursor::new(b"OK 42\nrest".to_vec());
+        let mut line = String::new();
+        assert_eq!(read_line_max(&mut ok, &mut line, MAX_REPLY_LINE).unwrap(), 6);
+        assert_eq!(read_reply(&mut std::io::Cursor::new(b"OK 42\n".to_vec())).unwrap(), Some(42));
+        assert!(read_reply(&mut std::io::Cursor::new(vec![b'E'; 1 << 20])).is_err());
+    }
+
+    #[test]
     fn paths_that_are_refused() {
         assert!(refuse_path("maps/Ahlheim/global.cfg").is_none());
         assert!(refuse_path("Vehicles/LiAZ/Model/model.cfg").is_none());
@@ -938,6 +963,10 @@ mod tests {
             "x.cfg",
             "maps//x.cfg",
             "maps/x/y?.cfg",
+            // (Windows drops a trailing dot or space: `run.exe.` is `run.exe` there)
+            "maps/x/run.exe.",
+            "maps/x/run.exe ",
+            "maps/ x/a.cfg",
         ] {
             assert!(refuse_path(bad).is_some(), "{bad} should be refused");
         }
