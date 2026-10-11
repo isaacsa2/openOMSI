@@ -163,7 +163,7 @@ pub(crate) struct Spawn {
     heading: f64,
 }
 
-fn spawns(base: &Path, models: &Path) -> Result<Vec<Spawn>> {
+fn spawns(base: &Path, models: &Path, warnings: &mut Vec<String>) -> Result<Vec<Spawn>> {
     let mut out = Vec::new();
     for d in [base, models] {
         let p = child(d, "entrypoints.txt")?;
@@ -174,22 +174,15 @@ fn spawns(base: &Path, models: &Path) -> Result<Vec<Spawn>> {
             if !name.starts_with("entrypoint_") {
                 continue;
             }
-            let number = |key: &str| -> Result<f64> {
-                let n = fields
-                    .get(key)
-                    .map(|s| s.parse::<f64>())
-                    .transpose()?
-                    .unwrap_or(0.0);
-                ensure!(
-                    n.is_finite() && n.abs() < 1_000_000.0,
-                    "invalid spawn coordinate"
-                );
-                Ok(n)
+            let mut number = |key: &str| -> Result<f64> {
+                spawn::number(fields.get(key), key, &name, &p, warnings)
             };
+            let pos = [number("posx")?, number("posz")?, number("posy")?];
+            let heading = number("roty")?;
             let spawn = Spawn {
                 name: fields.get("name").cloned().unwrap_or(name),
-                pos: [number("posx")?, number("posz")?, number("posy")?],
-                heading: number("roty")?,
+                pos,
+                heading,
             };
             if !out
                 .iter()
@@ -298,12 +291,12 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
             .map(String::as_str)
             .unwrap_or("textures"),
     )?;
-    let mut spawns = spawns(&base, &models)?;
+    let mut report = Report::default();
+    let mut spawns = spawns(&base, &models, &mut report.warnings)?;
     let markers = prefixes(&models)?;
     let mut spool = spool::Spool::new(&dir.join("proton-import/work"), &spawns)?;
     let mut registry = materials::Registry::default();
     let mut output_bytes = 0;
-    let mut report = Report::default();
     let presets = texture_settings::Presets::read(&texture_dir, &mut report)?;
     let mut navigation = paths::Collector::new(&models, &spawns)?;
     let mut stops = stops::Collector::new(&models)?;

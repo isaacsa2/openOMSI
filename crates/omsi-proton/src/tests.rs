@@ -81,6 +81,58 @@ pub(super) fn setup(f: &Fixture) {
 }
 
 #[test]
+fn entry_point_degree_suffixes_keep_the_authored_heading_in_the_native_map() {
+    let f = Fixture::new();
+    setup(&f);
+    let mut entries = String::new();
+    for (i, angle) in ["-106.885d", "32D", "11\u{00b0}"].iter().enumerate() {
+        entries.push_str(&format!(
+            "[entrypoint_{}]\nname=Start {i}\nposX=299.5\nposY=7\nposZ=10.5\nrotY={angle}\n",
+            i + 1
+        ));
+    }
+    std::fs::write(f.0.join("Town/tiles/0x0/entrypoints.txt"), entries).unwrap();
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
+    assert_eq!(global.entry_points.len(), 3);
+    for (entry, expected) in global.entry_points.iter().zip([-106.885, 32.0, 11.0]) {
+        assert_eq!(entry.pos, [299.5, 10.5, 7.0]);
+        let heading = 2.0 * entry.quat[1].atan2(entry.quat[3]).to_degrees();
+        assert!((heading - expected).abs() < 1e-6);
+    }
+    assert_eq!(report.warnings.len(), 3);
+    assert!(report
+        .warnings
+        .iter()
+        .all(|w| w.contains("roty") && w.contains("degrees")));
+}
+
+#[test]
+fn damaged_entry_point_numbers_report_the_file_section_field_and_value() {
+    for (key, value) in [("posX", "299.5d"), ("rotY", "10junk"), ("rotY", "NaN")] {
+        let f = Fixture::new();
+        setup(&f);
+        std::fs::write(
+            f.0.join("Town/tiles/0x0/entrypoints.txt"),
+            format!("[entrypoint_4]\nname=Start\n{key}={value}\n"),
+        )
+        .unwrap();
+        let error = format!(
+            "{:#}",
+            import(&f.0, "maps/Proton-Town", || false).unwrap_err()
+        );
+        assert!(error.contains("entrypoints.txt"), "{error}");
+        assert!(
+            error.contains(&format!("entrypoint_4.{}", key.to_ascii_lowercase())),
+            "{error}"
+        );
+        assert!(error.contains(value), "{error}");
+        assert!(!f.0.join("global.cfg").exists());
+        assert!(!f.0.join("proton-import").exists());
+    }
+}
+
+#[test]
 fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
     let f = Fixture::new();
     setup(&f);
@@ -357,7 +409,12 @@ fn stale_entry_point_is_relocated_and_reported_without_inventing_a_route() {
         p.y *= 10.0;
     }
     convert::append(m, &mut tiles, &mut Vec::new(), &[], &|| false).unwrap();
-    let mut spawns = spawns(&f.0.join("Town"), &f.0.join("Town/tiles/0x0")).unwrap();
+    let mut spawns = spawns(
+        &f.0.join("Town"),
+        &f.0.join("Town/tiles/0x0"),
+        &mut Vec::new(),
+    )
+    .unwrap();
     let mut warnings = Vec::new();
     spawn::validate(&tiles, &mut spawns, &mut warnings).unwrap();
     assert_eq!(spawns[0].name, "Old route");

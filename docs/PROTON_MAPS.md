@@ -160,6 +160,9 @@ the earlier matching-name/single-neighbour detection remains available. Ambiguou
 folders are not guessed. Relative `./` prefixes and trailing separators work.
 Unsupported map phases, unsafe paths, damaged 3DS records and maps
 without an explicit entry point produce an import error.
+Entry-point `rotY` values with a trailing `d`, `D` or degree symbol are read as
+degrees and reported in the import warnings. Other malformed entry-point numbers
+remain errors, now identifying the file, section, field and original value.
 
 The importer has no fixed ZIP size cap: a 1 GB archive is accepted when its format,
 conversion limits and available disk space allow it.

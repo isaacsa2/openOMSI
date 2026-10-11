@@ -3,8 +3,49 @@
 #[cfg(test)]
 use crate::convert::Tiles;
 use crate::{convert::EDGE, Spawn};
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Context, Result};
 use glam::Vec3;
+
+pub(crate) fn number(
+    raw: Option<&String>,
+    key: &str,
+    section: &str,
+    file: &std::path::Path,
+    warnings: &mut Vec<String>,
+) -> Result<f64> {
+    let raw = raw.map(String::as_str).unwrap_or("0");
+    // Some authored starts append a degree suffix to rotY. Restrict the repair
+    // to the angle: accepting a numeric prefix everywhere would hide damaged data.
+    let degrees = (key == "roty")
+        .then(|| {
+            raw.strip_suffix('d')
+                .or_else(|| raw.strip_suffix('D'))
+                .or_else(|| raw.strip_suffix('\u{00b0}'))
+        })
+        .flatten();
+    let n = degrees
+        .unwrap_or(raw)
+        .trim()
+        .parse::<f64>()
+        .with_context(|| {
+            format!(
+                "invalid entry point {section}.{key}={raw:?} in {}",
+                file.display()
+            )
+        })?;
+    ensure!(
+        n.is_finite() && n.abs() < 1_000_000.0,
+        "invalid entry point {section}.{key}={raw:?} in {}: non-finite or out of range",
+        file.display()
+    );
+    if degrees.is_some() {
+        warnings.push(format!(
+            "Entry point {section}.{key}={raw:?} in {}: interpreted the angle as {n} degrees.",
+            file.display()
+        ));
+    }
+    Ok(n)
+}
 
 fn height(face: [Vec3; 3], x: f32, y: f32) -> Option<f32> {
     let [a, b, c] = face;
