@@ -1251,6 +1251,17 @@ mod tests {
     }
 
     #[test]
+    fn pause_slider_touch_uses_track_not_numeric_label_and_clamps() {
+        let track = omsi_ui::Rect::new(100.0, 20.0, 200.0, 34.0);
+        assert_eq!(super::touch_slider_fraction(100.0, track, 1.0), 0.0);
+        assert_eq!(super::touch_slider_fraction(200.0, track, 1.0), 0.5);
+        assert_eq!(super::touch_slider_fraction(300.0, track, 1.0), 1.0);
+        assert_eq!(super::touch_slider_fraction(400.0, track, 1.0), 1.0);
+        assert_eq!(super::touch_slider_fraction(400.0, track, 2.0), 0.5);
+        assert_eq!(super::touch_slider_fraction(0.0, track, 2.0), 0.0);
+    }
+
+    #[test]
     fn a_drag_scrolls_the_shell_in_pixels_at_any_screen_density() {
         // Finger up => negative wheel => the menu moves down.
         assert_eq!(super::touch_menu_scroll_lines(-84.0, 1.0), -2.0);
