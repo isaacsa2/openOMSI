@@ -308,6 +308,7 @@ fn settings_rows(sh: &mut Shell, v: &PauseView, list: &ListView, body: Rect, anc
     let mut sel_y: Option<(f32, f32)> = None;
     let mut dd_anchor: Option<Rect> = None;
     let dd_row = list.dropdown.as_ref().map(|d| d.row);
+    let touch_sliders = &mut sh.touch_sliders;
     sh.ui.scroll_area(&key, body, &mut |ui, view| {
         let gap = GAP * 2.0;
         let cw = if cols.len() == 2 { (view.w - 8.0 - gap) / 2.0 } else { (view.w - 8.0).min(760.0) };
@@ -333,7 +334,7 @@ fn settings_rows(sh: &mut Shell, v: &PauseView, list: &ListView, body: Rect, anc
                 if kbd {
                     sel_y = Some((y - view.y, rh));
                 }
-                if let Some(a) = settings_row(ui, k, label, r, kbd, dd_row == Some(k), &mut dd_anchor) {
+                if let Some(a) = settings_row(ui, k, label, r, kbd, dd_row == Some(k), &mut dd_anchor, touch_sliders, body) {
                     acts.push(a);
                 }
                 y += rh;
@@ -354,7 +355,7 @@ fn settings_rows(sh: &mut Shell, v: &PauseView, list: &ListView, body: Rect, anc
 
 /// One row of a settings window: its name (and description) on the left, its control on
 /// the right as the launcher draws that control.
-fn settings_row(ui: &mut Ui, k: usize, label: &str, r: Rect, kbd: bool, dd_open: bool, dd_anchor: &mut Option<Rect>) -> Option<Action> {
+fn settings_row(ui: &mut Ui, k: usize, label: &str, r: Rect, kbd: bool, dd_open: bool, dd_anchor: &mut Option<Rect>, touch_sliders: &mut Vec<(usize, Rect, Rect)>, viewport: Rect) -> Option<Action> {
     let row = parse_row(label);
     let id = id_of(&format!("pause-row-{k}-{}", row.name));
     let hov = ui.hover(r);
@@ -396,6 +397,10 @@ fn settings_row(ui: &mut Ui, k: usize, label: &str, r: Rect, kbd: bool, dd_open:
         "v" => {
             let mut f = row.frac.unwrap_or(0.0).clamp(0.0, 1.0);
             let value = row.value.to_string();
+            // Share the same track geometry with Android touch handling.
+            // The last 58 logical pixels belong to the numeric value, not the slider.
+            let track = Rect::new(ctl.x, ctl.y, ctl.w - 58.0, ctl.h);
+            touch_sliders.push((k, track, viewport));
             let changed = ui.slider(&format!("pause-sl-{k}-{}", row.name), ctl, &mut f, 0.0, 1.0, 0.0, "", &|_| value.clone());
             changed.then_some(Action::Control(k, f))
         }
