@@ -2013,7 +2013,10 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
     let ambient_light = camera.ambient.xyz * ao;
     let mat_light = material.color.rgb * (light - ambient_light) + material.ambient.rgb * ambient_light;
     let light_mapped = material.params2.x > 0.5 && material.extra.x < 0.5;
-    var lit = albedo * mat_light;
+    // The low-range Vanilla+ target has no exposure/tonemapping. Saturate the
+    // diffuse light before modulating the texture, as the classic path does:
+    // overlapping lamps must not clip a coloured texture into a white patch.
+    var lit = albedo * clamp(mat_light, vec3<f32>(0.0), vec3<f32>(1.0));
     // The vanilla picture: Omsi.exe's texture stages multiply the gamma-encoded texture by
     // the vertex light (clamped at 1); here the texture is sampled linear and the target
     // encodes again, so multiplied here a light L showed as L^(1/2.2) - a night at 0.06
@@ -2070,7 +2073,14 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
     // the D3D material's own highlight (specular colour and power of the o3d file or a
     // [matl_allcolor]), lit at the vertices (see `vertex_specular`) and added after the
     // texture as D3D's specular is; the sun's not in its shadow
-    lit = lit + in.spec_sun * shadow + in.spec_sky;
+    let specular = in.spec_sun * shadow + in.spec_sky;
+    if (classic) {
+        // D3D adds its vertex specular after the encoded texture stages. Adding
+        // it in linear light encoded it again at the target and washed out dusk.
+        lit = srgb_decode(min(srgb_encode(lit) + specular, vec3<f32>(1.0)));
+    } else {
+        lit = lit + specular;
+    }
     if (material.params.y > 0.5) {
         lit = tex.rgb * material.color.rgb;
     }
