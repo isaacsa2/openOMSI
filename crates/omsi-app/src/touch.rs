@@ -16,6 +16,12 @@ use omsi_ui::paint::Align;
 use omsi_ui::{Atlas, Color, Draw, Fonts, Gpu, Layer, Painter, Rect, Weight};
 use winit::event::{Touch as Finger, TouchPhase};
 
+/// Whether the visible game panels own an Android touch.
+/// Pause, city map, photo and VR hide these panels; plugins take precedence.
+fn touch_game_panel_active(focused: bool, hidden: bool, plugin_focused: bool) -> bool {
+    focused && !hidden && !plugin_focused
+}
+
 /// What a control does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Btn {
@@ -112,6 +118,9 @@ enum Role {
     Cockpit,
     /// Looking round (or, not moved far, a tap on the picture).
     Look,
+    /// The game's modal panels (trip summary, destination dialog, quick menu).
+    /// Their controls take touches before the driving HUD.
+    GamePanel,
     /// The mouse, while the city map has the screen.
     Mouse,
     /// The game menu's (or the chooser's) list: a drag scrolls it, a tap picks a line.
@@ -488,7 +497,13 @@ impl App {
         self.input.touch.fingers.retain(|f| f.id != id);
         let menu_mode = self.menus.game_menu.is_some() || self.menus.chooser.is_some() || self.menus.navigator.as_ref().is_some_and(|n| n.map_open());
         let t = &self.input.touch;
-        let role = if let Some(k) = t.button_at(p) {
+        // Android Touch doesn't pass through desktop MouseInput's game_panel_click path.
+        // Panels are painted above the HUD: tap them before steering, pedals and cab controls.
+        let hidden = menu_mode || self.photo.is_some() || self.vr_active();
+        let game_panel = touch_game_panel_active(self.game_panels_mouse(), hidden, self.plugin_focus());
+        let role = if game_panel {
+            Role::GamePanel
+        } else if let Some(k) = t.button_at(p) {
             Role::Button(k, t.buttons[k].btn)
         } else if self.menus.game_menu.is_some() || self.menus.chooser.is_some() {
             Role::Menu
@@ -533,6 +548,10 @@ impl App {
             // without having moved - a finger that came down to scroll used to pick the
             // line it landed on)
             Role::Menu => self.on_cursor(p.x, p.y),
+            Role::GamePanel => {
+                self.on_cursor(p.x, p.y);
+                self.game_panel_click(true);
+            }
             Role::Wheel(..) => self.input.touch.steering = true,
             _ => {}
         }
@@ -592,6 +611,7 @@ impl App {
                     self.on_cursor(p.x, p.y);
                 }
             }
+            Role::GamePanel => self.on_cursor(p.x, p.y),
             Role::Cockpit | Role::Mouse => {
                 if let (Role::Mouse, Some(_)) = (role, self.input.touch.pinch) {
                     return self.touch_pinch();
@@ -677,6 +697,10 @@ impl App {
             Role::Cockpit | Role::Mouse => {
                 self.on_cursor(p.x, p.y);
                 self.left_button(event_loop, false);
+            }
+            Role::GamePanel => {
+                self.on_cursor(p.x, p.y);
+                self.game_panel_click(false);
             }
             Role::Navigator => {
                 if f.moved {
@@ -1225,6 +1249,14 @@ mod tests {
     fn the_information_bar_keeps_clear_of_the_buttons_along_the_top() {
         assert_eq!(super::info_room(1280.0, 14.0, 278.0, 914.0, 56.0, 1.0), [286.0, 906.0, 14.0]);
         assert_eq!(super::info_room(720.0, 14.0, 278.0, 470.0, 56.0, 1.0), [14.0, 706.0, 64.0]);
+    }
+
+    #[test]
+    fn game_panels_capture_android_touches_only_while_visible() {
+        assert!(super::touch_game_panel_active(true, false, false));
+        assert!(!super::touch_game_panel_active(false, false, false));
+        assert!(!super::touch_game_panel_active(true, true, false));
+        assert!(!super::touch_game_panel_active(true, false, true));
     }
 
     #[test]
