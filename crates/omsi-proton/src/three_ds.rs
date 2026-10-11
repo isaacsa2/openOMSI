@@ -1,6 +1,6 @@
 //! Static 3DS geometry. Vertex positions in 3DS are already in the file's world frame;
 //! its local-axis matrix describes the object's frame, not another transform to apply.
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 use glam::{Vec2, Vec3};
 use omsi_o3d::Material;
 use std::io::Read;
@@ -273,6 +273,11 @@ fn material(b: &[u8]) -> Result<(String, Material, UvTransform)> {
 }
 
 fn geometry(b: &[u8], o: &mut Object) -> Result<()> {
+    geometry_for_import(b, o, false).map(|_| ())
+}
+
+fn geometry_for_import(b: &[u8], o: &mut Object, repair_uvs: bool) -> Result<usize> {
+    let mut repaired = 0;
     for c in chunks(b)? {
         match c.tag {
             0x4110 => {
@@ -285,7 +290,20 @@ fn geometry(b: &[u8], o: &mut Object) -> Result<()> {
             0x4140 => {
                 let (_, data, _) = records(c.data, 8)?;
                 for p in data.chunks_exact(8) {
-                    o.uv.push(Vec2::new(float(p)?, 1.0 - float(&p[4..])?));
+                    let uv = Vec2::new(
+                        f32::from_le_bytes(p[..4].try_into()?),
+                        1.0 - f32::from_le_bytes(p[4..8].try_into()?),
+                    );
+                    if uv.is_finite() {
+                        o.uv.push(uv);
+                    } else {
+                        ensure!(repair_uvs, "non-finite 3DS texture coordinate");
+                        // Keep the surface and collision even when an export lost a
+                        // UV. The importer reports this local repair; strict readers
+                        // still reject it, and bad positions or indices remain fatal.
+                        o.uv.push(Vec2::ZERO);
+                        repaired += 1;
+                    }
                 }
             }
             0x4120 => {
@@ -339,7 +357,7 @@ fn geometry(b: &[u8], o: &mut Object) -> Result<()> {
             "3DS material names a missing face"
         );
     }
-    Ok(())
+    Ok(repaired)
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Model> {
@@ -378,7 +396,8 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
                     };
                     for g in chunks(rest)? {
                         if g.tag == 0x4100 {
-                            geometry(g.data, &mut o)?;
+                            geometry(g.data, &mut o)
+                                .with_context(|| format!("reading 3DS object {:?}", o.name))?;
                         }
                     }
                     if !o.positions.is_empty() {

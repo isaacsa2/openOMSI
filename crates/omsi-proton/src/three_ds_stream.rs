@@ -231,6 +231,23 @@ impl Scene {
         cancel: &impl Fn() -> bool,
         mut object: impl FnMut(Object) -> Result<()>,
     ) -> Result<()> {
+        self.visit_impl(cancel, false, |o, _| object(o))
+    }
+
+    pub(crate) fn visit_import(
+        &mut self,
+        cancel: &impl Fn() -> bool,
+        object: impl FnMut(Object, usize) -> Result<()>,
+    ) -> Result<()> {
+        self.visit_impl(cancel, true, object)
+    }
+
+    fn visit_impl(
+        &mut self,
+        cancel: &impl Fn() -> bool,
+        repair_uvs: bool,
+        mut object: impl FnMut(Object, usize) -> Result<()>,
+    ) -> Result<()> {
         let mut position = self.root.data;
         while position < self.root.end {
             ensure!(!cancel(), "map import cancelled");
@@ -247,7 +264,10 @@ impl Scene {
                         while mesh_at < item.end {
                             let mesh = self.at(mesh_at, item.end)?;
                             if mesh.tag == 0x4100 {
-                                data.extend(self.mesh(mesh, cancel)?);
+                                data.extend(
+                                    self.mesh(mesh, cancel)
+                                        .with_context(|| format!("reading 3DS object {name:?}"))?,
+                                );
                             }
                             mesh_at = mesh.end;
                         }
@@ -255,12 +275,13 @@ impl Scene {
                             name,
                             ..Default::default()
                         };
-                        geometry(&data, &mut o)?;
+                        let repaired = geometry_for_import(&data, &mut o, repair_uvs)
+                            .with_context(|| format!("reading 3DS object {:?}", o.name))?;
                         drop(data);
                         // Authored traffic points can be single vertices with no faces.
                         // Consumers decide whether an object is a marker or scenery.
                         if !o.positions.is_empty() {
-                            object(o)?;
+                            object(o, repaired)?;
                         }
                     }
                     child = item.end;

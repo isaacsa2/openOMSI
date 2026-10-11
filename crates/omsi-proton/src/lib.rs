@@ -325,7 +325,13 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         }
         let (names, default) = registry.register(&scene, &presets)?;
         scene
-            .visit(&cancel, |object| {
+            .visit_import(&cancel, |object, repaired_uvs| {
+                if repaired_uvs > 0 {
+                    report.warnings.push(format!(
+                        "{}: object {:?}: replaced {repaired_uvs} non-finite texture coordinates with (0, 0). Geometry and collision retained; affected texture mapping needs checking.",
+                        f.file_name().unwrap_or_default().to_string_lossy(), object.name
+                    ));
+                }
                 if all_gps || optimise::gps_name(&object.name) {
                     navigation.gps(&object, &f.file_name().unwrap_or_default().to_string_lossy(), &mut report)?;
                     return Ok(());

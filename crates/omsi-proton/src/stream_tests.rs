@@ -43,6 +43,91 @@ fn color(value: [f32; 3]) -> Vec<u8> {
 }
 
 #[test]
+fn map_import_repairs_only_non_finite_uvs_and_keeps_strict_3ds_readers() {
+    let temp = Temp::new();
+    let f = crate::tests::Fixture::new();
+    crate::tests::setup(&f);
+    let bytes = model();
+    // Rebuild the tiny fixture's mesh with one lost UV and two valid mappings.
+    let mut geometry = bytes[29..].to_vec();
+    let mut uv = 3u16.to_le_bytes().to_vec();
+    for p in [[f32::NAN, 0.0], [0.5, 0.25], [0.75, 0.5]] {
+        uv.extend(p.into_iter().flat_map(f32::to_le_bytes));
+    }
+    geometry.extend(chunk(0x4140, &uv));
+    let mut object = b"road\0".to_vec();
+    object.extend(chunk(0x4100, &geometry));
+    let bytes = chunk(0x4d4d, &chunk(0x3d3d, &chunk(0x4000, &object)));
+    assert!(three_ds::parse(&bytes).is_err());
+    let mut scene = three_ds::Scene::open(&temp.file(&bytes), &|| false).unwrap();
+    let error = scene.visit(&|| false, |_| Ok(())).unwrap_err();
+    assert!(format!("{error:#}").contains("road"));
+    let mut scene = three_ds::Scene::open(&temp.file(&bytes), &|| false).unwrap();
+    scene
+        .visit_import(&|| false, |o, repaired| {
+            assert_eq!(repaired, 1);
+            assert_eq!(
+                o.uv,
+                [Vec2::ZERO, Vec2::new(0.5, 0.75), Vec2::new(0.75, 0.5)]
+            );
+            assert_eq!(
+                o.positions,
+                three_ds::parse(&model()).unwrap().objects[0].positions
+            );
+            assert_eq!(o.faces, [[0, 1, 2]]);
+            Ok(())
+        })
+        .unwrap();
+    std::fs::write(f.0.join("Town/tiles/0x0/road.3ds"), bytes).unwrap();
+    let report = crate::import(&f.0, "maps/Proton-Town", || false).unwrap();
+    assert_eq!(report.triangles, 3);
+    assert_eq!(report.warnings.len(), 1);
+    assert!(report.warnings[0].contains("road.3ds"));
+    assert!(report.warnings[0].contains("object \"road\""));
+    for tile in omsi_map::GlobalCfg::load(&f.0.join("global.cfg"))
+        .unwrap()
+        .tiles
+    {
+        let mesh = omsi_o3d::load_mesh(&f.0.join(format!(
+            "proton-import/model/tile_{}_{}.o3d",
+            tile.x, tile.y
+        )))
+        .unwrap();
+        assert!(mesh
+            .vertices
+            .iter()
+            .all(|v| v.uv.is_finite() && v.position.is_finite()));
+        assert!(!mesh.triangles.is_empty());
+    }
+}
+
+#[test]
+fn uv_repair_never_accepts_invalid_positions_indices_or_record_lengths() {
+    let temp = Temp::new();
+    for kind in 0..3 {
+        let mut geometry = model()[29..].to_vec();
+        match kind {
+            0 => geometry[8..12].copy_from_slice(&f32::NAN.to_le_bytes()),
+            1 => geometry[52..54].copy_from_slice(&999u16.to_le_bytes()),
+            _ => {}
+        }
+        let mut uv = 3u16.to_le_bytes().to_vec();
+        let count = if kind == 2 { 2 } else { 3 };
+        for _ in 0..count {
+            uv.extend(f32::NAN.to_le_bytes());
+            uv.extend(0.0f32.to_le_bytes());
+        }
+        geometry.extend(chunk(0x4140, &uv));
+        let mut object = b"road\0".to_vec();
+        object.extend(chunk(0x4100, &geometry));
+        let bytes = chunk(0x4d4d, &chunk(0x3d3d, &chunk(0x4000, &object)));
+        let mut scene = three_ds::Scene::open(&temp.file(&bytes), &|| false).unwrap();
+        let error = scene.visit_import(&|| false, |_, _| Ok(())).unwrap_err();
+        assert!(format!("{error:#}").contains("road"));
+    }
+}
+
+#[test]
 fn oversized_flat_background_uses_occupied_tiles_and_keeps_materials() {
     let temp = Temp::new();
     let mut spool = crate::spool::Spool::new(&temp.0.join("work"), &[]).unwrap();
