@@ -1,4 +1,4 @@
-# Basic Proton Bus map support
+# Proton Bus map preview support
 
 The Mods installer can import a standalone Proton Bus map ZIP or folder containing
 `<name>.map.txt` with its assets under the relative `baseDir`, including nested folders,
@@ -26,13 +26,17 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 ## Included
 
 - Static `.3ds` scenery, UV coordinates, materials and referenced textures.
-- Diffuse UV scale, offset and rotation, specular colour/strength, basic self
-  illumination and shininess approximated as a Phong exponent. Material definitions
+- Diffuse UV scale, offset and rotation; conservative native material equivalents. Material definitions
   may follow their objects. UTF-8 names and legacy Windows-1252 names are accepted.
 - `_transparent_` mesh names select alpha blending; `_cutout_` selects alpha testing.
   Materials with different name tags remain distinct even when they share one texture.
-  Untagged PNGs retain the cutout fallback, and explicit 3DS material opacity is blended.
-  Other custom Proton shaders are not reproduced.
+  Untagged PNGs retain the cutout fallback.
+  `_emissive_` meshes are self-lit, including combined transparent/cutout tags.
+  `_additive_` is approximated by self-lit alpha blending without depth writes;
+  this is not exact additive blending. Common texture `.config.txt` presets
+  (`automotive/basicwhite`, asphalt, concrete and pavements) receive conservative
+  native specular values. `keepTexture=0` retains the local texture and warns because
+  built-in Proton replacement textures are unavailable. Other shaders are not reproduced.
 - `_gencol_` + `_invisible_` meshes become separate collision-only objects: they support
   wheels and vehicle collision without render meshes, textures or shadows. Untagged
   scenery retains the initial importer's wheel-surface behaviour.
@@ -58,7 +62,7 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   navigator and city map, without visible scenery, collision or source materials.
   GPS-only files are also recognised; unmatched strips are omitted and reported.
 - Vehicle-path coordinates in `aivehicles/*.txt`, or exact `<prefix>.000` 3DS
-  marker names, become roads on the navigator and launcher map. Numeric ordering,
+  marker names, become roads on the navigator and launcher map, plus native traffic paths. Numeric ordering,
   reversal and complete loops are preserved; missing point numbers split the road
   instead of connecting across a gap. The displayed width is an approximate 3.5 m.
 - `streetlights/*.txt` prefixes and `_real_` / `_fake_` markers become native
@@ -66,24 +70,54 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   intensity and range, and glow texture, tint and size are converted. They use the
   engine's night switch and its nearby-light filtering; marker meshes are omitted.
   Glow textures are shared by filename. Missing glows fall back to the native glow.
+- Automatic vehicle and `aipeople` paths become tile-local native street/sidewalk
+  segments, keeping slopes, direction, complete loops, point gaps and turn indicators.
+  Speed multipliers become native speed limits based on a 50 km/h preview default.
+  Vehicle spawner intervals are approximated by native traffic density, with spawning
+  disabled on points whose `isSpawner=0`; they are not exact timed spawners.
+- `busstops` coordinates or exact trigger/waiting 3D markers become native stops and
+  waiting places, including stop names, platform side and a bounded passenger count.
+  A 3D stop faces the nearest authored vehicle path when one exists. Missing triggers
+  are omitted and reported; missing waiting markers receive a small approximate
+  waiting area with a warning. Use an installed OMSI bus with a passenger cabin,
+  doors and a destination set to board in free drive. Existing native boarding,
+  ticket and disembarking logic is used; no fictional line or timetable is generated.
+- `trafficlights` cycles become native programs. Lamp markers accept both
+  `<prefix>_pathN_...` and `_<prefix>_pathN_...`, including exporter numeric suffixes.
+  Red/yellow/green channels and stop-trigger channels remain independent. Lamps
+  and glows follow the program, and matching vehicle paths are split at stop lines.
+  Decorative/flashing lights without an authored stop trigger do not hold traffic.
 - Simulation helper geometry identified by the map's pedestrian, traffic, stop and
   traffic-light prefixes is left out rather than drawn as obstacles.
 
-## Limits of this first version
+## Current limits
 
-Passengers, pedestrian simulation, AI vehicle simulation, working traffic lights,
-bus timetables, destination graphics and Proton buses are **not imported**. This is a
-scenery import, not full Proton Bus compatibility. Animated models, prefabs, tile
-streaming rules and texture `.config.txt` shader settings are not reproduced.
+Bus timetables, destination graphics and driveable Proton bus mods are **not imported**.
+This is partial compatibility. Animated models, prefabs and source tile streaming
+rules are not reproduced. `isFirstStop`/`isLatestStop` do not create native duties;
+terminal behaviour uses the native bus destination and passenger logic.
+
+Imported traffic uses up to eight installed native street-car `.ovh` types, if the
+map has generated vehicle paths and no explicit `ailists.cfg`. A custom native AI
+list overrides that fallback, including an empty list. Missing native cars or human
+models leave scenery driveable. Proton `aicars_v1` models, bicycles and source
+pedestrian spawn intervals are not converted; walking population uses native settings.
+Paths still need the original 3DS road/collision surface beneath them. Manual links,
+train paths and Proton spline smoothing are not reproduced.
 
 The GPS follows the author's drawn strip; it does not recalculate routes, announce
-turns or create a timetable. Vehicle paths supply navigation only and do not start
-AI traffic or generate road surfaces: the original 3DS road/collision geometry
-still supplies the drivable surface. Manual path links and spline smoothing are
-not reproduced. The tag/point conventions follow the public
+turns or create a timetable. Format conventions follow the public
 [map model](https://www.busmods.com/ciano/help/map-models.html),
 [path](https://www.busmods.com/ciano/help/map-traffic.html) and
-[streetlight](https://www.busmods.com/ciano/help/map-lights.html) references.
+[lights](https://www.busmods.com/ciano/help/map-lights.html) references.
+
+Signal clocks use native game time; random/first-tick startup timing is approximate.
+Mesh-shaped stop triggers use bounded horizontal bounds. A normal trigger attaches
+to the closest unambiguous authored vehicle path; `_anyangle_` can affect multiple
+paths. Triggers without a matching path or with ambiguous matches are reported and
+left unlinked. Signal lamps emit native glows; coloured real-light range/shadows are
+not imported. Native path linking uses the engine's endpoint tolerance, so very close
+but separate source endpoints should be checked in game.
 
 Streetlight rendering is approximate. Imported point lights follow the native
 night cycle and do not allocate additional lamp shadow maps; source shadow options
@@ -112,7 +146,10 @@ Cancellation or a failed conversion does not commit the staging result.
 Conversion scans material headers first, then reads one mesh object at a time.
 Clipped faces are spooled to temporary files in staging using at most 32 buffered
 writers. Each tile is then assembled with shared vertices and exported separately;
-its temporary file is deleted immediately. The whole converted map is not retained
+its temporary file is deleted immediately. Gameplay keeps bounded centres/points,
+not full helper meshes; lamp meshes are exported one at a time. A spatial tile index
+limits stop/signal matching, and waiting-place records append directly to UTF-16 tile
+files rather than rewriting each tile for every passenger position. The whole converted map is not retained
 in RAM. Peak memory still depends on the largest source object and densest output
 tile, plus bounded lookup buffers. Extra disk I/O can make an import slower.
 
@@ -161,7 +198,12 @@ conversion run per version, excluding ZIP extraction and later loader validation
 | Phase 3 | 363 | 4,457,414 | 85.5 MiB | 5.18 s |
 | Phase 4 | 365 | 30,792,230 | 196.0 MiB | 35.74 s |
 
-These are conversion measurements, not gameplay RAM or FPS. The phase 4 map remains
+The expanded phase 4 conversion was also checked with the native map/scenery/lane
+readers: 142 stops, 191 sidewalk segments, 7 signal programs, 137 controlled lanes
+and 461 lamp objects. The native O3D reader validated all 365 tile meshes and
+30,787,338 static triangles. Assets remained outside the repository.
+
+These measurements describe the earlier scenery-only conversion, not gameplay RAM or FPS. The phase 4 map remains
 very dense; its rendering, collision and driving still require an in-game test.
 
 ## Local format checks

@@ -10,6 +10,7 @@ mod control;
 mod mirror;
 mod parked;
 mod population;
+mod proton;
 mod setup;
 mod trains;
 

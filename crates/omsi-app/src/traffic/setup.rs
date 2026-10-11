@@ -321,6 +321,10 @@ fn random_types(root: &Path, world: &World) -> RandomTypes {
             }
         }
     }
+    if types.is_empty() && world.ailists.groups.is_empty() {
+        let fallback = super::proton::fallback(root, world);
+        if !fallback.types.is_empty() { return fallback; }
+    }
     RandomTypes { types, groups, group_curves, group_uvg, uvg_defaults }
 }
 

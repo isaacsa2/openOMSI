@@ -7,6 +7,10 @@ pub(crate) enum Mode {
     Blend,
     Cutout,
     Collision,
+    Emissive,
+    EmissiveBlend,
+    EmissiveCutout,
+    Additive,
 }
 
 pub(crate) enum ObjectKind {
@@ -38,7 +42,13 @@ pub(crate) fn classify(name: &str) -> ObjectKind {
     }) {
         return ObjectKind::EmbeddedTree;
     }
-    ObjectKind::Mesh(if name.contains("_transparent_") {
+    ObjectKind::Mesh(if name.contains("_additive_") {
+        Mode::Additive
+    } else if name.contains("_emissive_") {
+        if name.contains("_transparent_") { Mode::EmissiveBlend }
+        else if name.contains("_cutout_") { Mode::EmissiveCutout }
+        else { Mode::Emissive }
+    } else if name.contains("_transparent_") {
         Mode::Blend
     } else if name.contains("_cutout_") {
         Mode::Cutout

@@ -4,9 +4,14 @@
 mod convert;
 mod export;
 mod materials;
+mod gameplay;
 pub mod navigation;
 mod optimise;
 mod paths;
+mod settings;
+mod signals;
+mod stops;
+mod texture_settings;
 mod spawn;
 mod spool;
 mod tags;
@@ -30,11 +35,17 @@ pub struct Report {
     pub gps_imported: usize,
     pub roads_imported: usize,
     pub lights_imported: usize,
+    pub stops_imported: usize,
+    pub traffic_segments_imported: usize,
+    pub pedestrian_segments_imported: usize,
+    pub signals_imported: usize,
+    pub signal_paths_imported: usize,
     pub vertices_removed: usize,
     pub warnings: Vec<String>,
 }
 
 fn ini(path: &Path) -> Result<Ini> {
+    ensure!(std::fs::metadata(path)?.len() <= 1024 * 1024, "Proton configuration exceeds 1 MiB");
     let bytes = std::fs::read(path)?;
     Ok(ini_bytes(&bytes))
 }
@@ -293,7 +304,10 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut registry = materials::Registry::default();
     let mut output_bytes = 0;
     let mut report = Report::default();
+    let presets = texture_settings::Presets::read(&texture_dir, &mut report)?;
     let mut navigation = paths::Collector::new(&models, &spawns)?;
+    let mut stops = stops::Collector::new(&models)?;
+    let mut signals = signals::Collector::new(&models, &mut report)?;
     let mut lamps = streetlights::Collector::new(&models, &texture_dir, &dir.join("proton-import/texture"), &mut report)?;
     let mut helpers = 0;
     let mut embedded_trees = 0;
@@ -316,7 +330,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
                 "3DS keyframe data is present; only static mesh geometry is imported.".into(),
             );
         }
-        let (names, default) = registry.register(&scene)?;
+        let (names, default) = registry.register(&scene, &presets)?;
         scene
             .visit(&cancel, |object| {
                 if all_gps || optimise::gps_name(&object.name) {
@@ -327,6 +341,10 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
                     return Ok(());
                 }
                 if navigation.marker(&object)? {
+                    report.markers_skipped += 1;
+                    return Ok(());
+                }
+                if stops.marker(&object)? || signals.marker(&object, &mut registry, &names, default, dir, &texture_dir, &mut report, &cancel)? {
                     report.markers_skipped += 1;
                     return Ok(());
                 }
@@ -406,7 +424,11 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         report.lights_imported -= omitted;
         report.warnings.push(format!("{omitted} streetlight markers outside scenery tiles were omitted"));
     }
-    let navigation = navigation.finish(&mut report)?;
+    let (navigation, paths) = navigation.finish(&mut report)?;
+    let mut gameplay = gameplay::Paths::new(&paths)?;
+    drop(paths);
+    let stops = stops.finish(&mut gameplay, &mut report)?;
+    gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel)?;
     let file = std::fs::File::create(dir.join(navigation::FILE))?;
     let mut writer = std::io::BufWriter::new(file);
     serde_json::to_writer(&mut writer, &navigation)?;
@@ -428,3 +450,5 @@ mod tests;
 mod tag_tests;
 #[cfg(test)]
 mod navigation_tests;
+#[cfg(test)]
+mod gameplay_tests;

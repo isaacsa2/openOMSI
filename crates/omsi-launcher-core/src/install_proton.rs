@@ -127,7 +127,7 @@ pub(super) fn plan_at(
         found = true;
     }
     if found {
-        plan.warnings.push("Proton Bus basic support: scenery, textures and entry points for free driving. Passengers, AI traffic, traffic lights, routes and timetables are not imported.".into());
+        plan.warnings.push("Proton Bus preview support: scenery, GPS, bus stops, native passengers, authored vehicle/pedestrian paths and signal cycles. Native vehicles and humans must be installed. Timetables and Proton vehicle mods are not imported.".into());
     }
     found
 }
@@ -168,9 +168,10 @@ pub(super) fn convert(staging: &Path, plan: &Plan, job: &Job) -> Result<()> {
         check_space(staging)?;
         job.set(|p| {
             p.report.push(format!(
-                "{}: imported {} tiles and {} triangles; {} GPS strips, {} navigation roads and {} streetlight markers; {} simulation markers and {} unmatched GPS helpers left out; {} duplicate vertices removed",
+                "{}: imported {} tiles and {} triangles; {} GPS strips, {} navigation roads and {} streetlight markers; {} helper meshes removed and {} unmatched GPS helpers left out; {} duplicate vertices removed",
                 m.dest, report.tiles, report.triangles, report.gps_imported, report.roads_imported, report.lights_imported, report.markers_skipped, report.gps_skipped, report.vertices_removed
             ));
+            p.report.push(format!("{}: {} bus stops, {} traffic segments, {} pedestrian segments, {} signal programs and {} controlled paths", m.dest, report.stops_imported, report.traffic_segments_imported, report.pedestrian_segments_imported, report.signals_imported, report.signal_paths_imported));
             p.warnings.extend(report.warnings);
         });
     }

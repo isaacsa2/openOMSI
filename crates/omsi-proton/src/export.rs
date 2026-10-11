@@ -71,13 +71,14 @@ fn object(installed_rel: &str, stem: &str, id: usize) -> String {
     format!("[object]\n0\n{installed_rel}/proton-import/{stem}.sco\n{id}\n0\n0\n0\n0\n0\n0\n0\n")
 }
 
-fn material_overrides(sco: &mut String, materials: &[omsi_o3d::Material], modes: &[Mode]) {
+pub(crate) fn material_overrides(sco: &mut String, materials: &[omsi_o3d::Material], modes: &[Mode]) {
     for (index, (m, mode)) in materials.iter().zip(modes).enumerate() {
         let alpha = match mode {
-            Mode::Blend => 2,
-            Mode::Cutout => 1,
+            Mode::Blend | Mode::EmissiveBlend | Mode::Additive => 2,
+            Mode::Cutout | Mode::EmissiveCutout => 1,
             _ if m.diffuse[3] < 1.0 => 2,
             _ if m.texture.to_lowercase().ends_with(".png") => 1,
+            _ if matches!(mode, Mode::Emissive) => 0,
             _ => continue,
         };
         // The occurrence index names repeated textures, not the material slot.
@@ -89,6 +90,14 @@ fn material_overrides(sco: &mut String, materials: &[omsi_o3d::Material], modes:
             "[matl]\n{}\n{occurrence}\n[matl_alpha]\n{alpha}\n",
             m.texture
         ));
+        if *mode == Mode::Additive {
+            // Native equivalent until arbitrary mesh additive blending is available:
+            // self-lit alpha blending without depth writes (no invisible depth panel).
+            sco.push_str("[matl_noZwrite]\n");
+        }
+        if matches!(mode, Mode::Emissive | Mode::EmissiveBlend | Mode::EmissiveCutout | Mode::Additive) {
+            sco.push_str(&format!("[matl_allcolor]\n0\n0\n0\n1\n0\n0\n0\n0\n0\n0\n{}\n{}\n{}\n0\n",m.emissive[0],m.emissive[1],m.emissive[2]));
+        }
     }
 }
 
@@ -98,7 +107,7 @@ pub(crate) fn global(
     keys: &[(i32, i32)],
     spawns: &[Spawn],
 ) -> Result<()> {
-    let mut global = format!("[name]\n{}\n[friendlyname]\n{} (Proton Bus)\n[version]\n14\n[description]\nBasic Proton Bus import: free driving only. AI, passengers, timetables and traffic lights are not imported.\n[end]\n[years]\n1980\n2100\n", installed_rel.rsplit('/').next().unwrap_or(installed_rel), installed_rel.trim_start_matches("maps/Proton-"));
+    let mut global = format!("[name]\n{}\n[friendlyname]\n{} (Proton Bus)\n[version]\n14\n[description]\nProton Bus import: free driving, authored traffic/pedestrian paths, bus stops and signal cycles. Native installed vehicles and humans required. Timetables and Proton vehicle mods are not imported.\n[end]\n[years]\n1980\n2100\n", installed_rel.rsplit('/').next().unwrap_or(installed_rel), installed_rel.trim_start_matches("maps/Proton-"));
     for &(tx, ty) in keys {
         global.push_str(&format!("[map]\n{tx}\n{ty}\ntile_{tx}_{ty}.map\n"));
     }

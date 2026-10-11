@@ -311,13 +311,13 @@ fn identical_materials_across_files_share_source_slots_but_different_uv_maps_do_
     let bytes = chunk(0x4d4d, &chunk(0x3d3d, &edit));
     let mut scene = three_ds::Scene::open(&temp.file(&bytes), &|| false).unwrap();
     let mut registry = crate::materials::Registry::default();
-    let (names, _) = registry.register(&scene).unwrap();
+    let (names, _) = registry.register(&scene, &crate::texture_settings::Presets::default()).unwrap();
     assert_eq!(names["A"], names["B"]);
     let count = registry.materials.len();
-    registry.register(&scene).unwrap();
+    registry.register(&scene, &crate::texture_settings::Presets::default()).unwrap();
     assert_eq!(registry.materials.len(), count);
     scene.mappings[1].scale.x = 2.0;
-    let (names, _) = registry.register(&scene).unwrap();
+    let (names, _) = registry.register(&scene, &crate::texture_settings::Presets::default()).unwrap();
     assert_ne!(names["A"], names["B"]);
 }
 

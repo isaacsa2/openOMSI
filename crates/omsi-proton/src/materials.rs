@@ -55,11 +55,16 @@ impl Registry {
                 }
                 let source = *face as usize;
                 // Invisible colliders have no texture or shading to resolve/upload.
-                let material = if mode == Mode::Collision {
+                let mut material = if mode == Mode::Collision {
                     Material::default()
                 } else {
                     self.materials[source].clone()
                 };
+                if matches!(mode, Mode::Emissive | Mode::EmissiveBlend | Mode::EmissiveCutout | Mode::Additive) {
+                    material.emissive = [1.0; 3];
+                    material.diffuse[..3].fill(0.0);
+                    material.specular = [0.0; 3];
+                }
                 let variant = self.add(material, self.mappings[source], mode)?;
                 variants.insert(*face, variant);
                 *face = variant;
@@ -67,16 +72,17 @@ impl Registry {
         }
         Ok(faces)
     }
-    pub fn register(&mut self, scene: &Scene) -> Result<(BTreeMap<String, u16>, u16)> {
+    pub fn register(&mut self, scene: &Scene, presets: &crate::texture_settings::Presets) -> Result<(BTreeMap<String, u16>, u16)> {
         let mut names = BTreeMap::new();
         for (i, (name, material)) in scene.materials.iter().enumerate() {
             // Proton takes only the diffuse texture from a 3DS material. Exporter
             // defaults (often white specular with power 1) are not authored lighting:
             // carrying them into O3D washes whole faces out under the sun and sky.
-            let material = Material {
+            let mut material = Material {
                 texture: material.texture.clone(),
                 ..Default::default()
             };
+            presets.apply(&mut material);
             let index = self.add(material, scene.mappings[i], Mode::Auto)?;
             names.entry(name.clone()).or_insert(index);
         }
