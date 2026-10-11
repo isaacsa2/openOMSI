@@ -2,12 +2,15 @@
 //! installer's staging area; the renderer continues to read ordinary OMSI scenery.
 //! Only free driving is supported. Source mods are never embedded in the program.
 mod convert;
+mod export;
+mod materials;
 mod optimise;
 mod spawn;
+mod spool;
 pub mod three_ds;
 
 use anyhow::{ensure, Context, Result};
-use convert::{Tiles, EDGE};
+
 use omsi_o3d::Material;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -216,83 +219,6 @@ fn textures(
     Ok(())
 }
 
-fn export(
-    dir: &Path,
-    installed_rel: &str,
-    tiles: &Tiles,
-    spawns: &[Spawn],
-    cancel: &impl Fn() -> bool,
-) -> Result<()> {
-    let objects = dir.join("proton-import");
-    let models = objects.join("model");
-    std::fs::create_dir_all(&models)?;
-    let mut global = format!("[name]\n{}\n[friendlyname]\n{} (Proton Bus)\n[version]\n14\n[description]\nBasic Proton Bus import: free driving only. AI, passengers, timetables and traffic lights are not imported.\n[end]\n[years]\n1980\n2100\n", installed_rel.rsplit('/').next().unwrap_or(installed_rel), installed_rel.trim_start_matches("maps/Proton-"));
-    for (i, (&(tx, ty), mesh)) in tiles.iter().enumerate() {
-        ensure!(!cancel(), "map import cancelled");
-        let stem = format!("tile_{tx}_{ty}");
-        let materials = &mesh.materials;
-        convert::write_mesh(&models.join(format!("{stem}.o3d")), mesh, materials)?;
-        // The engine probes a terrain even on tiles with only scenery. Keep that fallback
-        // below the mesh: a zero-height fallback would cover Goianira's negative-height roads.
-        let floor = mesh
-            .vertices
-            .iter()
-            .map(|v| v.position.z)
-            .fold(f32::INFINITY, f32::min)
-            - 50.0;
-        let mut terrain = 60u32.to_le_bytes().to_vec();
-        for _ in 0..61 * 61 {
-            terrain.extend_from_slice(&floor.to_le_bytes());
-        }
-        std::fs::write(dir.join(format!("{stem}.map.terrain")), terrain)?;
-        let mut sco = format!("[absheight]\n[fixed]\n[surface]\n[mesh]\n{stem}.o3d\n");
-        // Preparation has already removed unreferenced material slots.
-        for (index, m) in materials.iter().enumerate() {
-            // Basic PNG cutouts keep foliage and fences; explicit material opacity is blended.
-            if m.diffuse[3] < 1.0 || m.texture.to_lowercase().ends_with(".png") {
-                // The occurrence index names repeated textures, not the material slot.
-                let occurrence = materials[..index]
-                    .iter()
-                    .filter(|other| other.texture.eq_ignore_ascii_case(&m.texture))
-                    .count();
-                sco.push_str(&format!(
-                    "[matl]\n{}\n{occurrence}\n[matl_alpha]\n{}\n",
-                    m.texture,
-                    if m.diffuse[3] < 1.0 { 2 } else { 1 }
-                ));
-            }
-        }
-        std::fs::write(objects.join(format!("{stem}.sco")), sco)?;
-        text(&dir.join(format!("{stem}.map")), &format!("[version]\n14\n[object]\n0\n{installed_rel}/proton-import/{stem}.sco\n{}\n0\n0\n0\n0\n0\n0\n0\n", i + 1))?;
-        global.push_str(&format!("[map]\n{tx}\n{ty}\n{stem}.map\n"));
-    }
-    global.push_str(&format!("[entrypoints]\n{}\n", spawns.len()));
-    for (i, spawn) in spawns.iter().enumerate() {
-        let [x, y, z] = spawn.pos;
-        let key = (
-            (x / EDGE as f64).floor() as i32,
-            (y / EDGE as f64).floor() as i32,
-        );
-        let group = tiles
-            .keys()
-            .position(|k| *k == key)
-            .context("entry point is outside imported scenery")?;
-        let half = spawn.heading.to_radians() * 0.5;
-        // An id that has no scenery object makes the game use this explicit entry position.
-        global.push_str(&format!(
-            "{i}\n{}\n0\n{}\n{z}\n{}\n0\n{}\n0\n{}\n{group}\n{}\n",
-            -(i as i64) - 1,
-            x - key.0 as f64 * EDGE as f64,
-            y - key.1 as f64 * EDGE as f64,
-            half.sin(),
-            half.cos(),
-            spawn.name
-        ));
-    }
-    text(&dir.join("global.cfg"), &global)?;
-    Ok(())
-}
-
 /// `dir` is a fresh installer staging directory, not the source mod or installed map.
 /// `installed_rel` is its eventual `maps/Proton-<name>` location below the content root.
 pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Result<Report> {
@@ -338,37 +264,63 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     )?;
     let mut spawns = spawns(&base, &models)?;
     let markers = prefixes(&models)?;
-    let mut tiles = Tiles::new();
-    let mut materials = Vec::new();
+    let mut spool = spool::Spool::new(&dir.join("proton-import/work"), &spawns)?;
+    let mut registry = materials::Registry::default();
+    let mut output_bytes = 0;
     let mut report = Report::default();
     for f in files(&models, "3ds")? {
         ensure!(!cancel(), "map import cancelled");
-        let mut model =
-            three_ds::load(&f, &cancel).with_context(|| format!("reading {}", f.display()))?;
-        if model.trailing_bytes != 0 {
+        let mut scene = three_ds::Scene::open(&f, &cancel)
+            .with_context(|| format!("reading {}", f.display()))?;
+        if scene.trailing_bytes != 0 {
             report.warnings.push(format!(
                 "{}: ignored {} trailing bytes outside the declared 3DS root chunk",
                 f.file_name().unwrap_or_default().to_string_lossy(),
-                model.trailing_bytes
+                scene.trailing_bytes
             ));
         }
         let all_gps = f
             .file_stem()
             .is_some_and(|s| optimise::gps_name(&s.to_string_lossy()));
-        let before = model.objects.len();
-        model
-            .objects
-            .retain(|o| !all_gps && !optimise::gps_name(&o.name));
-        report.gps_skipped += before - model.objects.len();
-        report.markers_skipped +=
-            convert::append(model, &mut tiles, &mut materials, &markers, &cancel)?;
+        if scene.keyframes {
+            report.warnings.push(
+                "3DS keyframe data is present; only static mesh geometry is imported.".into(),
+            );
+        }
+        let (names, default) = registry.register(&scene)?;
+        scene
+            .visit(&cancel, |object| {
+                if all_gps || optimise::gps_name(&object.name) {
+                    report.gps_skipped += 1;
+                    return Ok(());
+                }
+                if convert::marker(&object.name, &markers) {
+                    report.markers_skipped += 1;
+                    return Ok(());
+                }
+                let faces = materials::faces(&object, &names, default)?;
+                convert::append_object(
+                    &object,
+                    &faces,
+                    &registry.mappings,
+                    &mut spool,
+                    &mut output_bytes,
+                    &cancel,
+                )
+            })
+            .with_context(|| format!("reading {}", f.display()))?;
     }
     ensure!(
-        !tiles.is_empty(),
+        !spool.tiles.is_empty(),
         "Proton map has no renderable 3DS geometry"
     );
-    spawn::validate(&tiles, &mut spawns, &mut report.warnings)?;
-    optimise::used_materials(&mut tiles, &mut materials);
+    spool.finish_writes()?;
+    let mut materials = registry.into_materials();
+    for (i, m) in materials.iter_mut().enumerate() {
+        if !spool.used.contains(&(i as u16)) {
+            *m = Material::default();
+        }
+    }
     textures(
         &texture_dir,
         &dir.join("proton-import/texture"),
@@ -376,14 +328,26 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         &mut report.warnings,
         &cancel,
     )?;
-    report.vertices_removed = optimise::prepare(&mut tiles, &materials, &cancel)?;
-    export(dir, installed_rel, &tiles, &spawns, &cancel)?;
-    report.tiles = tiles.len();
-    report.triangles = tiles.values().map(|m| m.triangles.len()).sum();
+    let keys: Vec<_> = spool.tiles.keys().copied().collect();
+    for (i, &key) in keys.iter().enumerate() {
+        ensure!(!cancel(), "map import cancelled");
+        let (mesh, removed) = spool.mesh(key, &materials, &cancel)?;
+        report.vertices_removed += removed;
+        spool.probe.nearest(key, &mesh);
+        export::tile(dir, installed_rel, key, &mesh, i)?;
+        spool.discard_tile(key)?;
+    }
+    spool.probe.finish(&mut spawns, &mut report.warnings)?;
+    ensure!(!cancel(), "map import cancelled");
+    export::global(dir, installed_rel, &keys, &spawns)?;
+    report.tiles = keys.len();
+    report.triangles = spool.tiles.values().sum();
     report.warnings.sort();
     report.warnings.dedup();
     Ok(report)
 }
 
+#[cfg(test)]
+mod stream_tests;
 #[cfg(test)]
 mod tests;

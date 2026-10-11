@@ -1,4 +1,5 @@
 use super::*;
+use crate::convert::Tiles;
 use glam::{Vec2, Vec3};
 use omsi_o3d::{Mesh, Triangle, Vertex};
 
@@ -18,14 +19,14 @@ impl Drop for Fixture {
     }
 }
 
-fn chunk(tag: u16, data: &[u8]) -> Vec<u8> {
+pub(super) fn chunk(tag: u16, data: &[u8]) -> Vec<u8> {
     let mut out = tag.to_le_bytes().to_vec();
     out.extend_from_slice(&((data.len() + 6) as u32).to_le_bytes());
     out.extend_from_slice(data);
     out
 }
 
-fn model() -> Vec<u8> {
+pub(super) fn model() -> Vec<u8> {
     named_model("road")
 }
 
@@ -230,6 +231,14 @@ fn tile_compaction_keeps_uv_seams_normals_and_material_properties() {
             ..Default::default()
         },
     ];
+    let mut builder = optimise::Builder::default();
+    for t in &tiles[&(0, 0)].triangles {
+        builder.face(
+            t.indices.map(|i| tiles[&(0, 0)].vertices[i as usize]),
+            t.material,
+            &materials[t.material as usize],
+        );
+    }
     optimise::used_materials(&mut tiles, &mut materials);
     assert_eq!(materials.len(), 2);
     assert_eq!(
@@ -237,6 +246,9 @@ fn tile_compaction_keeps_uv_seams_normals_and_material_properties() {
         2
     );
     let mesh = &tiles[&(0, 0)];
+    assert_eq!(builder.mesh.vertices, mesh.vertices);
+    assert_eq!(builder.mesh.triangles, mesh.triangles);
+    assert_eq!(builder.mesh.materials, mesh.materials);
     assert_eq!(mesh.vertices.len(), 5);
     assert_eq!(mesh.materials, [m]);
     assert!(mesh.triangles.iter().all(|t| t.material == 0));

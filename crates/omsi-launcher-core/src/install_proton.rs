@@ -75,7 +75,7 @@ pub(super) fn plan_at(
 }
 
 pub(super) fn extra_space(plan: &Plan) -> u64 {
-    // Reserve for clipped faces before compaction and textures copied into the scenery
+    // Reserve for spooled/clipped faces and textures copied into the scenery
     // directory. Reserve a conservative expansion, including a hard-linked folder source.
     plan.maps
         .iter()

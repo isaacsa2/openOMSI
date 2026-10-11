@@ -5,6 +5,9 @@ use glam::{Vec2, Vec3};
 use omsi_o3d::Material;
 use std::io::Read;
 use std::path::Path;
+#[path = "three_ds_stream.rs"]
+mod stream;
+pub use stream::Scene;
 
 const FILE_LIMIT_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -13,6 +16,46 @@ pub struct Model {
     pub materials: Vec<(String, Material)>,
     pub objects: Vec<Object>,
     pub trailing_bytes: usize,
+    pub mappings: Vec<UvTransform>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UvTransform {
+    pub scale: Vec2,
+    pub offset: Vec2,
+    pub angle: f32,
+}
+
+impl Default for UvTransform {
+    fn default() -> Self {
+        Self {
+            scale: Vec2::ONE,
+            offset: Vec2::ZERO,
+            angle: 0.0,
+        }
+    }
+}
+
+impl UvTransform {
+    pub fn apply(self, uv: Vec2) -> Vec2 {
+        if self == Self::default() {
+            return uv;
+        }
+        let raw = Vec2::new(uv.x, 1.0 - uv.y) * self.scale;
+        let (s, c) = self.angle.sin_cos();
+        let mapped = Vec2::new(c * raw.x - s * raw.y, s * raw.x + c * raw.y) + self.offset;
+        Vec2::new(mapped.x, 1.0 - mapped.y)
+    }
+    pub(crate) fn key(self) -> [u32; 5] {
+        [
+            self.scale.x,
+            self.scale.y,
+            self.offset.x,
+            self.offset.y,
+            self.angle,
+        ]
+        .map(f32::to_bits)
+    }
 }
 
 #[derive(Default)]
@@ -125,8 +168,15 @@ fn string(b: &[u8]) -> Result<(String, &[u8])> {
         .iter()
         .position(|&v| v == 0)
         .ok_or_else(|| anyhow::anyhow!("unterminated 3DS name"))?;
-    let (s, _) = encoding_rs::WINDOWS_1252.decode_without_bom_handling(&b[..n]);
-    Ok((s.into_owned(), &b[n + 1..]))
+    let s = std::str::from_utf8(&b[..n])
+        .map(str::to_owned)
+        .unwrap_or_else(|_| {
+            encoding_rs::WINDOWS_1252
+                .decode_without_bom_handling(&b[..n])
+                .0
+                .into_owned()
+        });
+    Ok((s, &b[n + 1..]))
 }
 
 fn records(b: &[u8], size: usize) -> Result<(usize, &[u8], &[u8])> {
@@ -166,37 +216,60 @@ fn color(b: &[u8]) -> Result<[f32; 3]> {
     Ok(value)
 }
 
-fn material(b: &[u8]) -> Result<(String, Material)> {
+fn percent(b: &[u8]) -> Result<f32> {
+    for p in chunks(b)? {
+        match p.tag {
+            0x0030 => {
+                ensure!(p.data.len() >= 2, "truncated percentage");
+                return Ok(u16::from_le_bytes(p.data[..2].try_into()?) as f32 / 100.0);
+            }
+            0x0031 => return float(p.data),
+            _ => {}
+        }
+    }
+    Ok(0.0)
+}
+
+fn material(b: &[u8]) -> Result<(String, Material, UvTransform)> {
     let mut name = String::new();
     let mut m = Material::default();
+    let mut uv = UvTransform::default();
+    let mut ambient = [0.0; 3];
+    let mut illumination = 0.0;
+    let mut specular_strength = 1.0;
     for c in chunks(b)? {
         match c.tag {
             0xa000 => name = string(c.data)?.0,
+            0xa010 => ambient = color(c.data)?,
             0xa020 => m.diffuse[..3].copy_from_slice(&color(c.data)?),
+            0xa030 => m.specular = color(c.data)?,
+            // 3DS stores a percentage, O3D a Phong exponent: this is a basic approximation.
+            0xa040 => m.specular_power = percent(c.data)?.clamp(0.0, 1.0) * 128.0,
+            0xa041 => specular_strength = percent(c.data)?.clamp(0.0, 1.0),
+            0xa080 => illumination = 1.0,
+            0xa084 => illumination = percent(c.data)?.clamp(0.0, 1.0),
             0xa050 => {
-                for p in chunks(c.data)? {
-                    let transparency = match p.tag {
-                        0x0030 => {
-                            ensure!(p.data.len() >= 2, "truncated percentage");
-                            u16::from_le_bytes(p.data[..2].try_into()?) as f32 / 100.0
-                        }
-                        0x0031 => float(p.data)?,
-                        _ => continue,
-                    };
-                    m.diffuse[3] = 1.0 - transparency.clamp(0.0, 1.0);
-                }
+                m.diffuse[3] = 1.0 - percent(c.data)?.clamp(0.0, 1.0);
             }
             0xa200 => {
                 for t in chunks(c.data)? {
-                    if t.tag == 0xa300 {
-                        m.texture = string(t.data)?.0;
+                    match t.tag {
+                        0xa300 => m.texture = string(t.data)?.0,
+                        0xa354 => uv.scale.x = float(t.data)?,
+                        0xa356 => uv.scale.y = float(t.data)?,
+                        0xa358 => uv.offset.x = float(t.data)?,
+                        0xa35a => uv.offset.y = float(t.data)?,
+                        0xa35c => uv.angle = float(t.data)?,
+                        _ => {}
                     }
                 }
             }
             _ => {}
         }
     }
-    Ok((name, m))
+    m.specular = m.specular.map(|v| v * specular_strength);
+    m.emissive = ambient.map(|v| v * illumination);
+    Ok((name, m, uv))
 }
 
 fn geometry(b: &[u8], o: &mut Object) -> Result<()> {
@@ -292,7 +365,11 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
         }
         for c in chunks(root.data)? {
             match c.tag {
-                0xafff => m.materials.push(material(c.data)?),
+                0xafff => {
+                    let (name, mat, uv) = material(c.data)?;
+                    m.materials.push((name, mat));
+                    m.mappings.push(uv);
+                }
                 0x4000 => {
                     let (name, rest) = string(c.data)?;
                     let mut o = Object {

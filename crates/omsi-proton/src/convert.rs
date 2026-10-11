@@ -1,17 +1,21 @@
 //! Clip static geometry into the engine's 300 m tiles. This also keeps wheel probes and
 //! visibility near the geometry instead of placing an entire city on one owner tile.
-use crate::three_ds::{Model, Object};
+#[cfg(test)]
+use crate::three_ds::Model;
+use crate::three_ds::Object;
 use anyhow::{ensure, Result};
 use glam::{Vec2, Vec3};
 use omsi_o3d::{Material, Mesh, Triangle, Vertex};
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
 pub const EDGE: f32 = 300.0;
+#[cfg(test)]
 pub type Tiles = BTreeMap<(i32, i32), Mesh>;
 const GEOMETRY_LIMIT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
-const TILE_LIMIT: usize = 16_384;
+pub(crate) const TILE_LIMIT: usize = 16_384;
 const FACE_BYTES: u64 =
     (3 * std::mem::size_of::<Vertex>() + std::mem::size_of::<Triangle>()) as u64;
 
@@ -33,10 +37,10 @@ fn interpolate(a: Vertex, b: Vertex, t: f32) -> Vertex {
     }
 }
 
-fn clip(input: &[Vertex], axis: usize, edge: f32, lower: bool) -> Vec<Vertex> {
-    let mut out = Vec::new();
+fn clip(input: &[Vertex], out: &mut Vec<Vertex>, axis: usize, edge: f32, lower: bool) {
+    out.clear();
     if input.is_empty() {
-        return out;
+        return;
     }
     let inside = |v: Vertex| {
         if lower {
@@ -56,14 +60,55 @@ fn clip(input: &[Vertex], axis: usize, edge: f32, lower: bool) -> Vec<Vertex> {
         }
         a = b;
     }
-    out
 }
 
+pub(crate) trait Faces {
+    fn face(&mut self, key: (i32, i32), vertices: [Vertex; 3], material: u16) -> Result<()>;
+}
+
+#[cfg(test)]
+impl Faces for Tiles {
+    fn face(&mut self, key: (i32, i32), vertices: [Vertex; 3], material: u16) -> Result<()> {
+        ensure!(
+            self.contains_key(&key) || self.len() < TILE_LIMIT,
+            "map exceeds the {TILE_LIMIT} output tile import limit"
+        );
+        let mesh = self.entry(key).or_default();
+        let start = mesh.vertices.len() as u32;
+        mesh.vertices.extend_from_slice(&vertices);
+        mesh.triangles.push(Triangle {
+            indices: [start, start + 1, start + 2],
+            material,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ClipBuffers([Vec<Vertex>; 2]);
+
+#[cfg(test)]
 fn add_triangle(
     tiles: &mut Tiles,
     vertices: [Vertex; 3],
     material: u16,
     output_bytes: &mut u64,
+) -> Result<()> {
+    emit_triangle(
+        tiles,
+        vertices,
+        material,
+        output_bytes,
+        &mut ClipBuffers::default(),
+    )
+}
+
+fn emit_triangle(
+    tiles: &mut impl Faces,
+    vertices: [Vertex; 3],
+    material: u16,
+    output_bytes: &mut u64,
+    scratch: &mut ClipBuffers,
 ) -> Result<()> {
     let lo = vertices
         .iter()
@@ -85,10 +130,12 @@ fn add_triangle(
     );
     for tx in tx0..=tx1 {
         for ty in ty0..=ty1 {
-            let mut polygon = vertices.to_vec();
+            let [polygon, other] = &mut scratch.0;
+            polygon.clear();
+            polygon.extend_from_slice(&vertices);
             for (axis, origin) in [(0, tx as f32 * EDGE), (1, ty as f32 * EDGE)] {
-                polygon = clip(&polygon, axis, origin, true);
-                polygon = clip(&polygon, axis, origin + EDGE, false);
+                clip(polygon, other, axis, origin, true);
+                clip(other, polygon, axis, origin + EDGE, false);
             }
             for i in 1..polygon.len().saturating_sub(1) {
                 let mut face = [polygon[0], polygon[i], polygon[i + 1]];
@@ -102,27 +149,17 @@ fn add_triangle(
                 // Charge every clipped face across all source files before adding it.
                 // The 8 GiB total also keeps every tile's vertex indices within u32.
                 reserve_face(output_bytes)?;
-                let mesh = tiles.entry((tx, ty)).or_default();
-                let start = mesh.vertices.len() as u32;
                 for v in &mut face {
                     v.position -= Vec3::new(tx as f32 * EDGE, ty as f32 * EDGE, 0.0);
                 }
-                mesh.vertices.extend_from_slice(&face);
-                mesh.triangles.push(Triangle {
-                    indices: [start, start + 1, start + 2],
-                    material,
-                });
+                tiles.face((tx, ty), face, material)?;
             }
         }
     }
-    ensure!(
-        tiles.len() <= TILE_LIMIT,
-        "map exceeds the {TILE_LIMIT} output tile import limit"
-    );
     Ok(())
 }
 
-fn marker(name: &str, prefixes: &[String]) -> bool {
+pub(crate) fn marker(name: &str, prefixes: &[String]) -> bool {
     let n = name.to_lowercase();
     prefixes.iter().any(|p| {
         let p = p.to_lowercase();
@@ -152,6 +189,7 @@ fn normals(o: &Object) -> (Vec<Vec3>, Vec<Vec<usize>>) {
     (faces, by_vertex)
 }
 
+#[cfg(test)]
 pub fn append(
     model: Model,
     tiles: &mut Tiles,
@@ -192,32 +230,52 @@ pub fn append(
                 face_mats[face as usize] = (base + index) as u16;
             }
         }
-        let (face_normals, adjacency) = normals(&o);
-        for (i, f) in o.faces.iter().enumerate() {
-            if i % 4096 == 0 {
-                ensure!(!cancel(), "map import cancelled");
-            }
-            let smoothing = o.smoothing.get(i).copied().unwrap_or(0);
-            let v = f.map(|j| {
-                let j = j as usize;
-                let normal = if smoothing == 0 {
-                    face_normals[i]
-                } else {
-                    adjacency[j]
-                        .iter()
-                        .filter(|&&k| o.smoothing.get(k).copied().unwrap_or(0) & smoothing != 0)
-                        .fold(Vec3::ZERO, |sum, &k| sum + face_normals[k])
-                };
-                Vertex {
-                    position: o.positions[j],
-                    normal: normal.normalize_or_zero(),
-                    uv: o.uv.get(j).copied().unwrap_or(Vec2::ZERO),
-                }
-            });
-            add_triangle(tiles, v, face_mats[i], &mut output_bytes)?;
-        }
+        append_object(&o, &face_mats, &[], tiles, &mut output_bytes, cancel)?;
     }
     Ok(skipped)
+}
+
+pub(crate) fn append_object(
+    o: &Object,
+    face_mats: &[u16],
+    mappings: &[crate::three_ds::UvTransform],
+    tiles: &mut impl Faces,
+    output_bytes: &mut u64,
+    cancel: &impl Fn() -> bool,
+) -> Result<()> {
+    let (face_normals, adjacency) = normals(o);
+    let mut scratch = ClipBuffers::default();
+    for (i, f) in o.faces.iter().enumerate() {
+        if i % 4096 == 0 {
+            ensure!(!cancel(), "map import cancelled");
+        }
+        let smoothing = o.smoothing.get(i).copied().unwrap_or(0);
+        let v = f.map(|j| {
+            let j = j as usize;
+            let normal = if smoothing == 0 {
+                face_normals[i]
+            } else {
+                adjacency[j]
+                    .iter()
+                    .filter(|&&k| o.smoothing.get(k).copied().unwrap_or(0) & smoothing != 0)
+                    .fold(Vec3::ZERO, |sum, &k| sum + face_normals[k])
+            };
+            let uv = o.uv.get(j).copied().unwrap_or(Vec2::ZERO);
+            Vertex {
+                position: o.positions[j],
+                normal: normal.normalize_or_zero(),
+                uv: mappings
+                    .get(face_mats[i] as usize)
+                    .map_or(uv, |m| m.apply(uv)),
+            }
+        });
+        ensure!(
+            v.iter().all(|v| v.uv.is_finite()),
+            "non-finite transformed 3DS UV"
+        );
+        emit_triangle(tiles, v, face_mats[i], output_bytes, &mut scratch)?;
+    }
+    Ok(())
 }
 
 /// Version 3 uses 32-bit counts and indices, without the scrambling keys of later versions.

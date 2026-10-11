@@ -25,6 +25,9 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 ## Included
 
 - Static `.3ds` scenery, UV coordinates, materials and referenced textures.
+- Diffuse UV scale, offset and rotation, specular colour/strength, basic self
+  illumination and shininess approximated as a Phong exponent. Material definitions
+  may follow their objects. UTF-8 names and legacy Windows-1252 names are accepted.
 - PNG cutouts and explicit 3DS material opacity; custom Proton shaders are not reproduced.
 - Explicit entry points from the base folder or selected model folder. Names and
   coordinates are preserved; the importer does not invent route numbers or duties.
@@ -57,6 +60,13 @@ creates new files. The installer reserves additional disk space for those files 
 converts in its staging area before moving the result into the content folder.
 Cancellation or a failed conversion does not commit the staging result.
 
+Conversion scans material headers first, then reads one mesh object at a time.
+Clipped faces are spooled to temporary files in staging using at most 32 buffered
+writers. Each tile is then assembled with shared vertices and exported separately;
+its temporary file is deleted immediately. The whole converted map is not retained
+in RAM. Peak memory still depends on the largest source object and densest output
+tile, plus bounded lookup buffers. Extra disk I/O can make an import slower.
+
 The installer first looks for a base folder matching the `.map.txt` name. It also
 accepts a single neighbouring base folder containing `tiles/`, or a single config
 alongside `tiles/`. Ambiguous folders are not guessed. The config's `baseDir` must
@@ -78,6 +88,12 @@ Bytes after a 3DS file's declared main chunk are skipped without loading them in
 memory, and reported in the import warnings. Invalid or truncated chunks inside that
 main chunk still stop conversion. Large-map gameplay and RAM use need checking on
 the machine that will run the map; the import budget is not a gameplay memory budget.
+Camera/light objects are skipped, and keyframe data produces a warning that only
+the static mesh pose is imported. The local-axis matrix is not reapplied to vertices
+that already contain the exported world transform.
+
+The [PBSU Blender exporter](https://github.com/Arturo254/PBSU-Addon-3ds) was examined
+as a format reference; its Python implementation is not included in this importer.
 
 ## Local format checks
 
@@ -93,3 +109,26 @@ cargo test -p omsi-proton supplied_map_fixture_when_available -- --nocapture
 This converts that temporary folder and checks generated maps and meshes with the
 engine's format loaders. It is **not** a GPU, driving or performance test. Use a
 fresh extraction for each run; imported output is reserved and is not overwritten.
+
+To measure the conversion alone, without loading the result into the renderer:
+
+```sh
+cargo build --release -p omsi-proton --example import_map
+target/release/examples/import_map /path/to/freshly-extracted-map LocalTest
+```
+
+Local Linux measurements before/after the streaming implementation used the same
+release profile, a separate process per import and the median of three fresh
+extractions per map. ZIP extraction and gameplay were excluded. Peak resident RAM
+was recorded with `wait4`; these are not Windows, GPU or 1 GB map benchmarks.
+
+| Local map | Peak RAM before → after | Conversion time before → after |
+| --- | --- | --- |
+| Circular 606 | 153.6 → 47.1 MiB | 0.674 → 0.696 s |
+| Goianira 361 | 42.1 → 29.4 MiB | 0.206 → 0.241 s |
+| Cajueiro Seco | 28.4 → 13.9 MiB | 0.135 → 0.127 s |
+| Osasco Lite | 78.6 → 15.2 MiB | 0.770 → 0.784 s |
+| Osasco Full | 83.1 → 15.2 MiB | 0.469 → 0.591 s |
+
+All five maps kept byte-identical vertex attributes, triangle indices, entry points
+and terrain. Material records gained the additional supported 3DS properties.

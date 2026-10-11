@@ -1,5 +1,7 @@
 //! Compact generated tiles without changing positions, UV seams, normals or material data.
+#[cfg(test)]
 use crate::convert::Tiles;
+#[cfg(test)]
 use anyhow::{ensure, Result};
 use omsi_o3d::{Material, Mesh, Vertex};
 use std::collections::{BTreeMap, HashMap};
@@ -10,6 +12,7 @@ pub fn gps_name(name: &str) -> bool {
 }
 
 /// Drop materials belonging only to filtered helpers before resolving their textures.
+#[cfg(test)]
 pub fn used_materials(tiles: &mut Tiles, materials: &mut Vec<Material>) {
     let mut used = vec![false; materials.len()];
     for mesh in tiles.values() {
@@ -38,7 +41,7 @@ pub fn used_materials(tiles: &mut Tiles, materials: &mut Vec<Material>) {
     }
 }
 
-fn vertex_key(v: Vertex) -> [u32; 8] {
+pub(crate) fn vertex_key(v: Vertex) -> [u32; 8] {
     [
         v.position.x,
         v.position.y,
@@ -52,7 +55,7 @@ fn vertex_key(v: Vertex) -> [u32; 8] {
     .map(f32::to_bits)
 }
 
-fn material_key(m: &Material) -> ([u32; 11], String) {
+pub(crate) fn material_key(m: &Material) -> ([u32; 11], String) {
     let mut numbers = [0; 11];
     for (i, v) in m
         .diffuse
@@ -67,6 +70,47 @@ fn material_key(m: &Material) -> ([u32; 11], String) {
     (numbers, m.texture.clone())
 }
 
+/// Build shared vertices directly, without a full three-vertices-per-face mesh or remap.
+#[derive(Default)]
+pub(crate) struct Builder {
+    pub mesh: Mesh,
+    vertices: HashMap<[u32; 8], u32>,
+    materials: BTreeMap<([u32; 11], String), u16>,
+    sources: HashMap<u16, u16>,
+}
+
+impl Builder {
+    pub fn face(&mut self, face: [Vertex; 3], source: u16, material: &Material) {
+        let next = self.mesh.materials.len() as u16;
+        let slot = *self.sources.entry(source).or_insert_with(|| {
+            *self
+                .materials
+                .entry(material_key(material))
+                .or_insert_with(|| {
+                    self.mesh.materials.push(material.clone());
+                    next
+                })
+        });
+        let indices = face.map(|v| {
+            let key = vertex_key(v);
+            if let Some(&i) = self.vertices.get(&key) {
+                return i;
+            }
+            let i = self.mesh.vertices.len() as u32;
+            if self.vertices.len() < 1_000_000 {
+                self.vertices.insert(key, i);
+            }
+            self.mesh.vertices.push(v);
+            i
+        });
+        self.mesh.triangles.push(omsi_o3d::Triangle {
+            indices,
+            material: slot,
+        });
+    }
+}
+
+#[cfg(test)]
 fn vertices(mesh: &mut Mesh, cancel: &impl Fn() -> bool) -> Result<usize> {
     let before = mesh.vertices.len();
     let mut seen = HashMap::new();
@@ -103,6 +147,7 @@ fn vertices(mesh: &mut Mesh, cancel: &impl Fn() -> bool) -> Result<usize> {
 }
 
 /// Each exported O3D carries only the material slots its triangles actually reference.
+#[cfg(test)]
 pub fn prepare(
     tiles: &mut Tiles,
     materials: &[Material],
