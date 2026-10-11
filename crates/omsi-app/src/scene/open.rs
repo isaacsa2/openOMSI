@@ -651,11 +651,13 @@ pub fn navigation_map_of(root: &Path, tiles: &[(i32, i32, PathBuf)], chrono_dirs
         slis.lock().len(),
         t0.elapsed().as_secs_f64()
     );
-    NavigationMap { lanes, road_surfaces: roads, places: positions, signs }
+    let imported = crate::proton_navigation::load(tiles, &mut lanes);
+    NavigationMap { lanes, road_surfaces: roads, places: positions, signs, imported }
 }
 
 /// The whole map for the navigator (see [`World::navigation_map`]).
 pub struct NavigationMap {
+    pub imported: Option<Arc<omsi_proton::navigation::Navigation>>,
     pub lanes: Vec<Lane>,
     /// Asphalt footprints used to corroborate editor-only driving paths. They are evidence
     /// for roads, not streets to draw: a paved yard or median has no road centre line.

@@ -4,10 +4,13 @@
 mod convert;
 mod export;
 mod materials;
+pub mod navigation;
 mod optimise;
+mod paths;
 mod spawn;
 mod spool;
 mod tags;
+mod streetlights;
 pub mod three_ds;
 
 use anyhow::{ensure, Context, Result};
@@ -24,6 +27,9 @@ pub struct Report {
     pub triangles: usize,
     pub markers_skipped: usize,
     pub gps_skipped: usize,
+    pub gps_imported: usize,
+    pub roads_imported: usize,
+    pub lights_imported: usize,
     pub vertices_removed: usize,
     pub warnings: Vec<String>,
 }
@@ -122,7 +128,8 @@ fn files(dir: &Path, extension: &str) -> Result<Vec<PathBuf>> {
 
 fn prefixes(dir: &Path) -> Result<Vec<String>> {
     let mut out = Vec::new();
-    for folder in ["aipeople", "aivehicles", "busstops", "trafficlights"] {
+    // Vehicle paths use exact numbered marker names in paths::Collector.
+    for folder in ["aipeople", "busstops", "trafficlights"] {
         let folder = child(dir, folder)?;
         if !folder.is_dir() {
             continue;
@@ -264,9 +271,9 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let version = map
         .get("mapmodversion")
         .context("missing mapModVersion")?
-        .parse::<u32>()?;
+        .parse::<f32>()?;
     ensure!(
-        (2..=4).contains(&version),
+        version.is_finite() && (2.0..=4.0).contains(&version),
         "unsupported Proton map phase {version}"
     );
     let base = child(dir, map.get("basedir").context("missing baseDir")?)?;
@@ -286,6 +293,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut registry = materials::Registry::default();
     let mut output_bytes = 0;
     let mut report = Report::default();
+    let mut navigation = paths::Collector::new(&models, &spawns)?;
+    let mut lamps = streetlights::Collector::new(&models, &texture_dir, &dir.join("proton-import/texture"), &mut report)?;
     let mut helpers = 0;
     let mut embedded_trees = 0;
     for f in files(&models, "3ds")? {
@@ -311,7 +320,14 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         scene
             .visit(&cancel, |object| {
                 if all_gps || optimise::gps_name(&object.name) {
-                    report.gps_skipped += 1;
+                    navigation.gps(&object, &f.file_name().unwrap_or_default().to_string_lossy(), &mut report)?;
+                    return Ok(());
+                }
+                if lamps.marker(&object, &mut report)? {
+                    return Ok(());
+                }
+                if navigation.marker(&object)? {
+                    report.markers_skipped += 1;
                     return Ok(());
                 }
                 if convert::marker(&object.name, &markers) {
@@ -377,13 +393,24 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         report.vertices_removed += tile.removed;
         spool.probe.nearest(key, &tile.visible);
         spool.probe.nearest(key, &tile.collision);
-        export::tile(dir, installed_rel, key, &tile, i)?;
+        let lights = lamps.tiles.remove(&key).unwrap_or_default();
+        export::tile(dir, installed_rel, key, &tile, &lights, i)?;
         spool.discard_tile(key)?;
     }
     spool.probe.finish(&mut spawns, &mut report.warnings)?;
     ensure!(!cancel(), "map import cancelled");
     // Success must report a cleanup failure instead of silently ignoring it in Drop.
     spool.cleanup().context("removing temporary map geometry")?;
+    if !lamps.tiles.is_empty() {
+        let omitted: usize = lamps.tiles.values().map(Vec::len).sum();
+        report.lights_imported -= omitted;
+        report.warnings.push(format!("{omitted} streetlight markers outside scenery tiles were omitted"));
+    }
+    let navigation = navigation.finish(&mut report)?;
+    let file = std::fs::File::create(dir.join(navigation::FILE))?;
+    let mut writer = std::io::BufWriter::new(file);
+    serde_json::to_writer(&mut writer, &navigation)?;
+    std::io::Write::flush(&mut writer)?;
     export::global(dir, installed_rel, &keys, &spawns)?;
     report.tiles = keys.len();
     report.triangles = spool.tiles.values().sum();
@@ -399,3 +426,5 @@ mod tests;
 
 #[cfg(test)]
 mod tag_tests;
+#[cfg(test)]
+mod navigation_tests;

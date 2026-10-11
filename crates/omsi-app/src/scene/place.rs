@@ -330,6 +330,11 @@ impl World {
             // (a `[helparrow]` object goes on: it is put up hidden, and drawn while the route
             // arrows are on - see `World::show_help_arrows`)
             if ot.sco.only_editor || ot.meshes.is_empty() {
+                // A generated light wrapper can have an empty render mesh (the tile
+                // only has invisible wheel support). Its lamps still belong here.
+                if !ot.sco.only_editor && ot.sco.path.parent().is_some_and(|p| p.ends_with("proton-import")) {
+                    object_lights(&mut state, &ot, pos, xf, None, o.key);
+                }
                 if ot.imported_collider().is_some() {
                     self.object_collision(&mut state, &st, &ot, o, (pos, xf, heading), false);
                 }
@@ -907,6 +912,7 @@ fn object_lights(state: &mut TileState, ot: &ObjectType, pos: DVec3, xf: Mat4, l
             core: ml.radius.max(0.5),
             housed: true,
             shadow_owner: embedded.get(k).copied().unwrap_or(false).then_some(key),
+            casts_shadows: !ot.sco.path.parent().is_some_and(|p| p.ends_with("proton-import")),
             ..Default::default()
         });
     }

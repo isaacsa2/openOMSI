@@ -176,6 +176,9 @@ impl App {
                 nav.enabled = false;
             }
             if let Some(w) = self.world.as_ref() {
+                if let Some(entry) = w.global.entry_points.get(self.args.entry).or(w.global.entry_points.first()) {
+                    nav.imported_gps.select(&entry.name);
+                }
                 nav.start_map(w.clone());
             }
             // stops beyond the loaded tiles: their places from the navigator's map

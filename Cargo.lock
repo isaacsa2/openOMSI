@@ -3325,6 +3325,7 @@ dependencies = [
  "omsi-net",
  "omsi-o3d",
  "omsi-plugin",
+ "omsi-proton",
  "omsi-render",
  "omsi-scenery",
  "omsi-script",
@@ -3522,6 +3523,8 @@ dependencies = [
  "omsi-map",
  "omsi-o3d",
  "omsi-scenery",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

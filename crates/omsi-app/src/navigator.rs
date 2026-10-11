@@ -284,6 +284,7 @@ struct Roads {
 }
 
 pub struct Navigator {
+    pub(crate) imported_gps: crate::proton_navigation::Gps,
     /// The current small-map texture in Scene::overlays, for the cockpit display.
     pub panel_overlay: Option<usize>,
     pub cockpit_display: bool,
@@ -326,7 +327,7 @@ pub struct Navigator {
     /// Street names of the map's lanes (from its street name signs).
     streets: Option<std::sync::Arc<Streets>>,
     #[allow(clippy::type_complexity)]
-    building: Option<std::sync::mpsc::Receiver<(Network, HashMap<i64, DVec3>, Streets)>>,
+    building: Option<std::sync::mpsc::Receiver<(Network, HashMap<i64, DVec3>, Streets, Option<std::sync::Arc<omsi_proton::navigation::Navigation>>)>>,
     pub global_version: u64,
     roads: Option<Roads>,
     route: Route,
@@ -423,6 +424,7 @@ fn map_samples(format: wgpu::TextureFormat) -> u32 {
 impl Navigator {
     pub fn new(enabled: bool, opacity: f32, corner: &str) -> Navigator {
         Navigator {
+            imported_gps: Default::default(),
             panel_overlay: None,
             cockpit_display: false,
             drawn_at: f32::MIN,
@@ -487,7 +489,7 @@ impl Navigator {
                 confirm_road_surfaces(&mut net, &m.road_surfaces);
                 probe_lanes(&net);
                 let streets = build_streets(&net, &m.signs);
-                let _ = tx.send((net, m.places, streets));
+                let _ = tx.send((net, m.places, streets, m.imported));
             })
             .ok();
         self.building = Some(rx);
@@ -495,6 +497,7 @@ impl Navigator {
 
     /// The map's network given at once (an offscreen picture reads it on its own thread).
     pub fn set_map(&mut self, map: crate::scene::NavigationMap) {
+        self.imported_gps.data = map.imported;
         let mut net = Network { lanes: map.lanes, ..Default::default() };
         net.link(1.5);
         confirm_road_surfaces(&mut net, &map.road_surfaces);
@@ -898,7 +901,8 @@ impl Navigator {
         }
         self.time += f.dt;
         if let Some(rx) = self.building.as_ref() {
-            if let Ok((net, pos, streets)) = rx.try_recv() {
+            if let Ok((net, pos, streets, imported)) = rx.try_recv() {
+                self.imported_gps.data = imported;
                 log::info!("navigator: the map's road network is there ({} lanes, {} streets named)", net.lanes.len(), streets.names.len());
                 self.streets = Some(std::sync::Arc::new(streets));
                 self.global = Some(std::sync::Arc::new(net));
@@ -1035,7 +1039,7 @@ impl Navigator {
         let net = global.as_deref().or(f.traffic.map(|t| &t.net)).or(own.as_deref());
         let lanes_now = net.map(|n| n.lanes.len()).unwrap_or(0);
         let rebuild = match &self.roads {
-            None => lanes_now > 0,
+            None => lanes_now > 0 || self.imported_gps.data.is_some(),
             Some(r) => (r.anchor - f.bus.truncate()).length() > ROAD_RADIUS * 0.45 || (r.lanes_seen != lanes_now && self.time - r.built_at > 1.5),
         };
         let mut road_verts = None;
@@ -1079,6 +1083,13 @@ impl Navigator {
                 let style = RouteStyle { extra_m: -0.9, min_px: 4.0, arrows: Some((28.0, 900.0)), max_len: 12_000.0, near: Some((anchor, ROAD_RADIUS * 1.6)) };
                 build_route(&mut p, rn, &self.route.lanes[self.route.progress.min(self.route.lanes.len())..], anchor, self.route.s, &self.route_jam, &style, bus_lane);
                 self.route_mesh = (self.route.version, self.jam_version, anchor, p.len(), bus_lane);
+                route_verts = Some(p.verts);
+            }
+        } else if self.imported_gps.data.is_some() {
+            if self.route_mesh.0 != self.imported_gps.cache_key() || self.route_mesh.2 != anchor {
+                let mut p = Painter::new();
+                self.imported_gps.paint(&mut p, anchor, Some(ROAD_RADIUS * 1.6), ROUTE);
+                self.route_mesh = (self.imported_gps.cache_key(), 0, anchor, p.len(), 0);
                 route_verts = Some(p.verts);
             }
         } else if self.route_mesh.3 != 0 {
@@ -2411,7 +2422,7 @@ impl Navigator {
         // roads of the whole map (buffer 3), once per map version
         let mut roads_verts = None;
         if let Some(n) = net {
-            let version = self.global_version * 1_000_000 + n.lanes.len() as u64;
+            let version = self.global_version * 1_000_000 + n.lanes.len() as u64 + self.imported_gps.version;
             if self.city.roads.map(|r| r.0 != version).unwrap_or(true) {
                 let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
                 let road_lanes = road_geometry(n);
@@ -2420,6 +2431,10 @@ impl Navigator {
                         lo = lo.min(p.truncate());
                         hi = hi.max(p.truncate());
                     }
+                }
+                if let Some((gps_lo,gps_hi)) = self.imported_gps.extent() {
+                    lo = lo.min(gps_lo);
+                    hi = hi.max(gps_hi);
                 }
                 if lo.x == f64::MAX {
                     lo = f.bus.truncate();
@@ -2449,7 +2464,7 @@ impl Navigator {
         // with arrows about 90 pixels apart (built again when the zoom changes that much)
         let mut route_verts = None;
         let every = 2f64.powf((90.0 * s as f64 * self.city.mpp).log2().round()) as f32;
-        let key = (self.route.version, self.jam_version, every.to_bits(), self.city.roads.map(|r| r.0).unwrap_or(0));
+        let key = (self.route.version.wrapping_add(self.imported_gps.version), self.jam_version, every.to_bits(), self.city.roads.map(|r| r.0).unwrap_or(0));
         if self.city.route.0 != key {
             let mut p = Painter::new();
             if let Some(n) = net {
@@ -2464,6 +2479,7 @@ impl Navigator {
                 let bus_lane = r.lanes.get(done).map(|&l| lane_from_right(n, l, f.bus)).unwrap_or(0);
                 build_route(&mut p, n, &r.lanes[done..], anchor, r.s, &self.route_jam, &style, bus_lane);
             }
+            if self.route.lanes.is_empty() { self.imported_gps.paint(&mut p, anchor, None, ROUTE); }
             self.city.route = (key, p.len());
             route_verts = Some(p.verts);
         }

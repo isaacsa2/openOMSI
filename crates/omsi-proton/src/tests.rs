@@ -166,7 +166,8 @@ fn gps_files_and_embedded_helpers_are_omitted_and_relative_paths_work() {
     )
     .unwrap();
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
-    assert_eq!(report.gps_skipped, 2);
+    assert_eq!(report.gps_skipped, 1);
+    assert_eq!(report.gps_imported, 1);
     assert_eq!(report.tiles, 2);
     assert!(report.vertices_removed > 0);
     assert!(!optimise::gps_name("gpsmall"));

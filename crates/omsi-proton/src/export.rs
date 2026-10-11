@@ -13,6 +13,7 @@ pub(crate) fn tile(
     installed_rel: &str,
     key: (i32, i32),
     tile: &TileMeshes,
+    lights: &[crate::streetlights::Lamp],
     i: usize,
 ) -> Result<()> {
     let (tx, ty) = key;
@@ -40,9 +41,10 @@ pub(crate) fn tile(
     }
     std::fs::write(dir.join(format!("{stem}.map.terrain")), terrain)?;
     let mut map = "[version]\n14\n".to_owned();
-    if !mesh.triangles.is_empty() {
+    if !mesh.triangles.is_empty() || !lights.is_empty() {
         let mut sco = format!("[absheight]\n[fixed]\n[surface]\n[mesh]\n{stem}.o3d\n");
         material_overrides(&mut sco, materials, &tile.modes);
+        crate::streetlights::append(&mut sco, lights);
         std::fs::write(objects.join(format!("{stem}.sco")), sco)?;
         map.push_str(&object(installed_rel, &stem, i * 2 + 1));
     }

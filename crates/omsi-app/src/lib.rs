@@ -57,6 +57,7 @@ mod launcher;
 mod menu;
 mod mirror_hud;
 mod navigator;
+mod proton_navigation;
 mod vr_navigator;
 mod money;
 mod radio;

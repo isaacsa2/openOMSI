@@ -47,6 +47,7 @@ rayon.workspace = true
 omsi-net = { path = "../omsi-net" }
 omsi-ui = { path = "../omsi-ui" }
 omsi-launcher-core = { path = "../omsi-launcher-core" }
+omsi-proton = { path = "../omsi-proton" }
 serde.workspace = true
 hashbrown.workspace = true
 parking_lot.workspace = true

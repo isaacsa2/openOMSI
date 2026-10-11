@@ -817,7 +817,7 @@ fn read_map(look: &Look) -> Roads {
         .filter(|t| omsi_cfg::vfs::is_file(&t.2))
         .collect();
     let t0 = std::time::Instant::now();
-    let crate::scene::NavigationMap { lanes, road_surfaces, places, signs: _ } = crate::scene::navigation_map_of(&root, &tiles, &chrono);
+    let crate::scene::NavigationMap { lanes, road_surfaces, places, .. } = crate::scene::navigation_map_of(&root, &tiles, &chrono);
     let (roads, net) = crate::navigator::city_roads(lanes, &road_surfaces);
     // the lanes the timetable can name, and the lanes of every spline behind them
     let mut by_path = HashMap::new();

@@ -445,3 +445,53 @@ fn imported_collision_only_objects_support_wheels_without_render_instances() {
         );
     }
 }
+
+#[test]
+fn imported_post_lights_are_placed_on_visible_and_empty_tiles_with_native_night_switches() {
+    for visible in [false, true] {
+        let fixture = Fixture::new();
+        std::fs::create_dir_all(fixture.0.join("proton-import/model")).unwrap();
+        fixture.write(
+            "global.cfg",
+            "[name]\nNight lamps\n[map]\n0\n0\ntile_0_0.map\n",
+        );
+        fixture.write(
+            "tile_0_0.map",
+            "[version]\n14\n[object]\n0\nproton-import/tile_0_0.sco\n1\n100\n100\n0\n0\n0\n0\n0\n",
+        );
+        if visible {
+            fixture.write(
+                "proton-import/model/road.x",
+                &strip(&[(0.0, 2.0), (10.0, 2.0)]),
+            );
+        } else {
+            let bytes = [
+                0x84, 0x19, 3, 1, 0x17, 0, 0, 0, 0, 0x49, 0, 0, 0, 0, 0x26, 0, 0,
+            ];
+            std::fs::write(fixture.0.join("proton-import/model/empty.o3d"), bytes).unwrap();
+        }
+        let mesh = if visible { "road.x" } else { "empty.o3d" };
+        fixture.write("proton-import/tile_0_0.sco",&format!("[absheight]\n[fixed]\n[surface]\n[mesh]\n{mesh}\n[maplight]\n0\n0\n8\n1\n0.78\n0.5\n5\n[light_enh]\n0\n0\n8\n255\n200\n128\n6\nNightlightA\n0.4\n0\n2\n0\n"));
+        let world = World::open(&fixture.0, &fixture.0.join("global.cfg"), 20261001).unwrap();
+        world.prepare_tiles(&[(0, 0, fixture.0.join("tile_0_0.map"))]);
+        let states = world.tile_state.lock();
+        let state = &states[&(0, 0)];
+        assert_eq!(state.lights.len(), 1, "visible={visible}");
+        let lamp = &state.lights[0];
+        assert_eq!(lamp.position, DVec3::new(100.0, 100.0, 8.0));
+        assert_eq!(lamp.radius, 30.0);
+        assert!(lamp.housed);
+        assert!(
+            !lamp.casts_shadows,
+            "batched imported fixtures do not allocate extra shadow maps"
+        );
+        assert!(
+            omsi_render::PointLight::default().casts_shadows,
+            "native lights keep their existing shadow behaviour"
+        );
+        assert_eq!(state.coronas.len(), 1);
+        assert!(matches!(state.coronas[0].switch, LightSwitch::Night));
+        assert_eq!(state.coronas[0].corona.position, lamp.position);
+        assert_eq!(state.coronas[0].corona.brightness, 0.4);
+    }
+}

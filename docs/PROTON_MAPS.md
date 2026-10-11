@@ -3,7 +3,7 @@
 The Mods installer can import a standalone Proton Bus map ZIP or folder containing
 `<name>.map.txt` with its assets under the relative `baseDir`, including nested folders,
 or next to `tiles/` when `baseDir=.`. Packs with multiple configs install each map separately.
-Phases 2, 3 and 4 are accepted for **free
+Phases 2 through 4, including 3.1, are accepted for **free
 driving with an OMSI bus**.
 
 ## Install and drive
@@ -49,17 +49,51 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 - Identical vertices are shared within each tile, keeping distinct UV seams and
   normals. Each tile exports only the materials it uses; identical material slots
   are shared and textures referenced only by discarded helpers are not copied.
-- GPS helper files and objects with a separate `gps` name token are left out,
-  including the coloured navigation strips baked into some maps.
+- Authored GPS strips are kept as a lightweight navigation overlay, selected by
+  the entry-point name (`_gps_` plus `_<name>_`). They appear on both the small
+  navigator and city map, without visible scenery, collision or source materials.
+  GPS-only files are also recognised; unmatched strips are omitted and reported.
+- Vehicle-path coordinates in `aivehicles/*.txt`, or exact `<prefix>.000` 3DS
+  marker names, become roads on the navigator and launcher map. Numeric ordering,
+  reversal and complete loops are preserved; missing point numbers split the road
+  instead of connecting across a gap. The displayed width is an approximate 3.5 m.
+- `streetlights/*.txt` prefixes and `_real_` / `_fake_` markers become native
+  point lights and glow sprites at their mesh bounds' centre. Real-light colour,
+  intensity and range, and glow texture, tint and size are converted. They use the
+  engine's night switch and its nearby-light filtering; marker meshes are omitted.
+  Glow textures are shared by filename. Missing glows fall back to the native glow.
 - Simulation helper geometry identified by the map's pedestrian, traffic, stop and
   traffic-light prefixes is left out rather than drawn as obstacles.
 
 ## Limits of this first version
 
-Passengers, pedestrian paths, AI vehicle paths, working traffic lights, bus routes,
-timetables, destination graphics and Proton buses are **not imported**. This is a
+Passengers, pedestrian simulation, AI vehicle simulation, working traffic lights,
+bus timetables, destination graphics and Proton buses are **not imported**. This is a
 scenery import, not full Proton Bus compatibility. Animated models, prefabs, tile
 streaming rules and texture `.config.txt` shader settings are not reproduced.
+
+The GPS follows the author's drawn strip; it does not recalculate routes, announce
+turns or create a timetable. Vehicle paths supply navigation only and do not start
+AI traffic or generate road surfaces: the original 3DS road/collision geometry
+still supplies the drivable surface. Manual path links and spline smoothing are
+not reproduced. The tag/point conventions follow the public
+[map model](https://www.busmods.com/ciano/help/map-models.html),
+[path](https://www.busmods.com/ciano/help/map-traffic.html) and
+[streetlight](https://www.busmods.com/ciano/help/map-lights.html) references.
+
+Streetlight rendering is approximate. Imported point lights follow the native
+night cycle and do not allocate additional lamp shadow maps; source shadow options
+are not reproduced. `alwaysOn` is supported for glow sprites; real lights still
+switch with night, with a warning for such definitions. Fixed glow rotations and
+nonuniform scale become billboards; fixture mesh emission is not animated at night.
+Streetlight markers outside tiles with scenery are omitted and reported.
+
+Navigation is stored separately in a versioned `proton-import/navigation.json`,
+limited to 250,000 GPS triangles and 250,000 road points (up to 4,096 routes/roads),
+with a 64 MiB file limit. GPS geometry never enters the 3D scene's buffers. Nearby
+GPS triangles are cached around the small map's anchor; the city map caches the
+selected route. A damaged or missing navigation file leaves scenery usable.
+These limits apply to optional navigation metadata, not the source map archive.
 
 The map's static visible mesh and explicit invisible colliders supply the wheel surface. Collision and appearance
 need checking in game: foliage, roofs, glass and author-specific material settings

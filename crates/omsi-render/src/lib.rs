@@ -341,6 +341,9 @@ pub struct PointLight {
     /// A virtual source embedded in a pole fixture. Its fixture cannot occlude
     /// its own output; it remains a caster for other lamps and the sun.
     pub shadow_owner: Option<i64>,
+    /// Whether this light can allocate a lamp shadow map. Batched imported fixtures
+    /// initially use unshadowed illumination: their pole cannot be isolated as a caster.
+    pub casts_shadows: bool,
     /// Which path draws the light.
     pub mode: LightMode,
     /// The enhanced path lights it by a picture of its beam (`[spotlight_cookie]`, see
@@ -361,6 +364,7 @@ impl Default for PointLight {
             beam: 0.0,
             housed: false,
             shadow_owner: None,
+            casts_shadows: true,
             mode: LightMode::Both,
             cookie: None,
         }
@@ -6398,7 +6402,7 @@ impl Renderer {
                     g.pos[3] = -marks;
                 }
             }
-            if lamp_shadows && enhanced && l.housed && l.intensity > 0.0 {
+            if lamp_shadows && enhanced && l.casts_shadows && l.housed && l.intensity > 0.0 {
                 let d = (p - cam_rel).length();
                 if d < l.radius + LAMP_SHADOW_REACH {
                     let mut score = l.intensity * (l.color[0] + l.color[1] + l.color[2]) * l.core * l.core / (d * d + 25.0);

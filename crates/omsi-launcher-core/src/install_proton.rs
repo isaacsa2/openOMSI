@@ -168,8 +168,8 @@ pub(super) fn convert(staging: &Path, plan: &Plan, job: &Job) -> Result<()> {
         check_space(staging)?;
         job.set(|p| {
             p.report.push(format!(
-                "{}: imported {} tiles and {} triangles; {} simulation markers and {} GPS helpers left out; {} duplicate vertices removed",
-                m.dest, report.tiles, report.triangles, report.markers_skipped, report.gps_skipped, report.vertices_removed
+                "{}: imported {} tiles and {} triangles; {} GPS strips, {} navigation roads and {} streetlight markers; {} simulation markers and {} unmatched GPS helpers left out; {} duplicate vertices removed",
+                m.dest, report.tiles, report.triangles, report.gps_imported, report.roads_imported, report.lights_imported, report.markers_skipped, report.gps_skipped, report.vertices_removed
             ));
             p.warnings.extend(report.warnings);
         });

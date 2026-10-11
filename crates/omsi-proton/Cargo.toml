@@ -9,6 +9,8 @@ description = "Basic, local Proton Bus map import for free driving"
 anyhow.workspace = true
 glam.workspace = true
 encoding_rs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 omsi-cfg = { path = "../omsi-cfg" }
 omsi-o3d = { path = "../omsi-o3d" }
 
