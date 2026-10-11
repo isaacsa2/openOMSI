@@ -16,6 +16,11 @@ use omsi_ui::paint::Align;
 use omsi_ui::{Atlas, Color, Draw, Fonts, Gpu, Layer, Painter, Rect, Weight};
 use winit::event::{Touch as Finger, TouchPhase};
 
+/// Convert physical finger position to a clamped slider fraction.
+fn touch_slider_fraction(x: f32, track: Rect, scale: f32) -> f32 {
+    ((x / scale.max(0.25) - track.x) / track.w.max(1.0)).clamp(0.0, 1.0)
+}
+
 /// What a control does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Btn {
@@ -116,6 +121,8 @@ enum Role {
     Mouse,
     /// The game menu's (or the chooser's) list: a drag scrolls it, a tap picks a line.
     Menu,
+    /// The paused settings slider: item index and track in logical screen pixels.
+    MenuSlider(usize, Rect),
     /// The small navigator: a tap opens the city map, a drag moves it (as the mouse does,
     /// #940), where it then stays - out of the middle of the screen, which it covered on a
     /// phone (#1138).
@@ -490,6 +497,11 @@ impl App {
         let t = &self.input.touch;
         let role = if let Some(k) = t.button_at(p) {
             Role::Button(k, t.buttons[k].btn)
+        } else if let Some(&(row, track, _)) = self.shell.touch_sliders.iter().find(|&&(_, track, clip)| {
+            let at = p / self.shell.scale;
+            clip.contains(at) && track.pad(-8.0, 0.0).contains(at)
+        }) {
+            Role::MenuSlider(row, track)
         } else if self.menus.game_menu.is_some() || self.menus.chooser.is_some() {
             Role::Menu
         } else if menu_mode {
@@ -533,6 +545,9 @@ impl App {
             // without having moved - a finger that came down to scroll used to pick the
             // line it landed on)
             Role::Menu => self.on_cursor(p.x, p.y),
+            Role::MenuSlider(row, track) => {
+                self.shell.actions.push(crate::shell::Action::Control(row, touch_slider_fraction(p.x, track, self.shell.scale)));
+            }
             Role::Wheel(..) => self.input.touch.steering = true,
             _ => {}
         }
@@ -601,6 +616,9 @@ impl App {
             // The shell's pause menu owns its scroll areas (rail, pages and lists).
             // The legacy menu_top belongs to the old renderer, so moving it here no
             // longer scrolls anything on Android (#2108).
+            Role::MenuSlider(row, track) => {
+                self.shell.actions.push(crate::shell::Action::Control(row, touch_slider_fraction(p.x, track, self.shell.scale)));
+            }
             Role::Menu => {
                 if self.input.touch.fingers[k].moved {
                     if self.shell_takes_mouse() {
@@ -688,6 +706,11 @@ impl App {
                         n.panel_release();
                     }
                     _ => self.left_button(event_loop, false),
+                }
+            }
+            Role::MenuSlider(row, track) => {
+                if !cancelled {
+                    self.shell.actions.push(crate::shell::Action::Control(row, touch_slider_fraction(p.x, track, self.shell.scale)));
                 }
             }
             Role::Menu => {
