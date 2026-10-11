@@ -1,0 +1,17 @@
+[package]
+name = "omsi-proton"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Basic, local Proton Bus map import for free driving"
+
+[dependencies]
+anyhow.workspace = true
+glam.workspace = true
+encoding_rs.workspace = true
+omsi-cfg = { path = "../omsi-cfg" }
+omsi-o3d = { path = "../omsi-o3d" }
+
+[dev-dependencies]
+omsi-map = { path = "../omsi-map" }
+omsi-scenery = { path = "../omsi-scenery" }

@@ -133,6 +133,7 @@ pages live in [`docs/`](docs):
 | [PBR materials](docs/PBR.md) | normal, roughness, metalness and occlusion maps for mods |
 | [Building](docs/BUILDING.md) | building from source on macOS, Windows, Linux and Android |
 | [Content formats](docs/FORMATS.md) | every OMSI 2 file format |
+| [Proton Bus maps](docs/PROTON_MAPS.md) | basic map import for free driving |
 | [Architecture](docs/ARCHITECTURE.md) | crates, threading, renderer, roadmap |
 | [Routes](docs/ROUTES.md) | how the original runs timetables, chrono, HOF, IBIS |
 | [Plugins](docs/PLUGINS.md) | Lua and WebAssembly plugins (the API of every group, examples), compiled `.oop` plugins, OMSI plugin DLLs and the 32-bit plugin host |

@@ -26,6 +26,7 @@ sevenz-rust2 = { version = "0.22", default-features = false, features = ["util",
 unrar-rs = { version = "0.10", default-features = false, features = ["crypto-rust"] }
 omsi-cfg = { path = "../omsi-cfg" }
 omsi-map = { path = "../omsi-map" }
+omsi-proton = { path = "../omsi-proton" }
 omsi-vehicle = { path = "../omsi-vehicle" }
 omsi-timetable = { path = "../omsi-timetable" }
 omsi-content = { path = "../omsi-content" }

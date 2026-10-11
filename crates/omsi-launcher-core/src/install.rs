@@ -44,6 +44,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[path = "install_proton.rs"]
+mod proton;
+
 /// Keep at least this much free on the disk after an install (bytes).
 const MIN_MARGIN: u64 = 512 * 1024 * 1024;
 /// Stop unpacking when the disk gets this full while a job runs (something else writes).
@@ -629,6 +632,10 @@ fn plan(entries: &[Entry], source_name: &str, installed: &Installed) -> Plan {
         let mut found = false;
         for path in &level {
             let Some(node) = tree.get(path) else { continue };
+            if proton::plan_at(node, path, entries, &mut plan, &mut used) {
+                found = true;
+                continue;
+            }
             // a folder holding bus files is a bus even with `Sound` / `Texture` in it; one
             // holding `Vehicles` or `Sceneryobjects` is a pack whatever lies beside them
             let pack = node.dirs.keys().any(|d| PACK_ONLY.iter().any(|f| f.eq_ignore_ascii_case(d)));
@@ -1011,7 +1018,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     // an inbox folder's files are hard-linked into the staging folder (no space, and the
     // originals stay until the install is in place); everything else is written anew
     let moving = (job.from_inbox && !is_zip) || staged_archive;
-    let needed = if moving { 0 } else { total_bytes + (total_bytes / 20).max(MIN_MARGIN) };
+    let needed = (if moving { 0 } else { total_bytes + (total_bytes / 20).max(MIN_MARGIN) }) + proton::extra_space(&plan);
     let free = free_space(content).unwrap_or(u64::MAX);
     job.set(|p| {
         p.files_total = total_files;
@@ -1040,6 +1047,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
         m => m,
     }};
     job.set(|p| p.mode = mode);
+    proton::check_mode(&plan, mode)?;
     if mode == InstallMode::InPlace {
         layout?;
         drop(source);
@@ -1136,6 +1144,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
         }
     }
     drop(source);
+    proton::convert(&staging, &plan, job)?;
     if job.cancelled() {
         return Err(anyhow!(Cancelled));
     }
