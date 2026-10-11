@@ -55,6 +55,59 @@ fn sco(f: &Fixture, object: &omsi_map::MapObject) -> omsi_scenery::SceneryObject
 }
 
 #[test]
+fn vertex_only_3ds_markers_create_native_paths_without_rendering_helper_geometry() {
+    let f = Fixture::new();
+    setup(&f);
+    let mut edit = named_model("road")[12..].to_vec();
+    for (name, pos) in [
+        ("cars.000", [299.0f32, 10.0, 7.0]),
+        ("cars.001", [301.0, 10.0, 7.0]),
+        ("walk.000", [299.0, 8.0, 7.0]),
+        ("walk.001", [301.0, 8.0, 7.0]),
+    ] {
+        let mut positions = 1u16.to_le_bytes().to_vec();
+        positions.extend(pos.into_iter().flat_map(f32::to_le_bytes));
+        let mut mesh = chunk(0x4110, &positions);
+        mesh.extend(chunk(0x4120, &0u16.to_le_bytes()));
+        let mut object = name.as_bytes().to_vec();
+        object.push(0);
+        object.extend(chunk(0x4100, &mesh));
+        edit.extend(chunk(0x4000, &object));
+    }
+    let bytes = chunk(0x4d4d, &chunk(0x3d3d, &edit));
+    let parsed = crate::three_ds::parse(&bytes).unwrap();
+    assert_eq!(parsed.objects.len(), 5);
+    assert!(parsed.objects[1..]
+        .iter()
+        .all(|o| o.positions.len() == 1 && o.faces.is_empty()));
+    std::fs::write(f.0.join("Town/tiles/0x0/road.3ds"), bytes).unwrap();
+    config(
+        &f,
+        "aivehicles",
+        "cars.txt",
+        "[from_3d]\nreadFrom3D=1\nprefix=cars\n",
+    );
+    config(
+        &f,
+        "aipeople",
+        "walk.txt",
+        "[from_3d]\nreadFrom3D=1\nprefix=walk\n",
+    );
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    assert_eq!(report.roads_imported, 1);
+    assert_eq!(report.traffic_segments_imported, 2);
+    assert_eq!(report.pedestrian_segments_imported, 2);
+    assert_eq!(report.markers_skipped, 4);
+    assert_eq!(report.triangles, 3);
+    let paths: usize = loaded(&f)
+        .iter()
+        .flat_map(|t| &t.objects)
+        .map(|o| sco(&f, o).paths.len())
+        .sum();
+    assert_eq!(paths, 4);
+}
+
+#[test]
 fn native_paths_stops_waiting_and_lamps_survive_an_end_to_end_import() {
     let f = Fixture::new();
     setup(&f);

@@ -257,7 +257,9 @@ impl Scene {
                         };
                         geometry(&data, &mut o)?;
                         drop(data);
-                        if !o.faces.is_empty() {
+                        // Authored traffic points can be single vertices with no faces.
+                        // Consumers decide whether an object is a marker or scenery.
+                        if !o.positions.is_empty() {
                             object(o)?;
                         }
                     }

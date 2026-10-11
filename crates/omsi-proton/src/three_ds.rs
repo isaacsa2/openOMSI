@@ -381,7 +381,7 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
                             geometry(g.data, &mut o)?;
                         }
                     }
-                    if !o.faces.is_empty() {
+                    if !o.positions.is_empty() {
                         m.objects.push(o);
                     }
                 }

@@ -65,6 +65,8 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   marker names, become roads on the navigator and launcher map, plus native traffic paths. Numeric ordering,
   reversal and complete loops are preserved; missing point numbers split the road
   instead of connecting across a gap. The displayed width is an approximate 3.5 m.
+  Vertex-only 3DS objects are retained as markers; they need no faces and produce
+  no visible helper geometry. The same applies to authored pedestrian points.
 - `streetlights/*.txt` prefixes and `_real_` / `_fake_` markers become native
   point lights and glow sprites at their mesh bounds' centre. Real-light colour,
   intensity and range, and glow texture, tint and size are converted. They use the
