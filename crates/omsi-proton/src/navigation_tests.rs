@@ -79,11 +79,17 @@ fn phase_31_gps_roads_and_night_lights_survive_conversion_without_helper_meshes(
     let glow = &sco.model.meshes[0].light_enh[0];
     assert_eq!(glow.variable, "NightlightA");
     assert_eq!(glow.pos, [0.0, 11.0, 7.0]);
-    assert_eq!(glow.texture.as_deref(), Some("glow.png"));
+    let texture = glow.texture.as_deref().expect("imported glow texture");
+    // Case-insensitive filesystems may preserve the spelling from the config.
+    assert!(texture.eq_ignore_ascii_case("glow.png"));
     assert_eq!(glow.size, 6.0);
     assert_eq!(glow.values[0], 0.4);
     assert_eq!(glow.values[2], 2.0, "no additional fog halo");
-    assert!(f.0.join("proton-import/texture/glow.png").exists());
+    assert_eq!(
+        std::fs::read(f.0.join("proton-import/texture").join(texture)).unwrap(),
+        [0],
+        "the emitted texture reference must resolve to the copied source"
+    );
 }
 
 #[test]
