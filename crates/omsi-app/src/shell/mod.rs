@@ -58,6 +58,8 @@ pub(crate) struct Shell {
     pub(crate) scale: f32,
     /// The mouse was over a panel of the screens in the last frame.
     pub(crate) over_ui: bool,
+    /// Settings slider tracks, with row indices and clipped viewports (logical pixels).
+    pub(crate) touch_sliders: Vec<(usize, omsi_ui::Rect, omsi_ui::Rect)>,
     /// The line the keyboard chose last frame (to scroll it into view when it changes).
     pub(crate) last_sel: Option<(u64, usize)>,
     /// Where the open drop-down's field was drawn last (its list lies under it).
@@ -74,13 +76,14 @@ struct Drawn {
 
 impl Shell {
     pub(crate) fn new() -> Shell {
-        Shell { ui: Ui::new(), gpu: None, shot_gpu: None, drawn: None, actions: Vec::new(), picture: None, picture_tex: None, scale: 1.0, over_ui: false, last_sel: None, dd_anchor: None, opaque: false }
+        Shell { ui: Ui::new(), gpu: None, shot_gpu: None, drawn: None, actions: Vec::new(), touch_sliders: Vec::new(), picture: None, picture_tex: None, scale: 1.0, over_ui: false, last_sel: None, dd_anchor: None, opaque: false }
     }
 
     /// A frame of the screens begins: the window's size in physical pixels and how many of
     /// them make a point.
     pub(crate) fn begin(&mut self, width: f32, height: f32, scale: f32, dt: f32) {
         self.scale = scale.max(0.25);
+        self.touch_sliders.clear();
         self.ui.input.touch = crate::platform::touch_controls();
         self.ui.begin(Vec2::new(width / self.scale, height / self.scale), self.scale, dt);
     }
@@ -96,6 +99,7 @@ impl Shell {
     pub(crate) fn clear(&mut self) {
         self.drawn = None;
         self.over_ui = false;
+        self.touch_sliders.clear();
         self.ui.discard_input();
         self.ui.input.down = false;
         self.ui.active = None;
