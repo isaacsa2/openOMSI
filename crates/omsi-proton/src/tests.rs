@@ -100,13 +100,21 @@ fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
                 .join(format!("tile_{}_{}.o3d", t.x, t.y)),
         )
         .unwrap();
-        for v in &mesh.vertices {
-            assert!((0.0..=300.0).contains(&v.position.x));
-            assert_eq!(v.position.z, 7.0);
-            assert_eq!(v.normal, Vec3::Z);
+        // Exercise the game's geometry loader, not just the raw file parser. O3D stores
+        // Y up and this loader swaps it back to Z up before rendering and wheel probes.
+        let rendered = omsi_geometry::mesh_from_o3d(&mesh);
+        for (p, n) in rendered.positions.iter().zip(&rendered.normals) {
+            assert!((0.0..=300.0).contains(&p.x));
+            assert!((10.0..=12.0).contains(&p.y));
+            assert_eq!(p.z, 7.0);
+            assert_eq!(*n, Vec3::Z);
         }
-        for face in mesh.triangles {
-            let [a, b, c] = face.indices.map(|i| mesh.vertices[i as usize].position);
+        for face in rendered.indices.chunks_exact(3) {
+            let [a, b, c] = [face[0], face[1], face[2]].map(|i| rendered.positions[i as usize]);
+            assert!(
+                (b - a).cross(c - a).z < 0.0,
+                "road must face up with clockwise world winding"
+            );
             area += (b - a).cross(c - a).length() * 0.5;
         }
     }
@@ -163,8 +171,15 @@ fn o3d_writer_preserves_indices_material_opacity_and_uv() {
     };
     convert::write_mesh(&f.0.join("test.o3d"), &mesh, &[material.clone()]).unwrap();
     let loaded = omsi_o3d::load_mesh(&f.0.join("test.o3d")).unwrap();
-    assert_eq!(loaded.vertices, mesh.vertices);
-    assert_eq!(loaded.triangles, mesh.triangles);
+    assert!(loaded
+        .vertices
+        .iter()
+        .all(|v| v.position == Vec3::new(2.0, 4.0, 3.0) && v.normal == Vec3::Y));
+    assert_eq!(loaded.triangles[0].indices, [0, 2, 1]);
+    let rendered = omsi_geometry::mesh_from_o3d(&loaded);
+    assert_eq!(rendered.positions, vec![v.position; 3]);
+    assert_eq!(rendered.normals, vec![v.normal; 3]);
+    assert_eq!(rendered.uvs, vec![v.uv; 3]);
     assert_eq!(loaded.materials, vec![material]);
 }
 

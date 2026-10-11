@@ -13,6 +13,10 @@ driving with an OMSI bus**.
 3. On **Drive**, select the map labelled **(Proton Bus)**, choose an installed OMSI
    bus and one of the map's entry points, then start free driving without a duty.
 
+If an earlier preview imported the scenery sideways, remove that imported map through
+Mods and install its original ZIP again with the updated build. The fixed conversion
+changes the generated O3D files; updating the executable alone does not repair them.
+
 Importing creates a separate `maps/Proton-<name>` map. Original OMSI maps are not
 converted. The source archive stays untouched, and its assets are not distributed
 with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation setup.

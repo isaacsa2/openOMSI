@@ -204,6 +204,7 @@ pub fn append(
 }
 
 /// Version 3 uses 32-bit counts and indices, without the scrambling keys of later versions.
+/// Tiles use world coordinates (Z up); O3D records use Direct3D coordinates (Y up).
 pub fn write_mesh(path: &Path, mesh: &Mesh, materials: &[Material]) -> Result<()> {
     let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
     w.write_all(&[0x84, 0x19, 3, 1, 0x17])?;
@@ -211,11 +212,11 @@ pub fn write_mesh(path: &Path, mesh: &Mesh, materials: &[Material]) -> Result<()
     for v in &mesh.vertices {
         for f in [
             v.position.x,
-            v.position.y,
             v.position.z,
+            v.position.y,
             v.normal.x,
-            v.normal.y,
             v.normal.z,
+            v.normal.y,
             v.uv.x,
             v.uv.y,
         ] {
@@ -225,7 +226,9 @@ pub fn write_mesh(path: &Path, mesh: &Mesh, materials: &[Material]) -> Result<()
     w.write_all(&[0x49])?;
     w.write_all(&(mesh.triangles.len() as u32).to_le_bytes())?;
     for t in &mesh.triangles {
-        for i in t.indices {
+        // The renderer keeps Direct3D's clockwise front faces. Reverse the right-handed
+        // 3DS face as well as swapping axes so its visible side still faces its normal.
+        for i in [t.indices[0], t.indices[2], t.indices[1]] {
             w.write_all(&i.to_le_bytes())?;
         }
         w.write_all(&t.material.to_le_bytes())?;

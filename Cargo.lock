@@ -3518,6 +3518,7 @@ dependencies = [
  "encoding_rs",
  "glam",
  "omsi-cfg",
+ "omsi-geometry",
  "omsi-map",
  "omsi-o3d",
  "omsi-scenery",
