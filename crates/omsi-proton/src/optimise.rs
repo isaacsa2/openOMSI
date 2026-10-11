@@ -81,6 +81,22 @@ pub(crate) struct Builder {
 
 impl Builder {
     pub fn face(&mut self, face: [Vertex; 3], source: u16, material: &Material) {
+        self.face_with_limit(face, source, material, 1_000_000);
+    }
+
+    fn face_with_limit(
+        &mut self,
+        face: [Vertex; 3],
+        source: u16,
+        material: &Material,
+        limit: usize,
+    ) {
+        // A full lookup used to stop accepting new vertices forever. Dense tiles then
+        // exported the remaining geometry with three new vertices per triangle. Rotate
+        // the bounded lookup so later objects can still share their identical vertices.
+        if self.vertices.len() >= limit {
+            self.vertices.clear();
+        }
         let next = self.mesh.materials.len() as u16;
         let slot = *self.sources.entry(source).or_insert_with(|| {
             *self
@@ -97,9 +113,7 @@ impl Builder {
                 return i;
             }
             let i = self.mesh.vertices.len() as u32;
-            if self.vertices.len() < 1_000_000 {
-                self.vertices.insert(key, i);
-            }
+            self.vertices.insert(key, i);
             self.mesh.vertices.push(v);
             i
         });
@@ -107,6 +121,41 @@ impl Builder {
             indices,
             material: slot,
         });
+    }
+}
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+    use glam::{Vec2, Vec3};
+
+    #[test]
+    fn dense_tiles_keep_sharing_after_the_lookup_fills() {
+        let face = |x| {
+            [0.0, 1.0, 2.0].map(|y| Vertex {
+                position: Vec3::new(x, y, 0.0),
+                normal: Vec3::Z,
+                uv: Vec2::new(x, y),
+            })
+        };
+        let mut builder = Builder::default();
+        let m = Material::default();
+        for x in [0.0, 1.0, 2.0, 2.0, 2.0] {
+            builder.face_with_limit(face(x), 0, &m, 6);
+        }
+        assert_eq!(builder.mesh.vertices.len(), 9);
+        assert_eq!(builder.mesh.triangles.len(), 5);
+        assert_eq!(
+            builder.mesh.triangles[2].indices,
+            builder.mesh.triangles[4].indices
+        );
+        assert!(builder.vertices.len() <= 8); // at most two new vertices beyond the bound
+        for (triangle, x) in builder.mesh.triangles.iter().zip([0.0, 1.0, 2.0, 2.0, 2.0]) {
+            assert_eq!(
+                triangle.indices.map(|i| builder.mesh.vertices[i as usize]),
+                face(x)
+            );
+        }
     }
 }
 

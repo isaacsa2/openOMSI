@@ -153,3 +153,26 @@ was recorded with `wait4`; these are not Windows, GPU or 1 GB map benchmarks.
 
 All five maps kept byte-identical vertex attributes, triangle indices, entry points
 and terrain. Material records gained the additional supported 3DS properties.
+
+## GPU residency on dense maps
+
+Generated maps use the sizes of their per-tile O3D files to estimate resident geometry
+before loading it. The streamer selects a smaller radius where dense scenery would
+exceed its geometry allowance: 30% of reported dedicated VRAM, bounded to 128–1500 MB,
+or 384 MB when dedicated VRAM is unknown. The requested view distance remains the
+maximum. Native OMSI maps keep their existing distance rules.
+
+The estimate includes a 12.5% allowance and 64 KiB per tile for terrain and allocation
+slack, and counts the 75 m unload margin. Every camera/player area retains at least
+150 m (or the shorter requested distance). This is not a hard GPU memory limit: nearby
+ground takes priority, one exceptionally dense tile may exceed the allowance, and
+textures, vehicles, render targets and temporary uploads also use VRAM. Imported tiles
+are prepared one at a time to avoid allocating a batch of six heavy tiles ahead of
+placement. The effective radius and geometry allowance appear in the log.
+
+Vertex sharing now rotates its bounded lookup when full, so later geometry in a dense
+tile can still share identical positions, normals and UVs. No faces or detail are
+removed. Reimport the source archive to regenerate these meshes; the streaming change
+also applies to existing generated maps with the standard per-tile file layout.
+In-game GPU usage, visual distance transitions and frame rate still need validation
+on a graphics adapter; conversion RAM measurements above do not measure VRAM.

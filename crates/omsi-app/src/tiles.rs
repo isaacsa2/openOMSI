@@ -20,6 +20,8 @@ use omsi_map::{tile_size, MapSpline, SplineAttachment, Tile};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
+mod import_memory;
+
 /// A spline of the map as far as a repeater's walk along its chain needs it.
 #[derive(Debug, Clone, Copy)]
 pub struct IndexedSpline {
@@ -819,6 +821,8 @@ pub struct Streamer {
     tile_lookup: hashbrown::HashMap<(i32, i32), Vec<usize>>,
     pub load_radius: f64,
     pub unload_radius: f64,
+    /// Generated maps can contain millions of vertices per tile; distance alone is unbounded.
+    import_memory: Option<import_memory::ImportMemory>,
     tx: std::sync::mpsc::Sender<Batch>,
     rx: std::sync::mpsc::Receiver<Batch>,
     inflight: bool,
@@ -859,6 +863,7 @@ impl Streamer {
     /// first area, which is what the loading screen waits for.
     pub fn new(world: std::sync::Arc<crate::scene::World>, centers: &[DVec3], load_radius: f64, initial_radius: f64) -> Streamer {
         let tiles = world.select_tiles(None, None);
+        let import_memory = import_memory::ImportMemory::read(&world.map_dir, &tiles, load_radius);
         let mut tile_lookup: hashbrown::HashMap<(i32, i32), Vec<usize>> = hashbrown::HashMap::new();
         for (i, t) in tiles.iter().enumerate() {
             tile_lookup.entry((t.0, t.1)).or_default().push(i);
@@ -870,6 +875,7 @@ impl Streamer {
             tile_lookup,
             load_radius,
             unload_radius: load_radius + tile_size() * 1.5,
+            import_memory,
             tx,
             rx,
             inflight: false,
@@ -893,10 +899,18 @@ impl Streamer {
             initial_upload: None,
             relieved_at: (0, 0, std::time::Instant::now()),
         };
-        let first: hashbrown::HashSet<(i32, i32)> = s.tiles.iter().filter(|t| Self::nearest(centers, t.0, t.1) <= initial_radius.min(load_radius)).map(|t| (t.0, t.1)).collect();
-        log::info!("tile streaming: {} tiles in the map, load radius {:.0} m around {} points ({} tiles now), first area {} tiles", s.tiles.len(), load_radius, centers.len(), s.tiles.iter().filter(|t| Self::nearest(centers, t.0, t.1) <= load_radius).count(), first.len());
+        s.adjust_import_radius(centers);
+        let first: hashbrown::HashSet<(i32, i32)> = s.tiles.iter().filter(|t| Self::nearest(centers, t.0, t.1) <= initial_radius.min(s.load_radius)).map(|t| (t.0, t.1)).collect();
+        log::info!("tile streaming: {} tiles in the map, load radius {:.0} m around {} points ({} tiles now), first area {} tiles", s.tiles.len(), s.load_radius, centers.len(), s.tiles.iter().filter(|t| Self::nearest(centers, t.0, t.1) <= s.load_radius).count(), first.len());
         s.initial = Some((first, 0));
         s
+    }
+
+    fn adjust_import_radius(&mut self, centers: &[DVec3]) {
+        if let Some(memory) = &mut self.import_memory {
+            self.load_radius = memory.radius(centers);
+            self.unload_radius = self.load_radius + import_memory::UNLOAD_MARGIN;
+        }
     }
 
     /// Distance from `p` to the nearest point of tile (tx, ty).
@@ -961,6 +975,7 @@ impl Streamer {
     /// about half a budget more, at least one tile), and start the next batch. Returns true
     /// when the loaded tiles changed (the caller then refreshes whatever copies world data).
     pub fn update(&mut self, renderer: &omsi_render::Renderer, scene: &mut omsi_render::Scene, centers: &[DVec3], budget: std::time::Duration, audio: Option<&omsi_audio::AudioEngine>) -> bool {
+        self.adjust_import_radius(centers);
         let mut changed = false;
         while let Ok((asked, prepared, stats, secs)) = self.rx.try_recv() {
             self.inflight = false;
@@ -1159,7 +1174,9 @@ impl Streamer {
             if !missing.is_empty() {
                 // the first area in bigger bites (the loading screen shows the progress),
                 // then a few tiles at a time
-                let n = if self.initial.is_some() { 6 } else { 3 };
+                // A generated tile can itself be a hundred MB. Preparing six on the GPU
+                // ahead of placement creates a substantial peak even with a short radius.
+                let n = if self.import_memory.is_some() { 1 } else if self.initial.is_some() { 6 } else { 3 };
                 let batch: Vec<(i32, i32, PathBuf)> = missing.into_iter().take(n).map(|(_, t)| t).collect();
                 let keys: Vec<(i32, i32)> = batch.iter().map(|t| (t.0, t.1)).collect();
                 self.requested.extend(keys.iter().copied());
