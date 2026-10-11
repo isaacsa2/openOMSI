@@ -3,6 +3,10 @@
 use anyhow::{bail, ensure, Result};
 use glam::{Vec2, Vec3};
 use omsi_o3d::Material;
+use std::io::Read;
+use std::path::Path;
+
+const FILE_LIMIT_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct Model {
@@ -19,6 +23,80 @@ pub struct Object {
     pub faces: Vec<[u16; 3]>,
     pub groups: Vec<(String, Vec<u16>)>,
     pub smoothing: Vec<u32>,
+}
+
+/// Read the declared model only; opaque trailing data must not consume import memory.
+pub fn load(path: &Path, cancel: &impl Fn() -> bool) -> Result<Model> {
+    let file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    read_model(file, size, cancel)
+}
+
+fn read_model(mut reader: impl Read, size: u64, cancel: &impl Fn() -> bool) -> Result<Model> {
+    ensure!(
+        size <= FILE_LIMIT_BYTES,
+        "3DS file exceeds the 1 GiB import limit"
+    );
+    let mut header = [0; 6];
+    reader.read_exact(&mut header)?;
+    ensure!(header[..2] == [0x4d, 0x4d], "not a 3DS file");
+    let end = u32::from_le_bytes(header[2..6].try_into()?) as u64;
+    ensure!(
+        end >= 6 && end <= size,
+        "invalid 3DS root chunk length {end}"
+    );
+    ensure!(!cancel(), "map import cancelled");
+    let mut bytes = header.to_vec();
+    bytes.try_reserve_exact(end as usize - header.len())?;
+    let mut remaining = end as usize - header.len();
+    while remaining != 0 {
+        ensure!(!cancel(), "map import cancelled");
+        let chunk = remaining.min(1024 * 1024);
+        let start = bytes.len();
+        bytes.resize(start + chunk, 0);
+        reader.read_exact(&mut bytes[start..])?;
+        remaining -= chunk;
+    }
+    let mut model = parse(&bytes)?;
+    model.trailing_bytes = (size - end) as usize;
+    Ok(model)
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn gigabyte_sources_skip_the_tail_and_the_next_byte_is_refused() {
+        // A bounded reader fails if the loader touches the opaque tail. No giant
+        // fixture or disk allocation is needed to verify the source-size boundary.
+        let mut reader = Cursor::new([0x4d, 0x4d, 6, 0, 0, 0]);
+        let model = read_model(&mut reader, FILE_LIMIT_BYTES, &|| false).unwrap();
+        assert_eq!(reader.position(), 6);
+        assert_eq!(model.trailing_bytes as u64, FILE_LIMIT_BYTES - 6);
+        reader.set_position(0);
+        assert!(read_model(&mut reader, FILE_LIMIT_BYTES + 1, &|| false)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("1 GiB"));
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[test]
+    fn declared_chunks_are_still_bounded_and_reads_can_be_cancelled() {
+        let malformed = Cursor::new([0x4d, 0x4d, 20, 0, 0, 0]);
+        assert!(read_model(malformed, 6, &|| false).is_err());
+        let truncated = Cursor::new([0x4d, 0x4d, 20, 0, 0, 0]);
+        assert!(read_model(truncated, 20, &|| false).is_err());
+        let valid = Cursor::new([0x4d, 0x4d, 6, 0, 0, 0]);
+        assert!(read_model(valid, 6, &|| true)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("cancelled"));
+    }
 }
 
 struct Chunk<'a> {

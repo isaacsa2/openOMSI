@@ -64,14 +64,20 @@ refer to the selected layout; relative `./` prefixes and trailing separators wor
 Unsupported map phases, unsafe paths, damaged 3DS records and maps
 without an explicit entry point produce an import error.
 
-Generated geometry has a **2 GiB** budget for vertex and triangle data across all
+The importer has no fixed ZIP size cap: a 1 GB archive is accepted when its format,
+conversion limits and available disk space allow it.
+
+Generated geometry has an **8 GiB** budget for vertex and triangle data across all
 tiles and source files, including faces produced by clipping, before compaction. This replaces the
 earlier vertex-count limits. It is not a limit on the ZIP size or total process RAM:
 source meshes, vector capacity, textures and other conversion data use extra memory.
-The separate limits of 128 MiB per source 3DS file and 4096 output tiles still apply.
+Each source 3DS file may be up to **1 GiB**, and a map may produce up to **16,384 tiles**.
+The separate bound of 4096 tiles spanned by a single triangle still applies.
 
-Bytes after a 3DS file's declared main chunk are ignored and reported in the import
-warnings. Invalid or truncated chunks inside that main chunk still stop conversion.
+Bytes after a 3DS file's declared main chunk are skipped without loading them into
+memory, and reported in the import warnings. Invalid or truncated chunks inside that
+main chunk still stop conversion. Large-map gameplay and RAM use need checking on
+the machine that will run the map; the import budget is not a gameplay memory budget.
 
 ## Local format checks
 

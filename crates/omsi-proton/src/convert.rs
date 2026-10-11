@@ -10,7 +10,8 @@ use std::path::Path;
 
 pub const EDGE: f32 = 300.0;
 pub type Tiles = BTreeMap<(i32, i32), Mesh>;
-const GEOMETRY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const GEOMETRY_LIMIT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const TILE_LIMIT: usize = 16_384;
 const FACE_BYTES: u64 =
     (3 * std::mem::size_of::<Vertex>() + std::mem::size_of::<Triangle>()) as u64;
 
@@ -18,7 +19,7 @@ fn reserve_face(output_bytes: &mut u64) -> Result<()> {
     let next = output_bytes.checked_add(FACE_BYTES);
     ensure!(
         next.is_some_and(|n| n <= GEOMETRY_LIMIT_BYTES),
-        "generated map geometry exceeds the 2 GiB import limit"
+        "generated map geometry exceeds the 8 GiB import limit"
     );
     *output_bytes = next.unwrap();
     Ok(())
@@ -99,7 +100,7 @@ fn add_triangle(
                     continue;
                 }
                 // Charge every clipped face across all source files before adding it.
-                // The 2 GiB total also keeps every tile's vertex indices within u32.
+                // The 8 GiB total also keeps every tile's vertex indices within u32.
                 reserve_face(output_bytes)?;
                 let mesh = tiles.entry((tx, ty)).or_default();
                 let start = mesh.vertices.len() as u32;
@@ -114,7 +115,10 @@ fn add_triangle(
             }
         }
     }
-    ensure!(tiles.len() <= 4096, "map has too many tiles");
+    ensure!(
+        tiles.len() <= TILE_LIMIT,
+        "map exceeds the {TILE_LIMIT} output tile import limit"
+    );
     Ok(())
 }
 
@@ -276,17 +280,58 @@ mod budget_tests {
 
     #[test]
     fn geometry_budget_rejects_the_next_face_without_changing_the_total() {
-        // Exercise the 2 GiB boundary without allocating a multi-gigabyte fixture.
+        // Cross the old 2 GiB limit without allocating multi-gigabyte geometry.
+        let mut bytes = 2 * 1024 * 1024 * 1024;
+        reserve_face(&mut bytes).unwrap();
+        assert!(bytes > 2 * 1024 * 1024 * 1024);
+        // Exercise the new boundary and reject overflow without changing the total.
         let mut bytes = GEOMETRY_LIMIT_BYTES - FACE_BYTES;
         reserve_face(&mut bytes).unwrap();
         assert_eq!(bytes, GEOMETRY_LIMIT_BYTES);
         assert!(reserve_face(&mut bytes)
             .unwrap_err()
             .to_string()
-            .contains("2 GiB"));
+            .contains("8 GiB"));
         assert_eq!(bytes, GEOMETRY_LIMIT_BYTES);
         bytes = u64::MAX;
         assert!(reserve_face(&mut bytes).is_err());
         assert_eq!(bytes, u64::MAX);
+    }
+
+    #[test]
+    fn maps_can_exceed_the_old_tile_limit_but_still_stop_at_the_new_limit() {
+        let mut tiles = Tiles::new();
+        let mut bytes = 0;
+        for i in 0..TILE_LIMIT {
+            let x = (i % 128) as f32 * EDGE + 1.0;
+            let y = (i / 128) as f32 * EDGE + 1.0;
+            let vertex = |dx: f32, dy: f32| Vertex {
+                position: Vec3::new(x + dx, y + dy, 0.0),
+                normal: Vec3::Z,
+                uv: Vec2::ZERO,
+            };
+            add_triangle(
+                &mut tiles,
+                [vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)],
+                0,
+                &mut bytes,
+            )
+            .unwrap();
+        }
+        assert_eq!(tiles.len(), TILE_LIMIT);
+        let vertex = |dx: f32, dy: f32| Vertex {
+            position: Vec3::new(1.0 + dx, 128.0 * EDGE + 1.0 + dy, 0.0),
+            normal: Vec3::Z,
+            uv: Vec2::ZERO,
+        };
+        assert!(add_triangle(
+            &mut tiles,
+            [vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)],
+            0,
+            &mut bytes,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("16384"));
     }
 }

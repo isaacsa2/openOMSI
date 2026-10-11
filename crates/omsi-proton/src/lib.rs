@@ -343,12 +343,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut report = Report::default();
     for f in files(&models, "3ds")? {
         ensure!(!cancel(), "map import cancelled");
-        ensure!(
-            std::fs::metadata(&f)?.len() <= 128 << 20,
-            "3DS file exceeds import limit"
-        );
-        let mut model = three_ds::parse(&std::fs::read(&f)?)
-            .with_context(|| format!("reading {}", f.display()))?;
+        let mut model =
+            three_ds::load(&f, &cancel).with_context(|| format!("reading {}", f.display()))?;
         if model.trailing_bytes != 0 {
             report.warnings.push(format!(
                 "{}: ignored {} trailing bytes outside the declared 3DS root chunk",
