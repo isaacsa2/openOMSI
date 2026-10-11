@@ -1,7 +1,8 @@
 # Basic Proton Bus map support
 
 The Mods installer can import a standalone Proton Bus map ZIP or folder containing
-`<name>.map.txt` next to its base folder, or next to `tiles/` when `baseDir=.`.
+`<name>.map.txt` with its assets under the relative `baseDir`, including nested folders,
+or next to `tiles/` when `baseDir=.`. Packs with multiple configs install each map separately.
 Phases 2, 3 and 4 are accepted for **free
 driving with an OMSI bus**.
 
@@ -67,10 +68,11 @@ its temporary file is deleted immediately. The whole converted map is not retain
 in RAM. Peak memory still depends on the largest source object and densest output
 tile, plus bounded lookup buffers. Extra disk I/O can make an import slower.
 
-The installer first looks for a base folder matching the `.map.txt` name. It also
-accepts a single neighbouring base folder containing `tiles/`, or a single config
-alongside `tiles/`. Ambiguous folders are not guessed. The config's `baseDir` must
-refer to the selected layout; relative `./` prefixes and trailing separators work.
+The installer reads up to 64 KiB per `.map.txt` while planning and follows its authored
+`baseDir`, preserving nested paths and resolving folder names case-insensitively. Each
+map receives only that base folder and its own config. Without an available `baseDir`,
+the earlier matching-name/single-neighbour detection remains available. Ambiguous
+folders are not guessed. Relative `./` prefixes and trailing separators work.
 Unsupported map phases, unsafe paths, damaged 3DS records and maps
 without an explicit entry point produce an import error.
 
@@ -82,7 +84,10 @@ tiles and source files, including faces produced by clipping, before compaction.
 earlier vertex-count limits. It is not a limit on the ZIP size or total process RAM:
 source meshes, vector capacity, textures and other conversion data use extra memory.
 Each source 3DS file may be up to **1 GiB**, and a map may produce up to **16,384 tiles**.
-The separate bound of 4096 tiles spanned by a single triangle still applies.
+Ordinary triangles may span at most 4096 tiles. Oversized, nearly horizontal backdrop
+faces (height range at most 1 m) are deferred and clipped only to tiles occupied by
+other scenery, with a warning; at most 256 such faces are accepted. This avoids turning
+a large empty ground sheet into thousands of additional map tiles.
 
 Bytes after a 3DS file's declared main chunk are skipped without loading them into
 memory, and reported in the import warnings. Invalid or truncated chunks inside that
@@ -94,6 +99,22 @@ that already contain the exported world transform.
 
 The [PBSU Blender exporter](https://github.com/Arturo254/PBSU-Addon-3ds) was examined
 as a format reference; its Python implementation is not included in this importer.
+
+The supplied CSS pack (1,058,211,442-byte ZIP, 1,495,228,617 bytes expanded) includes
+phase 3 and phase 4 configs pointing at separate nested base folders. Both were
+installed from the complete ZIP through the launcher and checked with the engine's
+map, terrain, scenery, O3D and geometry loaders. Each retains its nine entry points;
+no missing textures were reported. Its roughly 25 km ground sheet is cropped to
+occupied tiles rather than producing thousands of empty tiles. One Linux release
+conversion run per version, excluding ZIP extraction and later loader validation:
+
+| CSS version | Output tiles | Output triangles | Conversion peak RAM | Conversion time |
+| --- | ---: | ---: | ---: | ---: |
+| Phase 3 | 363 | 4,457,414 | 85.5 MiB | 5.18 s |
+| Phase 4 | 365 | 30,792,230 | 196.0 MiB | 35.74 s |
+
+These are conversion measurements, not gameplay RAM or FPS. The phase 4 map remains
+very dense; its rendering, collision and driving still require an in-game test.
 
 ## Local format checks
 

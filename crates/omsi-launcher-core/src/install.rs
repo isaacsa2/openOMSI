@@ -432,6 +432,8 @@ struct Entry {
     size: u64,
     /// Index in the archive (zip sources).
     index: usize,
+    /// Authored asset folder, read only for bounded Proton map configurations.
+    proton_base: Option<String>,
 }
 
 /// A folder of the source as a tree of names.
@@ -887,7 +889,7 @@ fn list_folder(dir: &Path, job: &Job) -> Result<(Vec<Entry>, Vec<PathBuf>, usize
     let mut entries = Vec::with_capacity(found.len());
     let mut paths = Vec::with_capacity(found.len());
     for (index, (rel, size, p)) in found.into_iter().enumerate() {
-        entries.push(Entry { rel, size, index });
+        entries.push(Entry { rel, size, index, proton_base: None });
         paths.push(p);
     }
     Ok((entries, paths, refused))
@@ -933,7 +935,7 @@ fn list_zip(z: &mut zip::ZipArchive<std::io::BufReader<std::fs::File>>, job: &Jo
         if !supported {
             *unsupported.entry(format!("{method:?}")).or_default() += 1;
         }
-        out.push(Entry { rel, size: f.size(), index: i });
+        out.push(Entry { rel, size: f.size(), index: i, proton_base: None });
     }
     job.files_done.store(0, Ordering::Relaxed);
     if encrypted > 0 {
@@ -969,7 +971,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     }
     // (the name becomes a folder name: `...zip` has the stem `..`)
     let source_name = if archive.is_some() { src.file_stem() } else { src.file_name() }.map(|s| s.to_string_lossy().to_string()).filter(|n| safe_rel(n).as_deref() == Some(n.as_str())).unwrap_or_else(|| "mod".into());
-    let (mut source, entries) = if staged_archive {
+    let (mut source, mut entries) = if staged_archive {
         let unpacked = staging_dir(content, job.id).join("source");
         job.state("unpacking", "checking the archive and unpacking it into staging");
         unpack_archive(job, content, &src, &unpacked, archive.unwrap())?;
@@ -998,6 +1000,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     if entries.is_empty() {
         return Err(anyhow!("{} is empty", src.display()));
     }
+    proton::read_layouts(&mut source, &mut entries, job)?;
     let installed = Installed { content, root };
     let plan = plan(&entries, &source_name, &installed);
     if plan.maps.is_empty() {
@@ -1486,12 +1489,13 @@ pub fn inspect(content: &Path, root: Option<&Path>, src: &Path) -> Result<Source
     }
     let f = std::fs::File::open(src).with_context(|| format!("opening {}", src.display()))?;
     let mut z = zip::ZipArchive::new(std::io::BufReader::with_capacity(ZIP_BUFFER, f)).with_context(|| format!("{} is not a readable zip archive", src.display()))?;
-    let (entries, _) = list_zip(&mut z, &job)?;
+    let (mut entries, _) = list_zip(&mut z, &job)?;
+    proton::read_layouts(&mut Source::Zip(z), &mut entries, &job)?;
     let source_name = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "mod".into());
     let plan = plan(&entries, &source_name, &Installed { content, root });
     let files: u64 = plan.maps.iter().map(|m| m.files.len() as u64).sum();
     let unpacked: u64 = plan.maps.iter().map(|m| m.bytes).sum();
-    let needed = unpacked + (unpacked / 20).max(MIN_MARGIN);
+    let needed = unpacked.saturating_add((unpacked / 20).max(MIN_MARGIN)).saturating_add(proton::extra_space(&plan));
     let layout = if plan.maps.is_empty() { Err(anyhow!("nothing in it the game would use")) } else { in_place_layout(src, &plan) };
     let fits = needed <= free;
     let in_place_ok = layout.is_ok();
@@ -1584,7 +1588,7 @@ mod tests {
     use super::*;
 
     fn entries(names: &[&str]) -> Vec<Entry> {
-        names.iter().enumerate().map(|(i, n)| Entry { rel: n.to_string(), size: 10, index: i }).collect()
+        names.iter().enumerate().map(|(i, n)| Entry { rel: n.to_string(), size: 10, index: i, proton_base: None }).collect()
     }
 
     fn dests(p: &Plan) -> Vec<(String, bool)> {

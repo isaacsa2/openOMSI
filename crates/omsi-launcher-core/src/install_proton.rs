@@ -3,6 +3,52 @@ use super::*;
 
 const KIND: &str = "Proton Bus map (basic free-driving import)";
 
+/// Read only small configuration files while planning, never meshes or textures.
+pub(super) fn read_layouts(source: &mut Source, entries: &mut [Entry], job: &Job) -> Result<()> {
+    for entry in entries {
+        if !entry.rel.to_ascii_lowercase().ends_with(".map.txt") || entry.size > 64 * 1024 {
+            continue;
+        }
+        if job.cancelled() {
+            return Err(anyhow!(Cancelled));
+        }
+        let mut data = Vec::new();
+        match source {
+            Source::Folder(paths) => {
+                std::fs::File::open(&paths[entry.index])?
+                    .take(64 * 1024 + 1)
+                    .read_to_end(&mut data)?;
+            }
+            Source::Zip(zip) => {
+                zip.by_index(entry.index)?
+                    .take(64 * 1024 + 1)
+                    .read_to_end(&mut data)?;
+            }
+        }
+        entry.proton_base = omsi_proton::base_dir(&data).ok();
+    }
+    Ok(())
+}
+
+fn folder<'a>(root: &'a Node, rel: &str) -> Option<(String, &'a Node)> {
+    let rel = safe_rel(rel)?;
+    let mut node = root;
+    let mut actual = String::new();
+    for part in rel.split('/') {
+        let (name, child) = node.dirs.get_key_value(part).or_else(|| {
+            node.dirs
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(part))
+        })?;
+        actual = join(&actual, name);
+        node = child;
+    }
+    node.dirs
+        .keys()
+        .any(|n| n.eq_ignore_ascii_case("tiles"))
+        .then_some((actual, node))
+}
+
 pub(super) fn plan_at(
     node: &Node,
     path: &str,
@@ -34,21 +80,33 @@ pub(super) fn plan_at(
             .iter()
             .filter(|(_, d)| d.dirs.keys().any(|n| n.eq_ignore_ascii_case("tiles")))
             .collect();
-        let base = named.or_else(|| (candidates.len() == 1).then(|| candidates[0]));
+        let declared = entries.get(*index).and_then(|e| e.proton_base.as_deref());
+        let base = if let Some(rel) = declared {
+            folder(node, rel)
+        } else {
+            named
+                .or_else(|| (candidates.len() == 1).then(|| candidates[0]))
+                .map(|(name, base)| (name.clone(), base))
+        };
         let inline = node
             .files
             .iter()
             .filter(|(n, _)| n.to_ascii_lowercase().ends_with(".map.txt"))
             .count()
             == 1
-            && node.dirs.keys().any(|n| n.eq_ignore_ascii_case("tiles"));
+            && node.dirs.keys().any(|n| n.eq_ignore_ascii_case("tiles"))
+            && declared.is_none_or(|rel| {
+                rel.replace('\\', "/")
+                    .split('/')
+                    .all(|p| p.is_empty() || p == ".")
+            });
         if stem.is_empty() || stem.contains(['\r', '\n']) {
             continue;
         }
         let (files, bytes) = if let Some((base_name, base)) = base {
-            let (mut files, bytes) = collect(base, &join(path, base_name), entries);
+            let (mut files, bytes) = collect(base, &join(path, &base_name), entries);
             for (_, rel) in &mut files {
-                *rel = join(base_name, rel);
+                *rel = join(&base_name, rel);
             }
             files.push((*index, file.clone()));
             (files, bytes + entries[*index].size)
@@ -120,143 +178,5 @@ pub(super) fn convert(staging: &Path, plan: &Plan, job: &Job) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn standalone_maps_and_multiple_siblings_are_planned_separately() {
-        let entries: Vec<_> = [
-            "Pack/A.map.txt",
-            "Pack/A/tiles/x/map.3ds",
-            "Pack/A/textures/a.png",
-            "Pack/B.map.txt",
-            "Pack/B/tiles/x/map.3ds",
-        ]
-        .iter()
-        .enumerate()
-        .map(|(index, rel)| Entry {
-            rel: rel.to_string(),
-            size: 1,
-            index,
-        })
-        .collect();
-        let mut tree = Node::default();
-        for (i, e) in entries.iter().enumerate() {
-            tree.insert(&e.rel, i);
-        }
-        let mut plan = Plan::default();
-        let mut used = HashSet::new();
-        assert!(plan_at(
-            tree.get("Pack").unwrap(),
-            "Pack",
-            &entries,
-            &mut plan,
-            &mut used
-        ));
-        assert_eq!(plan.maps.len(), 2);
-        assert_eq!(used.len(), entries.len());
-        assert_eq!(plan.maps[0].dest, "maps/Proton-A");
-        assert!(plan.maps[0]
-            .files
-            .iter()
-            .any(|(_, p)| p == "A/tiles/x/map.3ds"));
-        assert!(check_mode(&plan, InstallMode::InPlace).is_err());
-        assert!(check_mode(&plan, InstallMode::Extract).is_ok());
-    }
-
-    #[test]
-    fn unique_base_folder_and_inline_maps_are_detected_without_guessing_ambiguous_layouts() {
-        for paths in [
-            vec!["Pack/Display.map.txt", "Pack/Actual/tiles/x/road.3ds"],
-            vec!["Pack/Display.map.txt", "Pack/tiles/x/road.3ds"],
-        ] {
-            let entries: Vec<_> = paths
-                .iter()
-                .enumerate()
-                .map(|(index, rel)| Entry {
-                    rel: rel.to_string(),
-                    size: 1,
-                    index,
-                })
-                .collect();
-            let mut tree = Node::default();
-            for (i, e) in entries.iter().enumerate() {
-                tree.insert(&e.rel, i);
-            }
-            let mut plan = Plan::default();
-            let mut used = HashSet::new();
-            assert!(plan_at(
-                tree.get("Pack").unwrap(),
-                "Pack",
-                &entries,
-                &mut plan,
-                &mut used
-            ));
-            assert_eq!(plan.maps[0].dest, "maps/Proton-Display");
-            assert_eq!(used.len(), entries.len());
-            assert!(plan.maps[0]
-                .files
-                .iter()
-                .any(|(_, rel)| rel == "Display.map.txt"));
-        }
-        let mut node = Node::default();
-        node.insert("Display.map.txt", 0);
-        node.insert("A/tiles/x/road.3ds", 1);
-        node.insert("B/tiles/x/road.3ds", 2);
-        assert!(!plan_at(
-            &node,
-            "",
-            &[],
-            &mut Plan::default(),
-            &mut HashSet::new()
-        ));
-    }
-
-    #[test]
-    fn existing_omsi_map_with_incidental_proton_text_is_not_converted() {
-        let mut node = Node::default();
-        node.insert("global.cfg", 0);
-        node.insert("Other.map.txt", 1);
-        node.insert("Other/tiles/x/map.3ds", 2);
-        assert!(!plan_at(
-            &node,
-            "",
-            &[],
-            &mut Plan::default(),
-            &mut HashSet::new()
-        ));
-    }
-
-    #[test]
-    fn install_supplied_proton_zip_when_available() {
-        let Some(src) = std::env::var_os("PROTON_INSTALL_FIXTURE") else {
-            return;
-        };
-        let content = std::env::temp_dir().join(format!("proton-install-{}", std::process::id()));
-        std::fs::create_dir_all(&content).unwrap();
-        let report = run_blocking(
-            content.clone(),
-            None,
-            PathBuf::from(src),
-            InstallMode::Extract,
-            None,
-            false,
-        );
-        assert_eq!(
-            report.state, "done",
-            "{}: {:?}",
-            report.message, report.warnings
-        );
-        assert_eq!(report.installed.len(), 1);
-        let map = content.join(&report.installed[0]);
-        let global = omsi_map::GlobalCfg::load(&map.join("global.cfg")).unwrap();
-        assert!(!global.tiles.is_empty() && !global.entry_points.is_empty());
-        for t in global.tiles {
-            let tile = omsi_map::Tile::load(&map.join(t.file)).unwrap();
-            for o in tile.objects {
-                assert!(content.join(o.file).is_file());
-            }
-        }
-        std::fs::remove_dir_all(content).unwrap();
-    }
-}
+#[path = "install_proton_tests.rs"]
+mod tests;

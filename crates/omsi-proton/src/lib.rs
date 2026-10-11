@@ -29,6 +29,23 @@ pub struct Report {
 
 fn ini(path: &Path) -> Result<Ini> {
     let bytes = std::fs::read(path)?;
+    Ok(ini_bytes(&bytes))
+}
+
+/// Read the authored asset folder without loading the map geometry.
+pub fn base_dir(bytes: &[u8]) -> Result<String> {
+    ensure!(
+        bytes.len() <= 64 * 1024,
+        "Proton map configuration exceeds 64 KiB"
+    );
+    ini_bytes(bytes)
+        .get("map")
+        .and_then(|map| map.get("basedir"))
+        .cloned()
+        .context("missing Proton baseDir")
+}
+
+fn ini_bytes(bytes: &[u8]) -> Ini {
     let text = match std::str::from_utf8(&bytes) {
         Ok(s) => s.to_owned(),
         Err(_) => encoding_rs::WINDOWS_1252
@@ -51,7 +68,7 @@ fn ini(path: &Path) -> Result<Ini> {
                 .insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
         }
     }
-    Ok(sections)
+    sections
 }
 
 /// Resolve only safe paths in the staging area, including a mod made on Windows whose
@@ -307,6 +324,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
                     &mut output_bytes,
                     &cancel,
                 )
+                .with_context(|| format!("converting object {:?}", object.name))
             })
             .with_context(|| format!("reading {}", f.display()))?;
     }
@@ -314,6 +332,10 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         !spool.tiles.is_empty(),
         "Proton map has no renderable 3DS geometry"
     );
+    let backdrops = spool.finish_backdrops(&mut output_bytes, &cancel)?;
+    if backdrops > 0 {
+        report.warnings.push(format!("{backdrops} oversized flat backdrop faces were clipped to occupied scenery tiles; distant empty background was not imported."));
+    }
     spool.finish_writes()?;
     let mut materials = registry.into_materials();
     for (i, m) in materials.iter_mut().enumerate() {
@@ -339,6 +361,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     }
     spool.probe.finish(&mut spawns, &mut report.warnings)?;
     ensure!(!cancel(), "map import cancelled");
+    // Success must report a cleanup failure instead of silently ignoring it in Drop.
+    spool.cleanup().context("removing temporary map geometry")?;
     export::global(dir, installed_rel, &keys, &spawns)?;
     report.tiles = keys.len();
     report.triangles = spool.tiles.values().sum();

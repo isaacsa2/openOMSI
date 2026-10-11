@@ -53,7 +53,10 @@ fn clip(input: &[Vertex], out: &mut Vec<Vertex>, axis: usize, edge: f32, lower: 
     for &b in input {
         if inside(a) != inside(b) {
             let t = (edge - a.position[axis]) / (b.position[axis] - a.position[axis]);
-            out.push(interpolate(a, b, t));
+            let mut intersection = interpolate(a, b, t);
+            // Large backdrops amplify float rounding; pin the cut to the shared edge.
+            intersection.position[axis] = edge;
+            out.push(intersection);
         }
         if inside(b) {
             out.push(b);
@@ -64,6 +67,9 @@ fn clip(input: &[Vertex], out: &mut Vec<Vertex>, axis: usize, edge: f32, lower: 
 
 pub(crate) trait Faces {
     fn face(&mut self, key: (i32, i32), vertices: [Vertex; 3], material: u16) -> Result<()>;
+    fn backdrop(&mut self, _vertices: [Vertex; 3], _material: u16) -> Result<()> {
+        anyhow::bail!("3DS triangle spans too many tiles")
+    }
 }
 
 #[cfg(test)]
@@ -124,37 +130,49 @@ fn emit_triangle(
     let tx1 = (hi.x / EDGE).floor() as i32;
     let ty0 = (lo.y / EDGE).floor() as i32;
     let ty1 = (hi.y / EDGE).floor() as i32;
-    ensure!(
-        (tx1 - tx0 + 1) as i64 * (ty1 - ty0 + 1) as i64 <= 4096,
-        "3DS triangle spans too many tiles"
-    );
+    if (tx1 - tx0 + 1) as i64 * (ty1 - ty0 + 1) as i64 > 4096 {
+        // A vast, nearly horizontal ground sheet is a backdrop, not a new city.
+        // Bound its later clipping to tiles occupied by ordinary scenery.
+        ensure!(hi.z - lo.z <= 1.0, "3DS triangle spans too many tiles");
+        return tiles.backdrop(vertices, material);
+    }
     for tx in tx0..=tx1 {
         for ty in ty0..=ty1 {
-            let [polygon, other] = &mut scratch.0;
-            polygon.clear();
-            polygon.extend_from_slice(&vertices);
-            for (axis, origin) in [(0, tx as f32 * EDGE), (1, ty as f32 * EDGE)] {
-                clip(polygon, other, axis, origin, true);
-                clip(other, polygon, axis, origin + EDGE, false);
-            }
-            for i in 1..polygon.len().saturating_sub(1) {
-                let mut face = [polygon[0], polygon[i], polygon[i + 1]];
-                if (face[1].position - face[0].position)
-                    .cross(face[2].position - face[0].position)
-                    .length_squared()
-                    < 1e-12
-                {
-                    continue;
-                }
-                // Charge every clipped face across all source files before adding it.
-                // The 8 GiB total also keeps every tile's vertex indices within u32.
-                reserve_face(output_bytes)?;
-                for v in &mut face {
-                    v.position -= Vec3::new(tx as f32 * EDGE, ty as f32 * EDGE, 0.0);
-                }
-                tiles.face((tx, ty), face, material)?;
-            }
+            emit_in_tile(tiles, (tx, ty), vertices, material, output_bytes, scratch)?;
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn emit_in_tile(
+    tiles: &mut impl Faces,
+    (tx, ty): (i32, i32),
+    vertices: [Vertex; 3],
+    material: u16,
+    output_bytes: &mut u64,
+    scratch: &mut ClipBuffers,
+) -> Result<()> {
+    let [polygon, other] = &mut scratch.0;
+    polygon.clear();
+    polygon.extend_from_slice(&vertices);
+    for (axis, origin) in [(0, tx as f32 * EDGE), (1, ty as f32 * EDGE)] {
+        clip(polygon, other, axis, origin, true);
+        clip(other, polygon, axis, origin + EDGE, false);
+    }
+    for i in 1..polygon.len().saturating_sub(1) {
+        let mut face = [polygon[0], polygon[i], polygon[i + 1]];
+        if (face[1].position - face[0].position)
+            .cross(face[2].position - face[0].position)
+            .length_squared()
+            < 1e-12
+        {
+            continue;
+        }
+        reserve_face(output_bytes)?;
+        for v in &mut face {
+            v.position -= Vec3::new(tx as f32 * EDGE, ty as f32 * EDGE, 0.0);
+        }
+        tiles.face((tx, ty), face, material)?;
     }
     Ok(())
 }

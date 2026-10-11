@@ -24,6 +24,7 @@ pub(crate) struct Spool {
     pub probe: Probe,
     writers: BTreeMap<(i32, i32), BufWriter<std::fs::File>>,
     order: VecDeque<(i32, i32)>,
+    backdrops: Vec<([Vertex; 3], u16)>,
 }
 
 impl Spool {
@@ -37,10 +38,28 @@ impl Spool {
             probe: Probe::new(spawns),
             writers: BTreeMap::new(),
             order: VecDeque::new(),
+            backdrops: Vec::new(),
         })
     }
     fn path(&self, key: (i32, i32)) -> PathBuf {
         self.dir.join(format!("{}_{}.faces", key.0, key.1))
+    }
+    pub fn finish_backdrops(
+        &mut self,
+        bytes: &mut u64,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<usize> {
+        let backdrops = std::mem::take(&mut self.backdrops);
+        let count = backdrops.len();
+        let keys: Vec<_> = self.tiles.keys().copied().collect();
+        let mut scratch = crate::convert::ClipBuffers::default();
+        for (vertices, material) in backdrops {
+            for &key in &keys {
+                ensure!(!cancel(), "map import cancelled");
+                crate::convert::emit_in_tile(self, key, vertices, material, bytes, &mut scratch)?;
+            }
+        }
+        Ok(count)
     }
     pub fn finish_writes(&mut self) -> Result<()> {
         for (_, mut writer) in std::mem::take(&mut self.writers) {
@@ -94,9 +113,22 @@ impl Spool {
         std::fs::remove_file(self.path(key))?;
         Ok(())
     }
+    pub fn cleanup(&mut self) -> Result<()> {
+        self.finish_writes()?;
+        std::fs::remove_dir_all(&self.dir)?;
+        Ok(())
+    }
 }
 
 impl Faces for Spool {
+    fn backdrop(&mut self, vertices: [Vertex; 3], material: u16) -> Result<()> {
+        ensure!(
+            self.backdrops.len() < 256,
+            "map exceeds the 256 oversized backdrop face limit"
+        );
+        self.backdrops.push((vertices, material));
+        Ok(())
+    }
     fn face(&mut self, key: (i32, i32), vertices: [Vertex; 3], material: u16) -> Result<()> {
         ensure!(
             self.tiles.contains_key(&key) || self.tiles.len() < TILE_LIMIT,

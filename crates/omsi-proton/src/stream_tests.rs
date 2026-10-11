@@ -42,6 +42,78 @@ fn color(value: [f32; 3]) -> Vec<u8> {
 }
 
 #[test]
+fn oversized_flat_background_uses_occupied_tiles_and_keeps_materials() {
+    let temp = Temp::new();
+    let mut spool = crate::spool::Spool::new(&temp.0.join("work"), &[]).unwrap();
+    let vertex = |x, y, z| Vertex {
+        position: Vec3::new(x, y, z),
+        normal: Vec3::Z,
+        uv: Vec2::ZERO,
+    };
+    for key in [(-1, -1), (0, 0)] {
+        spool
+            .face(
+                key,
+                [
+                    vertex(1.0, 1.0, 0.0),
+                    vertex(2.0, 1.0, 0.0),
+                    vertex(1.0, 2.0, 0.0),
+                ],
+                0,
+            )
+            .unwrap();
+    }
+    let mut object = three_ds::parse(&model()).unwrap().objects.remove(0);
+    object.positions = vec![
+        Vec3::new(-15000.0, -15000.0, -12.0),
+        Vec3::new(15000.0, -15000.0, -12.0),
+        Vec3::new(15000.0, 15000.0, -12.0),
+    ];
+    object.faces = vec![[0, 1, 2]];
+    object.smoothing.clear();
+    let mut bytes = 0;
+    crate::convert::append_object(&object, &[1], &[], &mut spool, &mut bytes, &|| false).unwrap();
+    assert!(!spool.used.contains(&1));
+    assert_eq!(spool.finish_backdrops(&mut bytes, &|| false).unwrap(), 1);
+    assert_eq!(spool.tiles.len(), 2);
+    assert!(spool.used.contains(&1));
+    spool.finish_writes().unwrap();
+    let materials = [
+        Material::default(),
+        Material {
+            texture: "ground.png".into(),
+            ..Default::default()
+        },
+    ];
+    for key in [(-1, -1), (0, 0)] {
+        let (mesh, _) = spool.mesh(key, &materials, &|| false).unwrap();
+        assert!(mesh.triangles.len() > 1);
+        assert!(mesh.materials.iter().any(|m| m.texture == "ground.png"));
+        assert!(mesh.vertices.iter().all(
+            |v| (0.0..=300.0).contains(&v.position.x) && (0.0..=300.0).contains(&v.position.y)
+        ));
+    }
+    object.positions[2].z = 10.0;
+    assert!(
+        crate::convert::append_object(&object, &[1], &[], &mut spool, &mut bytes, &|| false)
+            .is_err()
+    );
+    assert!(spool.finish_backdrops(&mut bytes, &|| true).is_ok()); // nothing pending
+    let face = [
+        vertex(-15000.0, -15000.0, -12.0),
+        vertex(15000.0, -15000.0, -12.0),
+        vertex(15000.0, 15000.0, -12.0),
+    ];
+    for _ in 0..256 {
+        spool.backdrop(face, 1).unwrap();
+    }
+    assert!(spool.backdrop(face, 1).is_err());
+    assert!(spool.finish_backdrops(&mut bytes, &|| true).is_err());
+    spool.cleanup().unwrap();
+    assert!(!temp.0.join("work").exists());
+}
+
+#[test]
 fn blender_records_forward_materials_uv_mapping_and_utf8_names_are_recognised() {
     let temp = Temp::new();
     let mut mat = chunk(0xa000, "Árvore\0".as_bytes());
