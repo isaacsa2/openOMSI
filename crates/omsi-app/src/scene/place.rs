@@ -330,6 +330,9 @@ impl World {
             // (a `[helparrow]` object goes on: it is put up hidden, and drawn while the route
             // arrows are on - see `World::show_help_arrows`)
             if ot.sco.only_editor || ot.meshes.is_empty() {
+                if ot.imported_collider().is_some() {
+                    self.object_collision(&mut state, &st, &ot, o, (pos, xf, heading), false);
+                }
                 // invisible sound sources (ambient sound objects) still run their script
                 if let (Some(program), true) = (&ot.program, ot.sco.sound.is_some()) {
                     let inst = omsi_sim::scenery::SceneryInstance::new(
@@ -535,7 +538,7 @@ impl World {
         let mesh_shape = ot
             .collision
             .as_ref()
-            .filter(|_| solid && !ot.sco.no_collision && !is_surface && !ot.meshes.is_empty());
+            .filter(|_| solid && !ot.sco.no_collision && !is_surface && (!ot.meshes.is_empty() || ot.imported_collider().is_some()));
         if let Some(c) = mesh_shape {
             let tris = |m: &dyn Fn(glam::Vec3) -> glam::DVec3| -> Vec<[glam::DVec3; 3]> {
                 c.indices

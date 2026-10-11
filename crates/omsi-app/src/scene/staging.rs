@@ -297,6 +297,21 @@ pub(super) fn lightmap_is_white(name: &str, dirs: &[&Path]) -> Option<bool> {
 }
 
 impl ObjectType {
+    /// Only the importer's collision-only wrappers use hidden meshes as wheel surfaces.
+    /// Native OMSI collision definitions retain their existing ground/visibility rules.
+    pub(super) fn imported_collider(&self) -> Option<&MeshData> {
+        if !self.meshes.is_empty() || self.sco.no_collision || self.sco.only_editor {
+            return None;
+        }
+        let path = &self.sco.path;
+        let generated = path.parent().and_then(Path::file_name)
+            == Some(std::ffi::OsStr::new("proton-import"))
+            && path.file_name().and_then(|s| s.to_str()).is_some_and(|s| {
+                s.starts_with("tile_") && s.ends_with("_collision.sco")
+            });
+        if generated { self.collision.as_ref() } else { None }
+    }
+
     /// The folders the object's textures are looked for in. Omsi.exe loads the model of a
     /// `.sco` with the `.sco`'s own folder as the base of `texture\`, also when `[model]`
     /// takes the model file from another folder: a retexture (a copy of the `.sco` with its

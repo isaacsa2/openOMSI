@@ -29,7 +29,17 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 - Diffuse UV scale, offset and rotation, specular colour/strength, basic self
   illumination and shininess approximated as a Phong exponent. Material definitions
   may follow their objects. UTF-8 names and legacy Windows-1252 names are accepted.
-- PNG cutouts and explicit 3DS material opacity; custom Proton shaders are not reproduced.
+- `_transparent_` mesh names select alpha blending; `_cutout_` selects alpha testing.
+  Materials with different name tags remain distinct even when they share one texture.
+  Untagged PNGs retain the cutout fallback, and explicit 3DS material opacity is blended.
+  Other custom Proton shaders are not reproduced.
+- `_gencol_` + `_invisible_` meshes become separate collision-only objects: they support
+  wheels and vehicle collision without render meshes, textures or shadows. Untagged
+  scenery retains the initial importer's wheel-surface behaviour.
+- `_low_speed_zone_`, `_force_exit_`, `_spawn_blocker_` and non-colliding `_invisible_`
+  helpers are omitted and reported. `_utree###_` boxes are omitted with a warning:
+  they request built-in Proton trees, which are not included with openOMSI.
+  Name tags are case-sensitive, following the [loader documentation](https://www.busmods.com/ciano/help/map-models.html).
 - Explicit entry points from the base folder or selected model folder. Names and
   coordinates are preserved; the importer does not invent route numbers or duties.
   An entry point without a nearby supporting face is moved to the closest reasonably
@@ -51,7 +61,7 @@ timetables, destination graphics and Proton buses are **not imported**. This is 
 scenery import, not full Proton Bus compatibility. Animated models, prefabs, tile
 streaming rules and texture `.config.txt` shader settings are not reproduced.
 
-The map's static visible mesh supplies the wheel surface. Collision and appearance
+The map's static visible mesh and explicit invisible colliders supply the wheel surface. Collision and appearance
 need checking in game: foliage, roofs, glass and author-specific material settings
 may need further adaptation. A missing texture is reported and its material is
 kept untextured; it does not prevent the entire map from loading.

@@ -7,6 +7,7 @@ mod materials;
 mod optimise;
 mod spawn;
 mod spool;
+mod tags;
 pub mod three_ds;
 
 use anyhow::{ensure, Context, Result};
@@ -285,6 +286,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut registry = materials::Registry::default();
     let mut output_bytes = 0;
     let mut report = Report::default();
+    let mut helpers = 0;
+    let mut embedded_trees = 0;
     for f in files(&models, "3ds")? {
         ensure!(!cancel(), "map import cancelled");
         let mut scene = three_ds::Scene::open(&f, &cancel)
@@ -315,7 +318,18 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
                     report.markers_skipped += 1;
                     return Ok(());
                 }
-                let faces = materials::faces(&object, &names, default)?;
+                let mode = match tags::classify(&object.name) {
+                    tags::ObjectKind::Mesh(mode) => mode,
+                    tags::ObjectKind::Helper => {
+                        helpers += 1;
+                        return Ok(());
+                    }
+                    tags::ObjectKind::EmbeddedTree => {
+                        embedded_trees += 1;
+                        return Ok(());
+                    }
+                };
+                let faces = registry.object_faces(&object, &names, default, mode)?;
                 convert::append_object(
                     &object,
                     &faces,
@@ -337,7 +351,13 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         report.warnings.push(format!("{backdrops} oversized flat backdrop faces were clipped to occupied scenery tiles; distant empty background was not imported."));
     }
     spool.finish_writes()?;
-    let mut materials = registry.into_materials();
+    if helpers > 0 {
+        report.warnings.push(format!("{helpers} invisible gameplay/helper meshes were omitted; their simulation is not imported."));
+    }
+    if embedded_trees > 0 {
+        report.warnings.push(format!("{embedded_trees} embedded tree placeholders were omitted; built-in Proton trees are not included."));
+    }
+    let (mut materials, modes) = registry.into_materials();
     for (i, m) in materials.iter_mut().enumerate() {
         if !spool.used.contains(&(i as u16)) {
             *m = Material::default();
@@ -353,10 +373,11 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let keys: Vec<_> = spool.tiles.keys().copied().collect();
     for (i, &key) in keys.iter().enumerate() {
         ensure!(!cancel(), "map import cancelled");
-        let (mesh, removed) = spool.mesh(key, &materials, &cancel)?;
-        report.vertices_removed += removed;
-        spool.probe.nearest(key, &mesh);
-        export::tile(dir, installed_rel, key, &mesh, i)?;
+        let tile = spool.mesh(key, &materials, &modes, &cancel)?;
+        report.vertices_removed += tile.removed;
+        spool.probe.nearest(key, &tile.visible);
+        spool.probe.nearest(key, &tile.collision);
+        export::tile(dir, installed_rel, key, &tile, i)?;
         spool.discard_tile(key)?;
     }
     spool.probe.finish(&mut spawns, &mut report.warnings)?;
@@ -375,3 +396,6 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
 mod stream_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tag_tests;

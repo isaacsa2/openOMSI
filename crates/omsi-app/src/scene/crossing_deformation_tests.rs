@@ -383,3 +383,65 @@ harbour.dds
             "an ordinary model of the same size keeps the far view at heading {heading}");
     }
 }
+
+#[test]
+fn imported_collision_only_objects_support_wheels_without_render_instances() {
+    for kind in ["generated", "native", "nocollision", "onlyeditor"] {
+        let fixture = Fixture::new();
+        std::fs::create_dir_all(fixture.0.join("proton-import/model")).unwrap();
+        fixture.write(
+            "global.cfg",
+            "[name]\nHidden collider\n[map]\n0\n0\ntile_0_0.map\n",
+        );
+        let object = if kind == "native" {
+            "native.sco"
+        } else {
+            "proton-import/tile_0_0_collision.sco"
+        };
+        let extra = match kind {
+            "nocollision" => "[nocollision]\n",
+            "onlyeditor" => "[onlyeditor]\n",
+            _ => "",
+        };
+        // A road at 2 m and an upright wall at its far end, entirely hidden.
+        fixture.write(
+            "proton-import/model/hidden.x",
+            &strip(&[(0.0, 2.0), (10.0, 2.0), (10.0, 5.0)]),
+        );
+        let model = if kind == "native" {
+            "proton-import/model/hidden.x"
+        } else {
+            "hidden.x"
+        };
+        fixture.write(
+            object,
+            &format!("[absheight]\n[fixed]\n[collision_mesh]\n{model}\n{extra}"),
+        );
+        fixture.write(
+            "tile_0_0.map",
+            &format!("[version]\n14\n[object]\n0\n{object}\n1\n100\n100\n0\n0\n0\n0\n0\n"),
+        );
+        let world = World::open(&fixture.0, &fixture.0.join("global.cfg"), 20261001).unwrap();
+        let ty = world.object_type(object).unwrap();
+        assert!(ty.meshes.is_empty());
+        assert_eq!(ty.collision.is_some(), kind != "nocollision");
+        assert_eq!(ty.imported_collider().is_some(), kind == "generated");
+        let (prepared, _) = world.prepare_tiles(&[(0, 0, fixture.0.join("tile_0_0.map"))]);
+        assert_eq!(prepared.len(), 1);
+        assert!(
+            prepared[0].objects.is_empty(),
+            "hidden collider must not reach the renderer"
+        );
+        let ground = drive_probe(&world.terrains, &world.surfaces, 100.0, 105.0, 3.0);
+        let expected = if kind == "generated" { 2.0 } else { 0.0 };
+        assert!(
+            (ground.below.unwrap() - expected).abs() < 1e-5,
+            "{kind}: {ground:?}"
+        );
+        let state = world.tile_state.lock();
+        assert_eq!(
+            !state[&(0, 0)].mesh_obstacles.is_empty(),
+            kind == "generated"
+        );
+    }
+}

@@ -1,26 +1,29 @@
 //! Share identical source material/mapping pairs while preserving per-file names.
 use crate::{
     optimise::material_key,
+    tags::Mode,
     three_ds::{Object, Scene, UvTransform},
 };
 use anyhow::{ensure, Result};
 use omsi_o3d::Material;
 use std::collections::BTreeMap;
 
-type Key = (([u32; 11], String), [u32; 5]);
+type Key = (([u32; 11], String), [u32; 5], Mode);
 #[derive(Default)]
 pub(crate) struct Registry {
     pub materials: Vec<Material>,
     pub mappings: Vec<UvTransform>,
+    pub modes: Vec<Mode>,
     seen: BTreeMap<Key, u16>,
 }
 
 impl Registry {
-    pub fn into_materials(self) -> Vec<Material> {
-        self.materials
+    pub fn into_materials(self) -> (Vec<Material>, Vec<Mode>) {
+        // Drop the source-name and UV lookups before assembling the dense output tiles.
+        (self.materials, self.modes)
     }
-    fn add(&mut self, material: Material, uv: UvTransform) -> Result<u16> {
-        let key = (material_key(&material), uv.key());
+    fn add(&mut self, material: Material, uv: UvTransform, mode: Mode) -> Result<u16> {
+        let key = (material_key(&material), uv.key(), mode);
         if let Some(&i) = self.seen.get(&key) {
             return Ok(i);
         }
@@ -31,16 +34,46 @@ impl Registry {
         let i = self.materials.len() as u16;
         self.materials.push(material);
         self.mappings.push(uv);
+        self.modes.push(mode);
         self.seen.insert(key, i);
         Ok(i)
+    }
+    pub fn object_faces(
+        &mut self,
+        object: &Object,
+        names: &BTreeMap<String, u16>,
+        default: u16,
+        mode: Mode,
+    ) -> Result<Vec<u16>> {
+        let mut faces = faces(object, names, default)?;
+        if mode != Mode::Auto {
+            let mut variants = BTreeMap::new();
+            for face in &mut faces {
+                if let Some(&variant) = variants.get(face) {
+                    *face = variant;
+                    continue;
+                }
+                let source = *face as usize;
+                // Invisible colliders have no texture or shading to resolve/upload.
+                let material = if mode == Mode::Collision {
+                    Material::default()
+                } else {
+                    self.materials[source].clone()
+                };
+                let variant = self.add(material, self.mappings[source], mode)?;
+                variants.insert(*face, variant);
+                *face = variant;
+            }
+        }
+        Ok(faces)
     }
     pub fn register(&mut self, scene: &Scene) -> Result<(BTreeMap<String, u16>, u16)> {
         let mut names = BTreeMap::new();
         for (i, (name, material)) in scene.materials.iter().enumerate() {
-            let index = self.add(material.clone(), scene.mappings[i])?;
+            let index = self.add(material.clone(), scene.mappings[i], Mode::Auto)?;
             names.entry(name.clone()).or_insert(index);
         }
-        let default = self.add(Material::default(), UvTransform::default())?;
+        let default = self.add(Material::default(), UvTransform::default(), Mode::Auto)?;
         Ok((names, default))
     }
 }

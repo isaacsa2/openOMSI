@@ -3,9 +3,9 @@ use crate::convert::Tiles;
 use glam::{Vec2, Vec3};
 use omsi_o3d::{Mesh, Triangle, Vertex};
 
-struct Fixture(PathBuf);
+pub(super) struct Fixture(pub(super) PathBuf);
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let p = std::env::temp_dir().join(format!("omsi-proton-{}-{n}", std::process::id()));
@@ -30,7 +30,7 @@ pub(super) fn model() -> Vec<u8> {
     named_model("road")
 }
 
-fn named_model(name: &str) -> Vec<u8> {
+pub(super) fn named_model(name: &str) -> Vec<u8> {
     let mut positions = 3u16.to_le_bytes().to_vec();
     for p in [
         [299.0f32, 10.0, 7.0],
@@ -64,7 +64,7 @@ fn named_model(name: &str) -> Vec<u8> {
     chunk(0x4d4d, &chunk(0x3d3d, &chunk(0x4000, &object)))
 }
 
-fn setup(f: &Fixture) {
+pub(super) fn setup(f: &Fixture) {
     std::fs::create_dir_all(f.0.join("Town/tiles/0x0")).unwrap();
     std::fs::create_dir_all(f.0.join("Town/textures")).unwrap();
     std::fs::write(
@@ -381,21 +381,33 @@ fn supplied_map_fixture_when_available() {
     let mut materials = 0;
     for t in &global.tiles {
         let tile = omsi_map::Tile::load(&dir.join(&t.file)).unwrap();
-        assert_eq!(tile.objects.len(), 1);
-        let mesh =
-            omsi_o3d::load_mesh(&dir.join(format!("proton-import/model/tile_{}_{}.o3d", t.x, t.y)))
-                .unwrap();
-        assert!(!mesh.triangles.is_empty());
-        vertices += mesh.vertices.len();
-        materials += mesh.materials.len();
-        assert!(mesh
-            .vertices
-            .iter()
-            .all(|v| v.position.is_finite() && v.normal.is_finite()));
-        assert!(mesh
-            .triangles
-            .iter()
-            .all(|t| (t.material as usize) < mesh.materials.len()));
+        assert!(!tile.objects.is_empty());
+        for object in tile.objects {
+            let file = Path::new(&object.file).file_name().unwrap();
+            let sco =
+                omsi_scenery::SceneryObject::load(&dir.join("proton-import").join(file)).unwrap();
+            let models = sco
+                .model
+                .meshes
+                .iter()
+                .map(|m| m.file.as_str())
+                .chain(sco.collision_mesh.as_deref());
+            for model in models {
+                let mesh =
+                    omsi_o3d::load_mesh(&dir.join("proton-import/model").join(model)).unwrap();
+                assert!(!mesh.triangles.is_empty());
+                vertices += mesh.vertices.len();
+                materials += mesh.materials.len();
+                assert!(mesh
+                    .vertices
+                    .iter()
+                    .all(|v| v.position.is_finite() && v.normal.is_finite()));
+                assert!(mesh
+                    .triangles
+                    .iter()
+                    .all(|t| (t.material as usize) < mesh.materials.len()));
+            }
+        }
     }
     eprintln!(
         "Imported {} tiles, {} triangles, {} skipped markers, {} GPS helpers, {} duplicate vertices removed; {vertices} vertices and {materials} material slots exported; warnings: {:?}",

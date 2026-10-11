@@ -3,6 +3,7 @@ use crate::{
     convert::{Faces, TILE_LIMIT},
     optimise::Builder,
     spawn::Probe,
+    tags::Mode,
     Spawn,
 };
 use anyhow::{ensure, Result};
@@ -16,6 +17,13 @@ use std::{
 
 const RECORD: usize = 3 * 32 + 2;
 const OPEN_FILES: usize = 32;
+
+pub(crate) struct TileMeshes {
+    pub visible: Mesh,
+    pub modes: Vec<Mode>,
+    pub collision: Mesh,
+    pub removed: usize,
+}
 
 pub(crate) struct Spool {
     dir: PathBuf,
@@ -72,8 +80,9 @@ impl Spool {
         &self,
         key: (i32, i32),
         materials: &[Material],
+        modes: &[Mode],
         cancel: &impl Fn() -> bool,
-    ) -> Result<(Mesh, usize)> {
+    ) -> Result<TileMeshes> {
         let count = self.tiles[&key];
         let mut reader = BufReader::with_capacity(64 * 1024, std::fs::File::open(self.path(key))?);
         ensure!(
@@ -81,6 +90,7 @@ impl Spool {
             "damaged temporary tile"
         );
         let mut builder = Builder::default();
+        let mut collision = Builder::default();
         builder.mesh.triangles.try_reserve_exact(count)?;
         let mut bytes = [0; RECORD];
         for i in 0..count {
@@ -103,11 +113,23 @@ impl Spool {
             let material = materials
                 .get(index)
                 .ok_or_else(|| anyhow::anyhow!("damaged temporary material index"))?;
-            builder.face(face, index as u16, material);
+            let mode = *modes
+                .get(index)
+                .ok_or_else(|| anyhow::anyhow!("damaged temporary material mode"))?;
+            if mode == Mode::Collision {
+                collision.face_with_mode(face, index as u16, material, mode);
+            } else {
+                builder.face_with_mode(face, index as u16, material, mode);
+            }
         }
-        let removed = count * 3 - builder.mesh.vertices.len();
+        let removed = count * 3 - builder.mesh.vertices.len() - collision.mesh.vertices.len();
         // Drop the lookups before writing this tile or assembling the next one.
-        Ok((builder.mesh, removed))
+        Ok(TileMeshes {
+            visible: builder.mesh,
+            modes: builder.modes,
+            collision: collision.mesh,
+            removed,
+        })
     }
     pub fn discard_tile(&self, key: (i32, i32)) -> Result<()> {
         std::fs::remove_file(self.path(key))?;

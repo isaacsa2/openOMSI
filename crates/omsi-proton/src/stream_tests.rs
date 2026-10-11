@@ -1,5 +1,6 @@
 use crate::{
     convert::Faces,
+    tags::Mode,
     tests::{chunk, model},
     three_ds,
 };
@@ -86,7 +87,10 @@ fn oversized_flat_background_uses_occupied_tiles_and_keeps_materials() {
         },
     ];
     for key in [(-1, -1), (0, 0)] {
-        let (mesh, _) = spool.mesh(key, &materials, &|| false).unwrap();
+        let tile = spool
+            .mesh(key, &materials, &[Mode::Auto; 2], &|| false)
+            .unwrap();
+        let mesh = tile.visible;
         assert!(mesh.triangles.len() > 1);
         assert!(mesh.materials.iter().any(|m| m.texture == "ground.png"));
         assert!(mesh.vertices.iter().all(
@@ -276,19 +280,20 @@ fn spooled_tiles_survive_writer_eviction_share_vertices_and_clean_up_on_failure(
     }
     spool.face((0, 0), face, 0).unwrap();
     spool.finish_writes().unwrap();
-    let (mesh, removed) = spool
-        .mesh((0, 0), &[Material::default()], &|| false)
+    let tile = spool
+        .mesh((0, 0), &[Material::default()], &[Mode::Auto], &|| false)
         .unwrap();
+    let mesh = tile.visible;
     assert_eq!(mesh.vertices.len(), 3);
     assert_eq!(mesh.triangles.len(), 2);
     assert_eq!(mesh.triangles[0].indices, mesh.triangles[1].indices);
-    assert_eq!(removed, 3);
+    assert_eq!(tile.removed, 3);
     assert!(spool
-        .mesh((0, 0), &[Material::default()], &|| true)
+        .mesh((0, 0), &[Material::default()], &[Mode::Auto], &|| true)
         .is_err());
     std::fs::write(work.join("0_0.faces"), [0]).unwrap();
     assert!(spool
-        .mesh((0, 0), &[Material::default()], &|| false)
+        .mesh((0, 0), &[Material::default()], &[Mode::Auto], &|| false)
         .is_err());
     drop(spool);
     assert!(!work.exists());

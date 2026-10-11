@@ -1,17 +1,18 @@
 //! Export one consolidated tile at a time, then publish the map manifest last.
 use crate::{
     convert::{self, EDGE},
+    spool::TileMeshes,
+    tags::Mode,
     text, Spawn,
 };
 use anyhow::{Context, Result};
-use omsi_o3d::Mesh;
 use std::path::Path;
 
 pub(crate) fn tile(
     dir: &Path,
     installed_rel: &str,
     key: (i32, i32),
-    mesh: &Mesh,
+    tile: &TileMeshes,
     i: usize,
 ) -> Result<()> {
     let (tx, ty) = key;
@@ -19,13 +20,17 @@ pub(crate) fn tile(
     let models = objects.join("model");
     std::fs::create_dir_all(&models)?;
     let stem = format!("tile_{tx}_{ty}");
+    let mesh = &tile.visible;
     let materials = &mesh.materials;
+    // Keep the standard per-tile file even when empty: the streaming estimator can
+    // recognise collision-only tiles without mistaking their CPU colliders for GPU data.
     convert::write_mesh(&models.join(format!("{stem}.o3d")), mesh, materials)?;
     // The engine probes a terrain even on tiles with only scenery. Keep that fallback
     // below the mesh: a zero-height fallback would cover Goianira's negative-height roads.
     let floor = mesh
         .vertices
         .iter()
+        .chain(&tile.collision.vertices)
         .map(|v| v.position.z)
         .fold(f32::INFINITY, f32::min)
         - 50.0;
@@ -34,26 +39,55 @@ pub(crate) fn tile(
         terrain.extend_from_slice(&floor.to_le_bytes());
     }
     std::fs::write(dir.join(format!("{stem}.map.terrain")), terrain)?;
-    let mut sco = format!("[absheight]\n[fixed]\n[surface]\n[mesh]\n{stem}.o3d\n");
-    // Preparation has already removed unreferenced material slots.
-    for (index, m) in materials.iter().enumerate() {
-        // Basic PNG cutouts keep foliage and fences; explicit material opacity is blended.
-        if m.diffuse[3] < 1.0 || m.texture.to_lowercase().ends_with(".png") {
-            // The occurrence index names repeated textures, not the material slot.
-            let occurrence = materials[..index]
-                .iter()
-                .filter(|other| other.texture.eq_ignore_ascii_case(&m.texture))
-                .count();
-            sco.push_str(&format!(
-                "[matl]\n{}\n{occurrence}\n[matl_alpha]\n{}\n",
-                m.texture,
-                if m.diffuse[3] < 1.0 { 2 } else { 1 }
-            ));
-        }
+    let mut map = "[version]\n14\n".to_owned();
+    if !mesh.triangles.is_empty() {
+        let mut sco = format!("[absheight]\n[fixed]\n[surface]\n[mesh]\n{stem}.o3d\n");
+        material_overrides(&mut sco, materials, &tile.modes);
+        std::fs::write(objects.join(format!("{stem}.sco")), sco)?;
+        map.push_str(&object(installed_rel, &stem, i * 2 + 1));
     }
-    std::fs::write(objects.join(format!("{stem}.sco")), sco)?;
-    text(&dir.join(format!("{stem}.map")), &format!("[version]\n14\n[object]\n0\n{installed_rel}/proton-import/{stem}.sco\n{}\n0\n0\n0\n0\n0\n0\n0\n", i + 1))?;
+    if !tile.collision.triangles.is_empty() {
+        let collision = format!("{stem}_collision");
+        convert::write_mesh(
+            &models.join(format!("{collision}.o3d")),
+            &tile.collision,
+            &tile.collision.materials,
+        )?;
+        // No [mesh]: this geometry must never be rendered or cast shadows. The scene
+        // loader recognises this generated wrapper as both wheel support and a collider.
+        std::fs::write(
+            objects.join(format!("{collision}.sco")),
+            format!("[absheight]\n[fixed]\n[collision_mesh]\n{collision}.o3d\n"),
+        )?;
+        map.push_str(&object(installed_rel, &collision, i * 2 + 2));
+    }
+    text(&dir.join(format!("{stem}.map")), &map)?;
     Ok(())
+}
+
+fn object(installed_rel: &str, stem: &str, id: usize) -> String {
+    format!("[object]\n0\n{installed_rel}/proton-import/{stem}.sco\n{id}\n0\n0\n0\n0\n0\n0\n0\n")
+}
+
+fn material_overrides(sco: &mut String, materials: &[omsi_o3d::Material], modes: &[Mode]) {
+    for (index, (m, mode)) in materials.iter().zip(modes).enumerate() {
+        let alpha = match mode {
+            Mode::Blend => 2,
+            Mode::Cutout => 1,
+            _ if m.diffuse[3] < 1.0 => 2,
+            _ if m.texture.to_lowercase().ends_with(".png") => 1,
+            _ => continue,
+        };
+        // The occurrence index names repeated textures, not the material slot.
+        let occurrence = materials[..index]
+            .iter()
+            .filter(|other| other.texture.eq_ignore_ascii_case(&m.texture))
+            .count();
+        sco.push_str(&format!(
+            "[matl]\n{}\n{occurrence}\n[matl_alpha]\n{alpha}\n",
+            m.texture
+        ));
+    }
 }
 
 pub(crate) fn global(

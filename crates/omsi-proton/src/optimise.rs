@@ -1,6 +1,7 @@
 //! Compact generated tiles without changing positions, UV seams, normals or material data.
 #[cfg(test)]
 use crate::convert::Tiles;
+use crate::tags::Mode;
 #[cfg(test)]
 use anyhow::{ensure, Result};
 use omsi_o3d::{Material, Mesh, Vertex};
@@ -74,14 +75,26 @@ pub(crate) fn material_key(m: &Material) -> ([u32; 11], String) {
 #[derive(Default)]
 pub(crate) struct Builder {
     pub mesh: Mesh,
+    pub modes: Vec<Mode>,
     vertices: HashMap<[u32; 8], u32>,
-    materials: BTreeMap<([u32; 11], String), u16>,
+    materials: BTreeMap<(([u32; 11], String), Mode), u16>,
     sources: HashMap<u16, u16>,
 }
 
 impl Builder {
+    #[cfg(test)]
     pub fn face(&mut self, face: [Vertex; 3], source: u16, material: &Material) {
-        self.face_with_limit(face, source, material, 1_000_000);
+        self.face_with_mode(face, source, material, Mode::Auto);
+    }
+
+    pub fn face_with_mode(
+        &mut self,
+        face: [Vertex; 3],
+        source: u16,
+        material: &Material,
+        mode: Mode,
+    ) {
+        self.face_with_limit(face, source, material, mode, 1_000_000);
     }
 
     fn face_with_limit(
@@ -89,6 +102,7 @@ impl Builder {
         face: [Vertex; 3],
         source: u16,
         material: &Material,
+        mode: Mode,
         limit: usize,
     ) {
         // A full lookup used to stop accepting new vertices forever. Dense tiles then
@@ -101,9 +115,10 @@ impl Builder {
         let slot = *self.sources.entry(source).or_insert_with(|| {
             *self
                 .materials
-                .entry(material_key(material))
+                .entry((material_key(material), mode))
                 .or_insert_with(|| {
                     self.mesh.materials.push(material.clone());
+                    self.modes.push(mode);
                     next
                 })
         });
@@ -141,7 +156,7 @@ mod builder_tests {
         let mut builder = Builder::default();
         let m = Material::default();
         for x in [0.0, 1.0, 2.0, 2.0, 2.0] {
-            builder.face_with_limit(face(x), 0, &m, 6);
+            builder.face_with_limit(face(x), 0, &m, Mode::Auto, 6);
         }
         assert_eq!(builder.mesh.vertices.len(), 9);
         assert_eq!(builder.mesh.triangles.len(), 5);

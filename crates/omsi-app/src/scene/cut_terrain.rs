@@ -254,6 +254,13 @@ impl World {
                         }
                     }
                 }
+                // Imported invisible road colliders support wheels without a render mesh.
+                if let Some(mesh) = ot.imported_collider() {
+                    if !outside(&mesh_bounds(mesh, &pose.rot, pose.pos)) {
+                        ts.add_drive_mesh(mesh, &pose.rot, pose.pos, tx, ty);
+                        wheel_meshes += 1;
+                    }
+                }
                 // An explicit cutter is independent of the object's render meshes.
                 if ot.meshes.is_empty() {
                     continue;
