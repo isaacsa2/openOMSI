@@ -49,6 +49,10 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 - Identical vertices are shared within each tile, keeping distinct UV seams and
   normals. Each tile exports only the materials it uses; identical material slots
   are shared and textures referenced only by discarded helpers are not copied.
+- Material colours, opacity, specular and self-illumination stored in the 3DS are
+  ignored, as in Proton's model loader: exporter defaults must not tint textures
+  or add a broad white reflection. Texture alpha and supported mesh-name tags
+  determine transparency. Reimport the original ZIP to update existing conversions.
 - Authored GPS strips are kept as a lightweight navigation overlay, selected by
   the entry-point name (`_gps_` plus `_<name>_`). They appear on both the small
   navigator and city map, without visible scenery, collision or source materials.

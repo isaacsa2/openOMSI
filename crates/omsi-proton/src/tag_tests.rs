@@ -92,6 +92,55 @@ fn shared_texture_keeps_blend_cutout_and_untagged_material_slots_distinct() {
 }
 
 #[test]
+fn exporter_colours_and_white_specular_do_not_wash_out_imported_textures() {
+    let f = Fixture::new();
+    setup(&f);
+    let bytes = combined(&["road", "glass_transparent_"], "wall.png");
+    let material_len = u32::from_le_bytes(bytes[14..18].try_into().unwrap()) as usize;
+    let mut material = bytes[18..12 + material_len].to_vec();
+    for (tag, rgb) in [(0xa010, [204; 3]), (0xa020, [204; 3]), (0xa030, [255; 3])] {
+        material.extend(chunk(tag, &chunk(0x0011, &rgb)));
+    }
+    material.extend(chunk(0xa080, &[]));
+    material.extend(chunk(0xa050, &chunk(0x0030, &50u16.to_le_bytes())));
+    let mut edit = chunk(0xafff, &material);
+    edit.extend_from_slice(&bytes[12 + material_len..]);
+    let bytes = chunk(0x4d4d, &chunk(0x3d3d, &edit));
+    let parsed = crate::three_ds::parse(&bytes).unwrap();
+    assert_eq!(parsed.materials[0].1.specular, [1.0; 3]);
+    assert_eq!(parsed.materials[0].1.emissive, [0.8; 3]);
+    std::fs::write(f.0.join("Town/tiles/0x0/road.3ds"), bytes).unwrap();
+    std::fs::write(f.0.join("Town/textures/wall.png"), [0]).unwrap();
+    import(&f.0, "maps/Proton-Town", || false).unwrap();
+    let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
+    for tile in global.tiles {
+        let stem = format!("tile_{}_{}", tile.x, tile.y);
+        let mesh =
+            omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{stem}.o3d"))).unwrap();
+        assert_eq!(mesh.materials.len(), 2, "alpha modes must remain distinct");
+        for material in mesh.materials {
+            assert_eq!(
+                material,
+                omsi_o3d::Material {
+                    texture: "wall.png".into(),
+                    ..Default::default()
+                }
+            );
+        }
+        let sco = omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.sco")))
+            .unwrap();
+        assert_eq!(
+            sco.model.meshes[0]
+                .materials
+                .iter()
+                .map(|m| m.alpha)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+}
+
+#[test]
 fn invisible_collider_is_not_rendered_and_retains_clipped_wheel_support() {
     for with_visible in [false, true] {
         let f = Fixture::new();

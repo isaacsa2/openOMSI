@@ -223,7 +223,11 @@ fn blender_records_forward_materials_uv_mapping_and_utf8_names_are_recognised() 
             .iter()
             .all(|v| (*v - Vec2::new(-1.4, 0.3)).length() < 1e-6));
         assert_eq!(mesh.materials.len(), 1);
-        assert_eq!(mesh.materials[0].specular_power, 64.0);
+        // Parsing preserves the source records; Proton's rendered material uses
+        // the texture alone, without the exporter's tint, reflection or emission.
+        assert_eq!(mesh.materials[0].diffuse, [1.0; 4]);
+        assert_eq!(mesh.materials[0].specular, [0.0; 3]);
+        assert_eq!(mesh.materials[0].emissive, [0.0; 3]);
         assert_eq!(mesh.materials[0].texture, "árvore.png");
     }
     assert!(!temp.0.join("proton-import/work").exists());

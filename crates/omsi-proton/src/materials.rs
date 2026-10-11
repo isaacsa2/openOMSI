@@ -70,7 +70,14 @@ impl Registry {
     pub fn register(&mut self, scene: &Scene) -> Result<(BTreeMap<String, u16>, u16)> {
         let mut names = BTreeMap::new();
         for (i, (name, material)) in scene.materials.iter().enumerate() {
-            let index = self.add(material.clone(), scene.mappings[i], Mode::Auto)?;
+            // Proton takes only the diffuse texture from a 3DS material. Exporter
+            // defaults (often white specular with power 1) are not authored lighting:
+            // carrying them into O3D washes whole faces out under the sun and sky.
+            let material = Material {
+                texture: material.texture.clone(),
+                ..Default::default()
+            };
+            let index = self.add(material, scene.mappings[i], Mode::Auto)?;
             names.entry(name.clone()).or_insert(index);
         }
         let default = self.add(Material::default(), UvTransform::default(), Mode::Auto)?;
