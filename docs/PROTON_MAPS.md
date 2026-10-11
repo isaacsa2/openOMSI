@@ -55,6 +55,12 @@ The basic standalone layout requires the base folder to have the same name as it
 `.map.txt` file. Unsupported map phases, unsafe paths, damaged 3DS records and maps
 without an explicit entry point produce an import error.
 
+Generated geometry has a **2 GiB** budget for vertex and triangle data across all
+tiles and source files, including faces produced by clipping. This replaces the
+earlier vertex-count limits. It is not a limit on the ZIP size or total process RAM:
+source meshes, vector capacity, textures and other conversion data use extra memory.
+The separate limits of 128 MiB per source 3DS file and 4096 output tiles still apply.
+
 ## Local format checks
 
 Synthetic tests run with `cargo test -p omsi-proton`. Real maps must stay outside the

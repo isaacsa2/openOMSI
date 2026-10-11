@@ -10,6 +10,19 @@ use std::path::Path;
 
 pub const EDGE: f32 = 300.0;
 pub type Tiles = BTreeMap<(i32, i32), Mesh>;
+const GEOMETRY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const FACE_BYTES: u64 =
+    (3 * std::mem::size_of::<Vertex>() + std::mem::size_of::<Triangle>()) as u64;
+
+fn reserve_face(output_bytes: &mut u64) -> Result<()> {
+    let next = output_bytes.checked_add(FACE_BYTES);
+    ensure!(
+        next.is_some_and(|n| n <= GEOMETRY_LIMIT_BYTES),
+        "generated map geometry exceeds the 2 GiB import limit"
+    );
+    *output_bytes = next.unwrap();
+    Ok(())
+}
 
 fn interpolate(a: Vertex, b: Vertex, t: f32) -> Vertex {
     Vertex {
@@ -49,7 +62,7 @@ fn add_triangle(
     tiles: &mut Tiles,
     vertices: [Vertex; 3],
     material: u16,
-    output_vertices: &mut usize,
+    output_bytes: &mut u64,
 ) -> Result<()> {
     let lo = vertices
         .iter()
@@ -85,16 +98,10 @@ fn add_triangle(
                 {
                     continue;
                 }
+                // Charge every clipped face across all source files before adding it.
+                // The 2 GiB total also keeps every tile's vertex indices within u32.
+                reserve_face(output_bytes)?;
                 let mesh = tiles.entry((tx, ty)).or_default();
-                *output_vertices += 3;
-                ensure!(
-                    *output_vertices <= 12_000_000,
-                    "map exceeds the basic importer geometry limit"
-                );
-                ensure!(
-                    mesh.vertices.len() < 6_000_000,
-                    "too much geometry in one tile"
-                );
                 let start = mesh.vertices.len() as u32;
                 for v in &mut face {
                     v.position -= Vec3::new(tx as f32 * EDGE, ty as f32 * EDGE, 0.0);
@@ -157,7 +164,13 @@ pub fn append(
     materials.extend(model.materials.iter().map(|(_, m)| m.clone()));
     materials.push(Material::default());
     let mut skipped = 0;
-    let mut output_vertices = tiles.values().map(|m| m.vertices.len()).sum();
+    let mut output_bytes = tiles
+        .values()
+        .map(|m| {
+            m.vertices.len() as u64 * std::mem::size_of::<Vertex>() as u64
+                + m.triangles.len() as u64 * std::mem::size_of::<Triangle>() as u64
+        })
+        .sum();
     for o in model.objects {
         ensure!(!cancel(), "map import cancelled");
         if marker(&o.name, prefixes) {
@@ -197,7 +210,7 @@ pub fn append(
                     uv: o.uv.get(j).copied().unwrap_or(Vec2::ZERO),
                 }
             });
-            add_triangle(tiles, v, face_mats[i], &mut output_vertices)?;
+            add_triangle(tiles, v, face_mats[i], &mut output_bytes)?;
         }
     }
     Ok(skipped)
@@ -255,4 +268,25 @@ pub fn write_mesh(path: &Path, mesh: &Mesh, materials: &[Material]) -> Result<()
     }
     w.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn geometry_budget_rejects_the_next_face_without_changing_the_total() {
+        // Exercise the 2 GiB boundary without allocating a multi-gigabyte fixture.
+        let mut bytes = GEOMETRY_LIMIT_BYTES - FACE_BYTES;
+        reserve_face(&mut bytes).unwrap();
+        assert_eq!(bytes, GEOMETRY_LIMIT_BYTES);
+        assert!(reserve_face(&mut bytes)
+            .unwrap_err()
+            .to_string()
+            .contains("2 GiB"));
+        assert_eq!(bytes, GEOMETRY_LIMIT_BYTES);
+        bytes = u64::MAX;
+        assert!(reserve_face(&mut bytes).is_err());
+        assert_eq!(bytes, u64::MAX);
+    }
 }
