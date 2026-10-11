@@ -8,6 +8,7 @@ use omsi_o3d::Material;
 pub struct Model {
     pub materials: Vec<(String, Material)>,
     pub objects: Vec<Object>,
+    pub trailing_bytes: usize,
 }
 
 #[derive(Default)]
@@ -191,9 +192,22 @@ fn geometry(b: &[u8], o: &mut Object) -> Result<()> {
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Model> {
-    let top = chunks(bytes)?;
-    ensure!(top.len() == 1 && top[0].tag == 0x4d4d, "not a 3DS file");
-    let mut m = Model::default();
+    ensure!(
+        bytes.len() >= 6 && bytes[..2] == [0x4d, 0x4d],
+        "not a 3DS file"
+    );
+    let end = u32::from_le_bytes(bytes[2..6].try_into()?) as usize;
+    ensure!(
+        end >= 6 && end <= bytes.len(),
+        "invalid 3DS root chunk length {end}"
+    );
+    // Some files carry extra data after their declared root (Osasco's PFLORA10).
+    // Only the declared root belongs to this model; nested chunks remain strictly bounded.
+    let top = chunks(&bytes[..end])?;
+    let mut m = Model {
+        trailing_bytes: bytes.len() - end,
+        ..Default::default()
+    };
     for root in chunks(top[0].data)? {
         if root.tag != 0x3d3d {
             continue;

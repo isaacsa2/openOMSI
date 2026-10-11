@@ -125,6 +125,30 @@ fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
 }
 
 #[test]
+fn trailing_data_after_the_root_is_reported_but_bad_nested_chunks_are_rejected() {
+    let f = Fixture::new();
+    setup(&f);
+    let mut bytes = model();
+    // Not a valid chunk: this must never be read as part of the declared model.
+    bytes.extend_from_slice(&[1, 77, 62, 0, 0, 104, 63, 181]);
+    let parsed = three_ds::parse(&bytes).unwrap();
+    assert_eq!(parsed.trailing_bytes, 8);
+    assert_eq!(
+        parsed.objects[0].positions,
+        three_ds::parse(&model()).unwrap().objects[0].positions
+    );
+    std::fs::write(f.0.join("Town/tiles/0x0/road.3ds"), bytes).unwrap();
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    assert_eq!(report.tiles, 2);
+    assert_eq!(
+        report.warnings,
+        ["road.3ds: ignored 8 trailing bytes outside the declared 3DS root chunk"]
+    );
+    let nested = chunk(0x4d4d, &[0x3d, 0x3d, 200, 0, 0, 0]);
+    assert!(three_ds::parse(&nested).is_err());
+}
+
+#[test]
 fn rejects_damaged_meshes_and_unsafe_or_unsupported_map_configs() {
     for bad in [
         vec![],

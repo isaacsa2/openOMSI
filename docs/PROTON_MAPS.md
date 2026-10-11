@@ -61,6 +61,9 @@ earlier vertex-count limits. It is not a limit on the ZIP size or total process 
 source meshes, vector capacity, textures and other conversion data use extra memory.
 The separate limits of 128 MiB per source 3DS file and 4096 output tiles still apply.
 
+Bytes after a 3DS file's declared main chunk are ignored and reported in the import
+warnings. Invalid or truncated chunks inside that main chunk still stop conversion.
+
 ## Local format checks
 
 Synthetic tests run with `cargo test -p omsi-proton`. Real maps must stay outside the

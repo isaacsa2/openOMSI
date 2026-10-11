@@ -343,6 +343,13 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         );
         let model = three_ds::parse(&std::fs::read(&f)?)
             .with_context(|| format!("reading {}", f.display()))?;
+        if model.trailing_bytes != 0 {
+            report.warnings.push(format!(
+                "{}: ignored {} trailing bytes outside the declared 3DS root chunk",
+                f.file_name().unwrap_or_default().to_string_lossy(),
+                model.trailing_bytes
+            ));
+        }
         report.markers_skipped +=
             convert::append(model, &mut tiles, &mut materials, &markers, &cancel)?;
     }
