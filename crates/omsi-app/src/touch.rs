@@ -497,10 +497,14 @@ impl App {
         let t = &self.input.touch;
         let role = if let Some(k) = t.button_at(p) {
             Role::Button(k, t.buttons[k].btn)
-        } else if let Some(&(row, track, _)) = self.shell.touch_sliders.iter().find(|&&(_, track, clip)| {
+        } else if self.shell_takes_mouse() && self.shell.touch_sliders.iter().any(|&(_, track, clip)| {
             let at = p / self.shell.scale;
             clip.contains(at) && track.pad(-8.0, 0.0).contains(at)
         }) {
+            let at = p / self.shell.scale;
+            let &(row, track, _) = self.shell.touch_sliders.iter().find(|&&(_, track, clip)| {
+                clip.contains(at) && track.pad(-8.0, 0.0).contains(at)
+            }).expect("a visible slider was just found");
             Role::MenuSlider(row, track)
         } else if self.menus.game_menu.is_some() || self.menus.chooser.is_some() {
             Role::Menu
