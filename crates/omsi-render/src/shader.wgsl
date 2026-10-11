@@ -197,12 +197,15 @@ fn weather_outside_n(world: vec3<f32>, n: vec3<f32>, terrain: bool, surface: f32
     return select(0.0, 1.0, skin_x || skin_y || skin_z);
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
-// Whether this pipeline draws alpha-tested materials (the only ones that may `discard`).
-// Pipelines of every other kind set it false, and the discard is compiled out: a fragment
+// Whether this pipeline draws alpha-tested materials.
+// Opaque pipelines set the discard overrides false: a fragment
 // function that can discard turns the GPU's early depth test off - on Apple's GPUs the
 // hidden surface removal as well - for everything it draws, and the heavy shading then
 // ran for every covered layer of the city, not once per pixel.
 override ALPHA_TEST: bool = true;
+// Fully invisible pixels of Z-writing blends must leave depth untouched, so later
+// textured layers remain visible through holes. Compiled out of all other pipelines.
+override BLEND_DEPTH: bool = false;
 // Multisampled cutout pipelines can turn filtered alpha directly into sample coverage.
 override ALPHA_TO_COVERAGE: bool = false;
 @group(0) @binding(5) var t_shadow: texture_depth_2d;
@@ -1876,7 +1879,9 @@ fn rain_env_vanilla(d: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: FsIn) -> @location(0) vec4<f32> {
     var unused = 0.0;
-    return shade_vanilla(in, &unused, camera.cam_pos.xyz);
+    let c = shade_vanilla(in, &unused, camera.cam_pos.xyz);
+    if (BLEND_DEPTH && c.a == 0.0) { discard; }
+    return c;
 }
 
 // Shared with Enhanced and the wheel splash mask: pools spread as the road soaks.
@@ -1896,6 +1901,7 @@ fn road_puddle_coverage(world: vec3<f32>, normal: vec3<f32>, wet: f32) -> f32 {
 fn fs_vanilla_reflections(in: FsIn) -> EnhancedOut {
     var weight = 0.0;
     let c = shade_vanilla(in, &weight, camera.cam_pos.xyz);
+    if (BLEND_DEPTH && c.a == 0.0) { discard; }
     let coverage = select(c.a, 0.0, in.params2.w > 1.5);
     var out: EnhancedOut;
     out.color = c;
