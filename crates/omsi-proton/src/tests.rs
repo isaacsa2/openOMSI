@@ -26,6 +26,10 @@ fn chunk(tag: u16, data: &[u8]) -> Vec<u8> {
 }
 
 fn model() -> Vec<u8> {
+    named_model("road")
+}
+
+fn named_model(name: &str) -> Vec<u8> {
     let mut positions = 3u16.to_le_bytes().to_vec();
     for p in [
         [299.0f32, 10.0, 7.0],
@@ -53,7 +57,8 @@ fn model() -> Vec<u8> {
             .flat_map(f32::to_le_bytes)
             .collect::<Vec<_>>(),
     ));
-    let mut object = b"road\0".to_vec();
+    let mut object = name.as_bytes().to_vec();
+    object.push(0);
     object.extend(chunk(0x4100, &geo));
     chunk(0x4d4d, &chunk(0x3d3d, &chunk(0x4000, &object)))
 }
@@ -122,6 +127,122 @@ fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
         (area - 2.0).abs() < 1e-6,
         "clipping must neither lose nor duplicate road area"
     );
+}
+
+#[test]
+fn inline_base_directory_works() {
+    let f = Fixture::new();
+    setup(&f);
+    std::fs::rename(f.0.join("Town/tiles"), f.0.join("tiles")).unwrap();
+    std::fs::rename(f.0.join("Town/textures"), f.0.join("textures")).unwrap();
+    std::fs::write(
+        f.0.join("Town.map.txt"),
+        "[map]\nbaseDir=.\nmodelsDir=./0x0/\ntextures=./textures/\nmapModVersion=4\n",
+    )
+    .unwrap();
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    assert_eq!(report.tiles, 2);
+    assert!(f.0.join("proton-import/model/tile_0_0.o3d").is_file());
+}
+
+#[test]
+fn gps_files_and_embedded_helpers_are_omitted_and_relative_paths_work() {
+    let f = Fixture::new();
+    setup(&f);
+    let road = named_model("road");
+    let gps = named_model("_162_gps_");
+    let mut objects = road[12..].to_vec();
+    objects.extend_from_slice(&gps[12..]);
+    std::fs::write(
+        f.0.join("Town/tiles/0x0/road.3ds"),
+        chunk(0x4d4d, &chunk(0x3d3d, &objects)),
+    )
+    .unwrap();
+    std::fs::write(f.0.join("Town/tiles/0x0/GPS.3ds"), model()).unwrap();
+    std::fs::write(
+        f.0.join("Town.map.txt"),
+        "[map]\nbaseDir=./Town/\nmodelsDir=./0x0/\ntextures=./textures/\nmapModVersion=3\n",
+    )
+    .unwrap();
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    assert_eq!(report.gps_skipped, 2);
+    assert_eq!(report.tiles, 2);
+    assert!(report.vertices_removed > 0);
+    assert!(!optimise::gps_name("gpsmall"));
+    assert!(
+        f.0.join("Town/tiles/0x0/GPS.3ds").exists(),
+        "source assets stay intact"
+    );
+    assert!(child(&f.0, "./Town/../outside").is_err());
+}
+
+#[test]
+fn tile_compaction_keeps_uv_seams_normals_and_material_properties() {
+    let mut tiles = Tiles::new();
+    let v = |x, y| Vertex {
+        position: Vec3::new(x, y, 7.0),
+        normal: Vec3::Z,
+        uv: Vec2::new(x, y),
+    };
+    let mut seam = v(1.0, 0.0);
+    seam.uv = Vec2::new(0.25, 0.75);
+    let mut sharp = v(0.0, 0.0);
+    sharp.normal = -Vec3::Z;
+    tiles.insert(
+        (0, 0),
+        Mesh {
+            vertices: vec![
+                v(0.0, 0.0),
+                v(1.0, 0.0),
+                v(0.0, 1.0),
+                v(0.0, 0.0),
+                seam,
+                v(0.0, 1.0),
+                sharp,
+            ],
+            triangles: vec![
+                Triangle {
+                    indices: [0, 1, 2],
+                    material: 0,
+                },
+                Triangle {
+                    indices: [3, 4, 5],
+                    material: 1,
+                },
+                Triangle {
+                    indices: [6, 2, 1],
+                    material: 0,
+                },
+            ],
+            ..Default::default()
+        },
+    );
+    let m = Material {
+        texture: "leaf.png".into(),
+        diffuse: [0.5, 0.6, 0.7, 0.4],
+        ..Default::default()
+    };
+    let mut materials = vec![
+        m.clone(),
+        m.clone(),
+        Material {
+            texture: "unused.png".into(),
+            ..Default::default()
+        },
+    ];
+    optimise::used_materials(&mut tiles, &mut materials);
+    assert_eq!(materials.len(), 2);
+    assert_eq!(
+        optimise::prepare(&mut tiles, &materials, &|| false).unwrap(),
+        2
+    );
+    let mesh = &tiles[&(0, 0)];
+    assert_eq!(mesh.vertices.len(), 5);
+    assert_eq!(mesh.materials, [m]);
+    assert!(mesh.triangles.iter().all(|t| t.material == 0));
+    assert_ne!(mesh.triangles[0].indices[1], mesh.triangles[1].indices[1]);
+    assert_eq!(mesh.vertices[mesh.triangles[1].indices[1] as usize], seam);
+    assert_eq!(mesh.vertices[mesh.triangles[2].indices[0] as usize], sharp);
 }
 
 #[test]
@@ -244,6 +365,8 @@ fn supplied_map_fixture_when_available() {
     let report = import(&dir, &format!("maps/Proton-{name}"), || false).unwrap();
     let global = omsi_map::GlobalCfg::load(&dir.join("global.cfg")).unwrap();
     assert!(!global.entry_points.is_empty());
+    let mut vertices = 0;
+    let mut materials = 0;
     for t in &global.tiles {
         let tile = omsi_map::Tile::load(&dir.join(&t.file)).unwrap();
         assert_eq!(tile.objects.len(), 1);
@@ -251,6 +374,8 @@ fn supplied_map_fixture_when_available() {
             omsi_o3d::load_mesh(&dir.join(format!("proton-import/model/tile_{}_{}.o3d", t.x, t.y)))
                 .unwrap();
         assert!(!mesh.triangles.is_empty());
+        vertices += mesh.vertices.len();
+        materials += mesh.materials.len();
         assert!(mesh
             .vertices
             .iter()
@@ -261,7 +386,7 @@ fn supplied_map_fixture_when_available() {
             .all(|t| (t.material as usize) < mesh.materials.len()));
     }
     eprintln!(
-        "Imported {} tiles, {} triangles, {} skipped markers; warnings: {:?}",
-        report.tiles, report.triangles, report.markers_skipped, report.warnings
+        "Imported {} tiles, {} triangles, {} skipped markers, {} GPS helpers, {} duplicate vertices removed; {vertices} vertices and {materials} material slots exported; warnings: {:?}",
+        report.tiles, report.triangles, report.markers_skipped, report.gps_skipped, report.vertices_removed, report.warnings
     );
 }

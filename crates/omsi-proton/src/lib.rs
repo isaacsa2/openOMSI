@@ -2,6 +2,7 @@
 //! installer's staging area; the renderer continues to read ordinary OMSI scenery.
 //! Only free driving is supported. Source mods are never embedded in the program.
 mod convert;
+mod optimise;
 mod spawn;
 pub mod three_ds;
 
@@ -18,6 +19,8 @@ pub struct Report {
     pub tiles: usize,
     pub triangles: usize,
     pub markers_skipped: usize,
+    pub gps_skipped: usize,
+    pub vertices_removed: usize,
     pub warnings: Vec<String>,
 }
 
@@ -58,10 +61,10 @@ fn child(base: &Path, rel: &str) -> Result<PathBuf> {
     );
     let mut out = base.to_path_buf();
     for part in rel.split('/') {
-        ensure!(
-            !part.is_empty() && part != "." && part != "..",
-            "unsafe Proton path {rel:?}"
-        );
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        ensure!(part != "..", "unsafe Proton path {rel:?}");
         let exact = out.join(part);
         if exact.exists() {
             out = exact;
@@ -196,10 +199,15 @@ fn textures(
             .to_owned();
         let from = child(source, &name)?;
         if from.is_file() {
-            if !dest.join(&name).is_file() {
-                std::fs::copy(&from, dest.join(&name))?;
+            let actual = from
+                .file_name()
+                .context("texture has no filename")?
+                .to_string_lossy()
+                .into_owned();
+            if !dest.join(&actual).is_file() {
+                std::fs::copy(&from, dest.join(&actual))?;
             }
-            m.texture = name;
+            m.texture = actual;
         } else {
             warnings.push(format!("Missing texture: {name}"));
             m.texture.clear();
@@ -212,7 +220,6 @@ fn export(
     dir: &Path,
     installed_rel: &str,
     tiles: &Tiles,
-    materials: &[Material],
     spawns: &[Spawn],
     cancel: &impl Fn() -> bool,
 ) -> Result<()> {
@@ -223,6 +230,7 @@ fn export(
     for (i, (&(tx, ty), mesh)) in tiles.iter().enumerate() {
         ensure!(!cancel(), "map import cancelled");
         let stem = format!("tile_{tx}_{ty}");
+        let materials = &mesh.materials;
         convert::write_mesh(&models.join(format!("{stem}.o3d")), mesh, materials)?;
         // The engine probes a terrain even on tiles with only scenery. Keep that fallback
         // below the mesh: a zero-height fallback would cover Goianira's negative-height roads.
@@ -238,10 +246,8 @@ fn export(
         }
         std::fs::write(dir.join(format!("{stem}.map.terrain")), terrain)?;
         let mut sco = format!("[absheight]\n[fixed]\n[surface]\n[mesh]\n{stem}.o3d\n");
+        // Preparation has already removed unreferenced material slots.
         for (index, m) in materials.iter().enumerate() {
-            if !mesh.triangles.iter().any(|t| t.material as usize == index) {
-                continue;
-            }
             // Basic PNG cutouts keep foliage and fences; explicit material opacity is blended.
             if m.diffuse[3] < 1.0 || m.texture.to_lowercase().ends_with(".png") {
                 // The occurrence index names repeated textures, not the material slot.
@@ -341,7 +347,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
             std::fs::metadata(&f)?.len() <= 128 << 20,
             "3DS file exceeds import limit"
         );
-        let model = three_ds::parse(&std::fs::read(&f)?)
+        let mut model = three_ds::parse(&std::fs::read(&f)?)
             .with_context(|| format!("reading {}", f.display()))?;
         if model.trailing_bytes != 0 {
             report.warnings.push(format!(
@@ -350,6 +356,14 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
                 model.trailing_bytes
             ));
         }
+        let all_gps = f
+            .file_stem()
+            .is_some_and(|s| optimise::gps_name(&s.to_string_lossy()));
+        let before = model.objects.len();
+        model
+            .objects
+            .retain(|o| !all_gps && !optimise::gps_name(&o.name));
+        report.gps_skipped += before - model.objects.len();
         report.markers_skipped +=
             convert::append(model, &mut tiles, &mut materials, &markers, &cancel)?;
     }
@@ -358,6 +372,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         "Proton map has no renderable 3DS geometry"
     );
     spawn::validate(&tiles, &mut spawns, &mut report.warnings)?;
+    optimise::used_materials(&mut tiles, &mut materials);
     textures(
         &texture_dir,
         &dir.join("proton-import/texture"),
@@ -365,7 +380,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         &mut report.warnings,
         &cancel,
     )?;
-    export(dir, installed_rel, &tiles, &materials, &spawns, &cancel)?;
+    report.vertices_removed = optimise::prepare(&mut tiles, &materials, &cancel)?;
+    export(dir, installed_rel, &tiles, &spawns, &cancel)?;
     report.tiles = tiles.len();
     report.triangles = tiles.values().map(|m| m.triangles.len()).sum();
     report.warnings.sort();

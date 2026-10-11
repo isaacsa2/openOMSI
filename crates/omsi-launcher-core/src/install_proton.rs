@@ -25,22 +25,38 @@ pub(super) fn plan_at(
             continue;
         }
         let stem = &file[..file.len() - ".map.txt".len()];
-        let Some((base_name, base)) = node
+        let named = node
             .dirs
             .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(stem))
-        else {
-            continue;
-        };
+            .find(|(name, _)| name.eq_ignore_ascii_case(stem));
+        let candidates: Vec<_> = node
+            .dirs
+            .iter()
+            .filter(|(_, d)| d.dirs.keys().any(|n| n.eq_ignore_ascii_case("tiles")))
+            .collect();
+        let base = named.or_else(|| (candidates.len() == 1).then(|| candidates[0]));
+        let inline = node
+            .files
+            .iter()
+            .filter(|(n, _)| n.to_ascii_lowercase().ends_with(".map.txt"))
+            .count()
+            == 1
+            && node.dirs.keys().any(|n| n.eq_ignore_ascii_case("tiles"));
         if stem.is_empty() || stem.contains(['\r', '\n']) {
             continue;
         }
-        let (mut files, mut bytes) = collect(base, &join(path, base_name), entries);
-        for (_, rel) in &mut files {
-            *rel = join(base_name, rel);
-        }
-        files.push((*index, file.clone()));
-        bytes += entries[*index].size;
+        let (files, bytes) = if let Some((base_name, base)) = base {
+            let (mut files, bytes) = collect(base, &join(path, base_name), entries);
+            for (_, rel) in &mut files {
+                *rel = join(base_name, rel);
+            }
+            files.push((*index, file.clone()));
+            (files, bytes + entries[*index].size)
+        } else if inline {
+            collect(node, path, entries)
+        } else {
+            continue;
+        };
         used.extend(files.iter().map(|f| f.0));
         plan.maps.push(Mapping {
             src: path.to_string(),
@@ -59,7 +75,7 @@ pub(super) fn plan_at(
 }
 
 pub(super) fn extra_space(plan: &Plan) -> u64 {
-    // Clipped faces have independent O3D vertices and textures are copied into the scenery
+    // Reserve for clipped faces before compaction and textures copied into the scenery
     // directory. Reserve a conservative expansion, including a hard-linked folder source.
     plan.maps
         .iter()
@@ -94,8 +110,8 @@ pub(super) fn convert(staging: &Path, plan: &Plan, job: &Job) -> Result<()> {
         check_space(staging)?;
         job.set(|p| {
             p.report.push(format!(
-                "{}: imported {} tiles and {} triangles; {} simulation markers left out",
-                m.dest, report.tiles, report.triangles, report.markers_skipped
+                "{}: imported {} tiles and {} triangles; {} simulation markers and {} GPS helpers left out; {} duplicate vertices removed",
+                m.dest, report.tiles, report.triangles, report.markers_skipped, report.gps_skipped, report.vertices_removed
             ));
             p.warnings.extend(report.warnings);
         });
@@ -146,6 +162,54 @@ mod tests {
             .any(|(_, p)| p == "A/tiles/x/map.3ds"));
         assert!(check_mode(&plan, InstallMode::InPlace).is_err());
         assert!(check_mode(&plan, InstallMode::Extract).is_ok());
+    }
+
+    #[test]
+    fn unique_base_folder_and_inline_maps_are_detected_without_guessing_ambiguous_layouts() {
+        for paths in [
+            vec!["Pack/Display.map.txt", "Pack/Actual/tiles/x/road.3ds"],
+            vec!["Pack/Display.map.txt", "Pack/tiles/x/road.3ds"],
+        ] {
+            let entries: Vec<_> = paths
+                .iter()
+                .enumerate()
+                .map(|(index, rel)| Entry {
+                    rel: rel.to_string(),
+                    size: 1,
+                    index,
+                })
+                .collect();
+            let mut tree = Node::default();
+            for (i, e) in entries.iter().enumerate() {
+                tree.insert(&e.rel, i);
+            }
+            let mut plan = Plan::default();
+            let mut used = HashSet::new();
+            assert!(plan_at(
+                tree.get("Pack").unwrap(),
+                "Pack",
+                &entries,
+                &mut plan,
+                &mut used
+            ));
+            assert_eq!(plan.maps[0].dest, "maps/Proton-Display");
+            assert_eq!(used.len(), entries.len());
+            assert!(plan.maps[0]
+                .files
+                .iter()
+                .any(|(_, rel)| rel == "Display.map.txt"));
+        }
+        let mut node = Node::default();
+        node.insert("Display.map.txt", 0);
+        node.insert("A/tiles/x/road.3ds", 1);
+        node.insert("B/tiles/x/road.3ds", 2);
+        assert!(!plan_at(
+            &node,
+            "",
+            &[],
+            &mut Plan::default(),
+            &mut HashSet::new()
+        ));
     }
 
     #[test]
