@@ -58,6 +58,8 @@ Textures/sounds/skins and attribution keep their original formats and bytes.
 
 - Rigid templates `4x2`, `6x2`, `6x4`: mass, collision box, centre of gravity,
   authored wheel locations/radii, spring/damper rates, steering angle, driven axles.
+  Body inertia is approximated from a uniform collision box about the authored centre
+  of mass, so rigid dynamics do not inherit the native near-zero default.
 - Native automatic drive with authored forward/reverse ratios, differential ratio,
   bounded engine torque/RPM, shift hysteresis, brake and parking-brake force. This is an
   approximation, not a port of the source torque converter, tyre model or engine dynamics.

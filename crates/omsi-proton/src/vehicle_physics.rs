@@ -176,7 +176,25 @@ impl Physics {
         let rear = self.axles.last().unwrap().left[1];
         let inv = self.max_steer.to_radians().tan() / (self.axles[0].left[1] - rear);
         let mass = info.mass_kg / 1000.;
+        // Uniform-box approximation in tonne m², about the authored centre of mass.
+        // OMSI orders these as pitch, yaw, roll (its original y-up frame).
+        // Omitting this leaves the native rigid body with a near-zero inertia.
+        let offset = std::array::from_fn::<_, 3, _>(|i| center[i] - cog[i]);
+        let inertia = |a: usize, b: usize| {
+            mass * ((size[a] * size[a] + size[b] * size[b]) / 12.
+                + offset[a] * offset[a]
+                + offset[b] * offset[b])
+        };
+        let mut moi = [inertia(1, 2), inertia(0, 1), inertia(0, 2)];
+        // The native reader treats a pitch inertia >= 5000 as kg m².
+        if moi[0] >= 5000. {
+            moi.iter_mut().for_each(|v| *v *= 1000.);
+        }
         let mut s=format!("[friendlyname]\nProton Bus\n{}\nDefault\n[ai_veh_type]\n2\n[mass]\n{mass}\n[cog]\n{}\n{}\n{}\n[schwerpunkt]\n{}\n[boundingbox]\n{}\n{}\n{}\n{}\n{}\n{}\n[rollwiderstand]\n{}\n[rot_pnt_long]\n{rear}\n[inv_min_turnradius]\n{inv}\n[model]\nModel/model.cfgoi\n[paths]\nModel/paths.cfgoi\n[passengercabin]\nModel/cabin.cfgoi\n[varnamelist]\n1\nScript/variables.cfgoi\n[stringvarnamelist]\n1\nScript/strings.cfgoi\n[script]\n1\nScript/main.cfgoi\n",info.name,cog[0],cog[1],cog[2],cog[2],size[0],size[1],size[2],center[0],center[1],center[2],info.mass_kg*0.009*9.81);
+        s.push_str(&format!(
+            "[momentofintertia]\n{}\n{}\n{}\n",
+            moi[0], moi[1], moi[2]
+        ));
         s.push_str(&format!(
             "[set_camera_outside_center]\n{}\n{}\n{}\n",
             center[0], center[1], center[2]

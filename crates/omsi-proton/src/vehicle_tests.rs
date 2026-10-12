@@ -122,6 +122,8 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
     );
     let def = omsi_vehicle::Vehicle::load(&base.join("vehicle.busoi")).unwrap();
     assert_eq!(def.mass, 12.);
+    // Box inertia plus the offset to the authored centre of mass, in tonne m².
+    assert_eq!(def.moment_of_inertia, [156., 150.25, 18.25]);
     assert!(matches!(def.kind, omsi_vehicle::vehicle::VehicleKind::Bus));
     assert_eq!(def.axles.len(), 2);
     assert!(!def.axles[0].driven && def.axles[1].driven);
@@ -217,21 +219,30 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
     v.trigger("automatic_D");
     assert_eq!(v.var("oi_selector"), Some(-1.));
     // The in-game player uses rigid wheel/ground contacts, not only simple dynamics.
-    let mut rigid = native(&out);
-    rigid.ground = Some(Arc::new(|_, _| Some(0.)));
-    rigid.enable_rigid_body();
-    rigid.trigger("kw_m_enginestart");
-    rigid.trigger("parking_brake_release");
-    rigid.trigger("automatic_D");
-    rigid.set_controls(omsi_sim::Controls {
-        throttle: 0.5,
-        ..Default::default()
-    });
-    for _ in 0..200 {
-        rigid.update(0.02);
+    for fps in [30, 50, 60, 144] {
+        let mut rigid = native(&out);
+        rigid.ground = Some(Arc::new(|_, _| Some(0.)));
+        rigid.enable_rigid_body();
+        rigid.trigger("kw_m_enginestart");
+        rigid.trigger("parking_brake_release");
+        rigid.trigger("automatic_D");
+        rigid.set_controls(omsi_sim::Controls {
+            throttle: 0.5,
+            ..Default::default()
+        });
+        for _ in 0..fps * 4 {
+            rigid.update(1. / fps as f32);
+        }
+        assert!(rigid.position.is_finite() && rigid.physics.speed.is_finite());
+        assert!(
+            rigid.physics.speed > 0.5,
+            "{fps} fps: speed {}, position {:?}, rpm {:?}, gear {:?}",
+            rigid.physics.speed,
+            rigid.position,
+            rigid.var("engine_n"),
+            rigid.var("oi_gear")
+        );
     }
-    assert!(rigid.position.is_finite() && rigid.physics.speed.is_finite());
-    assert!(rigid.physics.speed > 0.5);
 }
 #[test]
 fn failed_or_cancelled_vehicle_conversion_discards_stage() {
