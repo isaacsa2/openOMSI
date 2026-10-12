@@ -162,6 +162,11 @@ impl PeopleSim {
         let mut ids: Vec<i64> = self.stops.keys().copied().collect();
         ids.sort_unstable();
         let forced = omsi_cfg::flags::OMSI_PAX_WAITING.parse::<usize>();
+        // An imported free-drive map has stops but no native trips. An empty
+        // Schedule must not suppress its authored demand; real schedules still win.
+        let scheduled = self.stop_targets.as_ref().is_some_and(|targets| {
+            !world.unscheduled_passengers() || !targets.is_empty()
+        });
         // the people handed over to another player's bus stop counting once it has left
         // their stop (or the session)
         if !self.handed.is_empty() {
@@ -234,7 +239,7 @@ impl PeopleSim {
                 // (0x61bf94: with a timetable, times the share of the trips due there - at a
                 // stop no trip leaves from, nobody)
                 let none_due = self.due_dests.as_ref().is_some_and(|d| d.get(&id).is_none_or(|set| set.is_empty()));
-                let served = if self.stop_targets.is_some() && (s.lines.is_empty() || none_due) { 0.0 } else { 1.0 };
+                let served = if scheduled && (s.lines.is_empty() || none_due) { 0.0 } else { 1.0 };
                 let w = (self.density.max(0.0) * mean * s.factor * served).round().max(0.0) as usize;
                 forced.unwrap_or(w).min(s.spots.len())
             };

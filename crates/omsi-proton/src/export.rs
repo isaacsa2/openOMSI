@@ -108,6 +108,7 @@ pub(crate) fn global(
     spawns: &[Spawn],
 ) -> Result<()> {
     let mut global = format!("[name]\n{}\n[friendlyname]\n{} (Proton Bus)\n[version]\n14\n[description]\nProton Bus import: free driving, authored traffic/pedestrian paths, bus stops and signal cycles. Native installed vehicles and humans required. Timetables and Proton vehicle mods are not imported.\n[end]\n[years]\n1980\n2100\n", installed_rel.rsplit('/').next().unwrap_or(installed_rel), installed_rel.trim_start_matches("maps/Proton-"));
+    global.push_str("[openomsi_unscheduled_passengers]\n1\n");
     for &(tx, ty) in keys {
         global.push_str(&format!("[map]\n{tx}\n{ty}\ntile_{tx}_{ty}.map\n"));
     }

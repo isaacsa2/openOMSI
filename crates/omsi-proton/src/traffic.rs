@@ -106,8 +106,8 @@ pub(crate) fn export(
             let model = child(&folder, model)?;
             if !model.is_file() {
                 report.warnings.push(format!(
-                    "{}: missing AI model; definition omitted",
-                    file.display()
+                    "{}: missing AI model {}; definition omitted",
+                    file.display(), model.display()
                 ));
                 continue;
             }

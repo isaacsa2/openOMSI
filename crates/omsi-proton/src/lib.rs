@@ -131,11 +131,21 @@ fn child(base: &Path, rel: &str) -> Result<PathBuf> {
         if exact.exists() {
             out = exact;
         } else {
-            out = std::fs::read_dir(&out)?
-                .filter_map(|e| e.ok())
-                .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(part))
-                .map(|e| e.path())
-                .unwrap_or(exact);
+            if let Ok(m) = std::fs::metadata(&out) {
+                ensure!(m.is_dir(), "Proton path parent is not a directory: {}", out.display());
+            }
+            out = match std::fs::read_dir(&out) {
+                Ok(entries) => entries
+                    .filter_map(|e| e.ok())
+                    .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(part))
+                    .map(|e| e.path())
+                    .unwrap_or(exact),
+                // Missing optional nested assets are checked by the caller. Keep
+                // validating every remaining component instead of returning early.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => exact,
+                Err(e) => return Err(e).with_context(||
+                    format!("resolving Proton path {rel:?} inside {}", out.display())),
+            };
         }
         if let Ok(m) = std::fs::symlink_metadata(&out) {
             ensure!(!m.file_type().is_symlink(), "symbolic link in Proton map");
@@ -310,6 +320,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         &child(&base, "tiles")?,
         map.get("modelsdir").context("missing modelsDir")?,
     )?;
+    ensure!(models.is_dir(), "missing Proton model folder: {}", models.display());
     let texture_dir = child(
         &base,
         map.get("textures")
@@ -317,7 +328,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
             .unwrap_or("textures"),
     )?;
     let mut report = Report::default();
-    let mut spawns = spawns(&base, &models, &mut report.warnings)?;
+    let mut spawns = spawns(&base, &models, &mut report.warnings).context("reading map entry points")?;
     let markers = prefixes(&models)?;
     let mut spool = spool::Spool::new(&dir.join("proton-import/work"), &spawns)?;
     let mut registry = materials::Registry::default();
@@ -327,7 +338,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let smooth = settings::value(&config, "ai_traffic", "usesplines") == Some("1");
     let mut stops = stops::Collector::new(&models)?;
     let mut signals = signals::Collector::new(&models, &mut report)?;
-    let mut lamps = streetlights::Collector::new(&models, &texture_dir, &dir.join("proton-import/texture"), &mut report)?;
+    let mut lamps = streetlights::Collector::new(&models, &texture_dir, &dir.join("proton-import/texture"), &mut report).context("reading streetlights")?;
     let mut helpers = 0;
     let mut embedded_trees = 0;
     let mut inputs: Vec<_> = files(&models, "3ds")?.into_iter().map(|model| prefabs::Placement { model, transform: glam::Mat4::IDENTITY }).collect();
@@ -444,7 +455,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         spool.probe.nearest(key, &tile.visible);
         spool.probe.nearest(key, &tile.collision);
         let lights = lamps.tiles.remove(&key).unwrap_or_default();
-        export::tile(dir, installed_rel, key, &tile, &lights, i)?;
+        export::tile(dir, installed_rel, key, &tile, &lights, i)
+            .with_context(|| format!("writing map tile {},{}", key.0, key.1))?;
         spool.discard_tile(key)?;
     }
     spool.probe.finish(&mut spawns, &mut report.warnings)?;
@@ -460,15 +472,15 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut gameplay = gameplay::Paths::new(&paths)?;
     drop(paths);
     let stops = stops.finish(&mut gameplay, &mut report)?;
-    depot::export(dir, &base, installed_rel, &spawns, &stops, &mut report)?;
-    gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel)?;
+    depot::export(dir, &base, installed_rel, &spawns, &stops, &mut report).context("exporting map HOF")?;
+    gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel).context("exporting map paths, stops and signals")?;
     let file = std::fs::File::create(dir.join("proton-import/navigation.json"))?;
     let mut writer = std::io::BufWriter::new(file);
     serde_json::to_writer(&mut writer, &navigation)?;
     std::io::Write::flush(&mut writer)?;
     export::global(dir, installed_rel, &keys, &spawns)?;
-    traffic::export(dir, &base, &texture_dir, installed_rel, &config, &mut report, &mut output_bytes, &cancel)?;
-    package::seal(dir, installed_rel, &cancel)?;
+    traffic::export(dir, &base, &texture_dir, installed_rel, &config, &mut report, &mut output_bytes, &cancel).context("exporting map AI vehicles")?;
+    package::seal(dir, installed_rel, &cancel).context("sealing converted map files")?;
     report.tiles = keys.len();
     report.triangles = spool.tiles.values().sum();
     report.warnings.sort();

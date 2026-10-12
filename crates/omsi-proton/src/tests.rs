@@ -3,6 +3,42 @@ use crate::convert::Tiles;
 use glam::{Vec2, Vec3};
 use omsi_o3d::{Mesh, Triangle, Vertex};
 
+#[test]
+fn missing_nested_optional_paths_still_reject_unsafe_components() {
+    let f = Fixture::new();
+    assert_eq!(
+        child(&f.0, "absent/nested/model.3ds").unwrap(),
+        f.0.join("absent/nested/model.3ds")
+    );
+    assert!(child(&f.0, "absent/../escape.3ds").is_err());
+    std::fs::write(f.0.join("file"), b"file").unwrap();
+    assert!(child(&f.0, "file/nested/model.3ds").is_err());
+}
+
+#[test]
+fn a_missing_nested_ai_asset_does_not_abort_or_publish_an_incomplete_map() {
+    let f = Fixture::new();
+    setup(&f);
+    let ai = f.0.join("Town/aicars_v1");
+    std::fs::create_dir(&ai).unwrap();
+    std::fs::write(
+        ai.join("Taxi.txt"),
+        "[model]\nmodel1=[BG3D]MissingTaxi/Taxi.3ds\n",
+    )
+    .unwrap();
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    assert!(report.tiles > 0);
+    assert!(report
+        .warnings
+        .iter()
+        .any(|w| w.contains("missing AI model") && w.contains("MissingTaxi")));
+    let map = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    assert!(map.unscheduled_passengers);
+    let traffic = crate::traffic::Manifest::load(&f.0).unwrap();
+    assert!(traffic.native_cars && traffic.native_buses);
+    assert!(traffic.vehicles.is_empty());
+}
+
 pub(super) struct Fixture(pub(super) PathBuf);
 impl Fixture {
     pub(super) fn new() -> Self {
@@ -146,7 +182,8 @@ fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
     let mut area = 0.0;
     for t in global.tiles {
         let tile = omsi_map::Tile::load(&f.0.join(&t.file)).unwrap();
-        let terrain = omsi_map::Terrain::load(&f.0.join(&t.file).with_extension("terrainoi")).unwrap();
+        let terrain =
+            omsi_map::Terrain::load(&f.0.join(&t.file).with_extension("terrainoi")).unwrap();
         assert!(terrain.heights.iter().all(|&h| h < 7.0));
         assert_eq!(tile.objects.len(), 1);
         assert_eq!(tile.objects[0].pos, [0.0; 3]);
@@ -439,7 +476,11 @@ fn supplied_map_fixture_when_available() {
     assert_eq!(hof.termini.len(), report.destinations_imported);
     assert!(!hof.termini.is_empty());
     assert!(hof.info_trips.is_empty());
-    eprintln!("{} HOF destinations; {} named bus stops", hof.termini.len(), hof.bus_stops.len());
+    eprintln!(
+        "{} HOF destinations; {} named bus stops",
+        hof.termini.len(),
+        hof.bus_stops.len()
+    );
     let mut vertices = 0;
     let mut materials = 0;
     for t in &global.tiles {
@@ -480,11 +521,23 @@ fn supplied_map_fixture_when_available() {
 
 #[test]
 fn empty_entry_heading_defaults_to_zero_but_empty_coordinates_are_rejected() {
-    let f = Fixture::new(); setup(&f);
-    std::fs::write(f.0.join("Town/tiles/0x0/entrypoints.txt"), "[entrypoint_1]\nname=Start\nposX=299.5\nposY=7\nposZ=10.5\nrotY=\n").unwrap();
+    let f = Fixture::new();
+    setup(&f);
+    std::fs::write(
+        f.0.join("Town/tiles/0x0/entrypoints.txt"),
+        "[entrypoint_1]\nname=Start\nposX=299.5\nposY=7\nposZ=10.5\nrotY=\n",
+    )
+    .unwrap();
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
     assert_eq!(global.entry_points[0].quat, [0., 0., 0., 1.]);
     assert!(report.warnings.iter().any(|s| s.contains("empty rotation")));
-    assert!(crate::spawn::number(Some(&String::new()), "posx", "entrypoint_1", &f.0, &mut vec![]).is_err());
+    assert!(crate::spawn::number(
+        Some(&String::new()),
+        "posx",
+        "entrypoint_1",
+        &f.0,
+        &mut vec![]
+    )
+    .is_err());
 }

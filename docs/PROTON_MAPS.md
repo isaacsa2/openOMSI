@@ -136,7 +136,9 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   or add a broad white reflection. Texture alpha and supported mesh-name tags
   determine transparency. Reimport the original ZIP to update existing conversions.
 - Authored GPS strips are kept as a lightweight navigation overlay, selected by
-  the entry-point name (`_gps_` plus `_<name>_`). They appear on both the small
+  the entry-point name (`_gps_` plus `_<name>_`) until a bus destination is selected.
+  The HOF/IBIS destination then selects the matching authored route; an unknown or
+  out-of-service selection clears the old overlay. They appear on both the small
   navigator and city map, without visible scenery, collision or source materials.
   GPS-only files are also recognised; unmatched strips are omitted and reported.
   Matching tolerates case and separators (spaces/underscores/hyphens) and chooses the
@@ -175,6 +177,12 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   waiting area with a warning. Use an installed OMSI bus with a passenger cabin,
   doors and a destination set to board in free drive. Existing native boarding,
   ticket and disembarking logic is used; no fictional line or timetable is generated.
+  Converted OI globals opt into `openomsi_unscheduled_passengers=1` (a generated
+  global.cfg-style block, not a source permission). An empty native timetable no longer
+  suppresses their stop demand. Existing timetable targets still take precedence.
+  Reimport older conversions to acquire this flag; installed native human models
+  and nonzero passenger density remain necessary. With no ordered native trips,
+  riders use the existing free-drive behavior rather than an invented stop sequence.
 - A basic textual HOF lists entrypoint names, `dest/` folder names and imported stop
   names. Exact duplicate destination names are combined. `outofservice.txt` makes a
   destination unload passengers and refuse boarding. Stops explicitly marked
@@ -443,3 +451,21 @@ segments or static AI types; installed Grundorf remains the missing-category fal
 Some source textures/triggers are missing and are reported. Conversion/parser checks do
 not establish that its roads, lights, passenger clearance or GPU performance are correct
 in game. A start relocated by 5.6 m and disconnected authored route gaps need visual review.
+
+### Conexao Guarulhos: incomplete optional AI assets
+
+The supplied two Guarulhos ZIPs have identical assets and differ only in
+`mapModVersion` (4 and 3). Both already carry the conversion declaration. Their
+GolG4, Palio and Santana2000Taxi definitions reference missing nested model folders.
+The safe resolver now returns a missing candidate to the caller, which warns and
+omits that optional AI definition; it still rejects traversal, symlinks and a file
+used as a directory. Required missing model directories fail with their exact path.
+Other export failures include their conversion stage rather than a bare OS error.
+
+Both packages converted locally into 459 tiles, 12,583,048 scenery triangles,
+37 GPS objects (20 route groups), 232 stops, 157 HOF destinations, 46 AI types,
+3,780 streetlights, 8,878 vehicle segments, 660 pedestrian segments and four signal
+programs. Original configurations, assets and attribution were not edited. These
+are conversion/parser results; Windows, GPU rendering and real boarding/clearance
+still need in-game validation. Install the new build, reimport the ZIP, select its
+generated HOF and choose the full route destination, e.g. `490 TERMINAL PIMENTAS`.

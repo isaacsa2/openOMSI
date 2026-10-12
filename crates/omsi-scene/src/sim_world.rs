@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 /// What the people need of the loaded world (see `omsi_sim::people::World`).
 impl omsi_sim::people::World for World {
+    fn unscheduled_passengers(&self) -> bool { self.global.unscheduled_passengers }
     fn root(&self) -> &Path {
         &self.root
     }

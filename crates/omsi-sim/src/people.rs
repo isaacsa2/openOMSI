@@ -96,6 +96,9 @@ pub use money::Money;
 pub use pax::DutyTrip;
 pub use world::World;
 
+#[cfg(test)]
+mod unscheduled_tests;
+
 /// The map's traffic keeps left (its stops are on the left): see the doors of `Cabin`.
 pub static LEFT_HAND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 

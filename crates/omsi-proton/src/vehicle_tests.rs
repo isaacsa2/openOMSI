@@ -140,6 +140,10 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
             .all(|v| v.position.abs().max_element() < 10.));
     }
     let mut v = native(&out);
+    assert_eq!(v.var("target_index_int"), Some(-1.));
+    v.set_var("AI_target_index", 1.);
+    assert!(v.trigger("ai_scheduled_settarget"));
+    assert_eq!(v.var("target_index_int"), Some(1.));
     assert_eq!(v.ty.model.spotlights_2[0].values[10..], [20., 76.]);
     assert_eq!(v.ty.model.interior_lights.len(), 1);
     assert_eq!(v.ty.def.cameras_reflexion.len(), 1);
@@ -313,7 +317,10 @@ fn a_converted_real_map_can_be_read_by_native_parsers() {
         return;
     };
     let root = std::path::PathBuf::from(root);
-    let map = root.join("maps/Proton-Grande Recife");
+    let map_name =
+        std::env::var("PROTON_CONVERTED_MAP").unwrap_or_else(|_| "Proton-Grande Recife".into());
+    assert!(map_name.starts_with("Proton-") && !map_name.contains(['/', '\\', ':']));
+    let map = root.join("maps").join(map_name);
     let global = omsi_map::GlobalCfg::load(&map.join(omsi_cfg::oi::GLOBAL)).unwrap();
     assert!(!global.tiles.is_empty() && !global.entry_points.is_empty());
     let navigation = crate::navigation::Navigation::from_bytes(

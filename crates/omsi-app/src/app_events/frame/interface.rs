@@ -215,7 +215,7 @@ impl App {
             }
             if let Some(w) = self.world.as_ref() {
                 if let Some(entry) = w.global.entry_points.get(self.args.entry).or(w.global.entry_points.first()) {
-                    nav.imported_gps.select(&entry.name);
+                    nav.imported_gps.select_bus(p.map(|p| &p.vehicle), p.and_then(|p| p.blind_pick.as_ref()), &entry.name);
                 }
                 nav.start_map(w.clone());
             }

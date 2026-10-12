@@ -80,6 +80,58 @@ impl Gps {
             self.version = self.version.wrapping_add(1);
         }
     }
+    /// Keep the spawn's route until a sign is selected; then follow that sign.
+    /// An unmatched explicit destination clears the old route instead of lying.
+    pub fn select_destination(&mut self, destination: Option<&str>, entry: &str) {
+        self.select(destination.unwrap_or(entry));
+    }
+    pub fn select_bus(
+        &mut self,
+        vehicle: Option<&omsi_sim::VehicleInstance>,
+        pick: Option<&omsi_sim::timetable_run::BlindPick>,
+        entry: &str,
+    ) {
+        let destination = vehicle.and_then(|v| {
+            let hof = v.host.hof.as_ref()?;
+            let row = pick
+                .map(|p| p.row)
+                .or_else(|| {
+                    v.var("target_index_int")
+                        .filter(|i| i.is_finite() && *i >= 0.)
+                        .map(|i| i.round() as usize)
+                })
+                .or_else(|| {
+                    let code = v
+                        .var("IBIS_TerminusCode")
+                        .filter(|c| c.is_finite() && *c > 0.)?;
+                    let code = code.round() as i32;
+                    let indexed = v
+                        .var("IBIS_TerminusIndex")
+                        .filter(|i| i.is_finite() && *i >= 0.)
+                        .map(|i| i.round() as usize)
+                        .filter(|&i| hof.termini.get(i).is_some_and(|t| t.code == code));
+                    let mut matches = hof
+                        .termini
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| t.code == code);
+                    let unique = matches
+                        .next()
+                        .map(|(i, _)| i)
+                        .filter(|_| matches.next().is_none());
+                    // A typed but unknown/ambiguous code must clear the old route.
+                    Some(indexed.or(unique).unwrap_or(usize::MAX))
+                });
+            row.map(|row| {
+                hof.termini
+                    .get(row)
+                    .filter(|t| !t.all_exit)
+                    .map(|t| t.texture_id.as_str())
+                    .unwrap_or("")
+            })
+        });
+        self.select_destination(destination, entry);
+    }
     pub fn paint(&self, painter: &mut Painter, anchor: DVec2, radius: Option<f64>, color: Color) {
         let Some(data) = &self.data else {
             return;
@@ -176,6 +228,101 @@ mod tests {
     use super::*;
     use glam::DVec3;
     use omsi_proton::navigation::Route;
+
+    #[test]
+    fn a_bus_sign_ibis_code_and_manual_pick_select_the_authored_gps() {
+        let dir = std::env::temp_dir().join(format!("gps-bus-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("vehicle.bus"),
+            "[model]\nmodel.cfg\n[varnamelist]\n1\nvariables.txt\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("model.cfg"), "").unwrap();
+        std::fs::write(
+            dir.join("variables.txt"),
+            "target_index_int\nIBIS_TerminusCode\n",
+        )
+        .unwrap();
+        let ty = omsi_sim::VehicleType::load(&dir, &dir.join("vehicle.bus")).unwrap();
+        let mut bus = omsi_sim::VehicleInstance::new(
+            Arc::new(ty),
+            omsi_sim::VehicleHost::new(Default::default()),
+        );
+        bus.host.hof = Some(Arc::new(omsi_vehicle::Hof {
+            termini: ["Route One", "Route Two", "Out of service"]
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| omsi_vehicle::hof::Terminus {
+                    code: (i as i32 + 1) * 10,
+                    texture_id: name.into(),
+                    all_exit: i == 2,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }));
+        let mut gps = Gps::default();
+        gps.set_data(Some(Arc::new(Navigation {
+            version: 1,
+            routes: ["Route One", "Route Two"]
+                .map(|name| Route {
+                    name: name.into(),
+                    triangles: vec![],
+                })
+                .into(),
+            ..Default::default()
+        })));
+        bus.set_var("target_index_int", -1.);
+        gps.select_bus(Some(&bus), None, "Route One");
+        assert_eq!(gps.selected, Some(0));
+        bus.set_var("target_index_int", 1.);
+        gps.select_bus(Some(&bus), None, "Route One");
+        assert_eq!(gps.selected, Some(1));
+        bus.set_var("target_index_int", 2.);
+        gps.select_bus(Some(&bus), None, "Route One");
+        assert_eq!(gps.selected, None);
+        bus.set_var("target_index_int", -1.);
+        bus.set_var("IBIS_TerminusCode", 20.);
+        gps.select_bus(Some(&bus), None, "Route One");
+        assert_eq!(gps.selected, Some(1));
+        let pick = omsi_sim::timetable_run::BlindPick {
+            row: 0,
+            line: "1".into(),
+        };
+        gps.select_bus(Some(&bus), Some(&pick), "Route Two");
+        assert_eq!(gps.selected, Some(0));
+        bus.set_var("IBIS_TerminusCode", 999.);
+        gps.select_bus(Some(&bus), None, "Route One");
+        assert_eq!(gps.selected, None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn destination_changes_switch_routes_and_never_keep_an_unknown_signs_old_route() {
+        let mut gps = Gps::default();
+        gps.set_data(Some(Arc::new(Navigation {
+            version: 1,
+            routes: ["490 TERMINAL SAO JOAO", "490 TERMINAL PIMENTAS"]
+                .map(|name| Route {
+                    name: name.into(),
+                    triangles: vec![[[0., 0.], [10., 0.], [0., 10.]]],
+                })
+                .into(),
+            ..Default::default()
+        })));
+        gps.select_destination(None, "490 TERMINAL SAO JOAO");
+        assert_eq!(gps.selected, Some(0));
+        let old = gps.version;
+        gps.select_destination(Some("490_TERMINAL_PIMENTAS"), "490 TERMINAL SAO JOAO");
+        assert_eq!(gps.selected, Some(1));
+        assert!(gps.version > old);
+        gps.select_destination(Some("NOT IN SERVICE"), "490 TERMINAL SAO JOAO");
+        assert_eq!(gps.selected, None);
+        assert!(gps.extent().is_none());
+        gps.select_destination(None, "490 TERMINAL SAO JOAO");
+        assert_eq!(gps.selected, Some(0));
+    }
 
     #[test]
     fn roads_load_for_navigation_without_starting_ai_and_broken_optional_data_is_ignored() {

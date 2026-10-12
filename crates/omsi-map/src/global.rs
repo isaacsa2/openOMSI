@@ -128,6 +128,8 @@ pub struct GlobalCfg {
     pub dyn_helper_active: bool,
     pub real_rail: bool,
     pub left_hand_traffic: bool,
+    /// OI map extension: allow free-drive stop demand when no timetable exists.
+    pub unscheduled_passengers: bool,
     pub background_image: Vec<String>,
     pub map_cam: Vec<f64>,
     pub money_system: String,
@@ -193,6 +195,7 @@ impl GlobalCfg {
                 "backgroundimage" => g.background_image = (0..5).map(|_| r.str().to_string()).collect(),
                 "mapcam" => g.map_cam = (0..8).map(|_| r.f64()).collect(),
                 "moneysystem" => g.money_system = r.str().to_string(),
+                "openomsi_unscheduled_passengers" => g.unscheduled_passengers = r.i32() == 1,
                 "ticketpack" => g.ticket_pack = r.str().to_string(),
                 "repair_time_min" => g.repair_time_min = r.f32(),
                 "years" => {
@@ -263,6 +266,14 @@ impl GlobalCfg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_drive_demand_is_an_explicit_extension_and_defaults_off() {
+        for (text, enabled) in [("", false), ("[openomsi_unscheduled_passengers]\n0\n", false), ("[openomsi_unscheduled_passengers]\n1\n", true)] {
+            let g = GlobalCfg::parse(&omsi_cfg::CfgFile::from_str("global.cfgoi", text));
+            assert_eq!(g.unscheduled_passengers, enabled);
+        }
+    }
 
     /// Both winter kinds take the winter pictures; the snowy ones come with the weather (#2131).
     #[test]

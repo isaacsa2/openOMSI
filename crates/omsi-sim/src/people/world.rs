@@ -14,6 +14,8 @@ pub trait World {
     fn root(&self) -> &Path;
     /// The map's folder.
     fn map_dir(&self) -> &Path;
+    /// Imported maps can have stop demand without authored native timetable trips.
+    fn unscheduled_passengers(&self) -> bool { false }
     /// Height for somebody on foot: the top of whatever is here (a pavement, a platform),
     /// else the bare ground; None where nothing is loaded.
     fn walk_height(&self, x: f64, y: f64) -> Option<f64>;
