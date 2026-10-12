@@ -225,8 +225,13 @@ pub(crate) fn start_duty_at(app: &mut App, line: &str, tour: &str, trip: usize, 
     // (no teleport: the stop chosen is the one the bus drives to next)
     d.start_at_here(k, j);
     if let Some(p) = app.player.as_mut() {
-        // (nothing typed into the IBIS or the blind, as in OMSI 2: Shift+U does that)
+        // OMSI's manual IBIS entry stays intact on desktop. Touch-only Android needs
+        // the selected duty's destination without a physical keyboard (#2243).
         d.update(&mut p.vehicle, now);
+        if cfg!(target_os = "android") {
+            let (trip, stop) = d.trip_for_ibis();
+            p.set_duty_destination(trip, stop);
+        }
         if let Some(w) = app.world.as_ref() {
             let mut fonts = w.fonts.lock();
             if let Err(e) = crate::schedule_paper::update_vehicle(&mut p.vehicle, &d, &mut fonts) {
@@ -248,6 +253,11 @@ pub(super) fn start_duty(app: &mut App, line: &str, tour: &str) {
         Ok(mut d) => {
             if let Some(p) = app.player.as_mut() {
                 d.update(&mut p.vehicle, now);
+                // A selected tour should fill the IBIS on Android, not on desktop.
+                if cfg!(target_os = "android") {
+                    let (trip, stop) = d.trip_for_ibis();
+                    p.set_duty_destination(trip, stop);
+                }
                 let mut fonts = w.fonts.lock();
                 if let Err(e) = crate::schedule_paper::update_vehicle(
                     &mut p.vehicle,
