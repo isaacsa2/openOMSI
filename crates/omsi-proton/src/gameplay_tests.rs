@@ -4,7 +4,7 @@ use crate::{
 };
 use glam::Vec3;
 
-fn config(f: &Fixture, folder: &str, name: &str, contents: &str) {
+pub(super) fn config(f: &Fixture, folder: &str, name: &str, contents: &str) {
     let path = f.0.join("Town/tiles/0x0").join(folder);
     std::fs::create_dir_all(&path).unwrap();
     std::fs::write(path.join(name), contents).unwrap();
@@ -40,7 +40,7 @@ fn objects(f: &Fixture, objects: &[(&str, [f32; 3])]) {
     .unwrap();
 }
 
-fn loaded(f: &Fixture) -> Vec<omsi_map::Tile> {
+pub(super) fn loaded(f: &Fixture) -> Vec<omsi_map::Tile> {
     omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL))
         .unwrap()
         .tiles
@@ -49,7 +49,7 @@ fn loaded(f: &Fixture) -> Vec<omsi_map::Tile> {
         .collect()
 }
 
-fn sco(f: &Fixture, object: &omsi_map::MapObject) -> omsi_scenery::SceneryObject {
+pub(super) fn sco(f: &Fixture, object: &omsi_map::MapObject) -> omsi_scenery::SceneryObject {
     let rel = object.file.split("/proton-import/").nth(1).unwrap();
     omsi_scenery::SceneryObject::load(&f.0.join("proton-import").join(rel)).unwrap()
 }

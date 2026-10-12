@@ -9,6 +9,7 @@ pub mod package;
 mod materials;
 mod prefabs;
 mod gameplay;
+pub mod itinerary;
 pub mod navigation;
 mod navigation_index;
 mod road_surface;
@@ -54,6 +55,7 @@ pub struct Report {
     pub lights_imported: usize,
     pub stops_imported: usize,
     pub destinations_imported: usize,
+    pub itineraries_imported: usize,
     pub prefabs_imported: usize,
     pub ai_vehicles_imported: usize,
     pub traffic_segments_imported: usize,
@@ -472,8 +474,11 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut gameplay = gameplay::Paths::new(&paths)?;
     drop(paths);
     let stops = stops.finish(&mut gameplay, &mut report)?;
+    let known: Vec<_> = stops.iter().map(|s| itinerary::Known { id: s.id.clone(), name: s.name.clone() }).collect();
+    let itineraries = itinerary::load(&configs[0], &known, &depot::destinations(&base, &spawns, &stops)?, &mut report).context("reading the itineraries file")?;
     depot::export(dir, &base, installed_rel, &spawns, &stops, &mut report).context("exporting map HOF")?;
-    gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel).context("exporting map paths, stops and signals")?;
+    let placed = gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel).context("exporting map paths, stops and signals")?;
+    itinerary::export(dir, itineraries, &placed, &mut report).context("exporting itineraries")?;
     let file = std::fs::File::create(dir.join("proton-import/navigation.json"))?;
     let mut writer = std::io::BufWriter::new(file);
     serde_json::to_writer(&mut writer, &navigation)?;

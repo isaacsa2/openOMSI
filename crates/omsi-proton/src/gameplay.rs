@@ -71,7 +71,7 @@ impl Paths {
     }
 }
 
-fn key(p: Vec3) -> (i32, i32) {
+pub(crate) fn key(p: Vec3) -> (i32, i32) {
     ((p.x / EDGE).floor() as i32, (p.y / EDGE).floor() as i32)
 }
 
@@ -263,6 +263,12 @@ fn append_map(dir: &Path, key: (i32, i32), addition: &str) -> Result<()> {
     Ok(())
 }
 
+/// A stop that was written into the map: its source id and the id of its native object.
+pub(crate) struct PlacedStop {
+    pub id: String,
+    pub object: usize,
+}
+
 pub(crate) fn export(
     dir: &Path,
     installed: &str,
@@ -272,7 +278,7 @@ pub(crate) fn export(
     mut signals: Collector,
     report: &mut Report,
     cancel: &impl Fn() -> bool,
-) -> Result<()> {
+) -> Result<Vec<PlacedStop>> {
     let valid: BTreeSet<_> = keys.iter().copied().collect();
     let Paths {
         segments, cells, ..
@@ -410,6 +416,7 @@ pub(crate) fn export(
             "[absheight]\n[fixed]\n[busstop]\n",
         )?;
     }
+    let mut placed = Vec::new();
     for mut stop in stops {
         ensure!(!cancel(), "map import cancelled");
         let pos = Vec3::from(stop.pos.unwrap());
@@ -435,6 +442,7 @@ pub(crate) fn export(
             }
         }
         let amount = stop.passengers.min(stop.waiting.len());
+        placed.push(PlacedStop { id: stop.id.clone(), object: id });
         let labels = vec![
             stop.name,
             amount.to_string(),
@@ -459,7 +467,7 @@ pub(crate) fn export(
             }
         }
     }
-    Ok(())
+    Ok(placed)
 }
 
 #[cfg(test)]

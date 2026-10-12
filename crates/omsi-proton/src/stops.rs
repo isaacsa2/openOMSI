@@ -11,6 +11,9 @@ use glam::Vec3;
 use std::{collections::BTreeMap, path::Path};
 
 pub(crate) struct Stop {
+    /// The `busstops/` file name without extension: unique, and what an itinerary can name
+    /// when two stops share a display name.
+    pub id: String,
     pub name: String,
     prefix: Option<String>,
     pub pos: Option<[f32; 3]>,
@@ -42,6 +45,7 @@ impl Collector {
             let cfg = ini(&file)?;
             let from_3d = value(&cfg, "from_3d", "readfrom3d") == Some("1");
             let mut stop = Stop {
+                id: label(&file.file_stem().unwrap().to_string_lossy())?,
                 name: label(
                     value(&cfg, "busstop", "name")
                         .unwrap_or(&file.file_stem().unwrap().to_string_lossy()),

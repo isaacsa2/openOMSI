@@ -44,14 +44,9 @@ fn write(out: &mut impl Write, s: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn export(
-    dir: &Path,
-    base: &Path,
-    installed: &str,
-    spawns: &[Spawn],
-    stops: &[Stop],
-    report: &mut Report,
-) -> Result<()> {
+/// Every destination the generated HOF offers: entry points, `dest/` folders (those with
+/// `outofservice.txt` are reserved) and the stops marked as the latest stop.
+pub(crate) fn destinations(base: &Path, spawns: &[Spawn], stops: &[Stop]) -> Result<BTreeMap<String, bool>> {
     let mut destinations = BTreeMap::new();
     for spawn in spawns {
         destinations.insert(field(&spawn.name)?, false);
@@ -82,6 +77,18 @@ pub(crate) fn export(
     }
     destinations.retain(|name, _| !name.trim().is_empty());
     ensure!(destinations.len() <= 8192, "too many map destinations");
+    Ok(destinations)
+}
+
+pub(crate) fn export(
+    dir: &Path,
+    base: &Path,
+    installed: &str,
+    spawns: &[Spawn],
+    stops: &[Stop],
+    report: &mut Report,
+) -> Result<()> {
+    let destinations = destinations(base, spawns, stops)?;
     let depot = field(&format!(
         "{} (Proton Bus)",
         installed.trim_start_matches("maps/Proton-")
