@@ -230,10 +230,10 @@ fn decorative_signals_never_hold_traffic_without_authored_triggers() {
 }
 
 #[test]
-fn coordinate_stops_preserve_left_platform_and_rotated_waiting_positions() {
+fn coordinate_stops_preserve_world_waiting_positions_and_relative_facing() {
     let f = Fixture::new();
     setup(&f);
-    config(&f,"busstops","left.txt","[busstop]\nname=[TH3D] Platform\nposX=301\nposZ=10\nposY=7\nrotY=90\nisLeft=1\npaxAmount=1\n[standing_1]\nposX=-3\nposZ=0\nposY=0\nrotY=30\n");
+    config(&f,"busstops","left.txt","[busstop]\nname=[TH3D] Platform\nposX=301\nposZ=10\nposY=7\nrotY=90\nisLeft=1\npaxAmount=1\n[standing_1]\nposX=301\nposZ=13\nposY=7.2\nrotY=270\n");
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.stops_imported, 1);
     let tiles = loaded(&f);
@@ -247,7 +247,8 @@ fn coordinate_stops_preserve_left_platform_and_rotated_waiting_positions() {
         .unwrap();
     assert!((waiting.pos[0] - 1.0).abs() < 1e-5);
     assert!((waiting.pos[1] - 13.0).abs() < 1e-5);
-    assert_eq!(waiting.rot[0], 120.0);
+    assert!((waiting.pos[2] - 7.2).abs() < 1e-5);
+    assert_eq!(waiting.rot[0], 0.0);
 }
 
 #[test]

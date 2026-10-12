@@ -15,6 +15,7 @@ omsi-cfg = { path = "../omsi-cfg" }
 omsi-o3d = { path = "../omsi-o3d" }
 
 [dev-dependencies]
+omsi-vehicle = { path = "../omsi-vehicle" }
 omsi-geometry = { path = "../omsi-geometry" }
 omsi-map = { path = "../omsi-map" }
 omsi-scenery = { path = "../omsi-scenery" }

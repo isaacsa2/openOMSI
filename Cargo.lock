@@ -3683,6 +3683,7 @@ dependencies = [
  "omsi-map",
  "omsi-o3d",
  "omsi-scenery",
+ "omsi-vehicle",
  "serde",
  "serde_json",
 ]

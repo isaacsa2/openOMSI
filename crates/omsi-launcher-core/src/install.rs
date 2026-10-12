@@ -787,7 +787,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     }
     proton::read_layouts(&mut source, &mut entries, job)?;
     let installed = Installed { content, root };
-    let plan = plan(&entries, &source_name, &installed);
+    let mut plan = plan(&entries, &source_name, &installed);
     if plan.maps.is_empty() {
         return Err(anyhow!("could not tell what {} is: no Vehicles / maps / Sceneryobjects ... folders and no .bus / .sco / .sli / global.cfg files in it", src.display()));
     }
@@ -932,7 +932,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
         }
     }
     drop(source);
-    proton::convert(&staging, &plan, job)?;
+    proton::convert(&staging, &mut plan, job)?;
     if job.cancelled() {
         return Err(anyhow!(Cancelled));
     }

@@ -435,6 +435,11 @@ fn supplied_map_fixture_when_available() {
     let report = import(&dir, &format!("maps/Proton-{name}"), || false).unwrap();
     let global = omsi_map::GlobalCfg::load(&dir.join("global.cfg")).unwrap();
     assert!(!global.entry_points.is_empty());
+    let hof = omsi_vehicle::Hof::load(&dir.join(depot::FILE)).unwrap();
+    assert_eq!(hof.termini.len(), report.destinations_imported);
+    assert!(!hof.termini.is_empty());
+    assert!(hof.info_trips.is_empty());
+    eprintln!("{} HOF destinations; {} named bus stops", hof.termini.len(), hof.bus_stops.len());
     let mut vertices = 0;
     let mut materials = 0;
     for t in &global.tiles {

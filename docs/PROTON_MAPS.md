@@ -14,6 +14,9 @@ driving with an OMSI bus**.
 2. Read the import report, especially any missing textures.
 3. On **Drive**, select the map labelled **(Proton Bus)**, choose an installed OMSI
    bus and one of the map's entry points, then start free driving without a duty.
+4. Use the generated **<map> (Proton Bus)** depot and set a normal destination in
+   the destination menu (Shift+U). Stop close to the platform and open the matching
+   doors. Boarding requires installed native human models and a bus passenger cabin.
 
 To apply conversion improvements, remove the previously imported map through Mods
 and install its original ZIP again with the updated build. Updating the executable
@@ -79,11 +82,23 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   disabled on points whose `isSpawner=0`; they are not exact timed spawners.
 - `busstops` coordinates or exact trigger/waiting 3D markers become native stops and
   waiting places, including stop names, platform side and a bounded passenger count.
+  Coordinate waiting positions stay in world space; only their facing is relative
+  to the stop. This prevents a stop's position from being applied twice.
   A 3D stop faces the nearest authored vehicle path when one exists. Missing triggers
   are omitted and reported; missing waiting markers receive a small approximate
   waiting area with a warning. Use an installed OMSI bus with a passenger cabin,
   doors and a destination set to board in free drive. Existing native boarding,
   ticket and disembarking logic is used; no fictional line or timetable is generated.
+- A basic textual HOF lists entrypoint names, `dest/` folder names and imported stop
+  names. Exact duplicate destination names are combined. `outofservice.txt` makes a
+  destination unload passengers and refuse boarding. Stops explicitly marked
+  `isLatestStop=1` also become selectable terminal destinations: choosing the stop's
+  own destination makes the native passenger logic unload there. No entrypoint is
+  guessed to serve a particular terminal. Codes are generated indices, not original
+  line numbers or IBIS trips. The HOF is shared through `HOFs/`, selected for the map
+  by default and recorded with the mod for removal; vehicle folders are not edited.
+  Explicit `ailists.cfg` depot choices take precedence. This supports text displays;
+  source destination images and native roll-sign bitmaps are not converted.
 - `trafficlights` cycles become native programs. Lamp markers accept both
   `<prefix>_pathN_...` and `_<prefix>_pathN_...`, including exporter numeric suffixes.
   Red/yellow/green channels and stop-trigger channels remain independent. Lamps
@@ -98,6 +113,10 @@ Bus timetables, destination graphics and driveable Proton bus mods are **not imp
 This is partial compatibility. Animated models, prefabs and source tile streaming
 rules are not reproduced. `isFirstStop`/`isLatestStop` do not create native duties;
 terminal behaviour uses the native bus destination and passenger logic.
+Textual HOF destinations do not add announcements, ordered stop sequences or duties.
+The Ciano references describe [bus stops](https://www.busmods.com/ciano/help/map-busstops.html)
+and [destination displays](https://www.busmods.com/ciano/help/displays.html); a Proton
+display image is not a textual HOF or timetable.
 
 Imported traffic uses up to eight installed native street-car `.ovh` types, if the
 map has generated vehicle paths and no explicit `ailists.cfg`. A custom native AI

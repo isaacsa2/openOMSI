@@ -3,6 +3,7 @@
 //! Only free driving is supported. Source mods are never embedded in the program.
 mod convert;
 mod export;
+pub mod depot;
 mod materials;
 mod gameplay;
 pub mod navigation;
@@ -36,6 +37,7 @@ pub struct Report {
     pub roads_imported: usize,
     pub lights_imported: usize,
     pub stops_imported: usize,
+    pub destinations_imported: usize,
     pub traffic_segments_imported: usize,
     pub pedestrian_segments_imported: usize,
     pub signals_imported: usize,
@@ -427,6 +429,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut gameplay = gameplay::Paths::new(&paths)?;
     drop(paths);
     let stops = stops.finish(&mut gameplay, &mut report)?;
+    depot::export(dir, &base, installed_rel, &spawns, &stops, &mut report)?;
     gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel)?;
     let file = std::fs::File::create(dir.join(navigation::FILE))?;
     let mut writer = std::io::BufWriter::new(file);
@@ -451,3 +454,5 @@ mod tag_tests;
 mod navigation_tests;
 #[cfg(test)]
 mod gameplay_tests;
+#[cfg(test)]
+mod depot_tests;

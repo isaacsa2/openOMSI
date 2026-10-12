@@ -149,7 +149,10 @@ pub(super) fn check_mode(plan: &Plan, mode: InstallMode) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn convert(staging: &Path, plan: &Plan, job: &Job) -> Result<()> {
+pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> {
+    let shared = staging.join(plan.maps.len().to_string());
+    let mut hofs = Vec::new();
+    let mut hof_bytes = 0;
     for (i, m) in plan.maps.iter().enumerate().filter(|(_, m)| m.what == KIND) {
         if job.cancelled() {
             return Err(anyhow!(Cancelled));
@@ -165,6 +168,13 @@ pub(super) fn convert(staging: &Path, plan: &Plan, job: &Job) -> Result<()> {
             return Err(anyhow!(Cancelled));
         }
         let report = report.with_context(|| format!("converting {}", m.dest))?;
+        let filename = format!("{}.hof", omsi_proton::depot::name(&m.dest));
+        std::fs::create_dir_all(&shared)?;
+        hof_bytes += std::fs::copy(
+            staging.join(i.to_string()).join(omsi_proton::depot::FILE),
+            shared.join(&filename),
+        )?;
+        hofs.push((usize::MAX, filename));
         check_space(staging)?;
         job.set(|p| {
             p.report.push(format!(
@@ -172,7 +182,16 @@ pub(super) fn convert(staging: &Path, plan: &Plan, job: &Job) -> Result<()> {
                 m.dest, report.tiles, report.triangles, report.gps_imported, report.roads_imported, report.lights_imported, report.markers_skipped, report.gps_skipped, report.vertices_removed
             ));
             p.report.push(format!("{}: {} bus stops, {} traffic segments, {} pedestrian segments, {} signal programs and {} controlled paths", m.dest, report.stops_imported, report.traffic_segments_imported, report.pedestrian_segments_imported, report.signals_imported, report.signal_paths_imported));
+            p.report.push(format!("{}: shared HOF with {} textual destinations (generated codes); no timetable or ordered line stops inferred", m.dest, report.destinations_imported));
             p.warnings.extend(report.warnings);
+        });
+    }
+    if !hofs.is_empty() {
+        // Generated files take the same move/cleanup and mod-ownership path as
+        // source files. No shared depot is installed before all maps convert.
+        plan.maps.push(Mapping {
+            src: String::new(), dest: "HOFs".into(), what: "generated map depots".into(),
+            files: hofs, bytes: hof_bytes, aside: false,
         });
     }
     Ok(())

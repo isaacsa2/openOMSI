@@ -16,6 +16,7 @@ pub(crate) struct Stop {
     pub pos: Option<[f32; 3]>,
     pub heading: f32,
     pub left: bool,
+    pub terminal: bool,
     pub passengers: usize,
     pub length: f32,
     pub waiting: BTreeMap<usize, ([f32; 3], f32)>,
@@ -63,6 +64,7 @@ impl Collector {
                 )?
                 .rem_euclid(360.0),
                 left: value(&cfg, "busstop", "isleft") == Some("1"),
+                terminal: value(&cfg, "busstop", "islateststop") == Some("1"),
                 passengers: number(&cfg, "busstop", "paxamount", 10.0)?.clamp(0.0, 256.0) as usize,
                 length: (number(&cfg, "busstop", "radius", 1.0)?.clamp(0.1, 100.0) * 2.0 + 15.0)
                     .max(30.0),
@@ -74,17 +76,12 @@ impl Collector {
                 for section in cfg.keys().filter(|s| s.starts_with("standing_")) {
                     let index = section.trim_start_matches("standing_").parse::<usize>()?;
                     ensure!(index <= 999, "too many stop waiting places");
-                    let local = Vec3::from(position(&cfg, section)?);
-                    let h = stop.heading.to_radians();
-                    let rotated = Vec3::new(
-                        local.x * h.cos() + local.y * h.sin(),
-                        -local.x * h.sin() + local.y * h.cos(),
-                        local.z,
-                    );
-                    let pos = (Vec3::from(stop.pos.unwrap()) + rotated).to_array();
+                    // Standing positions are world coordinates. Only the facing
+                    // direction is relative to the stop, in coordinates mode.
+                    let pos = position(&cfg, section)?;
                     stop.waiting.insert(
                         index,
-                        (pos, stop.heading + number(&cfg, section, "roty", 0.0)?),
+                        (pos, (stop.heading + number(&cfg, section, "roty", 0.0)?).rem_euclid(360.0)),
                     );
                 }
             }
