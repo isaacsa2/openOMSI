@@ -353,7 +353,7 @@ mod tests {
             vec![DVec3::new(10.0, 20.0, 7.0), DVec3::new(30.0, 40.0, 8.0)]
         );
         assert_eq!(map.lanes[0].density, 0.0);
-        assert!(world.lanes.lock().is_empty());
+        assert!(world.traffic_inbox.peek(omsi_sim::world_data::TrafficArrivals::lanes_of).is_empty());
         assert_eq!(map.imported.as_ref().unwrap().road_triangles.len(), 1);
         let (roads, _) = crate::navigation_roads::city_roads(map.lanes, &[]);
         assert_eq!(roads.len(), 1);

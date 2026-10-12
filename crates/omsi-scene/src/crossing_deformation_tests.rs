@@ -256,7 +256,7 @@ fn ai_lane_heights_are_independent_of_visual_vertex_coverage() {
                 covered_vertices && field_sign != 0.0
             );
 
-            let lanes = world.lanes.lock();
+            let lanes = world.traffic_inbox.peek(omsi_sim::world_data::TrafficArrivals::lanes_of);
             assert_eq!(lanes.len(), 1, "the map's artificial [path] is placed");
             let lane = &lanes[0];
             assert_eq!(lane.points.len(), 6);
@@ -437,7 +437,7 @@ fn imported_collision_only_objects_support_wheels_without_render_instances() {
             prepared[0].objects.is_empty(),
             "hidden collider must not reach the renderer"
         );
-        let ground = drive_probe(&world.terrains, &world.surfaces, 100.0, 105.0, 3.0);
+        let ground = world.data.peek().drive_probe(100.0, 105.0, 3.0);
         let expected = if kind == "generated" { 2.0 } else { 0.0 };
         assert!(
             (ground.below.unwrap() - expected).abs() < 1e-5,

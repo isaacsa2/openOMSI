@@ -1,28 +1,26 @@
 use super::*;
 use crate::collision::{CollisionWorld, Obb};
-use parking_lot::{Mutex, MutexGuard};
+use crate::world_data::ObjectPlaces;
 
 struct StopWorld {
     unscheduled: bool,
-    objects: Mutex<HashMap<i64, (DVec3, [f64; 3])>>,
-    stops: Mutex<Vec<(i64, DVec3, f64, String)>>,
-    waits: Mutex<Vec<(i64, DVec3, f64, f32)>>,
-    collision: Mutex<Arc<CollisionWorld>>,
-    parked: Mutex<Arc<Vec<Obb>>>,
+    objects: ObjectPlaces,
+    stops: Vec<(i64, DVec3, f64, String)>,
+    waits: Vec<(i64, DVec3, f64, f32)>,
+    collision: Arc<CollisionWorld>,
+    parked: Arc<Vec<Obb>>,
 }
 impl StopWorld {
     fn new(unscheduled: bool) -> Self {
+        let mut objects = ObjectPlaces::default();
+        objects.add_index([(2, (DVec3::X * 3., [0.; 3])), (3, (DVec3::X * 4., [0.; 3]))], Vec::new());
         Self {
             unscheduled,
-            objects: Mutex::new(
-                [(2, (DVec3::X * 3., [0.; 3])), (3, (DVec3::X * 4., [0.; 3]))]
-                    .into_iter()
-                    .collect(),
-            ),
-            stops: Mutex::new(vec![(1, DVec3::ZERO, 0., "Fixture stop".into())]),
-            waits: Mutex::new(vec![(2, DVec3::X * 3., 0., 0.), (3, DVec3::X * 4., 0., 0.)]),
-            collision: Mutex::new(Arc::new(CollisionWorld::default())),
-            parked: Mutex::new(Arc::new(vec![])),
+            objects,
+            stops: vec![(1, DVec3::ZERO, 0., "Fixture stop".into())],
+            waits: vec![(2, DVec3::X * 3., 0., 0.), (3, DVec3::X * 4., 0., 0.)],
+            collision: Arc::new(CollisionWorld::default()),
+            parked: Arc::new(vec![]),
         }
     }
 }
@@ -57,20 +55,20 @@ impl World for StopWorld {
     fn stop_length(&self, _: i64) -> f32 {
         30.
     }
-    fn bus_stops(&self) -> MutexGuard<'_, Vec<(i64, DVec3, f64, String)>> {
-        self.stops.lock()
+    fn bus_stops(&self) -> &[(i64, DVec3, f64, String)] {
+        &self.stops
     }
-    fn waiting_places(&self) -> MutexGuard<'_, Vec<(i64, DVec3, f64, f32)>> {
-        self.waits.lock()
+    fn waiting_places(&self) -> &[(i64, DVec3, f64, f32)] {
+        &self.waits
     }
-    fn object_positions(&self) -> MutexGuard<'_, HashMap<i64, (DVec3, [f64; 3])>> {
-        self.objects.lock()
+    fn object_positions(&self) -> &ObjectPlaces {
+        &self.objects
     }
-    fn collision(&self) -> MutexGuard<'_, Arc<CollisionWorld>> {
-        self.collision.lock()
+    fn collision(&self) -> &Arc<CollisionWorld> {
+        &self.collision
     }
-    fn parked_boxes(&self) -> MutexGuard<'_, Arc<Vec<Obb>>> {
-        self.parked.lock()
+    fn parked_boxes(&self) -> &Arc<Vec<Obb>> {
+        &self.parked
     }
     fn tiles_generation(&self) -> u64 {
         0
