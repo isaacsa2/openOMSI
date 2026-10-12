@@ -201,6 +201,56 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 - Simulation helper geometry identified by the map's pedestrian, traffic, stop and
   traffic-light prefixes is left out rather than drawn as obstacles.
 
+## Author-declared itineraries (optional)
+
+A Proton package carries no stop sequence, and OpenOMSI never deduces one from stop names,
+route polygons, entry points or nearness. When the creator wants a line to run through
+stops in order, they write it in a text file **beside the map configuration**, named after
+it: `Town.map.txt` takes `Town.itineraries.txt` (any letter case). It is an OpenOMSI file,
+not a Proton one; the original configuration is not edited, and the file needs no
+declaration of its own (the conversion gate above still applies to the map).
+
+```ini
+; whole-line comments start with ; or #
+[itinerary]
+line=490
+direction=Centro
+destination=490 TERMINAL PIMENTAS
+stop=Praca Central
+stop=@busstop_17
+stop=Terminal Pimentas
+```
+
+* `line` and `direction` are optional text, kept as written. A generated HOF index is
+  never taken for a line number.
+* `destination` must be one of the generated HOF's destinations (an entry point, a
+  `dest/` folder or a latest-stop name), compared whole and without regard to case.
+  `490` does not match `4900`. An out-of-service destination is refused. A destination
+  that is also a stop's name is the terminal, so it must be the last stop.
+* Two or more `stop` keys, in order. A stop is named by its display name when exactly one
+  imported stop has it, or by `@` and its file name in `busstops/` (the way to tell apart
+  two stops that share a name). A loop may call at a stop twice, but not twice in a row.
+* Two itineraries with the same line, direction and destination are one when their stops
+  agree and neither is kept when they differ: tell them apart by line or direction.
+
+The file is read strictly. A line that is not understood, an unknown key or section, a
+repeated `line`/`direction`/`destination` in one section, an empty value or a size over
+the limits (1 MiB, 512 itineraries, 512 stops each, 20 000 stops in all) **stops the
+import** and names the line: guessing what the author meant would invent a service. An
+itinerary whose stops or destination cannot be resolved to exactly one thing is **left
+out and reported** as a warning (with the line of its `[itinerary]`), so one mistake does
+not take the others with it. So is one whose stop is not placed in the converted map
+(a stop outside the scenery tiles). Without the file nothing changes: the map stays in the
+free mode described above.
+
+The result is `proton-import/itineraries.jsonoi` (typed OI envelope, navigation kind): per
+itinerary, the line, direction, destination and its stops, each with the **native object
+id** of that stop in the converted tiles, so that duplicate names never collide. Read it
+with `omsi_proton::itinerary::from_bytes`. **The game does not use it yet:** passengers
+do not look at the line, and the GPS does not show the next stop. Those are the next
+steps; today the file is validated data and the import report counts it
+(`itineraries_imported`). Reimport a map to get it.
+
 ## Current limits
 
 Bus timetables, destination graphics and driveable Proton bus mods are **not imported**.
@@ -210,7 +260,8 @@ are converted through the existing scene converter, preserving position, Unity E
 rotation, custom nonuniform scale and mirrored winding. Missing prefab assets warn and
 are omitted. Built-in Proton trees and random vegetation placement are not reproduced. `isFirstStop`/`isLatestStop` do not create native duties;
 terminal behaviour uses the native bus destination and passenger logic.
-Textual HOF destinations do not add announcements, ordered stop sequences or duties.
+Textual HOF destinations do not add announcements, ordered stop sequences or duties; an
+author-declared itinerary (above) is validated and stored but not yet used by passengers or the GPS.
 The Ciano references describe [bus stops](https://www.busmods.com/ciano/help/map-busstops.html)
 and [destination displays](https://www.busmods.com/ciano/help/displays.html); a Proton
 display image is not a textual HOF or timetable.

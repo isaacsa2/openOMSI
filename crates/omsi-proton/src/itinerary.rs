@@ -95,8 +95,15 @@ struct Input {
 pub fn from_bytes(bytes: &[u8]) -> Result<Vec<Itinerary>> {
     ensure!(bytes.len() <= 8 << 20, "itineraries file exceeds 8 MiB");
     let input: Input = serde_json::from_slice(bytes)?;
-    ensure!(input.version == 1, "unsupported itineraries version {}", input.version);
-    ensure!(input.itineraries.len() <= MAX_ITINERARIES, "too many itineraries");
+    ensure!(
+        input.version == 1,
+        "unsupported itineraries version {}",
+        input.version
+    );
+    ensure!(
+        input.itineraries.len() <= MAX_ITINERARIES,
+        "too many itineraries"
+    );
     for i in &input.itineraries {
         ensure!(
             (2..=MAX_STOPS).contains(&i.stops.len()) && !i.destination.is_empty(),
@@ -108,7 +115,10 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Vec<Itinerary>> {
 }
 
 fn text(n: usize, key: &str, value: &str) -> Result<String> {
-    ensure!(!value.is_empty(), "itineraries file, line {n}: {key} is empty");
+    ensure!(
+        !value.is_empty(),
+        "itineraries file, line {n}: {key} is empty"
+    );
     ensure!(
         value.chars().count() <= MAX_TEXT && !value.chars().any(char::is_control),
         "itineraries file, line {n}: {key} is too long or holds a control character"
@@ -117,7 +127,10 @@ fn text(n: usize, key: &str, value: &str) -> Result<String> {
 }
 
 fn once(slot: &mut Option<String>, n: usize, key: &str, value: &str) -> Result<()> {
-    ensure!(slot.is_none(), "itineraries file, line {n}: {key} is given twice in one [itinerary]");
+    ensure!(
+        slot.is_none(),
+        "itineraries file, line {n}: {key} is given twice in one [itinerary]"
+    );
     *slot = Some(text(n, key, value)?);
     Ok(())
 }
@@ -125,7 +138,11 @@ fn once(slot: &mut Option<String>, n: usize, key: &str, value: &str) -> Result<(
 fn parse(bytes: &[u8]) -> Result<Vec<Raw>> {
     let mut out: Vec<Raw> = Vec::new();
     let mut references = 0;
-    for (i, line) in crate::ini_text(bytes).trim_start_matches('\u{feff}').lines().enumerate() {
+    for (i, line) in crate::ini_text(bytes)
+        .trim_start_matches('\u{feff}')
+        .lines()
+        .enumerate()
+    {
         let n = i + 1;
         let line = line.trim();
         if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
@@ -136,15 +153,24 @@ fn parse(bytes: &[u8]) -> Result<Vec<Raw>> {
                 name.trim().eq_ignore_ascii_case("itinerary"),
                 "itineraries file, line {n}: unknown section [{name}]"
             );
-            ensure!(out.len() < MAX_ITINERARIES, "itineraries file: more than {MAX_ITINERARIES} itineraries");
-            out.push(Raw { at: n, ..Default::default() });
+            ensure!(
+                out.len() < MAX_ITINERARIES,
+                "itineraries file: more than {MAX_ITINERARIES} itineraries"
+            );
+            out.push(Raw {
+                at: n,
+                ..Default::default()
+            });
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
             bail!("itineraries file, line {n}: expected key=value");
         };
         let Some(current) = out.last_mut() else {
-            bail!("itineraries file, line {n}: {} is outside an [itinerary] section", key.trim());
+            bail!(
+                "itineraries file, line {n}: {} is outside an [itinerary] section",
+                key.trim()
+            );
         };
         let (key, value) = (key.trim().to_ascii_lowercase(), value.trim());
         match key.as_str() {
@@ -152,9 +178,15 @@ fn parse(bytes: &[u8]) -> Result<Vec<Raw>> {
             "direction" => once(&mut current.direction, n, "direction", value)?,
             "destination" => once(&mut current.destination, n, "destination", value)?,
             "stop" => {
-                ensure!(current.stops.len() < MAX_STOPS, "itineraries file, line {n}: more than {MAX_STOPS} stops");
+                ensure!(
+                    current.stops.len() < MAX_STOPS,
+                    "itineraries file, line {n}: more than {MAX_STOPS} stops"
+                );
                 references += 1;
-                ensure!(references <= MAX_REFERENCES, "itineraries file: too many stops in all");
+                ensure!(
+                    references <= MAX_REFERENCES,
+                    "itineraries file: too many stops in all"
+                );
                 current.stops.push(text(n, "stop", value)?);
             }
             other => bail!("itineraries file, line {n}: unknown key {other}"),
@@ -179,23 +211,37 @@ fn resolve_stop<'a>(known: &'a [Known], reference: &str) -> Result<&'a Known, St
         many => Err(format!(
             "{reference:?} names {} stops; give one as {}",
             many.len(),
-            many.iter().map(|k| format!("@{}", k.id)).collect::<Vec<_>>().join(" or ")
+            many.iter()
+                .map(|k| format!("@{}", k.id))
+                .collect::<Vec<_>>()
+                .join(" or ")
         )),
     }
 }
 
 /// An itinerary resolved to stop ids, or the reason it cannot be.
-fn resolve(raw: &Raw, known: &[Known], destinations: &BTreeMap<String, bool>) -> Result<Draft, String> {
+fn resolve(
+    raw: &Raw,
+    known: &[Known],
+    destinations: &BTreeMap<String, bool>,
+) -> Result<Draft, String> {
     let wanted = raw.destination.as_deref().ok_or("no destination")?;
     if raw.stops.len() < 2 {
         return Err("an itinerary needs at least two stops".into());
     }
-    let hits: Vec<(&String, &bool)> = destinations.iter().filter(|(d, _)| d.eq_ignore_ascii_case(wanted)).collect();
+    let hits: Vec<(&String, &bool)> = destinations
+        .iter()
+        .filter(|(d, _)| d.eq_ignore_ascii_case(wanted))
+        .collect();
     let destination = match hits.as_slice() {
         [(name, false)] => (*name).clone(),
         [(_, true)] => return Err(format!("{wanted:?} is an out-of-service destination")),
         [] => return Err(format!("{wanted:?} is no destination of the generated HOF")),
-        _ => return Err(format!("{wanted:?} matches several destinations of the generated HOF")),
+        _ => {
+            return Err(format!(
+                "{wanted:?} matches several destinations of the generated HOF"
+            ))
+        }
     };
     let mut stops: Vec<&Known> = Vec::with_capacity(raw.stops.len());
     for reference in &raw.stops {
@@ -207,14 +253,24 @@ fn resolve(raw: &Raw, known: &[Known], destinations: &BTreeMap<String, bool>) ->
     }
     // A destination that is also a stop's name is the terminal: it has to be the last stop.
     let last = stops.last().expect("two stops at least");
-    if known.iter().any(|k| k.name.eq_ignore_ascii_case(&destination)) && !last.name.eq_ignore_ascii_case(&destination) {
-        return Err(format!("the destination {destination:?} is a stop, but the last stop is {:?}", last.name));
+    if known
+        .iter()
+        .any(|k| k.name.eq_ignore_ascii_case(&destination))
+        && !last.name.eq_ignore_ascii_case(&destination)
+    {
+        return Err(format!(
+            "the destination {destination:?} is a stop, but the last stop is {:?}",
+            last.name
+        ));
     }
     Ok(Draft {
         line: raw.line.clone(),
         direction: raw.direction.clone(),
         destination,
-        stops: stops.into_iter().map(|k| (k.id.clone(), k.name.clone())).collect(),
+        stops: stops
+            .into_iter()
+            .map(|k| (k.id.clone(), k.name.clone()))
+            .collect(),
     })
 }
 
@@ -229,19 +285,31 @@ pub(crate) struct Draft {
 impl Draft {
     fn key(&self) -> (String, String, String) {
         let lower = |s: &Option<String>| s.as_deref().unwrap_or("").to_lowercase();
-        (lower(&self.line), lower(&self.direction), self.destination.to_lowercase())
+        (
+            lower(&self.line),
+            lower(&self.direction),
+            self.destination.to_lowercase(),
+        )
     }
 }
 
 /// Resolve every itinerary; the ones that cannot be are reported and left out. Two with the
 /// same line, direction and destination are one when their stops agree and both are left out
 /// when they differ: which of them the bus runs would be a guess.
-fn drafts(raws: &[Raw], known: &[Known], destinations: &BTreeMap<String, bool>, report: &mut Report) -> Vec<Draft> {
+fn drafts(
+    raws: &[Raw],
+    known: &[Known],
+    destinations: &BTreeMap<String, bool>,
+    report: &mut Report,
+) -> Vec<Draft> {
     let mut out: Vec<(usize, Draft)> = Vec::new();
     for raw in raws {
         match resolve(raw, known, destinations) {
             Ok(d) => out.push((raw.at, d)),
-            Err(why) => report.warnings.push(format!("itineraries file, line {}: itinerary left out: {why}", raw.at)),
+            Err(why) => report.warnings.push(format!(
+                "itineraries file, line {}: itinerary left out: {why}",
+                raw.at
+            )),
         }
     }
     let mut kept: Vec<(usize, Draft)> = Vec::new();
@@ -249,12 +317,16 @@ fn drafts(raws: &[Raw], known: &[Known], destinations: &BTreeMap<String, bool>, 
     let mut late: Vec<(usize, (String, String, String))> = Vec::new();
     for (at, draft) in out {
         match kept.iter().find(|(_, k)| k.key() == draft.key()) {
-            Some((_, k)) if k.stops == draft.stops => report.warnings.push(format!("itineraries file, line {at}: the same itinerary is given again; the first is kept")),
+            Some((_, k)) if k.stops == draft.stops => report.warnings.push(format!(
+                "itineraries file, line {at}: the same itinerary is given again; the first is kept"
+            )),
             Some(_) => late.push((at, draft.key())),
             None => kept.push((at, draft)),
         }
     }
-    let doubt = |at: usize| format!("itineraries file, line {at}: itinerary left out: another with the same line, direction and destination has other stops; tell them apart by line or direction");
+    let doubt = |at: usize| {
+        format!("itineraries file, line {at}: itinerary left out: another with the same line, direction and destination has other stops; tell them apart by line or direction")
+    };
     for (at, _) in &late {
         report.warnings.push(doubt(*at));
     }
@@ -276,37 +348,76 @@ pub(crate) fn load(
     destinations: &BTreeMap<String, bool>,
     report: &mut Report,
 ) -> Result<Vec<Draft>> {
-    let Some(name) = config.file_name().map(|n| n.to_string_lossy().into_owned()) else { return Ok(Vec::new()) };
-    let wanted = format!("{}.itineraries.txt", &name[..name.len().saturating_sub(".map.txt".len())]);
-    let Some(folder) = config.parent() else { return Ok(Vec::new()) };
+    let Some(name) = config.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return Ok(Vec::new());
+    };
+    let wanted = format!(
+        "{}.itineraries.txt",
+        &name[..name.len().saturating_sub(".map.txt".len())]
+    );
+    let Some(folder) = config.parent() else {
+        return Ok(Vec::new());
+    };
     let mut found = None;
     for entry in std::fs::read_dir(folder)? {
         let entry = entry?;
-        if entry.file_name().to_string_lossy().eq_ignore_ascii_case(&wanted) {
-            ensure!(found.is_none(), "more than one {wanted} (they differ in case only)");
-            ensure!(entry.file_type()?.is_file(), "{wanted} is not a regular file");
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&wanted)
+        {
+            ensure!(
+                found.is_none(),
+                "more than one {wanted} (they differ in case only)"
+            );
+            ensure!(
+                entry.file_type()?.is_file(),
+                "{wanted} is not a regular file"
+            );
             found = Some(entry.path());
         }
     }
-    let Some(path) = found else { return Ok(Vec::new()) };
-    ensure!(std::fs::metadata(&path)?.len() <= FILE_MAX, "{wanted} exceeds 1 MiB");
+    let Some(path) = found else {
+        return Ok(Vec::new());
+    };
+    ensure!(
+        std::fs::metadata(&path)?.len() <= FILE_MAX,
+        "{wanted} exceeds 1 MiB"
+    );
     let raws = parse(&std::fs::read(&path)?)?;
     Ok(drafts(&raws, known, destinations, report))
 }
 
 /// Write the itineraries whose stops were all placed in the map, with their native object ids.
-pub(crate) fn export(dir: &Path, drafts: Vec<Draft>, placed: &[PlacedStop], report: &mut Report) -> Result<()> {
+pub(crate) fn export(
+    dir: &Path,
+    drafts: Vec<Draft>,
+    placed: &[PlacedStop],
+    report: &mut Report,
+) -> Result<()> {
     let mut out = Vec::new();
     'draft: for d in drafts {
         let mut stops = Vec::with_capacity(d.stops.len());
         for (id, name) in &d.stops {
             let Some(p) = placed.iter().find(|p| &p.id == id) else {
-                report.warnings.push(format!("itinerary to {:?} left out: stop {name:?} is not in the converted map", d.destination));
+                report.warnings.push(format!(
+                    "itinerary to {:?} left out: stop {name:?} is not in the converted map",
+                    d.destination
+                ));
                 continue 'draft;
             };
-            stops.push(ItineraryStop { object: p.object, id: id.clone(), name: name.clone() });
+            stops.push(ItineraryStop {
+                object: p.object,
+                id: id.clone(),
+                name: name.clone(),
+            });
         }
-        out.push(Itinerary { line: d.line, direction: d.direction, destination: d.destination, stops });
+        out.push(Itinerary {
+            line: d.line,
+            direction: d.direction,
+            destination: d.destination,
+            stops,
+        });
     }
     report.itineraries_imported = out.len();
     if out.is_empty() {
@@ -314,7 +425,13 @@ pub(crate) fn export(dir: &Path, drafts: Vec<Draft>, placed: &[PlacedStop], repo
     }
     let file = std::fs::File::create(dir.join(FILE))?;
     let mut writer = std::io::BufWriter::new(file);
-    serde_json::to_writer(&mut writer, &Output { version: 1, itineraries: &out })?;
+    serde_json::to_writer(
+        &mut writer,
+        &Output {
+            version: 1,
+            itineraries: &out,
+        },
+    )?;
     std::io::Write::flush(&mut writer)?;
     Ok(())
 }
