@@ -6,6 +6,81 @@ or next to `tiles/` when `baseDir=.`. Packs with multiple configs install each m
 Phases 2 through 4, including 3.1, are accepted for **free
 driving with an OMSI bus**.
 
+## Declaração obrigatória / Required declaration
+
+O conversor **continua no launcher**, pelo fluxo de Mods. Antes de importar, o criador
+acrescenta ao **final do `.map.txt` original**, sem alterar `mapModVersion`, `baseDir`,
+`modelsDir` ou os demais parâmetros:
+
+```ini
+[openomsi]
+allowConversion=1
+```
+
+Essa seção é uma **extensão do OpenOMSI**, não um parâmetro oficial do PBSU.
+Somente um campo `allowConversion` na seção `[openomsi]`, com valor literal `1`,
+é aceito. Ausência, `0`, vazio, valor inválido, grafia diferente ou declaração
+repetida/conflitante bloqueiam a conversão. Todos os mapas selecionados são verificados
+antes da primeira conversão, e os arquivos copiados para staging são verificados
+novamente. A CLI e a API pública usam a mesma regra. Não há opção para ignorar o
+bloqueio, inserção automática da declaração ou alteração do original pelo programa.
+
+O campo é texto editável, inclusive por terceiros: **não é prova de identidade,
+autorização verificável, proteção contra cópia ou permissão de redistribuição**.
+Créditos e licenças existentes são preservados; os direitos e condições do pacote
+continuam sendo os do autor.
+
+The creator appends the exact section above to the original `.map.txt`. This is our
+extension, not an official PBSU setting. One canonical literal `1` is required;
+missing, empty, invalid or duplicate/conflicting declarations block every conversion
+entry point before converted files are generated. The launcher keeps its converter.
+The editable field does not establish identity, verified authorization, copy protection
+or redistribution rights. Source parameters and existing attribution remain unchanged.
+
+**PBSU compatibility has not been tested in its runtime here.** Parser tests and public
+loader references do not establish whether PBSU accepts this appended section. A creator
+should check the original map in PBSU after adding it; that validation remains pending.
+
+## CLI (Windows included)
+
+The existing example uses the same `omsi-proton` implementation as Mods. From the repository:
+
+```powershell
+cargo build --release -p omsi-proton --example import_map
+.\target\release\examples\import_map.exe "C:\Maps\Source" "C:\Maps\Converted" "Town"
+```
+
+On Linux/macOS:
+
+```sh
+cargo run --release -p omsi-proton --example import_map -- /maps/source /maps/converted Town
+```
+
+Choose a source folder with exactly one root `.map.txt` and an **absent** output folder
+outside the source. The CLI copies the source, converts in temporary staging and publishes
+the output only on success. It never writes to the original folder. For multiple maps or
+ZIP input use Mods, which checks all selected configurations before conversion. Install
+the resulting folder (containing `maps/` and `HOFs/`) via normal **Mods → Extract**;
+it is already converted and is not converted again.
+
+## OpenOMSI-only generated format
+
+Generated engine files use a typed, versioned, compressed **OI** envelope and extensions
+ending in `oi`: `global.cfgoi`, `.tileoi`, `.terrainoi`, `.oscoi`, `.o3doi`, `.hofoi`,
+`.ovhoi` and `.jsonoi`. The header is 24 bytes: `OPENOMSI-OI` plus NUL (12 bytes),
+little-endian version `u16` (1), file kind `u16`, uncompressed byte length `u64`, followed
+by zlib data. File kinds are config=1, tile=2, scenery=3, mesh=4, terrain=5, depot=6,
+navigation=7 and vehicle=8. Readers reject wrong versions/types, lengths, oversized
+payloads and trailing compressed data. Mesh payloads are limited to 1 GiB per file;
+other kinds to 64 MiB. Normal OMSI definitions keep their original reader behavior.
+
+The original OMSI does not read this generated format, and renaming extensions alone
+does not decode it. This is a format distinction, **not DRM**: the format and converter
+are open source. Original images, sounds, source configurations, credits and licenses
+retain their filenames and bytes. Reimport an older conversion to obtain the OI package.
+The auxiliary terrain is retained for CPU probes but omitted from rendering on OI tiles,
+so it does not produce the distant green ground below the authored scene.
+
 ## Install and drive
 
 1. Open **Mods**, select the map ZIP, and install with **Extract** (or **Auto** when
@@ -78,8 +153,9 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 - Automatic vehicle and `aipeople` paths become tile-local native street/sidewalk
   segments, keeping slopes, direction, complete loops, point gaps and turn indicators.
   Speed multipliers become native speed limits based on a 50 km/h preview default.
-  Vehicle spawner intervals are approximated by native traffic density, with spawning
-  disabled on points whose `isSpawner=0`; they are not exact timed spawners.
+  Vehicle and bus spawner intervals are approximated by native traffic density; a point
+  with both spawners disabled has zero density. Bus-only points exclude ordinary cars;
+  they are not exact timed spawners.
 - `busstops` coordinates or exact trigger/waiting 3D markers become native stops and
   waiting places, including stop names, platform side and a bounded passenger count.
   Coordinate waiting positions stay in world space; only their facing is relative
@@ -110,21 +186,37 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
 ## Current limits
 
 Bus timetables, destination graphics and driveable Proton bus mods are **not imported**.
-This is partial compatibility. Animated models, prefabs and source tile streaming
-rules are not reproduced. `isFirstStop`/`isLatestStop` do not create native duties;
+This is partial compatibility. Animated models and source tile streaming
+rules are not reproduced. Authored `prefabs.txt` instances and `prefabs/*.txt` definitions
+are converted through the existing scene converter, preserving position, Unity Euler
+rotation, custom nonuniform scale and mirrored winding. Missing prefab assets warn and
+are omitted. Built-in Proton trees and random vegetation placement are not reproduced. `isFirstStop`/`isLatestStop` do not create native duties;
 terminal behaviour uses the native bus destination and passenger logic.
 Textual HOF destinations do not add announcements, ordered stop sequences or duties.
 The Ciano references describe [bus stops](https://www.busmods.com/ciano/help/map-busstops.html)
 and [destination displays](https://www.busmods.com/ciano/help/displays.html); a Proton
 display image is not a textual HOF or timetable.
 
-Imported traffic uses up to eight installed native street-car `.ovh` types, if the
-map has generated vehicle paths and no explicit `ailists.cfg`. A custom native AI
-list overrides that fallback, including an empty list. Missing native cars or human
-models leave scenery driveable. Proton `aicars_v1` models, bicycles and source
-pedestrian spawn intervals are not converted; walking population uses native settings.
-Paths still need the original 3DS road/collision surface beneath them. Manual links,
-train paths and Proton spline smoothing are not reproduced.
+Source `aicars_v1` and `aibuses_v1` definitions import static 3DS models with the same
+UV/material/texture converter, `_skin001_` paint slots, bounded PNG random skins,
+weights, masses, geometry bounds, authored speed caps and simple moving/stopped sound
+loops. They run as native AI road vehicles, **not drivable Proton buses**. Source
+wheel/suspension/door animation, engine physics, collisions from custom vehicle
+colliders, passenger cabins, exact sound pitch and schedules are not reproduced.
+A malformed supplied AI definition fails the staged import; missing models warn and
+fall back when the category has no usable authored models.
+
+Missing car/bus categories use up to eight vehicle types referenced by the installed
+**Grundorf `ailists.cfg`**, including depot bus type groups. Stock assets are reused
+from the installation, not bundled or copied into the converted package. If source
+cars exist, `disableNativeTraffic=1` suppresses the native car supplement; missing source
+cars still allow the requested fallback. Missing Grundorf or its models logs a clear
+warning and leaves scenery usable. An explicit map `ailists.cfg` overrides the fallback,
+including an empty list. Bus models need authored bus-allowed paths. Native human models
+remain required for pedestrians/boarding; Proton pedestrian spawn intervals are not
+reproduced. Paths need a supporting road/collision surface. Manual path links,
+train paths and Proton spline smoothing remain unsupported and are reported rather
+than invented; `automatic_setup.enabled=0` does not create an inferred traffic route.
 
 The GPS follows the author's drawn strip; it does not recalculate routes, announce
 turns or create a timetable. Format conventions follow the public
@@ -147,7 +239,7 @@ switch with night, with a warning for such definitions. Fixed glow rotations and
 nonuniform scale become billboards; fixture mesh emission is not animated at night.
 Streetlight markers outside tiles with scenery are omitted and reported.
 
-Navigation is stored separately in a versioned `proton-import/navigation.json`,
+Navigation is stored separately in a versioned `proton-import/navigation.jsonoi`,
 limited to 250,000 GPS triangles and 250,000 road points (up to 4,096 routes/roads),
 with a 64 MiB file limit. GPS geometry never enters the 3D scene's buffers. Nearby
 GPS triangles are cached around the small map's anchor; the city map caches the
@@ -176,7 +268,8 @@ tile, plus bounded lookup buffers. Extra disk I/O can make an import slower.
 
 The installer reads up to 64 KiB per `.map.txt` while planning and follows its authored
 `baseDir`, preserving nested paths and resolving folder names case-insensitively. Each
-map receives only that base folder and its own config. Without an available `baseDir`,
+map receives that base folder, its own config and recognized package-level credits,
+licenses, copyright/readme/author files or folders. Without an available `baseDir`,
 the earlier matching-name/single-neighbour detection remains available. Ambiguous
 folders are not guessed. Relative `./` prefixes and trailing separators work.
 Unsupported map phases, unsafe paths, damaged 3DS records and maps
@@ -295,3 +388,13 @@ removed. Reimport the source archive to regenerate these meshes; the streaming c
 also applies to existing generated maps with the standard per-tile file layout.
 In-game GPU usage, visual distance transitions and frame rate still need validation
 on a graphics adapter; conversion RAM measurements above do not measure VRAM.
+
+## Validation boundaries
+
+Synthetic fixtures cover the permission gate (accepted/refused/absent/conflicting),
+all-selected-map preflight, copied-config revalidation, source preservation, staging
+cleanup after conversion failure, attribution bytes, OI references and decoding,
+prefab transforms and source AI export. No original map or stock asset is committed.
+Real user archives without the declaration are intentionally blocked; the converter
+does not add it to run a test. PBSU loading, a real Windows CLI execution, GPU memory,
+night lighting and AI/boarding behavior in-game still require runtime validation.

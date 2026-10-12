@@ -28,6 +28,8 @@ pub mod flags;
 pub mod lang;
 mod keywords;
 pub mod number;
+pub mod oi;
+pub mod par;
 pub mod panic_guard;
 pub mod vfs;
 pub mod install_search;

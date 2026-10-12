@@ -157,7 +157,7 @@ pub(super) fn list_folder(dir: &Path, job: &Job) -> Result<(Vec<Entry>, Vec<Path
     let mut entries = Vec::with_capacity(found.len());
     let mut paths = Vec::with_capacity(found.len());
     for (index, (rel, size, p)) in found.into_iter().enumerate() {
-        entries.push(Entry { rel, size, index, proton_base: None });
+        entries.push(Entry { rel, size, index, proton_authorization: None, proton_base: None });
         paths.push(p);
     }
     Ok((entries, paths, refused))
@@ -203,7 +203,7 @@ pub(super) fn list_zip(z: &mut zip::ZipArchive<std::io::BufReader<std::fs::File>
         if !supported {
             *unsupported.entry(format!("{method:?}")).or_default() += 1;
         }
-        out.push(Entry { rel, size: f.size(), index: i, proton_base: None });
+        out.push(Entry { rel, size: f.size(), index: i, proton_authorization: None, proton_base: None });
     }
     job.files_done.store(0, Ordering::Relaxed);
     if encrypted > 0 {

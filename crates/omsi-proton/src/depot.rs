@@ -8,9 +8,9 @@ use std::{
 };
 
 /// Generated HOF kept with the map; the installer also publishes it in shared HOFs/.
-pub const FILE: &str = "proton-import/depot.hof";
+pub const FILE: &str = "proton-import/depot.hofoi";
 /// Display name of the shared HOF, used by map-specific depot selection.
-pub const NAME_FILE: &str = "proton-import/depot.txt";
+pub const NAME_FILE: &str = "proton-import/depot.cfgoi";
 
 /// Portable, map-specific name: no source path is interpolated into shared HOFs/.
 pub fn name(installed: &str) -> String {
@@ -22,14 +22,9 @@ pub fn name(installed: &str) -> String {
 
 /// Read the small display-name hint without loading all HOF destinations.
 pub fn installed_name(dir: &Path) -> Option<String> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    std::fs::File::open(dir.join(NAME_FILE))
-        .ok()?
-        .take(1025)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    let name = String::from_utf8(bytes).ok()?;
+    let file = dir.join(NAME_FILE);
+    if omsi_cfg::vfs::file_size(&file)? > 4096 { return None; }
+    let name = omsi_cfg::vfs::read_text(&file).ok()?;
     (!name.is_empty() && name.len() <= 1024 && !name.chars().any(char::is_control)).then_some(name)
 }
 
@@ -91,7 +86,7 @@ pub(crate) fn export(
         "{} (Proton Bus)",
         installed.trim_start_matches("maps/Proton-")
     ))?;
-    let mut out = BufWriter::new(std::fs::File::create(dir.join(FILE))?);
+    let mut out = BufWriter::new(std::fs::File::create(dir.join("proton-import/depot.hof"))?);
     out.write_all(&[0xff, 0xfe])?;
     write(
         &mut out,
@@ -121,7 +116,7 @@ pub(crate) fn export(
     }
     write(&mut out, "[end]\n")?;
     out.flush()?;
-    std::fs::write(dir.join(NAME_FILE), &depot)?;
+    std::fs::write(dir.join("proton-import/depot.txt"), &depot)?;
     report.destinations_imported = destinations.len();
     Ok(())
 }

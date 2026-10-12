@@ -22,7 +22,9 @@ impl ImportMemory {
         let sizes = tiles
             .iter()
             .map(|(x, y, _)| {
-                let bytes = omsi_cfg::vfs::file_size(&models.join(format!("tile_{x}_{y}.o3d")))?;
+                let oi = models.join(format!("tile_{x}_{y}.o3doi"));
+                let bytes = if omsi_cfg::vfs::is_file(&oi) { omsi_cfg::oi::file_payload_size(&oi)? }
+                    else { omsi_cfg::vfs::file_size(&models.join(format!("tile_{x}_{y}.o3d")))? };
                 // O3D v3 stores the same 32-byte vertices and slightly larger triangles than
                 // the GPU. Include terrain and allocation slack; no meshes need decoding.
                 Some((

@@ -76,7 +76,7 @@ impl World {
             let list: Vec<String> = text
                 .lines()
                 .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty() && l.to_ascii_lowercase().ends_with(".sco"))
+                .filter(|l| !l.is_empty() && (l.to_ascii_lowercase().ends_with(".sco") || l.to_ascii_lowercase().ends_with(".oscoi")))
                 .collect();
             log::info!("{filename}: {} parked car types", list.len());
             g.insert(index, list);
@@ -307,7 +307,7 @@ impl ObjectType {
         let generated = path.parent().and_then(Path::file_name)
             == Some(std::ffi::OsStr::new("proton-import"))
             && path.file_name().and_then(|s| s.to_str()).is_some_and(|s| {
-                s.starts_with("tile_") && s.ends_with("_collision.sco")
+                s.starts_with("tile_") && (s.ends_with("_collision.sco") || s.ends_with("_collision.oscoi"))
             });
         if generated { self.collision.as_ref() } else { None }
     }

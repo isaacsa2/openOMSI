@@ -6,7 +6,11 @@ const KIND: &str = "Proton Bus map (basic free-driving import)";
 /// Read only small configuration files while planning, never meshes or textures.
 pub(super) fn read_layouts(source: &mut Source, entries: &mut [Entry], job: &Job) -> Result<()> {
     for entry in entries {
-        if !entry.rel.to_ascii_lowercase().ends_with(".map.txt") || entry.size > 64 * 1024 {
+        if !entry.rel.to_ascii_lowercase().ends_with(".map.txt") {
+            continue;
+        }
+        if entry.size > 64 * 1024 {
+            entry.proton_authorization = Some(Err("map configuration exceeds 64 KiB; conversion blocked".into()));
             continue;
         }
         if job.cancelled() {
@@ -26,6 +30,21 @@ pub(super) fn read_layouts(source: &mut Source, entries: &mut [Entry], job: &Job
             }
         }
         entry.proton_base = omsi_proton::base_dir(&data).ok();
+        entry.proton_authorization = Some(omsi_proton::permission::validate(&data).map_err(|e| e.to_string()));
+    }
+    Ok(())
+}
+
+/// Validate every selected source map before creating a staging/output directory.
+pub(super) fn validate_selected(plan: &Plan, entries: &[Entry]) -> Result<()> {
+    for map in plan.maps.iter().filter(|m| m.what == KIND) {
+        let config = map.files.iter().find(|(_, p)| p.to_ascii_lowercase().ends_with(".map.txt"))
+            .and_then(|(i, _)| entries.get(*i)).context("missing source map declaration")?;
+        match &config.proton_authorization {
+            Some(Ok(())) => {},
+            Some(Err(message)) => return Err(anyhow!("{}: {message}", config.rel)),
+            None => return Err(anyhow!("{}: conversion blocked: missing validated [openomsi] allowConversion=1 declaration", config.rel)),
+        }
     }
     Ok(())
 }
@@ -60,7 +79,7 @@ pub(super) fn plan_at(
     if node
         .files
         .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("global.cfg"))
+        .any(|(name, _)| name.eq_ignore_ascii_case("global.cfg") || name.eq_ignore_ascii_case(omsi_cfg::oi::GLOBAL))
     {
         return false;
     }
@@ -103,7 +122,7 @@ pub(super) fn plan_at(
         if stem.is_empty() || stem.contains(['\r', '\n']) {
             continue;
         }
-        let (files, bytes) = if let Some((base_name, base)) = base {
+        let (mut files, mut bytes) = if let Some((base_name, base)) = base {
             let (mut files, bytes) = collect(base, &join(path, &base_name), entries);
             for (_, rel) in &mut files {
                 *rel = join(&base_name, rel);
@@ -115,6 +134,22 @@ pub(super) fn plan_at(
         } else {
             continue;
         };
+        // Package-level attribution is outside baseDir in many original archives.
+        for (name, index) in &node.files {
+            if attribution(name) && !files.iter().any(|(i, _)| i == index) {
+                files.push((*index, name.clone()));
+                bytes = bytes.saturating_add(entries[*index].size);
+            }
+        }
+        for (name, folder) in &node.dirs {
+            if attribution(name) {
+                let (docs, size) = collect(folder, &join(path, name), entries);
+                for (index, rel) in docs {
+                    if !files.iter().any(|(i, _)| *i == index) { files.push((index, join(name, &rel))); }
+                }
+                bytes = bytes.saturating_add(size);
+            }
+        }
         used.extend(files.iter().map(|f| f.0));
         plan.maps.push(Mapping {
             src: path.to_string(),
@@ -127,9 +162,14 @@ pub(super) fn plan_at(
         found = true;
     }
     if found {
-        plan.warnings.push("Proton Bus preview support: scenery, GPS, bus stops, native passengers, authored vehicle/pedestrian paths and signal cycles. Native vehicles and humans must be installed. Timetables and Proton vehicle mods are not imported.".into());
+        plan.warnings.push("Proton Bus preview support: scenery, GPS, bus stops, native passengers, authored vehicle/pedestrian paths and signal cycles. Native humans must be installed. Source static AI models or missing categories from installed Grundorf are used; timetables and drivable Proton buses are not imported.".into());
     }
     found
+}
+
+fn attribution(name: &str) -> bool {
+    let name = name.to_lowercase();
+    ["license", "licence", "licença", "licenca", "credit", "crédito", "copyright", "readme", "author", "autor"].iter().any(|tag| name.contains(tag))
 }
 
 pub(super) fn extra_space(plan: &Plan) -> u64 {
@@ -150,6 +190,13 @@ pub(super) fn check_mode(plan: &Plan, mode: InstallMode) -> Result<()> {
 }
 
 pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> {
+    // Folder sources can change after planning. Recheck every copied declaration
+    // before converting the first map, not only when each map is reached.
+    for (i, m) in plan.maps.iter().enumerate().filter(|(_, m)| m.what == KIND) {
+        let config = m.files.iter().find(|(_, p)| p.to_ascii_lowercase().ends_with(".map.txt"))
+            .context("missing original map configuration")?;
+        omsi_proton::permission::validate_file(&staging.join(i.to_string()).join(&config.1))?;
+    }
     let shared = staging.join(plan.maps.len().to_string());
     let mut hofs = Vec::new();
     let mut hof_bytes = 0;
@@ -168,7 +215,7 @@ pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> 
             return Err(anyhow!(Cancelled));
         }
         let report = report.with_context(|| format!("converting {}", m.dest))?;
-        let filename = format!("{}.hof", omsi_proton::depot::name(&m.dest));
+        let filename = format!("{}.hofoi", omsi_proton::depot::name(&m.dest));
         std::fs::create_dir_all(&shared)?;
         hof_bytes += std::fs::copy(
             staging.join(i.to_string()).join(omsi_proton::depot::FILE),
@@ -183,6 +230,7 @@ pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> 
             ));
             p.report.push(format!("{}: {} bus stops, {} traffic segments, {} pedestrian segments, {} signal programs and {} controlled paths", m.dest, report.stops_imported, report.traffic_segments_imported, report.pedestrian_segments_imported, report.signals_imported, report.signal_paths_imported));
             p.report.push(format!("{}: shared HOF with {} textual destinations (generated codes); no timetable or ordered line stops inferred", m.dest, report.destinations_imported));
+            p.report.push(format!("{}: {} prefab instances and {} source AI types imported; OI package for OpenOMSI", m.dest, report.prefabs_imported, report.ai_vehicles_imported));
             p.warnings.extend(report.warnings);
         });
     }

@@ -58,7 +58,7 @@ fn supplied_generated_gameplay_when_available() {
     let Some(dir) = std::env::var_os("PROTON_GENERATED_MAP").map(PathBuf::from) else {
         return;
     };
-    let global = GlobalCfg::load(&dir.join("global.cfg")).unwrap();
+    let global = GlobalCfg::load(&omsi_cfg::oi::global_path(&dir)).unwrap();
     let mut controlled = 0;
     let mut sidewalks = 0;
     let mut stops = 0;
@@ -67,6 +67,7 @@ fn supplied_generated_gameplay_when_available() {
         let tile = omsi_map::Tile::load(&dir.join(t.file)).unwrap();
         if std::env::var_os("PROTON_VERIFY_GEOMETRY").is_some() {
             let file = dir.join(format!("proton-import/model/tile_{}_{}.o3d", t.x, t.y));
+            let file = if file.is_file() { file } else { file.with_extension("o3doi") };
             let mesh = omsi_o3d::load_mesh(&file).unwrap();
             assert!(mesh
                 .vertices

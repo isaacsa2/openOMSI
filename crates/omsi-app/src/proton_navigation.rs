@@ -88,7 +88,9 @@ mod tests {
         .unwrap();
         std::fs::write(dir.join("tile_0_0.map"), "[version]\n14\n").unwrap();
         let file = dir.join(omsi_proton::navigation::FILE);
-        std::fs::write(&file,br#"{"version":1,"routes":[],"roads":[{"name":"main.txt","points":[[10,20,7],[30,40,8]]}]}"#).unwrap();
+        let raw = dir.join("navigation-source");
+        std::fs::write(&raw,br#"{"version":1,"routes":[],"roads":[{"name":"main.txt","points":[[10,20,7],[30,40,8]]}]}"#).unwrap();
+        omsi_cfg::oi::encode_file(&raw, &file, omsi_cfg::oi::Kind::Navigation).unwrap();
         let world = crate::scene::World::open(&dir, &dir.join("global.cfg"), 20261001).unwrap();
         let map = world.navigation_map();
         assert_eq!(map.lanes.len(), 1);

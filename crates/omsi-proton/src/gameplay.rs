@@ -355,6 +355,9 @@ pub(crate) fn export(
                     },
                     s.rule.speed
                 ));
+                if !s.rule.cars {
+                    rules.push_str(&format!("[rule]\n{index}\nno_cars\n1\n0\n"));
+                }
                 if s.rule.buses {
                     rules.push_str(&format!("[rule]\n{index}\nbus\n1\n0\n"));
                 }
@@ -469,6 +472,7 @@ mod tests {
             speed: 40.0,
             turn: 2,
             buses: false,
+            cars: true,
             density: 1.0,
         };
         let paths = vec![DrivePath {
@@ -494,6 +498,7 @@ mod tests {
             speed: 40.0,
             turn: 0,
             buses: false,
+            cars: true,
             density: 1.0,
         };
         let paths = vec![DrivePath {

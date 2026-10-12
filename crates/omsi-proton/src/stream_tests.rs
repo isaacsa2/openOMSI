@@ -84,12 +84,12 @@ fn map_import_repairs_only_non_finite_uvs_and_keeps_strict_3ds_readers() {
     assert_eq!(report.warnings.len(), 1);
     assert!(report.warnings[0].contains("road.3ds"));
     assert!(report.warnings[0].contains("object \"road\""));
-    for tile in omsi_map::GlobalCfg::load(&f.0.join("global.cfg"))
+    for tile in omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL))
         .unwrap()
         .tiles
     {
         let mesh = omsi_o3d::load_mesh(&f.0.join(format!(
-            "proton-import/model/tile_{}_{}.o3d",
+            "proton-import/model/tile_{}_{}.o3doi",
             tile.x, tile.y
         )))
         .unwrap();
@@ -287,7 +287,7 @@ fn blender_records_forward_materials_uv_mapping_and_utf8_names_are_recognised() 
     std::fs::create_dir_all(temp.0.join("assets/textures")).unwrap();
     std::fs::write(
         temp.0.join("Demo.map.txt"),
-        "[map]\nbaseDir=assets\nmodelsDir=m\ntextures=textures\nmapModVersion=4\n",
+        "[map]\nbaseDir=assets\nmodelsDir=m\ntextures=textures\nmapModVersion=4\n\n[openomsi]\nallowConversion=1\n",
     )
     .unwrap();
     std::fs::write(temp.0.join("assets/tiles/m/road.3ds"), &bytes).unwrap();
@@ -412,7 +412,7 @@ fn cancelling_a_map_import_removes_the_spool_without_publishing_a_manifest() {
     std::fs::create_dir_all(temp.0.join("assets/tiles/m")).unwrap();
     std::fs::write(
         temp.0.join("Demo.map.txt"),
-        "[map]\nbaseDir=assets\nmodelsDir=m\nmapModVersion=4\n",
+        "[map]\nbaseDir=assets\nmodelsDir=m\nmapModVersion=4\n\n[openomsi]\nallowConversion=1\n",
     )
     .unwrap();
     std::fs::write(temp.0.join("assets/tiles/m/road.3ds"), model()).unwrap();
@@ -430,5 +430,5 @@ fn cancelling_a_map_import_removes_the_spool_without_publishing_a_manifest() {
     .unwrap_err();
     assert!(format!("{error:#}").contains("cancelled"));
     assert!(!temp.0.join("proton-import/work").exists());
-    assert!(!temp.0.join("global.cfg").exists());
+    assert!(!temp.0.join(omsi_cfg::oi::GLOBAL).exists());
 }

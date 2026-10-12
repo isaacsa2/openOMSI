@@ -414,13 +414,47 @@ pub fn archive_of(path: &Path) -> Option<PathBuf> {
 
 /// Read a whole file, from a folder, a mounted archive or a sealed store.
 pub fn read(path: &Path) -> io::Result<Vec<u8>> {
-    if let Some((m, key)) = sealed::locate(path) {
-        return m.read(&key);
+    let bytes = if let Some((m, key)) = sealed::locate(path) { m.read(&key)? }
+        else { match locate(path) { Some((m, key)) => m.read(&key)?, None => std::fs::read(path)? } };
+    crate::oi::decode(path, bytes)
+}
+
+/// Read an undecoded file prefix for OI size estimates, using bounded ZIP buffers.
+/// Full file reads still validate the archive CRC and OI payload separately.
+pub(crate) fn raw_prefix(path: &Path, size: usize) -> io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    if sealed::locate(path).is_some() {
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "sealed prefix unavailable"));
     }
-    match locate(path) {
-        Some((m, key)) => m.read(&key),
-        None => std::fs::read(path),
+    if let Some((archive, key)) = locate(path) {
+        let entry = archive.entries.get(&key).ok_or_else(|| bad("missing ZIP entry"))?;
+        if entry.flags & 1 != 0 || entry.compressed > MAX_ENTRY || entry.size > MAX_ENTRY {
+            return Err(bad("unsupported ZIP prefix"));
+        }
+        let local = archive.read_at(entry.header, 30)?;
+        if le32(&local, 0) != 0x0403_4b50 { return Err(bad("bad ZIP local header")); }
+        let at = entry.header + 30 + le16(&local, 26) as u64 + le16(&local, 28) as u64;
+        struct Packed<'a> { archive: &'a ZipArchive, at: u64, remaining: u64 }
+        impl Read for Packed<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let n = self.remaining.min(buf.len().min(8192) as u64) as usize;
+                if n == 0 { return Ok(0); }
+                let bytes = self.archive.read_at(self.at, n)?;
+                buf[..n].copy_from_slice(&bytes);
+                self.at += n as u64; self.remaining -= n as u64;
+                Ok(n)
+            }
+        }
+        let packed = Packed { archive: &archive, at, remaining: entry.compressed };
+        match entry.method {
+            0 => packed.take(size as u64).read_to_end(&mut out)?,
+            8 => flate2::read::DeflateDecoder::new(packed).take(size as u64).read_to_end(&mut out)?,
+            _ => return Err(bad("unsupported ZIP compression")),
+        };
+    } else {
+        std::fs::File::open(path)?.take(size as u64).read_to_end(&mut out)?;
     }
+    Ok(out)
 }
 
 /// Read a text file with OMSI's encoding rules.
@@ -603,6 +637,26 @@ mod tests {
         out.extend_from_slice(&cd_offset.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes());
         std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn oi_mesh_estimates_read_only_a_prefix_in_stored_and_deflated_archives() {
+        let dir = std::env::temp_dir().join(format!("oi-zip-prefix-{}",std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source"); let oi = dir.join("mesh.o3doi");
+        let payload = vec![42;1024*1024]; std::fs::write(&source,&payload).unwrap();
+        crate::oi::encode_file(&source,&oi,crate::oi::Kind::Mesh).unwrap();
+        let data = std::fs::read(&oi).unwrap();
+        let zip = dir.join("oi.zip");
+        write_zip(&zip,&[("maps/Town/a.o3doi",data.clone(),false),("maps/Town/b.o3doi",data,true)]);
+        let mount = mount_zip(&zip).unwrap();
+        for name in ["a.o3doi","b.o3doi"] {
+            let file = mount.join("maps/Town").join(name);
+            assert_eq!(crate::oi::file_payload_size(&file),Some(payload.len() as u64));
+            assert_eq!(raw_prefix(&file,crate::oi::HEADER_SIZE).unwrap().len(),crate::oi::HEADER_SIZE);
+            assert_eq!(read(&file).unwrap(),payload);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

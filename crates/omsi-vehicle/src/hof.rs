@@ -267,7 +267,7 @@ pub fn depot_files(dir: &Path) -> Vec<PathBuf> {
     let mut local: Vec<PathBuf> = Vec::new();
     for d in omsi_cfg::mirrored_dirs(dir) {
         for p in omsi_cfg::vfs::read_dir_paths(&d) {
-            if !p.extension().map(|e| e.eq_ignore_ascii_case("hof")).unwrap_or(false) {
+            if !p.extension().map(|e| e.eq_ignore_ascii_case("hof") || e.eq_ignore_ascii_case("hofoi")).unwrap_or(false) {
                 continue;
             }
             if seen.insert(p.file_name().unwrap_or_default().to_string_lossy().to_ascii_lowercase()) {
@@ -279,7 +279,7 @@ pub fn depot_files(dir: &Path) -> Vec<PathBuf> {
 
     let mut shared: Vec<PathBuf> = omsi_cfg::read_dir_merged("HOFs")
         .into_iter()
-        .filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("hof")).unwrap_or(false))
+        .filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("hof") || e.eq_ignore_ascii_case("hofoi")).unwrap_or(false))
         .filter(|p| seen.insert(p.file_name().unwrap_or_default().to_string_lossy().to_ascii_lowercase()))
         .collect();
     shared.sort_by_key(|f| f.file_name().unwrap_or_default().to_string_lossy().to_ascii_lowercase());

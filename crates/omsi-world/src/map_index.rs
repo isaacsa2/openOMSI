@@ -430,6 +430,9 @@ fn spline_cover(tile: &Tile, origin: DVec2) -> [f64; 4] {
 /// object editor saved as a copy in the content folder, which has only the tile itself -
 /// in the same map folder under the other content roots.
 pub fn tile_companion(path: &Path, ext: &str) -> PathBuf {
+    if omsi_cfg::oi::kind(path) == Some(omsi_cfg::oi::Kind::Tile) && ext == ".terrain" {
+        return path.with_extension("terrainoi");
+    }
     // a copy in a content root before the installation's (the editor's ground, a mod's)
     if let (Some(dir), Some(name)) = (path.parent(), path.file_name()) {
         let p = omsi_cfg::resolve_path(dir, &format!("{}{}", name.to_string_lossy(), ext));

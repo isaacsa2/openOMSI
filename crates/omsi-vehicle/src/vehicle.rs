@@ -81,6 +81,8 @@ pub struct Vehicle {
     pub friendly_name_inv: Vec<String>,
     pub description: String,
     pub ai_veh_type: i32,
+    /// Optional cruise cap for imported OI traffic; native definitions keep None.
+    pub imported_ai_speed_kmh: Option<f32>,
     pub number_file: Option<String>,
     /// `[registration_automatic]`: prefix and postfix around the fleet number.
     pub registration_automatic: Option<(String, String)>,
@@ -279,7 +281,7 @@ impl Vehicle {
     }
 
     pub fn parse(file: &CfgFile) -> Vehicle {
-        let is_ovh = file.path.extension().map(|e| e.eq_ignore_ascii_case("ovh")).unwrap_or(false);
+        let is_ovh = file.path.extension().map(|e| e.eq_ignore_ascii_case("ovh") || e.eq_ignore_ascii_case("ovhoi")).unwrap_or(false);
         let mut v = Vehicle { path: file.path.clone(), kind: if is_ovh { VehicleKind::Other(0) } else { VehicleKind::Bus }, mass: 1000.0, ..Default::default() };
         let base = file.dir().to_path_buf();
         let mut r = file.reader().disabled_blocks();

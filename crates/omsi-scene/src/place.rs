@@ -472,7 +472,9 @@ impl World {
         Some(Prepared {
             tx,
             ty,
-            terrain: Some(build_terrain_mesh(terrain)),
+            // Imported geometry supplies the visible ground. Keep the fallback
+            // height field for CPU probes without drawing grass far below the map.
+            terrain: (omsi_cfg::oi::kind(&st.path) != Some(omsi_cfg::oi::Kind::Tile)).then(|| build_terrain_mesh(terrain)),
             hole_walls: MeshData::default(),
             paint_masks: self.load_ground_paint(&st.path),
             paint: Vec::new(),

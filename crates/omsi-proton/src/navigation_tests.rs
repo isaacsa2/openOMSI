@@ -23,7 +23,7 @@ fn config(f: &Fixture, folder: &str, name: &str, contents: &str) {
 }
 
 fn nav(f: &Fixture) -> Navigation {
-    Navigation::from_bytes(&std::fs::read(f.0.join(crate::navigation::FILE)).unwrap()).unwrap()
+    Navigation::from_bytes(&omsi_cfg::vfs::read(&f.0.join(crate::navigation::FILE)).unwrap()).unwrap()
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn phase_31_gps_roads_and_night_lights_survive_conversion_without_helper_meshes(
     setup(&f);
     std::fs::write(
         f.0.join("Town.map.txt"),
-        "[map]\nbaseDir=Town\nmodelsDir=0x0\nmapModVersion=3.1\n",
+        "[map]\nbaseDir=Town\nmodelsDir=0x0\nmapModVersion=3.1\n\n[openomsi]\nallowConversion=1\n",
     )
     .unwrap();
     add_objects(
@@ -71,7 +71,7 @@ fn phase_31_gps_roads_and_night_lights_survive_conversion_without_helper_meshes(
         data.roads[0].points,
         vec![[310.0, 22.0, 8.0], [299.0, 10.0, 7.0], [310.0, 22.0, 8.0]]
     );
-    let sco = omsi_scenery::SceneryObject::load(&f.0.join("proton-import/tile_1_0.sco")).unwrap();
+    let sco = omsi_scenery::SceneryObject::load(&f.0.join("proton-import/tile_1_0.oscoi")).unwrap();
     assert_eq!(sco.map_lights.len(), 1);
     assert_eq!(sco.map_lights[0].pos, [0.0, 11.0, 7.0]);
     assert_eq!(sco.map_lights[0].radius, 5.0);
@@ -86,7 +86,7 @@ fn phase_31_gps_roads_and_night_lights_survive_conversion_without_helper_meshes(
     assert_eq!(glow.values[0], 0.4);
     assert_eq!(glow.values[2], 2.0, "no additional fog halo");
     assert_eq!(
-        std::fs::read(f.0.join("proton-import/texture").join(texture)).unwrap(),
+        omsi_cfg::vfs::read(&f.0.join("proton-import/texture").join(texture)).unwrap(),
         [0],
         "the emitted texture reference must resolve to the copied source"
     );
@@ -116,7 +116,7 @@ fn numbered_3d_road_markers_remain_disconnected_at_gaps_and_keep_lookalikes() {
     );
     // The artificial boxes have the same centre; make successive markers distinct.
     let file = f.0.join("Town/tiles/0x0/road.3ds");
-    let mut model = crate::three_ds::parse(&std::fs::read(&file).unwrap()).unwrap();
+    let mut model = crate::three_ds::parse(&omsi_cfg::vfs::read(&file).unwrap()).unwrap();
     let mut edit = Vec::new();
     for (i, object) in model.objects.iter_mut().enumerate() {
         let mut positions = (object.positions.len() as u16).to_le_bytes().to_vec();

@@ -10,13 +10,13 @@ pub(crate) fn load(
 ) -> Option<Arc<Navigation>> {
     let dir = tiles.first()?.2.parent()?;
     let file = dir.join(omsi_proton::navigation::FILE);
-    let meta = std::fs::metadata(&file).ok()?;
+    let bytes = omsi_cfg::vfs::file_size(&file)?;
     let read = || -> anyhow::Result<Navigation> {
         anyhow::ensure!(
-            meta.len() <= omsi_proton::navigation::MAX_BYTES as u64,
+            bytes <= omsi_proton::navigation::MAX_BYTES as u64 + omsi_cfg::oi::HEADER_SIZE as u64,
             "navigation data exceeds budget"
         );
-        Navigation::from_bytes(&std::fs::read(&file)?)
+        Navigation::from_bytes(&omsi_cfg::vfs::read(&file)?)
     };
     let data = match read() {
         Ok(data) => data,

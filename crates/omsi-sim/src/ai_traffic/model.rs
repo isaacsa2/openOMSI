@@ -88,6 +88,7 @@ pub struct AiCar {
     pub exit_wait: bool,
     /// Stopped by a red light this frame.
     pub light_hold: bool,
+    pub since_player_at_light: f32,
     /// Junction lanes this car has claimed to drive through (`TPathInfo::reservePaths`).
     pub reserved: Vec<usize>,
     /// The light (controller, lamp) the driver decided to pass on yellow.
@@ -545,6 +546,9 @@ impl TrafficSim {
         } else {
             100.0
         };
+        if let Some(limit) = ty.def.imported_ai_speed_kmh {
+            state.max_speed_kmh = state.max_speed_kmh.min(limit);
+        }
         // lorries and vans take bends more gently than cars
         state.lat_accel = if kind == LaneKind::Air {
             50.0
@@ -635,6 +639,7 @@ impl TrafficSim {
             yielding: false,
             exit_wait: false,
             light_hold: false,
+            since_player_at_light: f32::MAX,
             reserved: Vec::new(),
             amber: None,
             amber_start: false,

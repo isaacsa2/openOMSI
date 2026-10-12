@@ -12,7 +12,7 @@ pub const MAP_POPULATION_FACTOR: f32 = 8.0;
 
 
 pub fn street_lane_weight(l: &crate::traffic::Lane) -> Option<f64> {
-    (l.kind == LaneKind::Street && !l.no_cars && l.density > 0.0 && l.length() >= 8.0)
+    (l.kind == LaneKind::Street && (!l.no_cars || l.rule_bus || l.rule_trucks) && l.density > 0.0 && l.length() >= 8.0)
         .then(|| l.length() as f64 * l.density.clamp(0.05, 4.0) as f64)
 }
 
@@ -32,7 +32,8 @@ impl TrafficSim {
                 let d = &mut self.dormant[i];
                 let lane = &self.net.lanes[d.lane];
                 // (waits at lights and junctions taken as a quarter off the speed limit)
-                d.speed = (lane.speed_limit_kmh.min(60.0) / 3.6 * 0.75).max(2.0);
+                let cap = d.ty.def.imported_ai_speed_kmh.unwrap_or(60.0);
+                d.speed = (lane.speed_limit_kmh.min(cap).min(60.0) / 3.6 * 0.75).max(2.0);
                 d.s += d.speed * dt;
                 let mut guard = 0;
                 while d.s > self.net.lanes[d.lane].length() && guard < 32 {
@@ -200,5 +201,21 @@ impl TrafficSim {
     /// seed and paint, where it has got to, at about its speed. Its id.
     pub fn wake(&mut self, d: DormantCar, vehicle: VehicleInstance) -> u64 {
         self.place_car(vehicle, d.kind, d.lane, d.s, d.ty, d.seed, d.scheme, Some(d.id), Some(d.speed), None)
+    }
+}
+
+#[cfg(test)]
+mod imported_tests {
+    #[test]
+    fn bus_only_roads_can_spawn_allowed_traffic_but_closed_roads_cannot() {
+        use glam::DVec3;
+        let mut lane = crate::traffic::LaneBuilder::arc(DVec3::ZERO,0.0,30.0,0.0,0.0,crate::traffic::LaneKind::Street,3.5);
+        lane.no_cars = true;
+        assert!(super::street_lane_weight(&lane).is_none());
+        lane.rule_bus = true;
+        assert!(super::street_lane_weight(&lane).is_some());
+        assert!(!lane.allows(0)); assert!(lane.allows(2));
+        lane.density = 0.0;
+        assert!(super::street_lane_weight(&lane).is_none());
     }
 }

@@ -166,7 +166,7 @@ pub fn omsi_options(root: &Path) -> Option<OmsiOptions> {
     let mut v = json!({});
     let num = |k: &str| o.str(k).and_then(|x| x.trim().replace(',', ".").parse::<f64>().ok()).filter(|x| x.is_finite());
     // (not on a phone: the PC's OMSI caps at 30, and a phone played at 30 frames)
-    if let Some(x) = num("maxfps").filter(|_| !cfg!(target_os = "android")) {
+    if let Some(x) = num("maxfps").filter(|_| !cfg!(any(target_os = "android", target_os = "ios"))) {
         v["max_fps"] = json!(x.max(0.0) as i64);
     }
     if let Some(x) = num("performance_minobjsize") {
@@ -239,6 +239,65 @@ pub fn save_config(c: &Config) -> Result<()> {
     // the launcher was restarted, however often it was chosen and saved again
     *FOUND.lock().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(())
+}
+
+/// The OMSI 2 folder the launcher works with (configured or found).
+pub fn root_dir() -> Result<PathBuf> {
+    root()
+}
+
+/// The game program a duty is started with (see `find_game`).
+pub fn game_binary() -> Option<PathBuf> {
+    find_game(&load_config().game)
+}
+
+/// Where a content path (`maps/Grundorf/picture.jpg`) is: the content folder and the
+/// archives first, then the OMSI 2 folder.
+pub fn content_path(rel: &str) -> Result<PathBuf> {
+    resolve_content(rel)
+}
+
+/// The depot file a bus uses on `map` on `date`: the one the map's own buses use that day
+/// (the chrono scenarios change it: Berlin's 1994 depot has line 137 where 1986's had 92),
+/// one of the bus's carrying the line driven, the bus's own of that name or one named like
+/// the map, else the bus's first (#896).
+pub fn default_hof(map: Option<&MapInfo>, bus: Option<&VehicleInfo>, date: &str, line: Option<&str>) -> String {
+    let on_date = map.and_then(|m| {
+        let dir = resolve_content(&m.file).ok()?;
+        omsi_map::ailists::depot_hof_on(dir.parent()?, omsi_map::ailists::date_code(date)?)
+    });
+    let want = on_date.or_else(|| map.map(|m| m.hof.clone())).unwrap_or_default();
+    let Some(v) = bus else { return want };
+    let names: Vec<&str> = v.hofs.iter().map(|h| h.as_str()).collect();
+    let like = |hints: &[&str]| omsi_vehicle::hof::closest_name(&names, hints).map(|i| v.hofs[i].clone());
+    let map_hints: Vec<String> = map.map(|m| vec![m.name.clone(), m.friendly.clone(), m.file.trim_end_matches("/global.cfg").rsplit('/').next().unwrap_or("").to_string()]).unwrap_or_default();
+    let map_hints: Vec<&str> = map_hints.iter().map(|h| h.as_str()).collect();
+    let with_line = match (line, root()) {
+        (Some(line), Ok(r)) => depot_names_with_line(&r, &v.file, line),
+        _ => Vec::new(),
+    };
+    // (not over the map's own depot borrowed from elsewhere when it carries the line: a bus
+    // without it took a depot of its folder that had a line of the same number - the map's was
+    // no longer given to a bus that lacks it, #1837)
+    let map_depot_has_line = match (line, want.is_empty()) {
+        (Some(line), false) => depot_has_line(&want, line) == Some(true),
+        _ => false,
+    };
+    if !with_line.is_empty() && !map_depot_has_line && !with_line.iter().any(|h| h.eq_ignore_ascii_case(&want)) {
+        let names: Vec<&str> = with_line.iter().map(|h| h.as_str()).collect();
+        let hints: Vec<&str> = std::iter::once(want.as_str()).chain(map_hints.iter().copied()).collect();
+        let pick = omsi_vehicle::hof::closest_name(&names, &hints).unwrap_or(0);
+        return with_line[pick].clone();
+    }
+    v.hofs
+        .iter()
+        .find(|h| h.eq_ignore_ascii_case(&want))
+        .cloned()
+        .or_else(|| like(&[want.as_str()]))
+        .or(Some(want.clone()).filter(|w| !w.is_empty()))
+        .or_else(|| like(&map_hints))
+        .or_else(|| v.hofs.first().cloned())
+        .unwrap_or_default()
 }
 
 fn root() -> Result<PathBuf> {
@@ -648,7 +707,9 @@ pub fn poll() -> Result<Poll> {
     let content = content_dir();
     let started = content.as_deref().map(watch_inbox).unwrap_or_default();
     let stamp = index::content_stamp(&bases(), content.as_ref().map(|c| c.join("Mods")).as_deref());
-    Ok(Poll { stamp, jobs: install::jobs(), instances: instances::list(), started })
+    // (only the games still running: an ended one stays listed a while for its log, not as running)
+    let running = instances::list().into_iter().filter(|i| i.running).collect();
+    Ok(Poll { stamp, jobs: install::jobs(), instances: running, started })
 }
 
 // ---------------------------------------------------------------------------------------
@@ -681,10 +742,10 @@ pub fn list_maps() -> Result<Vec<MapInfo>> {
     let mut keys = Vec::new();
     for (folder, dirs) in merged_folders("maps") {
         // a map is one folder: the first copy that has a global.cfg
-        let Some(d) = dirs.into_iter().find(|d| omsi_cfg::vfs::is_file(&d.join("global.cfg"))) else { continue };
+        let Some(d) = dirs.into_iter().find(|d| omsi_cfg::vfs::is_file(&omsi_cfg::oi::global_path(&d))) else { continue };
         let key = format!("map|{lang}|{}", d.display());
-        let mut stamped = vec![d.clone(), d.join("global.cfg"), d.join("ailists.cfg"), d.join(omsi_proton::depot::NAME_FILE)];
-        stamped.extend(dsc_candidates(&d.join("global.cfg"), lang));
+        let mut stamped = vec![d.clone(), omsi_cfg::oi::global_path(&d), d.join("ailists.cfg"), d.join(omsi_proton::depot::NAME_FILE)];
+        stamped.extend(dsc_candidates(&omsi_cfg::oi::global_path(&d), lang));
         let stamp = index::files_stamp(&stamped);
         keys.push(key.clone());
         let info: Option<MapInfo> = index::cached(&key, stamp, || (read_map(&d, &folder, lang), Vec::new()));
@@ -714,15 +775,15 @@ fn log_empty(rel: &str, what: &str) {
 }
 
 fn read_map(d: &Path, folder: &str, lang: &str) -> Option<MapInfo> {
-    let g = match omsi_map::GlobalCfg::load(&d.join("global.cfg")) {
+    let g = match omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(&d)) {
         Ok(g) => g,
         Err(e) => {
-            log_line(&format!("maps: {} cannot be read ({e:#}) - not listed", d.join("global.cfg").display()));
+            log_line(&format!("maps: {} cannot be read ({e:#}) - not listed", omsi_cfg::oi::global_path(&d).display()));
             return None;
         }
     };
     // `global_ENG.dsc` (the language of the settings) names and describes the map
-    let dsc = find_dsc(&d.join("global.cfg"), lang);
+    let dsc = find_dsc(&omsi_cfg::oi::global_path(&d), lang);
     let friendly = dsc.as_ref().and_then(|x| x.name.first().cloned()).unwrap_or_else(|| g.friendly_name.trim().to_string());
     let description = dsc.map(|x| x.description).filter(|t| !t.is_empty()).unwrap_or_else(|| g.description.trim().to_string());
     let mut entries: Vec<EntryInfo> = g.entry_points.iter().map(|e| EntryInfo { index: e.index, name: e.name.trim().to_string() }).collect();
@@ -743,7 +804,7 @@ fn read_map(d: &Path, folder: &str, lang: &str) -> Option<MapInfo> {
     }
     // (the depot groups' first: a plain car group's name line is no depot)
     let hof = omsi_map::ailists::AiLists::load(&d.join("ailists.cfg")).ok().and_then(|l| l.groups.iter().filter(|g| g.is_depot).chain(l.groups.iter()).find_map(|g| g.hof.clone())).or_else(|| omsi_proton::depot::installed_name(d)).unwrap_or_default();
-    Some(MapInfo { name: if g.name.trim().is_empty() { folder.to_string() } else { g.name.trim().to_string() }, friendly, file: format!("maps/{folder}/global.cfg"), description, entry_points: entries, hof, installed: in_content(d) })
+    Some(MapInfo { name: if g.name.trim().is_empty() { folder.to_string() } else { g.name.trim().to_string() }, friendly, file: format!("maps/{folder}/{}", omsi_cfg::oi::global_path(d).file_name().unwrap_or_default().to_string_lossy()), description, entry_points: entries, hof, installed: in_content(d) })
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -870,7 +931,7 @@ fn shared_depot_names() -> Vec<String> {
         list.sort();
         for (n, is_dir) in list {
             let file = n.to_string_lossy().to_ascii_lowercase();
-            if is_dir || !file.ends_with(".hof") || !seen.insert(file) {
+            if is_dir || !(file.ends_with(".hof") || file.ends_with(".hofoi")) || !seen.insert(file) {
                 continue;
             }
             if let Some(name) = omsi_vehicle::Hof::read_name(&dir.join(&n)) {
@@ -1108,18 +1169,38 @@ pub fn list_weather() -> Result<Vec<WeatherInfo>> {
         // the description in the settings' language lives in `<name>_ENG.dsc`
         let mut stamped = vec![f.clone()];
         stamped.extend(dsc_candidates(&f, lang));
-        let key = format!("wx|{lang}|{}", f.display());
+        let key = format!("wx2|{lang}|{}", f.display());
         keys.push(key.clone());
         let info: Option<WeatherInfo> = index::cached(&key, index::files_stamp(&stamped), || (read_weather(&f, lang), Vec::new()));
         out.extend(info);
     }
-    index::save("wx|", Some(&keys));
+    index::save("wx2|", Some(&keys));
     Ok(out)
+}
+
+/// A weather's name as the player reads it: the `[name]` of its description in the
+/// interface's language - the English one where OMSI has none in that language (the
+/// interface's tables translate it further) - else its file's name. OMSI's own angle brackets
+/// ("<Best Weather>", which sort it first in its list) are left out.
+pub fn weather_name(f: &Path) -> String {
+    weather_name_in(f, content_language())
+}
+
+/// OMSI 2's own weathers by their English names (its `_ENG.dsc`), which the interface's
+/// tables translate for the languages OMSI has no descriptions in; listed here so the
+/// translation check knows them as texts the program shows.
+pub const STOCK_WEATHER_NAMES: [&str; 9] = ["Best Weather", "Ground Fog", "Twilight Fog", "Iciness", "Rainy", "Summerlike", "Heavy Snowfall", "Storm", "Freezing Wetness"];
+
+fn weather_name_in(f: &Path, lang: &str) -> String {
+    let stem = f.file_stem().map(|s| s.to_string_lossy().trim_start_matches('#').to_string()).unwrap_or_default();
+    find_dsc(f, lang)
+        .and_then(|d| d.name.first().map(|n| n.trim().trim_start_matches('<').trim_end_matches('>').trim().to_string()))
+        .filter(|n| !n.is_empty())
+        .unwrap_or(stem)
 }
 
 fn read_weather(f: &Path, lang: &str) -> Option<WeatherInfo> {
     let w = omsi_content::weather::Weather::load(f).ok()?;
-    let stem = f.file_stem().unwrap().to_string_lossy().to_string();
     // (the `[name]` of the file is not part of the description: "Ground Fog Heavy ground fog ...")
     let description = find_dsc(f, lang).map(|x| x.description.replace('\n', " ")).filter(|t| !t.is_empty()).unwrap_or_else(|| w.description.replace('\n', " "));
     let precip = match w.precip.first().copied().unwrap_or(0.0) as i32 {
@@ -1127,7 +1208,7 @@ fn read_weather(f: &Path, lang: &str) -> Option<WeatherInfo> {
         2 => format!("snow {:.0}%", w.precip.get(1).copied().unwrap_or(0.0) / 255.0 * 100.0),
         _ => "dry".into(),
     };
-    Some(WeatherInfo { name: stem.trim_start_matches('#').to_string(), file: format!("Weather/{}", f.file_name().unwrap().to_string_lossy()), description, fog_m: w.fog.0, temp: w.temp.0, clouds: if w.clouds.0.trim().starts_with("-1") { "clear".into() } else { w.clouds.0.trim().to_string() }, precip, snow: w.snow, installed: in_content(f) })
+    Some(WeatherInfo { name: weather_name_in(f, lang), file: format!("Weather/{}", f.file_name().unwrap().to_string_lossy()), description, fog_m: w.fog.0, temp: w.temp.0, clouds: if w.clouds.0.trim().starts_with("-1") { "clear".into() } else { w.clouds.0.trim().to_string() }, precip, snow: w.snow, installed: in_content(f) })
 }
 
 /// The content language of the settings (`language=`, English by default): which
@@ -1299,7 +1380,7 @@ pub fn trip_path(map: &str, date: &str, trip: &str) -> Result<TripPath> {
         t.stations.clone()
     };
     // the tile of a path step is the index of its entry in `[map]`, as the game reads it
-    let tiles = omsi_map::GlobalCfg::load(&map_dir.join("global.cfg")).map(|g| g.raw_tiles).unwrap_or_default();
+    let tiles = omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(&map_dir)).map(|g| g.raw_tiles).unwrap_or_default();
     let at = |tile_index: f64| tiles.get(tile_index as usize).copied();
     let track_name = if t.display_name.trim().is_empty() { t.name.trim() } else { t.display_name.trim() };
     if let Some(track) = data.tracks.iter().find(|x| x.path.file_stem().map(|s| s.to_string_lossy().eq_ignore_ascii_case(track_name)).unwrap_or(false)) {
@@ -1939,6 +2020,9 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
     v["mirror_refresh"] = json!("full");
     v["vr_desktop_mirror"] = json!(true);
     v["discord_status"] = json!(true);
+    // iPhone, iPad, Mac: the cross-platform launcher (this one, drawn by the game) instead of the
+    // system's own (SwiftUI); elsewhere there is only this one
+    v["cross_platform_launcher"] = json!(false);
     v["discord_app_id"] = json!("");
     // positional voice through GreenTeaSpeak's openOMSI plugin in multiplayer
     v["voice_chat"] = json!(true);
@@ -2049,7 +2133,7 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
             "pad_steer_speed" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.8, 5.0)).unwrap_or(2.0)),
             "pad_deadzone" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 0.4)).unwrap_or(0.08)),
             "pad_type" => v[&k] = json!(match val.trim().to_ascii_lowercase().as_str() { "xbox" => "xbox", "ps4" => "ps4", "ps5" => "ps5", _ => "auto" }),
-            "camera_collision" | "right_stick_look" | "pad_steer_linear" | "pad_buttons" | "arrows_switch_cams" | "steer_look" | "head_tracking" | "head_tracking_invert_yaw" | "head_tracking_invert_pitch" | "head_tracking_invert_roll" | "head_tracking_invert_x" | "head_tracking_invert_y" | "head_tracking_invert_z" | "discord_status" | "voice_chat" | "launcher_rest" => v[&k] = json!(b(val)),
+            "camera_collision" | "right_stick_look" | "pad_steer_linear" | "pad_buttons" | "arrows_switch_cams" | "steer_look" | "head_tracking" | "head_tracking_invert_yaw" | "head_tracking_invert_pitch" | "head_tracking_invert_roll" | "head_tracking_invert_x" | "head_tracking_invert_y" | "head_tracking_invert_z" | "discord_status" | "voice_chat" | "launcher_rest" | "cross_platform_launcher" => v[&k] = json!(b(val)),
             // (how much of the mip chain an LED panel is held at, 0..4; a file from before
             // it was a number says 1 or 0)
             "led_mips" => v[&k] = json!(val.trim().parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 4.0)).unwrap_or(1.3)),
@@ -2154,7 +2238,7 @@ pub fn decode_html_entities(input: &str) -> String {
             "lt" => Some('<'), "gt" => Some('>'), "nbsp" => Some(' '),
             "auml" => Some('ä'), "ouml" => Some('ö'), "uuml" => Some('ü'),
             "Auml" => Some('Ä'), "Ouml" => Some('Ö'), "Uuml" => Some('Ü'),
-            "szlig" => Some('ß'), "ndash" => Some('–'), "mdash" => Some('—'),
+            "szlig" => Some('ß'), "ndash" | "mdash" | "minus" => Some('-'),
             "bull" => Some('•'), "deg" => Some('°'),
             _ => entity.strip_prefix("#x").or_else(|| entity.strip_prefix("#X"))
                 .and_then(|n| u32::from_str_radix(n, 16).ok())
@@ -2186,7 +2270,7 @@ pub fn option_presets() -> Vec<(String, Value)> {
         let Ok(o) = omsi_content::options::Options::load(&f) else { continue };
         let name = f.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let mut v = json!({});
-        if !cfg!(target_os = "android") {
+        if !cfg!(any(target_os = "android", target_os = "ios")) {
             v["max_fps"] = json!(o.i32("maxfps", 0).max(0));
         }
         v["min_obj_size"] = json!(o.f32("performance_minobjsize", 0.013) as f64);
@@ -2447,7 +2531,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     let vr_scale = v.get("vr_scale").and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).filter(|x| x.is_finite()).unwrap_or(0.65).clamp(0.5, 1.0);
     let vr_head_smoothing_ms = v.get("vr_head_smoothing_ms").and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).filter(|x| x.is_finite()).unwrap_or(0.0).clamp(0.0, 30.0);
     let vr_mirror_rate = v.get("vr_mirror_rate").and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).filter(|x| x.is_finite()).unwrap_or(16.0).clamp(-1.0, 360.0);
-    let text = format!("{text}vr={}\nvr_scale={vr_scale}\nvr_head_smoothing_ms={vr_head_smoothing_ms}\nvr_mirror_rate={vr_mirror_rate}\nvr_desktop_mirror={}\ndiscord_status={}\nvoice_chat={}\nlauncher_rest={}\n", b("vr", false), b("vr_desktop_mirror", true), b("discord_status", true), b("voice_chat", true), b("launcher_rest", true));
+    let text = format!("{text}vr={}\nvr_scale={vr_scale}\nvr_head_smoothing_ms={vr_head_smoothing_ms}\nvr_mirror_rate={vr_mirror_rate}\nvr_desktop_mirror={}\ndiscord_status={}\nvoice_chat={}\nlauncher_rest={}\ncross_platform_launcher={}\n", b("vr", false), b("vr_desktop_mirror", true), b("discord_status", true), b("voice_chat", true), b("launcher_rest", true), b("cross_platform_launcher", false));
     // what the page does not manage (keys of newer games, hand-written ones) stays as it
     // was in the file; other spellings of the keys just written go
     let mut text = text;
@@ -2586,7 +2670,7 @@ pub fn last_situation(map: &str) -> Option<PathBuf> {
 
 /// A situation saved on a map to continue from: the file, its `[name]`, when it was written
 /// (seconds since 1970).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SavedSituation {
     pub file: PathBuf,
     pub name: String,
@@ -2892,9 +2976,10 @@ pub fn cleanup() {
 }
 
 /// Native folder / file picker (Finder, Explorer, the GTK dialog) for a mod. Must run on
-/// the main thread. (None on a phone: the launcher browses the storage itself there.)
+/// the main thread. (None on a phone: the launcher browses the storage itself there, and on an iPhone or an iPad
+/// the system's document picker of the Swift launcher hands the path over.)
 pub fn pick_mod(zip: bool) -> Option<PathBuf> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         if zip {
             rfd::FileDialog::new().set_title("Choose a mod archive").add_filter("Mod archive", &["zip", "7z", "rar"]).pick_file()
@@ -2902,7 +2987,7 @@ pub fn pick_mod(zip: bool) -> Option<PathBuf> {
             rfd::FileDialog::new().set_title("Choose the mod folder").pick_folder()
         }
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = zip;
         None
@@ -2911,11 +2996,11 @@ pub fn pick_mod(zip: bool) -> Option<PathBuf> {
 
 /// Folder picker (Setup: the OMSI 2 folder).
 pub fn pick_folder(title: &str) -> Option<PathBuf> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         rfd::FileDialog::new().set_title(title).pick_folder()
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = title;
         None
@@ -2924,11 +3009,11 @@ pub fn pick_folder(title: &str) -> Option<PathBuf> {
 
 /// File picker (Setup: the game program).
 pub fn pick_file(title: &str) -> Option<PathBuf> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         rfd::FileDialog::new().set_title(title).pick_file()
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = title;
         None
@@ -2945,8 +3030,9 @@ pub fn take_in_process_launch() -> Option<Vec<String>> {
     IN_PROCESS.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
-/// Whether games run inside the launcher's own process (a phone).
-pub const IN_PROCESS_GAMES: bool = cfg!(target_os = "android");
+/// Whether games run inside the launcher's own process (a phone, an iPhone, an iPad: an app
+/// there may not start programs).
+pub const IN_PROCESS_GAMES: bool = cfg!(any(target_os = "android", target_os = "ios"));
 
 pub use instances::{list as list_instances, log_tail, stop as stop_instance, Instance};
 

@@ -1,7 +1,7 @@
 use super::*;
 
 fn entries(names: &[&str]) -> Vec<Entry> {
-    names.iter().enumerate().map(|(i, n)| Entry { rel: n.to_string(), size: 10, index: i, proton_base: None }).collect()
+    names.iter().enumerate().map(|(i, n)| Entry { rel: n.to_string(), size: 10, index: i, proton_authorization: None, proton_base: None }).collect()
 }
 
 fn dests(p: &Plan) -> Vec<(String, bool)> {

@@ -434,6 +434,8 @@ struct Entry {
     index: usize,
     /// Authored asset folder, read only for bounded Proton map configurations.
     proton_base: Option<String>,
+    /// None: not read; Some(Ok): canonical declaration; Some(Err): refuse.
+    proton_authorization: Option<std::result::Result<(), String>>,
 }
 
 /// A folder of the source as a tree of names.
@@ -535,7 +537,7 @@ const PACK_ONLY: &[&str] = &["Vehicles", "maps", "Sceneryobjects", "Splines", "H
 
 /// What a folder is, judged by the files directly in it.
 fn guess_kind(n: &Node) -> Option<&'static str> {
-    if n.files.iter().any(|(f, _)| f.eq_ignore_ascii_case("global.cfg")) {
+    if n.files.iter().any(|(f, _)| f.eq_ignore_ascii_case("global.cfg") || f.eq_ignore_ascii_case(omsi_cfg::oi::GLOBAL)) {
         return Some("maps");
     }
     for (ext, kind) in [("bus", "Vehicles"), ("ovh", "Vehicles"), ("zug", "Trains"), ("sco", "Sceneryobjects"), ("sli", "Splines"), ("hum", "Humans"), ("owt", "Weather"), ("otp", "TicketPacks"), ("oft", "Fonts"), ("odr", "Drivers"), ("osn", "Situations"), ("dll", "Plugins"), ("opl", "Plugins")] {
@@ -788,6 +790,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     proton::read_layouts(&mut source, &mut entries, job)?;
     let installed = Installed { content, root };
     let mut plan = plan(&entries, &source_name, &installed);
+    proton::validate_selected(&plan, &entries)?;
     if plan.maps.is_empty() {
         return Err(anyhow!("could not tell what {} is: no Vehicles / maps / Sceneryobjects ... folders and no .bus / .sco / .sli / global.cfg files in it", src.display()));
     }
@@ -1278,6 +1281,7 @@ pub fn inspect(content: &Path, root: Option<&Path>, src: &Path) -> Result<Source
     proton::read_layouts(&mut Source::Zip(z), &mut entries, &job)?;
     let source_name = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "mod".into());
     let plan = plan(&entries, &source_name, &Installed { content, root });
+    proton::validate_selected(&plan, &entries)?;
     let files: u64 = plan.maps.iter().map(|m| m.files.len() as u64).sum();
     let unpacked: u64 = plan.maps.iter().map(|m| m.bytes).sum();
     let needed = unpacked.saturating_add((unpacked / 20).max(MIN_MARGIN)).saturating_add(proton::extra_space(&plan));

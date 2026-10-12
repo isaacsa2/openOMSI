@@ -1,12 +1,16 @@
-//! Basic import of user-supplied Proton Bus phase 2-4 maps. Conversion runs in the
-//! installer's staging area; the renderer continues to read ordinary OMSI scenery.
+//! Declared conversion of user-supplied Proton Bus phase 2-4 maps. Conversion runs
+//! in staging and emits OpenOMSI-only OI definitions for the native simulation.
 //! Only free driving is supported. Source mods are never embedded in the program.
 mod convert;
 mod export;
 pub mod depot;
+pub mod permission;
+pub mod package;
 mod materials;
+mod prefabs;
 mod gameplay;
 pub mod navigation;
+pub mod traffic;
 mod optimise;
 mod paths;
 mod settings;
@@ -38,6 +42,8 @@ pub struct Report {
     pub lights_imported: usize,
     pub stops_imported: usize,
     pub destinations_imported: usize,
+    pub prefabs_imported: usize,
+    pub ai_vehicles_imported: usize,
     pub traffic_segments_imported: usize,
     pub pedestrian_segments_imported: usize,
     pub signals_imported: usize,
@@ -66,13 +72,7 @@ pub fn base_dir(bytes: &[u8]) -> Result<String> {
 }
 
 fn ini_bytes(bytes: &[u8]) -> Ini {
-    let text = match std::str::from_utf8(&bytes) {
-        Ok(s) => s.to_owned(),
-        Err(_) => encoding_rs::WINDOWS_1252
-            .decode_without_bom_handling(&bytes)
-            .0
-            .into_owned(),
-    };
+    let text = ini_text(bytes);
     let mut sections = Ini::new();
     let mut current = String::new();
     for line in text.trim_start_matches('\u{feff}').lines().map(str::trim) {
@@ -82,13 +82,23 @@ fn ini_bytes(bytes: &[u8]) -> Ini {
         if let Some(s) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
             current = s.to_ascii_lowercase();
         } else if let Some((k, v)) = line.split_once('=') {
-            sections
-                .entry(current.clone())
-                .or_default()
-                .insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
+            sections.entry(current.clone()).or_default().insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
         }
     }
     sections
+}
+
+fn ini_text(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0xff, 0xfe]) {
+        return omsi_cfg::decode_text(bytes);
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_owned(),
+        Err(_) => encoding_rs::WINDOWS_1252
+            .decode_without_bom_handling(&bytes)
+            .0
+            .into_owned(),
+    }
 }
 
 /// Resolve only safe paths in the staging area, including a mod made on Windows whose
@@ -254,11 +264,11 @@ fn textures(
 /// `installed_rel` is its eventual `maps/Proton-<name>` location below the content root.
 pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Result<Report> {
     ensure!(
-        installed_rel.starts_with("maps/Proton-") && !installed_rel.contains(['\\', '\n', '\r']),
+        installed_rel.strip_prefix("maps/Proton-").is_some_and(|name| !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':', '\n', '\r', '\0'])),
         "invalid imported map destination"
     );
     ensure!(
-        !child(dir, "global.cfg")?.exists() && !child(dir, "proton-import")?.exists(),
+        !child(dir, "global.cfg")?.exists() && !child(dir, omsi_cfg::oi::GLOBAL)?.exists() && !child(dir, "proton-import")?.exists(),
         "source contains reserved import output files"
     );
     let configs: Vec<_> = files(dir, "txt")?
@@ -272,6 +282,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         })
         .collect();
     ensure!(configs.len() == 1, "expected one Proton .map.txt file");
+    permission::validate_file(&configs[0]).with_context(|| format!("{}", configs[0].display()))?;
     let config = ini(&configs[0])?;
     let map = config.get("map").context("missing Proton [map] section")?;
     let version = map
@@ -306,7 +317,10 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut lamps = streetlights::Collector::new(&models, &texture_dir, &dir.join("proton-import/texture"), &mut report)?;
     let mut helpers = 0;
     let mut embedded_trees = 0;
-    for f in files(&models, "3ds")? {
+    let mut inputs: Vec<_> = files(&models, "3ds")?.into_iter().map(|model| prefabs::Placement { model, transform: glam::Mat4::IDENTITY }).collect();
+    inputs.extend(prefabs::read(&base, &models, &mut report)?);
+    for input in inputs {
+        let f = input.model;
         ensure!(!cancel(), "map import cancelled");
         let mut scene = three_ds::Scene::open(&f, &cancel)
             .with_context(|| format!("reading {}", f.display()))?;
@@ -327,7 +341,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         }
         let (names, default) = registry.register(&scene, &presets)?;
         scene
-            .visit_import(&cancel, |object, repaired_uvs| {
+            .visit_import(&cancel, |mut object, repaired_uvs| {
+                prefabs::transform(&mut object, input.transform)?;
                 if repaired_uvs > 0 {
                     report.warnings.push(format!(
                         "{}: object {:?}: replaced {repaired_uvs} non-finite texture coordinates with (0, 0). Geometry and collision retained; affected texture mapping needs checking.",
@@ -431,11 +446,13 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let stops = stops.finish(&mut gameplay, &mut report)?;
     depot::export(dir, &base, installed_rel, &spawns, &stops, &mut report)?;
     gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel)?;
-    let file = std::fs::File::create(dir.join(navigation::FILE))?;
+    let file = std::fs::File::create(dir.join("proton-import/navigation.json"))?;
     let mut writer = std::io::BufWriter::new(file);
     serde_json::to_writer(&mut writer, &navigation)?;
     std::io::Write::flush(&mut writer)?;
     export::global(dir, installed_rel, &keys, &spawns)?;
+    traffic::export(dir, &base, &texture_dir, installed_rel, &config, &mut report, &mut output_bytes, &cancel)?;
+    package::seal(dir, installed_rel, &cancel)?;
     report.tiles = keys.len();
     report.triangles = spool.tiles.values().sum();
     report.warnings.sort();
@@ -456,3 +473,6 @@ mod navigation_tests;
 mod gameplay_tests;
 #[cfg(test)]
 mod depot_tests;
+
+#[cfg(test)]
+mod package_tests;

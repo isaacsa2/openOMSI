@@ -27,6 +27,7 @@ pub(crate) struct Point {
     pub speed: f32,
     pub turn: i32,
     pub buses: bool,
+    pub cars: bool,
     pub density: f32,
 }
 
@@ -276,7 +277,8 @@ impl Collector {
                         0
                     },
                     buses: n("isbusspawner", 0.0)? != 0.0,
-                    density: if n("isspawner", 1.0)? != 0.0 {
+                    cars: n("isspawner", 1.0)? != 0.0,
+                    density: if n("isspawner", 1.0)? != 0.0 || n("isbusspawner", 0.0)? != 0.0 {
                         (5.0 / n("spawninterval", 5.0)?.clamp(0.25, 3600.0)).clamp(0.0, 4.0)
                     } else {
                         0.0
