@@ -56,7 +56,7 @@ pub fn validate(bytes: &[u8]) -> Result<()> {
         );
         found = true;
     }
-    ensure!(found, "conversion blocked: original .map.txt must contain [openomsi] followed by allowConversion=1; only the creator should add this declaration");
+    ensure!(found, "conversion blocked: original main configuration (.map.txt, .bus.txt or .ini) must contain [openomsi] followed by allowConversion=1; only the creator should add this declaration");
     Ok(())
 }
 

@@ -56,9 +56,9 @@ impl Manifest {
     }
 }
 
-struct Local<'a> {
-    builder: crate::optimise::Builder,
-    registry: &'a crate::materials::Registry,
+pub(crate) struct Local<'a> {
+    pub builder: crate::optimise::Builder,
+    pub registry: &'a crate::materials::Registry,
 }
 impl crate::convert::Faces for Local<'_> {
     fn face(&mut self, _: (i32, i32), vertices: [Vertex; 3], material: u16) -> Result<()> {
@@ -125,7 +125,7 @@ pub(crate) fn export(
             let mut scene = crate::three_ds::Scene::open(&model, cancel)?;
             let (names, default) = registry.register(&scene, &presets)?;
             let mut model_cfg = String::new();
-            let mut skin_slots = Vec::new();
+            let mut skin_slots = crate::materials::SkinSlots::default();
             let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
             let mut object_index = 0;
             scene.visit_import(cancel, |object, repaired| {
@@ -150,7 +150,7 @@ pub(crate) fn export(
                     builder: Default::default(),
                     registry: &registry,
                 };
-                crate::convert::append_object(
+                crate::convert::append_object_local(
                     &object,
                     &faces,
                     &registry.mappings,
@@ -174,19 +174,8 @@ pub(crate) fn export(
                     hi = hi.max(v.position);
                 }
                 if object.name.contains("_skin001_") {
-                    for (m, material) in builder
-                        .mesh
-                        .materials
-                        .iter_mut()
-                        .enumerate()
-                        .filter(|(_, m)| !m.texture.is_empty())
-                    {
-                        let source = models.join("texture").join(&material.texture);
-                        let ext = source.extension().unwrap_or_default().to_string_lossy();
-                        let name = format!("skin_{object_index}_{m}.{ext}");
-                        std::fs::copy(&source, models.join("texture").join(&name))?;
-                        material.texture = name.clone();
-                        skin_slots.push(name);
+                    for material in &mut builder.mesh.materials {
+                        skin_slots.replace(material, &models.join("texture"))?;
                     }
                 }
                 let name = format!("body_{object_index}.o3d");
@@ -212,7 +201,7 @@ pub(crate) fn export(
                 std::fs::remove_dir_all(&target)?;
                 continue;
             }
-            skins(&folder, &cfg, &target, &skin_slots, &mut model_cfg, cancel)?;
+            skins(&folder, &cfg, &target, &skin_slots.names, &mut model_cfg, cancel)?;
             crate::text(&models.join("model.cfg"), &model_cfg)?;
             let size = (hi - lo).max(Vec3::splat(0.1));
             let centre = (hi + lo) * 0.5;
@@ -335,7 +324,7 @@ mod tests {
         let ai = f.0.join("Town/aibuses_v1");
         std::fs::create_dir(&ai).unwrap();
         std::fs::write(ai.join("Bus.txt"), "[model]\nmodel1=bus.3ds\n[config]\nmass=18000\npriority=2\n[driving]\nspeedLimit=10\n[sounds_v1]\nmoving=engine.wav\n").unwrap();
-        std::fs::write(ai.join("bus.3ds"), crate::tests::named_model("body")).unwrap();
+        std::fs::write(ai.join("bus.3ds"), crate::vehicle_tests::local_model()).unwrap();
         std::fs::write(ai.join("engine.wav"), b"fixture").unwrap();
         let report = crate::import(&f.0, "maps/Proton-Town", || false).unwrap();
         assert_eq!(report.ai_vehicles_imported, 1);
@@ -351,7 +340,8 @@ mod tests {
         assert_eq!(def.sound_ai.as_deref(), Some("Sound/sound.cfgoi"));
         let cfg = omsi_cfg::vfs::read_text(&base.join("Model/model.cfgoi")).unwrap();
         assert!(cfg.contains("body_0.o3doi"));
-        assert!(omsi_o3d::load_mesh(&base.join("Model/body_0.o3doi")).is_ok());
+        let mesh = omsi_o3d::load_mesh(&base.join("Model/body_0.o3doi")).unwrap();
+        assert!(mesh.vertices.iter().all(|v| v.position.abs().max_element() < 10.));
         assert_eq!(
             std::fs::read(base.join("Sound/moving.wav")).unwrap(),
             b"fixture"

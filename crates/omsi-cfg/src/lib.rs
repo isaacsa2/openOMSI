@@ -717,7 +717,7 @@ fn package_definitions(root: &Path, package: &str) -> std::collections::HashSet<
         .into_iter()
         .filter(|(_, is_dir)| !is_dir)
         .map(|(n, _)| name_key(&n.to_string_lossy()))
-        .filter(|n| n.ends_with(".bus") || n.ends_with(".ovh") || n.ends_with(".zug"))
+        .filter(|n| n.ends_with(".bus") || n.ends_with(".busoi") || n.ends_with(".ovh") || n.ends_with(".ovhoi") || n.ends_with(".zug"))
         .collect()
 }
 

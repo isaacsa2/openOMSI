@@ -14,6 +14,13 @@ pub(crate) fn number(
     warnings: &mut Vec<String>,
 ) -> Result<f64> {
     let raw = raw.map(String::as_str).unwrap_or("0");
+    if raw.trim().is_empty() && key == "roty" {
+        warnings.push(format!(
+            "Entry point {section}.{key} in {}: empty rotation interpreted as 0 degrees.",
+            file.display()
+        ));
+        return Ok(0.0);
+    }
     // Some authored starts append a degree suffix to rotY. Restrict the repair
     // to the angle: accepting a numeric prefix everywhere would hide damaged data.
     let degrees = (key == "roty")

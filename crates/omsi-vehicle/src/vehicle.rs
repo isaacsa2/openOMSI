@@ -423,7 +423,7 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
 pub fn offered_vehicles(files: &[PathBuf]) -> Vec<(PathBuf, Vehicle)> {
     let loaded: Vec<(PathBuf, Vehicle)> = files
         .iter()
-        .filter(|f| f.extension().map(|e| e.eq_ignore_ascii_case("bus") || e.eq_ignore_ascii_case("ovh")).unwrap_or(false))
+        .filter(|f| f.extension().map(|e| e.eq_ignore_ascii_case("bus") || e.eq_ignore_ascii_case("busoi") || e.eq_ignore_ascii_case("ovh") || e.eq_ignore_ascii_case("ovhoi")).unwrap_or(false))
         .filter_map(|f| Vehicle::load(f).ok().map(|v| (f.clone(), v)))
         .collect();
     let coupled: Vec<PathBuf> = loaded.iter().filter_map(|(_, v)| v.couple_back_path()).collect();
@@ -446,7 +446,7 @@ pub fn front_sections_of(rear: &Path) -> Vec<PathBuf> {
         }
         let mut out = Vec::new();
         for d in dirs {
-            let mut files: Vec<PathBuf> = omsi_cfg::vfs::read_dir_paths(&d).into_iter().filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("bus") || e.eq_ignore_ascii_case("ovh")).unwrap_or(false)).collect();
+            let mut files: Vec<PathBuf> = omsi_cfg::vfs::read_dir_paths(&d).into_iter().filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("bus") || e.eq_ignore_ascii_case("busoi") || e.eq_ignore_ascii_case("ovh") || e.eq_ignore_ascii_case("ovhoi")).unwrap_or(false)).collect();
             files.sort();
             for f in files {
                 if same_file(&f, rear) {

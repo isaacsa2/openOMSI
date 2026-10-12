@@ -14,6 +14,13 @@ mod navigation_index;
 mod road_surface;
 pub mod traffic;
 pub mod vehicle;
+pub mod vehicle_package;
+mod vehicle_export;
+mod vehicle_physics;
+mod vehicle_script;
+mod vehicle_model;
+mod vehicle_cabin;
+mod vehicle_sounds;
 mod optimise;
 mod paths;
 mod path_smoothing;
@@ -485,3 +492,6 @@ mod depot_tests;
 
 #[cfg(test)]
 mod package_tests;
+
+#[cfg(test)]
+mod vehicle_tests;

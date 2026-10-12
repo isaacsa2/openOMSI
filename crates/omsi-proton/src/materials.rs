@@ -60,7 +60,10 @@ impl Registry {
                 } else {
                     self.materials[source].clone()
                 };
-                if matches!(mode, Mode::Emissive | Mode::EmissiveBlend | Mode::EmissiveCutout | Mode::Additive) {
+                if matches!(
+                    mode,
+                    Mode::Emissive | Mode::EmissiveBlend | Mode::EmissiveCutout | Mode::Additive
+                ) {
                     material.emissive = [1.0; 3];
                     material.diffuse[..3].fill(0.0);
                     material.specular = [0.0; 3];
@@ -72,7 +75,11 @@ impl Registry {
         }
         Ok(faces)
     }
-    pub fn register(&mut self, scene: &Scene, presets: &crate::texture_settings::Presets) -> Result<(BTreeMap<String, u16>, u16)> {
+    pub fn register(
+        &mut self,
+        scene: &Scene,
+        presets: &crate::texture_settings::Presets,
+    ) -> Result<(BTreeMap<String, u16>, u16)> {
         let mut names = BTreeMap::new();
         for (i, (name, material)) in scene.materials.iter().enumerate() {
             // Proton takes only the diffuse texture from a 3DS material. Exporter
@@ -102,4 +109,54 @@ pub(crate) fn faces(o: &Object, names: &BTreeMap<String, u16>, default: u16) -> 
         }
     }
     Ok(result)
+}
+
+/// Repaint material slots share one image across body/door meshes, keeping GPU cache keys
+/// identical. A per-mesh filename uploaded the same large skin many times.
+#[derive(Default)]
+pub(crate) struct SkinSlots {
+    pub names: Vec<String>,
+    textures: BTreeMap<String, String>,
+}
+impl SkinSlots {
+    pub fn replace(&mut self, material: &mut Material, folder: &std::path::Path) -> Result<()> {
+        if material.texture.is_empty() {
+            return Ok(());
+        }
+        let key = material.texture.to_ascii_lowercase();
+        if let Some(name) = self.textures.get(&key) {
+            material.texture = name.clone();
+            return Ok(());
+        }
+        let source = folder.join(&material.texture);
+        let ext = source.extension().unwrap_or_default().to_string_lossy();
+        std::fs::create_dir_all(folder.join("proton-skins"))?;
+        let name = format!("proton-skins/{}.{ext}", self.names.len());
+        std::fs::copy(&source, folder.join(&name))?;
+        self.names.push(name.clone());
+        self.textures.insert(key, name.clone());
+        material.texture = name;
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod skin_tests {
+    #[test]
+    fn repeated_large_skin_slots_share_one_file_and_cache_key() {
+        let f = crate::tests::Fixture::new();
+        std::fs::write(f.0.join("body.png"), b"synthetic-image").unwrap();
+        let mut slots = super::SkinSlots::default();
+        let mut materials = (0..32)
+            .map(|_| omsi_o3d::Material {
+                texture: "body.png".into(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        for m in &mut materials {
+            slots.replace(m, &f.0).unwrap();
+        }
+        assert_eq!(slots.names.len(), 1);
+        assert!(materials.iter().all(|m| m.texture == "proton-skins/0.png"));
+        assert_eq!(std::fs::read_dir(&f.0).unwrap().count(), 2);
+    }
 }

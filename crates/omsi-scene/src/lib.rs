@@ -47,6 +47,8 @@ mod sound_probe;
 mod world;
 mod open;
 mod proton_navigation;
+pub mod proton_overlay;
+pub mod navigation_roads;
 #[cfg(test)]
 mod proton_gameplay_tests;
 mod stage;

@@ -3,7 +3,7 @@ name = "omsi-proton"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Basic, local Proton Bus map import for free driving"
+description = "Declared local Proton Bus map and rigid-vehicle conversion"
 
 [dependencies]
 anyhow.workspace = true
@@ -15,6 +15,7 @@ omsi-cfg = { path = "../omsi-cfg" }
 omsi-o3d = { path = "../omsi-o3d" }
 
 [dev-dependencies]
+omsi-sim = { path = "../omsi-sim" }
 omsi-vehicle = { path = "../omsi-vehicle" }
 omsi-geometry = { path = "../omsi-geometry" }
 omsi-map = { path = "../omsi-map" }

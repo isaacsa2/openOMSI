@@ -477,3 +477,14 @@ fn supplied_map_fixture_when_available() {
         report.tiles, report.triangles, report.markers_skipped, report.gps_skipped, report.vertices_removed, report.warnings
     );
 }
+
+#[test]
+fn empty_entry_heading_defaults_to_zero_but_empty_coordinates_are_rejected() {
+    let f = Fixture::new(); setup(&f);
+    std::fs::write(f.0.join("Town/tiles/0x0/entrypoints.txt"), "[entrypoint_1]\nname=Start\nposX=299.5\nposY=7\nposZ=10.5\nrotY=\n").unwrap();
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    assert_eq!(global.entry_points[0].quat, [0., 0., 0., 1.]);
+    assert!(report.warnings.iter().any(|s| s.contains("empty rotation")));
+    assert!(crate::spawn::number(Some(&String::new()), "posx", "entrypoint_1", &f.0, &mut vec![]).is_err());
+}

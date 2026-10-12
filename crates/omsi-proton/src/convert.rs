@@ -261,6 +261,31 @@ pub(crate) fn append_object(
     output_bytes: &mut u64,
     cancel: &impl Fn() -> bool,
 ) -> Result<()> {
+    append_faces(o, face_mats, mappings, tiles, output_bytes, cancel, false)
+}
+
+/// Vehicles keep their authored local coordinates, including faces crossing zero.
+/// Clipping these as map tiles translated the negative half of a vehicle by 300 m.
+pub(crate) fn append_object_local(
+    o: &Object,
+    face_mats: &[u16],
+    mappings: &[crate::three_ds::UvTransform],
+    output: &mut impl Faces,
+    output_bytes: &mut u64,
+    cancel: &impl Fn() -> bool,
+) -> Result<()> {
+    append_faces(o, face_mats, mappings, output, output_bytes, cancel, true)
+}
+
+fn append_faces(
+    o: &Object,
+    face_mats: &[u16],
+    mappings: &[crate::three_ds::UvTransform],
+    tiles: &mut impl Faces,
+    output_bytes: &mut u64,
+    cancel: &impl Fn() -> bool,
+    local: bool,
+) -> Result<()> {
     let (face_normals, adjacency) = normals(o);
     let mut scratch = ClipBuffers::default();
     for (i, f) in o.faces.iter().enumerate() {
@@ -291,7 +316,23 @@ pub(crate) fn append_object(
             v.iter().all(|v| v.uv.is_finite()),
             "non-finite transformed 3DS UV"
         );
-        emit_triangle(tiles, v, face_mats[i], output_bytes, &mut scratch)?;
+        if local {
+            ensure!(
+                v.iter()
+                    .all(|v| v.position.is_finite() && v.position.abs().max_element() < 100.),
+                "vehicle geometry exceeds 100 m local bounds"
+            );
+            if (v[1].position - v[0].position)
+                .cross(v[2].position - v[0].position)
+                .length_squared()
+                > 1e-12
+            {
+                reserve_face(output_bytes)?;
+                tiles.face((0, 0), v, face_mats[i])?;
+            }
+        } else {
+            emit_triangle(tiles, v, face_mats[i], output_bytes, &mut scratch)?;
+        }
     }
     Ok(())
 }

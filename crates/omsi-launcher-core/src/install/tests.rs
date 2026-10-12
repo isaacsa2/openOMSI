@@ -400,3 +400,14 @@ fn stale_staging_is_removed() {
 fn free_space_is_known() {
     assert!(free_space(&std::env::temp_dir()).unwrap_or(0) > 0);
 }
+
+#[test]
+fn converted_oi_vehicles_use_the_normal_mods_plan() {
+    let content = tmp("oi-vehicle-plans");
+    let inst = Installed { content: &content, root: None };
+    let p = plan(&entries(&["vehicle.busoi", "Model/model.cfgoi", "Model/body.o3doi", "Source/LICENSE.txt"]), "ConvertedBus", &inst);
+    assert_eq!(dests(&p), vec![("Vehicles/ConvertedBus".into(), false)]);
+    assert_eq!(p.maps[0].files.len(), 4);
+    let p = plan(&entries(&["Vehicles/Proton-Bus/vehicle.busoi", "Vehicles/Proton-Bus/Model/model.cfgoi"]), "Pack", &inst);
+    assert_eq!(dests(&p), vec![("Vehicles/Proton-Bus".into(), false)]);
+}

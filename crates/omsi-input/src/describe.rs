@@ -99,7 +99,7 @@ impl ControlNames {
                     continue;
                 }
                 for path in omsi_cfg::vfs::read_dir_paths(&pack) {
-                    let is_vehicle = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("bus") || ext.eq_ignore_ascii_case("ovh"));
+                    let is_vehicle = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("bus") || ext.eq_ignore_ascii_case("busoi") || ext.eq_ignore_ascii_case("ovh") || ext.eq_ignore_ascii_case("ovhoi"));
                     if !is_vehicle {
                         continue;
                     }

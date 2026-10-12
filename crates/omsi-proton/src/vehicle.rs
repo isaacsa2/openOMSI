@@ -109,7 +109,16 @@ pub fn inspect(file: &Path) -> Result<Inspection> {
             if !(section.starts_with("part") && section.ends_with("_3ds")) && section != "model" {
                 continue;
             }
-            for (key, path) in entries {
+            let mut ordered: Vec<_> = entries
+                .iter()
+                .filter_map(|(key, path)| {
+                    key.strip_prefix("model")
+                        .and_then(|n| n.parse::<u16>().ok())
+                        .map(|n| (n, key, path))
+                })
+                .collect();
+            ordered.sort_by_key(|(n, _, _)| *n);
+            for (_, key, path) in ordered {
                 if !key
                     .strip_prefix("model")
                     .is_some_and(|n| n.parse::<u16>().is_ok())
@@ -155,7 +164,7 @@ pub fn inspect(file: &Path) -> Result<Inspection> {
             report.doors.push(Door {
                 name: name.clone(),
                 position: position(&door, name)?,
-                entrance: number(&door, name, "isentrance", 0.)? != 0.,
+                entrance: number(&door, name, "isentrance", 1.)? != 0.,
                 exit: number(&door, name, "isexit", 0.)? != 0.,
                 from_model: number(&door, name, "getpathsfrommodel", 1.)? != 0.,
             });

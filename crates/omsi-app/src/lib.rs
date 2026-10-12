@@ -98,6 +98,7 @@ mod camera_util;
 use omsi_input::{controllers, gamepad_profile, hpattern};
 mod cli;
 mod diagnostics;
+mod perf_overlay;
 mod perf_report;
 mod frame_stages;
 mod support_bundle;
@@ -720,6 +721,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             instructions_mark: None,
             profile_mark: None,
             frame_times: Vec::new(),
+            overlay: Default::default(),
         },
         sound: SoundState {
             radio,

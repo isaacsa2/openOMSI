@@ -428,3 +428,18 @@ night lighting and AI/boarding behavior in-game still require runtime validation
 Read-only preparation for drivable Proton vehicles is described in
 [PROTON_VEHICLES.md](PROTON_VEHICLES.md). The map importer does not install `.ini`
 vehicles or change the existing declaration gate.
+
+### Grande Recife and empty entry headings
+
+Some phase-4 packages write `rotY=` on an entry point. An empty **heading only** defaults
+explicitly to zero degrees with a report warning; empty/invalid coordinates and non-finite
+numbers remain rejected. The original file is preserved. Vehicle/AI geometry now uses the
+shared converter without map-tile clipping, retaining negative local coordinates.
+
+A real Grande Recife phase-4 package carrying the declaration was converted locally:
+628 tiles, 47 GPS helpers, 96 path groups, 541 stops, 70 HOF destinations, 8,845 lamps,
+21,718 traffic segments and six signal programs. The source has no imported pedestrian
+segments or static AI types; installed Grundorf remains the missing-category fallback.
+Some source textures/triggers are missing and are reported. Conversion/parser checks do
+not establish that its roads, lights, passenger clearance or GPU performance are correct
+in game. A start relocated by 5.6 m and disconnected authored route gaps need visual review.

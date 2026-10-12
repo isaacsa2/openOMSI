@@ -540,7 +540,7 @@ fn guess_kind(n: &Node) -> Option<&'static str> {
     if n.files.iter().any(|(f, _)| f.eq_ignore_ascii_case("global.cfg") || f.eq_ignore_ascii_case(omsi_cfg::oi::GLOBAL)) {
         return Some("maps");
     }
-    for (ext, kind) in [("bus", "Vehicles"), ("ovh", "Vehicles"), ("zug", "Trains"), ("sco", "Sceneryobjects"), ("sli", "Splines"), ("hum", "Humans"), ("owt", "Weather"), ("otp", "TicketPacks"), ("oft", "Fonts"), ("odr", "Drivers"), ("osn", "Situations"), ("dll", "Plugins"), ("opl", "Plugins")] {
+    for (ext, kind) in [("busoi", "Vehicles"), ("ovhoi", "Vehicles"), ("bus", "Vehicles"), ("ovh", "Vehicles"), ("zug", "Trains"), ("sco", "Sceneryobjects"), ("sli", "Splines"), ("hum", "Humans"), ("owt", "Weather"), ("otp", "TicketPacks"), ("oft", "Fonts"), ("odr", "Drivers"), ("osn", "Situations"), ("dll", "Plugins"), ("opl", "Plugins")] {
         if n.files.iter().any(|(f, _)| has_ext(f, &[ext])) {
             return Some(kind);
         }
@@ -663,7 +663,7 @@ fn plan(entries: &[Entry], source_name: &str, installed: &Installed) -> Plan {
                             let bpath = join(&cpath, bus);
                             let (files, bytes) = collect(bn, &bpath, entries);
                             used.extend(files.iter().map(|f| f.0));
-                            if bn.has_ext_deep(&["bus", "ovh", "zug", "sco"]) {
+                            if bn.has_ext_deep(&["bus", "busoi", "ovh", "ovhoi", "zug", "sco"]) {
                                 plan.maps.push(Mapping { src: bpath, dest: format!("Vehicles/{bus}"), what: "vehicle".into(), files, bytes, aside: false });
                             } else {
                                 match installed.vehicle(bus) {

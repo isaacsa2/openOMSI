@@ -32,7 +32,7 @@ pub fn kind(path: &Path) -> Option<Kind> {
         "terrainoi" => Some(Kind::Terrain),
         "hofoi" => Some(Kind::Depot),
         "jsonoi" => Some(Kind::Navigation),
-        "ovhoi" => Some(Kind::Vehicle),
+        "ovhoi" | "busoi" => Some(Kind::Vehicle),
         _ => None,
     }
 }

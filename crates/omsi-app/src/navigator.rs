@@ -26,7 +26,9 @@
 use glam::{DMat3, DVec2, DVec3, Mat4, Vec2, Vec3};
 use hashbrown::HashMap;
 use omsi_render::{Renderer, Scene, TextureId};
-use omsi_sim::traffic::{LaneKey, LaneKind, Network};
+use omsi_sim::traffic::{LaneKind, Network};
+#[cfg(test)]
+use omsi_sim::traffic::LaneKey;
 use omsi_ui::paint::Align;
 use omsi_ui::{Atlas, Color, Draw, Fonts, Gpu, Layer, Painter, Rect, Weight};
 
