@@ -53,6 +53,12 @@ impl Presets {
         Ok(out)
     }
 
+    pub fn is_road(&self, texture: &str) -> bool {
+        let texture = texture.replace('\\', "/");
+        let name = texture.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+        self.0.get(&name).is_some_and(|p| p.starts_with("asphalt/"))
+    }
+
     pub fn apply(&self, m: &mut Material) {
         let name = m.texture.replace('\\', "/");
         let name = name.rsplit('/').next().unwrap_or("").to_ascii_lowercase();

@@ -25,7 +25,7 @@ pub(crate) fn load(
             return None;
         }
     };
-    for road in &data.roads {
+    for road in data.roads.iter().filter(|road| !road.overview_only) {
         let points = road
             .points
             .iter()

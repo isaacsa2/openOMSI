@@ -93,6 +93,7 @@ impl Collector {
                             let Ok(index) = section.parse::<usize>() else {
                                 continue;
                             };
+                            if !["posx","posy","posz"].iter().any(|key| fields.contains_key(*key)) { continue; }
                             ensure!(index <= 999, "gameplay path index exceeds 999");
                             let n = |k: &str| -> Result<f32> {
                                 let value = fields
@@ -146,6 +147,7 @@ impl Collector {
                     })
                     .collect(),
                 roads: Vec::new(),
+                road_triangles: Vec::new(),
             },
             paths,
             triangles: 0,
@@ -154,25 +156,13 @@ impl Collector {
     }
 
     pub fn gps(&mut self, object: &Object, file: &str, report: &mut Report) -> Result<()> {
-        let matched: Vec<usize> = self
-            .data
-            .routes
-            .iter()
-            .enumerate()
-            .filter_map(|(i, r)| {
-                let tag = format!("_{}_", r.name);
-                (object.name.contains(&tag) || file.contains(&tag)).then_some(i)
-            })
-            .collect();
-        // A route-less strip is unambiguous only in a map with one entry point.
-        let matched = if matched.is_empty()
-            && self.data.routes.len() == 1
-            && !object.name.contains("_gps_")
-        {
-            vec![0]
-        } else {
-            matched
-        };
+        let mut matched = crate::navigation_index::route_in(&object.name,&self.data.routes);
+        if matched.is_empty() && !crate::navigation_index::explicit_gps_route(&object.name) {
+            matched = crate::navigation_index::route_in(file,&self.data.routes);
+            if matched.is_empty() && self.data.routes.len() == 1 && !crate::navigation_index::explicit_gps_route(file) { matched.push(0); }
+        }
+        // A spelling shared by distinct entrypoints is ambiguous; never show both routes.
+        if matched.len() > 1 { matched.clear(); }
         if matched.is_empty() {
             report.gps_skipped += 1;
             return Ok(());
@@ -238,15 +228,14 @@ impl Collector {
         Ok(found)
     }
 
-    pub fn finish(mut self, report: &mut Report) -> Result<(Navigation, Vec<DrivePath>)> {
+    pub fn finish(mut self, report: &mut Report, smooth: bool) -> Result<(Navigation, Vec<DrivePath>)> {
         let mut gameplay = Vec::new();
         for path in self.paths {
             if !path.enabled {
                 report.warnings.push(format!(
-                    "{}: manual vehicle-path links are not imported into the navigator",
+                    "{}: manual links unknown; numbered geometry is drawn as an approximate overview only, with no generated traffic paths",
                     path.name
                 ));
-                continue;
             }
             let mut runs: Vec<Vec<Point>> = vec![Vec::new()];
             let mut previous = None;
@@ -299,7 +288,7 @@ impl Collector {
                     path.name
                 ));
             }
-            let close = path.looped && runs.len() == 1;
+            let close = path.enabled && path.looped && runs.len() == 1;
             for mut points in runs.into_iter().filter(|p| p.len() >= 2) {
                 if path.reverse {
                     points.reverse();
@@ -307,16 +296,19 @@ impl Collector {
                 if close && points.first().map(|p| p.pos) != points.last().map(|p| p.pos) {
                     points.push(points[0].clone());
                 }
+                if smooth && path.enabled && !path.pedestrian {
+                    points = crate::path_smoothing::smooth(points)?;
+                }
                 if !path.pedestrian {
                     self.data.roads.push(Road {
                         name: path.name.clone(),
                         points: points.iter().map(|p| p.pos).collect(),
+                        overview_only: !path.enabled,
                     });
                 }
-                gameplay.push(DrivePath {
-                    points,
-                    pedestrian: path.pedestrian,
-                });
+                if path.enabled {
+                    gameplay.push(DrivePath { points, pedestrian: path.pedestrian });
+                }
             }
         }
         report.roads_imported = self.data.roads.len();
@@ -326,6 +318,10 @@ impl Collector {
                 report.gps_skipped
             ));
         }
+        let surfaces = self.data.road_triangles.len();
+        self.data.road_triangles.truncate(MAX_TRIANGLES.saturating_sub(self.triangles));
+        report.road_surface_triangles = self.data.road_triangles.len();
+        if report.road_surface_triangles < surfaces { report.warnings.push("3D road overview reduced to reserve navigation space for authored GPS routes".into()); }
         ensure!(self.data.roads.len() <= 4096, "too many navigation roads");
         ensure!(
             self.data

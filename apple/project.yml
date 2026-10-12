@@ -65,6 +65,9 @@ targets:
       - Resources
     settings:
       base:
+        # Keep the Swift launcher distinct from the embedded Rust game on the
+        # default case-insensitive filesystem (openOMSI and openomsi collide).
+        EXECUTABLE_NAME: openomsi-apple
         INFOPLIST_FILE: macOS/Info.plist
         CODE_SIGN_ENTITLEMENTS: macOS/openOMSI.entitlements
         ENABLE_HARDENED_RUNTIME: YES

@@ -181,3 +181,43 @@ fn gps_route_names_are_exact_and_an_unmatched_route_does_not_leak_into_other_ent
     )
     .is_err());
 }
+
+#[test]
+fn normalized_gps_tags_choose_longest_route_and_explicit_unknown_does_not_use_file_route() {
+    let f = Fixture::new(); setup(&f);
+    std::fs::write(f.0.join("Town/tiles/0x0/entrypoints.txt"),"[entrypoint_1]\nname=101 Downtown\nposX=299.5\nposZ=10.5\nposY=7\n[entrypoint_2]\nname=101\nposX=299.5\nposZ=10.5\nposY=7\n").unwrap();
+    add_objects(&f,&["road","GPS_101_DOWNTOWN-part1","route_gps_1010_part1"]);
+    let file=f.0.join("Town/tiles/0x0/GPS-101-Downtown.3ds");
+    std::fs::write(&file,named_model("route_gps_unknown_part1")).unwrap();
+    let report=import(&f.0,"maps/Proton-Town",||false).unwrap();
+    let data=nav(&f);
+    assert_eq!(data.routes[0].triangles.len(),1);
+    assert!(data.routes[1].triangles.is_empty());
+    assert_eq!(report.gps_skipped,2);
+    assert_eq!(data.route_index("101_DOWNTOWN"),Some(0));
+    assert_eq!(data.route_index("1010"),None);
+}
+
+#[test]
+fn disabled_manual_links_keep_overview_but_never_generate_ai_paths_or_fake_origins() {
+    let f=Fixture::new();setup(&f);
+    config(&f,"aivehicles","manual.txt","[automatic_setup]\nenabled=0\nloop=1\n[1]\nposX=299\nposY=7\nposZ=10\n[2]\nposX=310\nposY=7\nposZ=20\n[3]\nisSpawner=0\n");
+    let report=import(&f.0,"maps/Proton-Town",||false).unwrap();
+    let data=nav(&f);
+    assert_eq!(report.traffic_segments_imported,0);
+    assert_eq!(data.roads.len(),1);assert!(data.roads[0].overview_only);
+    assert_eq!(data.roads[0].points.len(),2);
+    assert!(report.warnings.iter().any(|w|w.contains("overview only")));
+    assert!(!data.road_triangles.is_empty());
+}
+
+#[test]
+fn authored_splines_expand_shared_navigation_and_traffic_with_rules_preserved() {
+    let f=Fixture::new();setup(&f);
+    let file=f.0.join("Town.map.txt");let mut cfg=std::fs::read_to_string(&file).unwrap();cfg.push_str("\n[ai_traffic]\nuseSplines=1\n");std::fs::write(file,cfg).unwrap();
+    config(&f,"aivehicles","smooth.txt","[defaults]\nisBusSpawner=1\nisSpawner=0\n[1]\nposX=299\nposY=7\nposZ=10\n[2]\nposX=339\nposY=9\nposZ=10\n[3]\nposX=379\nposY=11\nposZ=20\n");
+    let report=import(&f.0,"maps/Proton-Town",||false).unwrap();
+    let data=nav(&f);assert!(data.roads[0].points.len()>3);assert!(!data.roads[0].overview_only);
+    assert!(data.roads[0].points.contains(&[339.,10.,9.]));
+    assert!(report.traffic_segments_imported>2);
+}

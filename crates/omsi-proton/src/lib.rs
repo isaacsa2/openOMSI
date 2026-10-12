@@ -10,9 +10,13 @@ mod materials;
 mod prefabs;
 mod gameplay;
 pub mod navigation;
+mod navigation_index;
+mod road_surface;
 pub mod traffic;
+pub mod vehicle;
 mod optimise;
 mod paths;
+mod path_smoothing;
 mod settings;
 mod signals;
 mod stops;
@@ -39,6 +43,7 @@ pub struct Report {
     pub gps_skipped: usize,
     pub gps_imported: usize,
     pub roads_imported: usize,
+    pub road_surface_triangles: usize,
     pub lights_imported: usize,
     pub stops_imported: usize,
     pub destinations_imported: usize,
@@ -312,6 +317,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let mut output_bytes = 0;
     let presets = texture_settings::Presets::read(&texture_dir, &mut report)?;
     let mut navigation = paths::Collector::new(&models, &spawns)?;
+    let smooth = settings::value(&config, "ai_traffic", "usesplines") == Some("1");
     let mut stops = stops::Collector::new(&models)?;
     let mut signals = signals::Collector::new(&models, &mut report)?;
     let mut lamps = streetlights::Collector::new(&models, &texture_dir, &dir.join("proton-import/texture"), &mut report)?;
@@ -380,6 +386,9 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
                     }
                 };
                 let faces = registry.object_faces(&object, &names, default, mode)?;
+                if mode == tags::Mode::Auto {
+                    road_surface::collect(&object, &faces, &registry.materials, &presets, &mut navigation.data, &mut report);
+                }
                 convert::append_object(
                     &object,
                     &faces,
@@ -440,7 +449,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         report.lights_imported -= omitted;
         report.warnings.push(format!("{omitted} streetlight markers outside scenery tiles were omitted"));
     }
-    let (navigation, paths) = navigation.finish(&mut report)?;
+    let (navigation, paths) = navigation.finish(&mut report, smooth)?;
     let mut gameplay = gameplay::Paths::new(&paths)?;
     drop(paths);
     let stops = stops.finish(&mut gameplay, &mut report)?;

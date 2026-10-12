@@ -93,6 +93,14 @@ rust_for_xcode() {
 # Called by Xcode after the Mac app is linked: the game program and the Steam library go
 # beside the launcher in Contents/MacOS, signed as the app is.
 embed_game() {
+    # Xcode may run this alongside dSYM generation. Never overwrite its launcher
+    # with a sibling whose name differs only in case on an ordinary Mac volume.
+    launcher_name="$(printf '%s' "${EXECUTABLE_NAME:-openomsi-apple}" | tr '[:upper:]' '[:lower:]')"
+    case "$launcher_name" in
+        openomsi|openomsi-launcher)
+            echo "The Swift launcher executable must differ from the embedded game: $EXECUTABLE_NAME" >&2
+            exit 1 ;;
+    esac
     dir="$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
     src="$target_dir/universal-apple-darwin/$profile"
     cp "$src/openomsi" "$dir/openomsi"

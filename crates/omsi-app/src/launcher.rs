@@ -123,9 +123,13 @@ impl Host for AppHost {
         showroom::clear_placing_mark();
     }
     fn city_map(&self, root: &Path, tiles: &[(i32, i32, PathBuf)], chrono: &[PathBuf]) -> CityMap {
-        let crate::scene::NavigationMap { lanes, road_surfaces, places, .. } = crate::scene::navigation_map_of(root, tiles, chrono);
+        let crate::scene::NavigationMap { lanes, road_surfaces, places, imported, .. } = crate::scene::navigation_map_of(root, tiles, chrono);
         let (roads, net) = crate::navigator::city_roads(lanes, &road_surfaces);
-        CityMap { roads: roads.into_iter().map(|r| MapRoad { points: r.points, width: r.width, main: r.main }).collect(), net, places: places.into_iter().collect() }
+        let mut roads: Vec<_> = roads.into_iter().map(|r| MapRoad { points:r.points,width:r.width,main:r.main }).collect();
+        if let Some(data) = imported {
+            roads.extend(data.roads.iter().filter(|r| r.overview_only).map(|r| MapRoad {points:r.points.iter().map(|p| glam::DVec3::new(p[0] as f64,p[1] as f64,p[2] as f64)).collect(),width:3.5,main:false}));
+        }
+        CityMap { roads, net, places: places.into_iter().collect() }
     }
     fn city_map_colors(&self) -> [omsi_ui::Color; 4] {
         use crate::navigator::{ROAD, ROAD_CASING, ROAD_MAIN, ROUTE};

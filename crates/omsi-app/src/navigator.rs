@@ -504,7 +504,8 @@ impl Navigator {
 
     /// The map's network given at once (an offscreen picture reads it on its own thread).
     pub fn set_map(&mut self, map: crate::scene::NavigationMap) {
-        self.imported_gps.data = map.imported;
+        self.imported_gps.set_data(map.imported);
+        self.roads = None;
         let mut net = Network { lanes: map.lanes, ..Default::default() };
         net.link(1.5);
         confirm_road_surfaces(&mut net, &map.road_surfaces);
@@ -909,7 +910,8 @@ impl Navigator {
         self.time += f.dt;
         if let Some(rx) = self.building.as_ref() {
             if let Ok((net, pos, streets, imported)) = rx.try_recv() {
-                self.imported_gps.data = imported;
+                self.imported_gps.set_data(imported);
+                self.roads = None;
                 log::info!("navigator: the map's road network is there ({} lanes, {} streets named)", net.lanes.len(), streets.names.len());
                 self.streets = Some(std::sync::Arc::new(streets));
                 self.global = Some(std::sync::Arc::new(net));
@@ -1049,7 +1051,7 @@ impl Navigator {
         let net = global.as_deref().or(f.traffic.map(|t| &t.net)).or(own.as_deref());
         let lanes_now = net.map(|n| n.lanes.len()).unwrap_or(0);
         let rebuild = match &self.roads {
-            None => lanes_now > 0 || self.imported_gps.data.is_some(),
+            None => lanes_now > 0 || self.imported_gps.has_data(),
             Some(r) => (r.anchor - f.bus.truncate()).length() > ROAD_RADIUS * 0.45 || (r.lanes_seen != lanes_now && self.time - r.built_at > 1.5),
         };
         let mut road_verts = None;
@@ -1058,6 +1060,7 @@ impl Navigator {
                 let anchor = f.bus.truncate();
                 let mut p = Painter::new();
                 let t0 = std::time::Instant::now();
+                self.imported_gps.paint_roads(&mut p, anchor, Some(ROAD_RADIUS * 1.6), ROAD);
                 build_roads(&mut p, net, anchor);
                 if omsi_cfg::flags::OMSI_DEBUG_NAV.is_set() {
                     log::info!("navigator: roads around ({:.0}, {:.0}) in {:.1} ms: {} vertices", anchor.x, anchor.y, t0.elapsed().as_secs_f64() * 1000.0, p.verts.len());
@@ -1095,7 +1098,7 @@ impl Navigator {
                 self.route_mesh = (self.route.version, self.jam_version, anchor, p.len(), bus_lane);
                 route_verts = Some(p.verts);
             }
-        } else if self.imported_gps.data.is_some() {
+        } else if self.imported_gps.has_data() {
             if self.route_mesh.0 != self.imported_gps.cache_key() || self.route_mesh.2 != anchor {
                 let mut p = Painter::new();
                 self.imported_gps.paint(&mut p, anchor, Some(ROAD_RADIUS * 1.6), ROUTE);

@@ -305,7 +305,7 @@ impl Navigator {
                         hi = hi.max(p.truncate());
                     }
                 }
-                if let Some((gps_lo,gps_hi)) = self.imported_gps.extent() {
+                if let Some((gps_lo,gps_hi)) = self.imported_gps.map_extent() {
                     lo = lo.min(gps_lo);
                     hi = hi.max(gps_hi);
                 }
@@ -317,6 +317,7 @@ impl Navigator {
                 self.city.extent = (lo, hi);
                 let rel = |q: DVec3| Vec3::new((q.x - anchor.x) as f32, (q.y - anchor.y) as f32, 0.0);
                 let mut p = Painter::new();
+                self.imported_gps.paint_roads(&mut p, anchor, None, ROAD);
                 for pass in 0..2 {
                     for l in &road_lanes {
                         let pts = simplify(&l.points.iter().map(|q| rel(*q)).collect::<Vec<_>>(), 0.12);

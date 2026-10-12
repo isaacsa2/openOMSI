@@ -139,10 +139,20 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   the entry-point name (`_gps_` plus `_<name>_`). They appear on both the small
   navigator and city map, without visible scenery, collision or source materials.
   GPS-only files are also recognised; unmatched strips are omitted and reported.
+  Matching tolerates case and separators (spaces/underscores/hyphens) and chooses the
+  longest complete route name, never a numeric prefix such as `101` inside `1010`.
+  Ambiguous normalized names remain unmatched. An explicitly unknown object route
+  cannot inherit a different route from its containing filename. Route changes and
+  metadata reloads invalidate cached drawing buffers. Nearby GPS and road faces use
+  a bounded 256 m spatial index; wide faces are retained without expanding a huge grid.
 - Vehicle-path coordinates in `aivehicles/*.txt`, or exact `<prefix>.000` 3DS
   marker names, become roads on the navigator and launcher map, plus native traffic paths. Numeric ordering,
   reversal and complete loops are preserved; missing point numbers split the road
   instead of connecting across a gap. The displayed width is an approximate 3.5 m.
+  `automatic_setup.enabled=0` keeps a numbered approximate overview for map drawing,
+  without closing loops, adding routing links or generating traffic from unknown manual
+  connections. The game and launcher can display this overview separately from the network.
+  Numeric sections containing only settings do not produce an invented point at the origin.
   Vertex-only 3DS objects are retained as markers; they need no faces and produce
   no visible helper geometry. The same applies to authored pedestrian points.
 - `streetlights/*.txt` prefixes and `_real_` / `_fake_` markers become native
@@ -214,9 +224,25 @@ cars still allow the requested fallback. Missing Grundorf or its models logs a c
 warning and leaves scenery usable. An explicit map `ailists.cfg` overrides the fallback,
 including an empty list. Bus models need authored bus-allowed paths. Native human models
 remain required for pedestrians/boarding; Proton pedestrian spawn intervals are not
-reproduced. Paths need a supporting road/collision surface. Manual path links,
-train paths and Proton spline smoothing remain unsupported and are reported rather
-than invented; `automatic_setup.enabled=0` does not create an inferred traffic route.
+reproduced. Paths need a supporting road/collision surface. Manual links and train paths remain unsupported for traffic. With authored
+`[ai_traffic] useSplines=1`, automatic vehicle paths use bounded Catmull–Rom subdivision
+(approximately 5 m, with extra samples at corners). Original control points, loops,
+gaps, direction and per-segment rules remain; elevation stays on the source segment,
+and lateral deviation is bounded to 2 m. This is an approximation, not PBSU's exact
+spline implementation. Both navigation and native AI use the same sampled points;
+pedestrian and manual-link paths are not smoothed.
+
+The in-game navigator and city map also recognize approximate road footprints from
+near-horizontal faces of road-named meshes, asphalt/dirt-road texture names or authored
+asphalt material presets. Names indicating walls, roofs, signs or sidewalks are excluded.
+This is a semantic heuristic, not visual texture recognition or a complete road detector.
+Up to 32,768 faces share the existing navigation byte/triangle budget. Extra faces stay
+in the scene; only their optional overview is omitted. Drawing uses spatial culling,
+and source road geometry is not duplicated into the 3D scene or collision buffers.
+These footprints are **display-only**, never traffic lanes, road junctions or routable
+links; they do not connect different bridge levels or create vehicles without authored
+paths. The launcher's road preview currently shows authored/overview paths; the inferred
+triangle footprints are displayed in-game. Reimport to regenerate this metadata.
 
 The GPS follows the author's drawn strip; it does not recalculate routes, announce
 turns or create a timetable. Format conventions follow the public
@@ -398,3 +424,7 @@ prefab transforms and source AI export. No original map or stock asset is commit
 Real user archives without the declaration are intentionally blocked; the converter
 does not add it to run a test. PBSU loading, a real Windows CLI execution, GPU memory,
 night lighting and AI/boarding behavior in-game still require runtime validation.
+
+Read-only preparation for drivable Proton vehicles is described in
+[PROTON_VEHICLES.md](PROTON_VEHICLES.md). The map importer does not install `.ini`
+vehicles or change the existing declaration gate.
