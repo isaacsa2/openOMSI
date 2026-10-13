@@ -55,7 +55,7 @@ pub(crate) fn weather(app: &App) -> Option<op::Weather> {
         snow_on_road: w.snow_on_road,
         wetness: app.session.wetness,
         changing: app.session.weather_blend.is_some(),
-        locked: app.metar_locked(),
+        locked: lan_client(app) || app.metar_locked(),
     })
 }
 
@@ -176,7 +176,7 @@ pub(crate) fn set_view(app: &mut App, name: &str) -> bool {
 }
 
 pub(crate) fn set_free_camera(app: &mut App, at: [f64; 3], yaw: f32, pitch: f32) -> bool {
-    if !at.iter().all(|v| v.is_finite()) || app.camera.is_none() {
+    if !at.iter().all(|v| v.is_finite()) || !yaw.is_finite() || !pitch.is_finite() || app.camera.is_none() {
         return false;
     }
     app.view = "free".into();
@@ -184,7 +184,7 @@ pub(crate) fn set_free_camera(app: &mut App, at: [f64; 3], yaw: f32, pitch: f32)
     if let Some(c) = app.camera.as_mut() {
         c.position = glam::DVec3::new(at[0], at[1], at[2]);
         c.yaw = yaw.rem_euclid(360.0);
-        c.pitch = pitch;
+        c.pitch = pitch.clamp(-89.0, 89.0);
     }
     true
 }
