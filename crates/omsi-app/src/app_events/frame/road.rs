@@ -19,11 +19,11 @@ pub(super) fn traffic(cx: TrafficCx, dt: f32) {
         cx.gfx.renderer.as_ref(),
         cx.gfx.scene.as_mut(),
     ) {
-        let center = cx.player.player
-            .as_ref()
-            .map(|p| p.vehicle.position)
-            .or(cx.view.camera.as_ref().map(|c| c.position))
-            .unwrap_or(DVec3::ZERO);
+        let center = crate::traffic_link::population_center(
+            cx.people.on_foot.as_ref().map(|f| f.pos),
+            cx.player.player.as_ref().map(|p| p.vehicle.position),
+            cx.view.camera.as_ref().map(|c| c.position),
+        );
         let aspect = cx.gfx.gfx.surface
             .as_ref()
             .map(|s| s.config.width as f64 / s.config.height.max(1) as f64)

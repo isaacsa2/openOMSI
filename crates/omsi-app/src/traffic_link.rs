@@ -2,6 +2,12 @@
 
 use super::*;
 
+/// Centre of visible random traffic: a pedestrian can walk away from a parked bus.
+/// The bus still contributes a collision outline and its passengers stay simulated.
+pub(crate) fn population_center(on_foot: Option<DVec3>, bus: Option<DVec3>, camera: Option<DVec3>) -> DVec3 {
+    on_foot.or(bus).or(camera).unwrap_or(DVec3::ZERO)
+}
+
 /// Position, heading, half extents and speed of the player's vehicle for the AI's
 /// obstacle checks.
 pub(crate) fn player_outline(p: &Player) -> traffic::PlayerBox {
@@ -121,5 +127,20 @@ pub(crate) fn lay_down_poles(
         if let Some(pos) = world.lay_down_pole(renderer, scene, id, push) {
             log::info!("knocked over post {id} at ({:.1}, {:.1})", pos.x, pos.y);
         }
+    }
+}
+
+#[cfg(test)]
+mod population_tests {
+    use super::*;
+
+    #[test]
+    fn walking_uses_pedestrian_position_not_parked_bus() {
+        let walker = DVec3::new(100.0, 20.0, 0.0);
+        let parked = DVec3::new(5.0, 6.0, 0.0);
+        assert_eq!(population_center(Some(walker), Some(parked), None), walker);
+        assert_eq!(population_center(None, Some(parked), Some(walker)), parked);
+        assert_eq!(population_center(None, None, Some(walker)), walker);
+        assert_eq!(population_center(None, None, None), DVec3::ZERO);
     }
 }
