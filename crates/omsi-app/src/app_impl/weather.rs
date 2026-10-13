@@ -267,6 +267,9 @@ impl App {
 
     /// Go over to the weather of a METAR report that came in.
     fn apply_metar(&mut self, to: omsi_content::weather::Weather) {
+        // Once a station report takes over, the old natural weather model must not
+        // overwrite it after the 60-second transition finishes.
+        self.session.sky.model = None;
         self.session.metar_next = 600.0;
         let file = to.path.to_string_lossy().to_string();
         // (what the players are told: the report's values, which they make the weather from)
