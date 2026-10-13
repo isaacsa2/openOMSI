@@ -837,7 +837,8 @@ Regional = https://example.org/regional.mp3 | 97.9
 * `[maplight] x y z r g b radius` (scenery): point light at night, full within `radius`,
   inverse-square beyond, out of range at six times it. The colour is the brightness: a petrol
   station's red sign declares 0.1 red over a 20 m core and is meant to glow by its pumps, not
-  to tint the street a hundred metres away. `[matl_nightmap]` = self-illumination texture, `[matl_change]
+  to tint the street a hundred metres away. `[maplight_2] x y z r g b radius variable`
+  (openOMSI): the same, switched by a lamp variable in a traffic lamp (see MODDING). `[matl_nightmap]` = self-illumination texture, `[matl_change]
   texture index variable` + `[matl_item]` = texture variants by variable (`NightlightA` for
   street lights).
 

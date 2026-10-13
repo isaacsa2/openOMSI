@@ -328,6 +328,14 @@ pub(crate) fn export(
         segments, cells, ..
     } = paths;
     drop(cells);
+    let unused = signals.unused();
+    if !unused.is_empty() {
+        report.warnings.push(format!(
+            "{} traffic-light programs have no lamp or trigger in the map (objects named <prefix>_path<N>_red_…): {}",
+            unused.len(),
+            unused.join(", ")
+        ));
+    }
     let segments = attach_signals(segments, &signals, report)?;
     let mut groups = BTreeMap::<((i32, i32), Option<usize>), Vec<Segment>>::new();
     let mut omitted = 0;

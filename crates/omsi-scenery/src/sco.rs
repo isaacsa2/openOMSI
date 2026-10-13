@@ -172,6 +172,8 @@ pub struct SceneryObject {
     pub crash_mode_pole: Option<(f32, f32)>,
     pub attachments: Vec<Attachment>,
     pub map_lights: Vec<MapLight>,
+    /// `[maplight_2]` (openOMSI): a `[maplight]` and the variable that switches it.
+    pub switched_map_lights: Vec<(MapLight, String)>,
     pub rail_enh: Vec<[f32; 8]>,
     pub third_rail: Vec<[f32; 6]>,
     pub trigger_boxes: Vec<TriggerBox>,
@@ -413,6 +415,11 @@ impl SceneryObject {
                     let v = r.f32s::<7>();
                     o.map_lights.push(MapLight { pos: [v[0], v[1], v[2]], color: [v[3], v[4], v[5]], radius: v[6] });
                 }
+                "maplight_2" => {
+                    let v = r.f32s::<7>();
+                    let variable = r.str().trim().to_string();
+                    o.switched_map_lights.push((MapLight { pos: [v[0], v[1], v[2]], color: [v[3], v[4], v[5]], radius: v[6] }, variable));
+                }
                 "rail_enh" => o.rail_enh.push(r.f32s::<8>()),
                 "third_rail" => o.third_rail.push(r.f32s::<6>()),
                 "triggerbox_new" => {
@@ -484,6 +491,16 @@ mod tests {
         assert_eq!(o.attachments.len(), 2);
         assert_eq!(o.attachments[0].ops, vec![("attach_trans".to_string(), vec![0.042, 0.0, 2.68])]);
         assert_eq!(o.attachments[1].ops, vec![("attach_rot_x".to_string(), vec![-10.0])]);
+    }
+
+    #[test]
+    fn a_switched_map_light_keeps_its_variable_beside_the_plain_ones() {
+        let text = "[maplight]\n0\n0\n5\n1\n1\n0.8\n4\n[maplight_2]\n0\n0.1\n0\n1\n0\n0\n1.5\n red\n";
+        let o = SceneryObject::parse(&CfgFile::from_str("lamp.sco", text));
+        assert_eq!(o.map_lights.len(), 1);
+        assert_eq!(o.switched_map_lights.len(), 1);
+        let (l, var) = &o.switched_map_lights[0];
+        assert_eq!((l.pos, l.color, l.radius, var.as_str()), ([0.0, 0.1, 0.0], [1.0, 0.0, 0.0], 1.5, "red"));
     }
 
     #[test]

@@ -552,6 +552,11 @@ pub struct LightObject {
     pub corona_mesh: Vec<(usize, glam::Vec3, glam::Vec3)>,
     /// Current brightness of each corona (set with the lamp state every frame).
     pub lit: Vec<f32>,
+    /// `[maplight_2]` lamps switched by a lamp variable (a signal's red light on the road
+    /// while it shows red), and that variable.
+    pub lights: Vec<(omsi_render::PointLight, String)>,
+    /// Current brightness of each of `lights` (set with the lamp state every frame).
+    pub light_lit: Vec<f32>,
     /// The object's rotation, and whether its script moves meshes of it: a level
     /// crossing's barrier is a `[trafficlight]` object whose arm turns with its light
     /// (`bue_schranke.osc`), and stood as a static model across the road.

@@ -483,6 +483,34 @@ mod cookie_tests {
 }
 
 #[cfg(test)]
+mod lamp_light_tests {
+    use super::*;
+
+    #[test]
+    fn a_signals_light_on_the_road_follows_what_it_shows_after_dark_and_near() {
+        let red = PointLight { position: DVec3::new(0.0, 0.0, 5.0), radius: 10.0, color: [1.0, 0.0, 0.0], intensity: 0.8, ..Default::default() };
+        let mut lamp = crate::LightObject {
+            parent: 1, index: 0, any_light: false, instances: Vec::new(), slots: Vec::new(),
+            variants: Vec::new(), pos: DVec3::ZERO, script: None, coronas: Vec::new(),
+            corona_mesh: Vec::new(), lit: Vec::new(),
+            lights: vec![(red, "red".into()), (red, "green".into())],
+            light_lit: vec![1.0, 0.0], xf: glam::Mat4::IDENTITY, animated: false, sound: None,
+            sounds: Default::default(), shown: None, texts: Vec::new(),
+        };
+        let lit = |lamp: &crate::LightObject, on, camera| {
+            let mut out = Vec::new();
+            lamp_lights(lamp, on, camera, &mut out);
+            out.iter().map(|l| (l.color, l.intensity)).collect::<Vec<_>>()
+        };
+        assert_eq!(lit(&lamp, true, DVec3::ZERO), vec![([1.0, 0.0, 0.0], 0.8)], "the red one only");
+        assert!(lit(&lamp, false, DVec3::ZERO).is_empty(), "by day the glow alone");
+        assert!(lit(&lamp, true, DVec3::new(MAP_LIGHT_RANGE + 1.0, 0.0, 0.0)).is_empty());
+        lamp.light_lit = vec![0.5, 2.0];
+        assert_eq!(lit(&lamp, true, DVec3::ZERO), vec![([1.0, 0.0, 0.0], 0.4), ([1.0, 0.0, 0.0], 0.8)], "dimmed, never brighter than declared");
+    }
+}
+
+#[cfg(test)]
 mod spot_tests {
     #[test]
     fn a_full_beam_reaches_further_than_the_low_beam() {
@@ -560,6 +588,19 @@ pub(crate) struct NearLights {
     counts: (usize, usize),
     lights: Vec<PointLight>,
     coronas: Vec<Corona>,
+}
+
+/// The `[maplight_2]` lights of a traffic lamp that its state switches on: they light the
+/// road only after dark, like the map's other lamps, and as near.
+fn lamp_lights(lamp: &crate::LightObject, lamps_on: bool, camera_pos: DVec3, out: &mut Vec<PointLight>) {
+    if !lamps_on || (lamp.pos - camera_pos).length() > MAP_LIGHT_RANGE {
+        return;
+    }
+    for ((l, _), lit) in lamp.lights.iter().zip(&lamp.light_lit) {
+        if *lit > 0.0 {
+            out.push(PointLight { intensity: l.intensity * lit.min(1.0), ..*l });
+        }
+    }
 }
 
 /// Fill the scene's lights for this frame, the lamps' cones in the weather `cone`.
@@ -641,6 +682,7 @@ pub fn collect(
             corona.brightness *= lit.min(1.0);
             scene.coronas.push(corona);
         }
+        lamp_lights(lamp, daylight.lamps_on, camera_pos, &mut scene.lights);
     }
     for list in world.particle_objects.lock().values() {
         for po in list {

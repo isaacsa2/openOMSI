@@ -1168,6 +1168,16 @@ impl World {
             key
         });
         let lit = vec![0.0; coronas.len()];
+        let lights: Vec<(omsi_render::PointLight, String)> = ot
+            .sco
+            .switched_map_lights
+            .iter()
+            .filter_map(|(ml, var)| match LightSwitch::parse(var) {
+                LightSwitch::Variable(v) => Some((map_light(ml, xf, pos), v)),
+                _ => None,
+            })
+            .collect();
+        let light_lit = vec![0.0; lights.len()];
         let sound = ot.sco.sound.as_ref().map(|rel| {
             let dir = ot.sco.path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
             omsi_cfg::resolve_path(&dir, rel)
@@ -1184,6 +1194,8 @@ impl World {
             coronas,
             corona_mesh,
             lit,
+            lights,
+            light_lit,
             xf,
             animated,
             sound,

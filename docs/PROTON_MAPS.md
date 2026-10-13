@@ -390,8 +390,13 @@ chain; chains that overlap on the stop line and head the same way share it, and
 `_anyangle_` takes every direction. Paths going different ways on the same line, and
 triggers with no path in reach, are left unlinked and reported with their number
 (`traffic_light_triggers`, `traffic_light_triggers_matched`) and the nearest miss. Signal
-lamps emit native glows; coloured real-light range/shadows are not imported. Native path
-linking uses the engine's endpoint tolerance (see the corners above).
+lamps glow natively and, with `useRealLights` (the default), light the road in their
+`[red_light]`/`[yellow_light]`/`[green_light]` colour and `range` while lit, after dark
+(`[maplight_2]` in each lamp, see [MODDING](MODDING.md#lights)); these lights cast no
+shadows. Lamps and triggers are matched by prefix: when two programs declare the same
+prefix the first by file name drives them and the other is skipped with a warning, and
+programs no object of the map is named after are listed. Native path linking uses the
+engine's endpoint tolerance (see the corners above).
 
 Streetlight rendering is approximate. Imported point lights follow the native
 night cycle and do not allocate additional lamp shadow maps; source shadow options

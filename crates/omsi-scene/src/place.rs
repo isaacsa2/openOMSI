@@ -898,23 +898,41 @@ fn object_lights(state: &mut TileState, ot: &ObjectType, pos: DVec3, xf: Mat4, l
         if ot.sco.map_lights[..k].iter().any(|o| o.pos == ml.pos && o.color == ml.color && o.radius == ml.radius) {
             continue;
         }
-        let p = xf.transform_point3(glam::Vec3::from(ml.pos)).as_dvec3() + pos;
-        // `[maplight] … radius` is the core the light fills at full colour; it
-        // fades inverse-square beyond and is cut off at six times that. The
-        // colour is the brightness, so the intensity stays at one: an Esso sign
-        // declared as 0.1 red is a glow by its pumps, not a red wash over the
-        // whole street.
         state.lights.push(omsi_render::PointLight {
-            position: p,
-            radius: ml.radius.max(0.5) * 6.0,
-            color: ml.color,
-            intensity: 1.0,
-            core: ml.radius.max(0.5),
-            housed: true,
             shadow_owner: embedded.get(k).copied().unwrap_or(false).then_some(key),
             casts_shadows: !ot.sco.path.parent().is_some_and(|p| p.ends_with("proton-import")),
-            ..Default::default()
+            ..map_light(ml, xf, pos)
         });
+    }
+    // `[maplight_2]`: a traffic lamp's switch with its state (`LightObject::lights`);
+    // elsewhere it is a `[maplight]`, unless its constant switches it off
+    for (ml, var) in &ot.sco.switched_map_lights {
+        let intensity = match LightSwitch::parse(var) {
+            LightSwitch::Variable(_) if lamp.is_some() => continue,
+            LightSwitch::Constant(x) if x <= 0.0 => continue,
+            LightSwitch::Constant(x) => x,
+            _ => 1.0,
+        };
+        state.lights.push(omsi_render::PointLight { intensity, ..map_light(ml, xf, pos) });
+    }
+}
+
+/// The light of a `[maplight]` placed at `pos` turned by `xf`.
+///
+/// `[maplight] … radius` is the core the light fills at full colour; it fades
+/// inverse-square beyond and is cut off at six times that. The colour is the brightness,
+/// so the intensity stays at one: an Esso sign declared as 0.1 red is a glow by its
+/// pumps, not a red wash over the whole street.
+pub(super) fn map_light(ml: &omsi_scenery::sco::MapLight, xf: Mat4, pos: DVec3) -> omsi_render::PointLight {
+    omsi_render::PointLight {
+        position: xf.transform_point3(glam::Vec3::from(ml.pos)).as_dvec3() + pos,
+        radius: ml.radius.max(0.5) * 6.0,
+        color: ml.color,
+        intensity: 1.0,
+        core: ml.radius.max(0.5),
+        housed: true,
+        casts_shadows: false,
+        ..Default::default()
     }
 }
 
@@ -1120,5 +1138,34 @@ mod embedded_light_tests {
             assert_eq!(placed.color, source.color);
             assert_eq!(placed.intensity, 1.0);
         }
+    }
+
+    #[test]
+    fn switched_map_lights_leave_a_lamps_to_its_state_and_light_the_rest_as_map_lights() {
+        let mut fixture = pole_fixture();
+        fixture.sco.map_lights.clear();
+        let light = |radius| omsi_scenery::sco::MapLight { pos: [0.0, 0.0, 1.0], color: [1.0, 0.0, 0.0], radius };
+        fixture.sco.switched_map_lights = vec![
+            (light(1.0), "red".into()),
+            (light(2.0), "NightlightA".into()),
+            (light(3.0), "0".into()),
+            (light(4.0), "0.5".into()),
+        ];
+        let position = DVec3::new(10.0, 20.0, 30.0);
+        let lit = |lamp| {
+            let mut state = TileState::default();
+            object_lights(&mut state, &fixture, position, Mat4::IDENTITY, lamp, 7);
+            state.lights.iter().map(|l| (l.core, l.intensity)).collect::<Vec<_>>()
+        };
+        // a traffic lamp's red is switched with its state (`LightObject::lights`), the
+        // constant switched off is never lit
+        assert_eq!(lit(Some((1, 0, false))), vec![(2.0, 1.0), (4.0, 0.5)]);
+        // elsewhere a variable cannot switch it: it is a `[maplight]`
+        assert_eq!(lit(None), vec![(1.0, 1.0), (2.0, 1.0), (4.0, 0.5)]);
+        let mut state = TileState::default();
+        object_lights(&mut state, &fixture, position, Mat4::IDENTITY, None, 7);
+        let red = &state.lights[0];
+        assert_eq!((red.position, red.radius, red.color), (position + DVec3::Z, 6.0, [1.0, 0.0, 0.0]));
+        assert!(red.housed && !red.casts_shadows);
     }
 }

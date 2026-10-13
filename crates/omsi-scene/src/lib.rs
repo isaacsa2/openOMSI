@@ -78,6 +78,7 @@ pub use vehicle_materials::*;
 pub use vehicle_types::*;
 use lanes::*;
 use lightmaps::*;
+use place::map_light;
 pub use stage::*;
 #[cfg(test)]
 use place::field_height;

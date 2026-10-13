@@ -45,7 +45,7 @@ pub(crate) const LOWER_CASE: &[&str] = &[
     "illumination_interior", "important", "infosystem_busstop_list", "infosystem_trip",
     "interiorlight", "inv_min_turnradius", "isshadow", "item", "kill_rule", "kmcounter_init",
     "language", "last_driver", "last_map", "length", "light", "light_enh", "light_enh_2", "line",
-    "links", "location", "loopsound", "map", "mapcam", "maplight", "mass", "matl", "matl_allcolor",
+    "links", "location", "loopsound", "map", "mapcam", "maplight", "maplight_2", "mass", "matl", "matl_allcolor",
     "matl_alpha", "matl_bumpmap", "matl_change", "matl_envmap", "matl_envmap_mask",
     "matl_envmaprealtime", "matl_freetex", "matl_item", "matl_lightmap", "matl_nightmap",
     "matl_raindropmap", "matl_texadress_border", "matl_texadress_clamp", "matl_texadress_mirror",

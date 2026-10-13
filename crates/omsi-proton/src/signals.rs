@@ -26,6 +26,8 @@ const CORONA_RANGE: (f32, f32) = (0.6, 1.2);
 /// The corona's brightness factor. The renderer draws it times 0.48 by day and 1.08 by night,
 /// so the 0.5 these lamps had was a quarter of a lamp by day.
 const CORONA_BRIGHTNESS: f32 = 1.0;
+/// The least, the default and the most reach of a lamp's real light (`[red_light] range`, m).
+const REAL_LIGHT_RANGE: (f32, f32, f32) = (1.0, 10.0, 60.0);
 
 /// The corona of a lamp that is `diameter` metres across.
 pub(crate) fn corona_size(diameter: f32) -> f32 {
@@ -56,6 +58,9 @@ pub(crate) struct Program {
     paths: usize,
     pub tiles: BTreeSet<(i32, i32)>,
     colors: [[f32; 3]; 3],
+    /// The reach of the red, yellow and green lamps' light on the road (m), when the
+    /// program has real lights (`useRealLights`).
+    lights: Option<[f32; 3]>,
 }
 #[derive(Default)]
 pub(crate) struct Collector {
@@ -72,6 +77,7 @@ impl Collector {
         if !folder.is_dir() {
             return Ok(out);
         }
+        let mut declared = BTreeMap::<String, String>::new();
         for file in files(&folder, "txt")? {
             ensure!(out.programs.len() < 1024, "too many traffic-light programs");
             let cfg = ini(&file)?;
@@ -79,6 +85,17 @@ impl Collector {
                 value(&cfg, "trafficlight", "prefix")
                     .unwrap_or(&file.file_name().unwrap().to_string_lossy()),
             )?;
+            // (lamps and triggers are named by the prefix: a second program of the same
+            // name could never drive them, and which one Proton takes is not documented,
+            // so the first by file name is kept, the same on every import)
+            let name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            if let Some(first) = declared.get(&prefix) {
+                report.warnings.push(format!(
+                    "{prefix}: traffic-light prefix declared by both {first} and {name}; {first} drives its lamps and triggers, {name} is skipped"
+                ));
+                continue;
+            }
+            declared.insert(prefix.clone(), name);
             let paths = number(&cfg, "trafficlight", "howmanypaths", 2.0)? as usize;
             let ticks = number(&cfg, "trafficlight", "howmanyticks", 2.0)? as usize;
             ensure!(
@@ -128,6 +145,7 @@ impl Collector {
                 continue;
             }
             let mut colors = [[1.0, 0.0, 0.0], [1.0, 0.92, 0.02], [0.0, 1.0, 0.0]];
+            let mut ranges = [REAL_LIGHT_RANGE.1; 3];
             for (i, section) in ["red_light", "yellow_light", "green_light"]
                 .iter()
                 .enumerate()
@@ -137,12 +155,11 @@ impl Collector {
                     colors[i][j] =
                         number(&cfg, section, key, colors[i][j])?.clamp(0.0, 1.0) * intensity;
                 }
+                ranges[i] = number(&cfg, section, "range", REAL_LIGHT_RANGE.1)?
+                    .clamp(REAL_LIGHT_RANGE.0, REAL_LIGHT_RANGE.2);
             }
             if value(&cfg, "trafficlight", "randomtimestampatstart") != Some("0") || first != 0 {
                 report.warnings.push(format!("{prefix}: signal phases use the native game-time clock; start timing is approximated"));
-            }
-            if value(&cfg, "trafficlight", "usereallights") != Some("0") {
-                report.warnings.push(format!("{prefix}: traffic lamps use native glows; coloured real-light range is not imported"));
             }
             out.programs.push(Program {
                 prefix,
@@ -153,9 +170,23 @@ impl Collector {
                 height: number(&cfg, "trafficlight", "triggerheight", 5.0)?.clamp(0.1, 50.0),
                 tiles: BTreeSet::new(),
                 colors,
+                lights: (value(&cfg, "trafficlight", "usereallights") != Some("0")).then_some(ranges),
             });
         }
         Ok(out)
+    }
+
+    /// The prefixes of the programs no lamp or trigger of the map is named after.
+    pub fn unused(&self) -> Vec<&str> {
+        self.programs
+            .iter()
+            .enumerate()
+            .filter(|&(group, _)| {
+                !self.bulbs.iter().any(|b| b.group == group)
+                    && !self.triggers.iter().any(|t| t.group == group)
+            })
+            .map(|(_, p)| p.prefix.as_str())
+            .collect()
     }
 
     pub fn marker(
@@ -305,6 +336,14 @@ impl Collector {
                 b * 255.0,
                 corona_size(diameter)
             ));
+            if let Some(ranges) = program.lights {
+                // the lamp's coloured light on the road while it is lit (Proton's real
+                // light): the native `[maplight]` radius is its core, cut off at six
+                sco.push_str(&format!(
+                    "[maplight_2]\n0\n0\n0\n{r}\n{g}\n{b}\n{}\n{variable}\n",
+                    ranges[color] / 6.0
+                ));
+            }
             std::fs::write(dir.join(format!("proton-import/{stem}.sco")), sco)?;
             let key = ((p.x / EDGE).floor() as i32, (p.y / EDGE).floor() as i32);
             program.tiles.insert(key);

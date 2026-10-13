@@ -184,6 +184,7 @@ fn native_paths_stops_waiting_and_lamps_survive_an_end_to_end_import() {
         assert_eq!(glow.size, crate::signals::corona_size(1.0));
         assert!(glow.size > 0.4, "{}", glow.size);
         assert_eq!(glow.values[0], 1.0);
+        assert!(sco.switched_map_lights.is_empty(), "useRealLights=0 adds no light on the road");
     }
 
     // a signal lamp's glow follows its size within the range that can be seen and not mistaken
@@ -209,6 +210,47 @@ fn native_paths_stops_waiting_and_lamps_survive_an_end_to_end_import() {
         .iter()
         .any(|r| r.kind == "trafficdensity" && r.value == 0.5));
     assert!(plain.rules.iter().any(|r| r.kind == "bus"));
+}
+
+#[test]
+fn real_lamp_light_follows_its_lamp_and_a_shared_prefix_keeps_the_first_program() {
+    let f = Fixture::new();
+    setup(&f);
+    objects(
+        &f,
+        &[
+            ("junction_path1_red_a", [301.0, 10.0, 8.0]),
+            ("junction_path1_green_a", [301.0, 10.0, 9.0]),
+        ],
+    );
+    config(&f,"trafficlights","a.txt","[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=2\ntickInterval=2\nrandomTimestampAtStart=0\n[tick1]\nrepeat=2\npath1_red=1\n[tick2]\nrepeat=3\npath1_green=1\n[red_light]\ncolorR=1\ncolorG=0.2\ncolorB=0\nintensity=0.5\nrange=12\n");
+    config(&f,"trafficlights","b.txt","[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=1\ntickInterval=7\nrandomTimestampAtStart=0\n[tick1]\npath1_red=1\n");
+    config(&f,"trafficlights","c.txt","[trafficlight]\nprefix=lonely\nhowManyPaths=1\nhowManyTicks=1\nrandomTimestampAtStart=0\n[tick1]\npath1_red=1\n");
+    let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
+    assert_eq!(report.signals_imported, 1);
+    let said = |text: &str| report.warnings.iter().any(|w| w.contains(text));
+    assert!(said("junction: traffic-light prefix declared by both a.txt and b.txt; a.txt drives"), "{:?}", report.warnings);
+    assert!(said("1 traffic-light programs have no lamp or trigger in the map (objects named <prefix>_path<N>_red_…): lonely"), "{:?}", report.warnings);
+    assert!(!said("real-light"), "{:?}", report.warnings);
+    let tiles = loaded(&f);
+    let all: Vec<_> = tiles.iter().flat_map(|t| &t.objects).collect();
+    let program = all.iter().map(|o| sco(&f, o)).find(|s| !s.traffic_lights.is_empty()).unwrap();
+    assert_eq!(program.traffic_lights_group, Some(10.0), "a.txt's cycle, not b.txt's");
+    let mut lights: Vec<_> = all
+        .iter()
+        .filter(|o| o.file.contains("/signal_"))
+        .flat_map(|o| sco(&f, o).switched_map_lights)
+        .map(|(l, var)| (var, l.pos, l.color, l.radius))
+        .collect();
+    lights.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        lights,
+        vec![
+            ("green".to_string(), [0.0; 3], [0.0, 1.0, 0.0], 10.0 / 6.0),
+            ("red".to_string(), [0.0; 3], [0.5, 0.1, 0.0], 2.0),
+        ],
+        "each lamp lights the road in its colour, switched by what it shows"
+    );
 }
 
 #[test]

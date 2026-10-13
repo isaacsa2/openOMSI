@@ -421,6 +421,9 @@ impl Traffic {
                 let v = value(lamp, &lamp.coronas[k].1);
                 lamp.lit[k] = v;
             }
+            for k in 0..lamp.lights.len() {
+                lamp.light_lit[k] = value(lamp, &lamp.lights[k].1);
+            }
             for (k, (inst, cond)) in lamp.instances.iter().enumerate() {
                 let visible = match cond {
                     Some((var, want)) => (value(lamp, var) - want).abs() < 0.5,

@@ -87,6 +87,27 @@ Normal, roughness, metalness and occlusion maps beside a texture, up to 4096 × 
   `[spotlight]`'s, it is not moved onto the vehicle's front. A rear section's model may have
   its own; their variables are the bus's.
 
+- `[maplight_2]` in a scenery object is a `[maplight]` (position, red, green, blue, radius)
+  followed by the variable that switches it. In a traffic lamp (a `[trafficlight]` object
+  driven by a crossing) it lights the road while the lamp shows that variable, `red`,
+  `yellow` or `green` as its `[visible]` meshes and `[light_enh_2]` glows do, and only after
+  dark like the map's other lamps. Anywhere else, or with `NightlightA`, it is a
+  `[maplight]`; a number is a constant, and 0 or less leaves it off:
+
+  ```
+  [maplight_2]
+  0
+  0
+  0
+  1
+  0
+  0
+  1.6
+  red
+  ```
+
+  The colour is the brightness, 0 to 1 (as `[maplight]`'s); OMSI 2 does not read it.
+
 - `[spotlight_cookie]` in the `model.cfg` is a lamp whose beam is a picture: what it would
   show on a wall in front of it, its brightness and colour every way the lamp shines. One
   value a line: position (x, y, z), direction (x, y, z), red, green, blue, range, the angle the
