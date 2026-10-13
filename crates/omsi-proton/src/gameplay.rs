@@ -7,7 +7,7 @@ use crate::{
     Report,
 };
 use anyhow::{ensure, Result};
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,
@@ -120,6 +120,19 @@ fn segments(paths: &[DrivePath]) -> Result<Vec<Segment>> {
     Ok(out)
 }
 
+/// A vehicle stops when its body, not its axis, meets a trigger's capsule: half the width of a
+/// car or a bus reaches this much further than the trigger's radius.
+const HALF_WIDTH: f32 = 1.2;
+/// Chains whose paths come this close on a stop line are one stop line.
+const SAME_LINE: f32 = 0.5;
+/// Paths whose headings differ less than this (degrees) go the same way.
+const SAME_WAY: f32 = 35.0;
+
+fn horizontal(a: Vec3, b: Vec3) -> Option<Vec2> {
+    let d = (b - a).truncate();
+    (d.length() > 0.001).then(|| d.normalize())
+}
+
 fn attach_signals(
     segments: Vec<Segment>,
     signals: &Collector,
@@ -131,9 +144,13 @@ fn attach_signals(
     }
     let mut cuts = BTreeMap::<usize, Vec<(f32, (usize, usize))>>::new();
     let mut probes = 0usize;
+    let (mut unmatched, mut opposed, mut nearest_miss) = (0usize, 0usize, f32::INFINITY);
     for trigger in &signals.triggers {
+        report.traffic_light_triggers += 1;
         let (x, y) = key(trigger.centre);
+        let reach = trigger.radius + HALF_WIDTH;
         let mut candidates = Vec::new();
+        let mut nearest = f32::INFINITY;
         for tx in x - 1..=x + 1 {
             for ty in y - 1..=y + 1 {
                 for &i in spatial.get(&(tx, ty)).into_iter().flatten() {
@@ -149,7 +166,8 @@ fn attach_signals(
                     .clamp(0.0, 1.0);
                     let p = s.a + ab * t;
                     let d = (p - trigger.centre).truncate().length();
-                    if d <= trigger.radius
+                    nearest = nearest.min(d);
+                    if d <= reach
                         && (p.z - trigger.centre.z).abs() <= trigger.height
                         && t < 0.99999
                     {
@@ -163,27 +181,53 @@ fn attach_signals(
                 .then(a.2.total_cmp(&b.2))
                 .then(a.1.cmp(&b.1))
         });
+        // one piece per chain: a trigger on a corner point lies on two pieces of one chain
+        let mut seen = BTreeSet::new();
+        candidates.retain(|c| seen.insert(segments[c.1].path));
         if candidates.is_empty() {
-            report.warnings.push("A traffic-light trigger has no matching authored vehicle path; stopping omitted there".into());
+            unmatched += 1;
+            nearest_miss = nearest_miss.min(nearest);
             continue;
         }
         if !trigger.any_angle {
             let first = candidates[0];
+            let way = |i: usize| horizontal(segments[i].a, segments[i].b);
+            let turned_away = |c: &(f32, usize, f32)| match (way(c.1), way(first.1)) {
+                (Some(a), Some(b)) => a.dot(b).clamp(-1.0, 1.0).acos().to_degrees() >= SAME_WAY,
+                _ => true,
+            };
+            // two paths on the same line going different ways: which one the light is for
+            // cannot be known, so neither is stopped
             if candidates
                 .iter()
                 .skip(1)
-                .any(|c| c.0 - first.0 < 0.05 && segments[c.1].path != segments[first.1].path)
+                .any(|c| c.0 - first.0 < 0.05 && turned_away(c))
             {
-                report.warnings.push("An ambiguous traffic-light trigger overlaps multiple vehicle paths; stopping omitted there".into());
+                opposed += 1;
                 continue;
             }
-            candidates.truncate(1);
+            // chains that overlap on the stop line and go the same way share it: a vehicle
+            // of any of them meets the trigger's capsule
+            candidates.retain(|c| c.0 - first.0 <= SAME_LINE && !turned_away(c));
         }
+        report.traffic_light_triggers_matched += 1;
         for (_, i, t) in candidates {
             cuts.entry(i)
                 .or_default()
                 .push((t, (trigger.group, trigger.path * 4 + 3)));
         }
+    }
+    if unmatched > 0 {
+        report.warnings.push(format!(
+            "{unmatched} of {} traffic-light triggers have no authored vehicle path within their radius plus half a vehicle's width (nearest miss {nearest_miss:.1} m); stopping omitted there",
+            signals.triggers.len()
+        ));
+    }
+    if opposed > 0 {
+        report.warnings.push(format!(
+            "{opposed} of {} traffic-light triggers lie on vehicle paths going different ways; stopping omitted there",
+            signals.triggers.len()
+        ));
     }
     let mut out = Vec::new();
     for (i, s) in segments.into_iter().enumerate() {
@@ -497,6 +541,111 @@ mod tests {
         for pair in s.windows(2) {
             assert_eq!(pair[0].b, pair[1].a);
         }
+    }
+
+    fn lane(points: &[[f32; 3]]) -> DrivePath {
+        DrivePath {
+            points: points
+                .iter()
+                .map(|&pos| Point { pos, speed: 40.0, turn: 0, buses: false, cars: true, density: 1.0 })
+                .collect(),
+            pedestrian: false,
+        }
+    }
+
+    fn trigger(centre: [f32; 3], radius: f32, any_angle: bool) -> crate::signals::Trigger {
+        crate::signals::Trigger { group: 0, path: 0, centre: Vec3::from(centre), radius, height: 5.0, any_angle }
+    }
+
+    /// Which chains got a signal, after the paths are cut where the stop lines are.
+    fn stopped(paths: &[DrivePath], triggers: Vec<crate::signals::Trigger>) -> (BTreeSet<usize>, Report) {
+        let mut signals = Collector::default();
+        signals.triggers = triggers;
+        let mut report = Report::default();
+        let lanes = attach_signals(segments(paths).unwrap(), &signals, &mut report).unwrap();
+        (lanes.iter().filter(|l| l.signal.is_some()).map(|l| l.path).collect(), report)
+    }
+
+    #[test]
+    fn a_trigger_beside_the_lane_still_stops_a_vehicle_whose_body_reaches_its_capsule() {
+        let road = [lane(&[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]])];
+        // 2 m off the axis with a 1 m capsule: a car's flank is in it, its centre line is not
+        let (beside, report) = stopped(&road, vec![trigger([10.0, 2.0, 0.0], 1.0, false)]);
+        assert_eq!(beside, BTreeSet::from([0]));
+        assert_eq!((report.traffic_light_triggers, report.traffic_light_triggers_matched), (1, 1));
+        // 2.5 m is out of reach: nothing is guessed, and the report counts it
+        let (far, report) = stopped(&road, vec![trigger([10.0, 2.5, 0.0], 1.0, false)]);
+        assert!(far.is_empty());
+        assert_eq!((report.traffic_light_triggers, report.traffic_light_triggers_matched), (1, 0));
+        let warning = report.warnings.iter().find(|w| w.contains("no authored vehicle path")).unwrap();
+        assert!(warning.starts_with("1 of 1 traffic-light triggers") && warning.contains("2.5 m"), "{warning}");
+    }
+
+    #[test]
+    fn chains_that_overlap_on_the_stop_line_and_go_the_same_way_all_stop() {
+        // straight on and a left turn share the approach: the light holds both
+        let paths = [
+            lane(&[[0.0, 0.0, 0.0], [30.0, 0.0, 0.0]]),
+            lane(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 15.0, 0.0]]),
+        ];
+        let (stopped, report) = stopped(&paths, vec![trigger([5.0, 0.0, 0.0], 1.0, false)]);
+        assert_eq!(stopped, BTreeSet::from([0, 1]));
+        assert_eq!(report.traffic_light_triggers_matched, 1);
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    #[test]
+    fn paths_going_opposite_ways_on_one_trigger_leave_it_unmatched_rather_than_guessed() {
+        let paths = [
+            lane(&[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]]),
+            lane(&[[20.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+        ];
+        let (stopped, report) = stopped(&paths, vec![trigger([10.0, 0.0, 0.0], 1.0, false)]);
+        assert!(stopped.is_empty());
+        assert_eq!(report.traffic_light_triggers_matched, 0);
+        assert!(report.warnings.iter().any(|w| w.contains("different ways")), "{:?}", report.warnings);
+        // `_anyangle_` is exactly the author saying every direction stops
+        let (both, _) = stopped_any(&paths);
+        assert_eq!(both, BTreeSet::from([0, 1]));
+    }
+
+    fn stopped_any(paths: &[DrivePath]) -> (BTreeSet<usize>, Report) {
+        stopped(paths, vec![trigger([10.0, 0.0, 0.0], 1.0, true)])
+    }
+
+    #[test]
+    fn a_trigger_on_a_corner_point_of_one_chain_stops_it_once() {
+        let road = [lane(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]])];
+        let mut signals = Collector::default();
+        signals.triggers = vec![trigger([10.0, 0.0, 0.0], 1.0, false)];
+        let mut report = Report::default();
+        let lanes = attach_signals(segments(&road).unwrap(), &signals, &mut report).unwrap();
+        // the stop line is where the second lane begins: that whole lane carries the signal
+        let held: Vec<_> = lanes.iter().filter(|l| l.signal.is_some()).collect();
+        assert_eq!(held.len(), 1);
+        assert_eq!((held[0].a.x, held[0].b.x), (10.0, 20.0));
+        assert_eq!(report.traffic_light_triggers_matched, 1);
+    }
+
+    #[test]
+    fn a_trigger_beside_a_bend_holds_the_chain_at_one_stop_line_not_two() {
+        // both lanes of the bend are within reach and within half a metre of each other;
+        // the vehicle stops once, at the nearer
+        let road = [lane(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 3.6, 0.0]])];
+        let mut signals = Collector::default();
+        signals.triggers = vec![trigger([9.5, 1.0, 0.0], 1.0, false)];
+        let mut report = Report::default();
+        let lanes = attach_signals(segments(&road).unwrap(), &signals, &mut report).unwrap();
+        let held: Vec<_> = lanes.iter().filter(|l| l.signal.is_some()).collect();
+        assert_eq!(held.len(), 1, "{:?}", held.iter().map(|l| (l.a.x, l.b.x)).collect::<Vec<_>>());
+        assert_eq!(held[0].a.x, 9.5);
+    }
+
+    #[test]
+    fn a_trigger_over_a_different_level_does_not_stop_the_road_beneath() {
+        let road = [lane(&[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]])];
+        let (held, _) = stopped(&road, vec![trigger([10.0, 0.0, 9.0], 1.0, false)]);
+        assert!(held.is_empty(), "a viaduct's light is not the street's");
     }
 
     #[test]

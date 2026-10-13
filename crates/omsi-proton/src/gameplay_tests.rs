@@ -179,7 +179,19 @@ fn native_paths_stops_waiting_and_lamps_survive_an_end_to_end_import() {
         let sco = sco(&f, lamp);
         assert!(sco.model.meshes[0].visible.is_some());
         assert!(sco.model.meshes[0].materials[0].allcolor.is_some());
+        // the glow follows the lamp (these are 1 m across) and is no longer half a lamp
+        let glow = &sco.model.meshes[0].light_enh[0];
+        assert_eq!(glow.size, crate::signals::corona_size(1.0));
+        assert!(glow.size > 0.4, "{}", glow.size);
+        assert_eq!(glow.values[0], 1.0);
     }
+
+    // a signal lamp's glow follows its size within the range that can be seen and not mistaken
+    // for a floodlight
+    let size = crate::signals::corona_size;
+    assert_eq!((size(0.0), size(0.1), size(1.0), size(50.0)), (0.6, 0.6, 1.2, 1.2));
+    assert!((size(0.3) - 1.05).abs() < 1e-6);
+    assert!(size(0.2) < size(0.3) && size(0.3) < size(0.34));
     let plain = all
         .iter()
         .find(|o| {

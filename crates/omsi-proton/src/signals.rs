@@ -18,6 +18,20 @@ use std::{
     path::Path,
 };
 
+/// A corona is drawn about this many lamp diameters wide: a glow of the lamp's own size cannot
+/// be seen from the other end of a block (a 0.4 m sprite is four pixels at 100 m).
+const CORONA_PER_LAMP: f32 = 3.5;
+/// The least and the most a signal's corona is drawn (m).
+const CORONA_RANGE: (f32, f32) = (0.6, 1.2);
+/// The corona's brightness factor. The renderer draws it times 0.48 by day and 1.08 by night,
+/// so the 0.5 these lamps had was a quarter of a lamp by day.
+const CORONA_BRIGHTNESS: f32 = 1.0;
+
+/// The corona of a lamp that is `diameter` metres across.
+pub(crate) fn corona_size(diameter: f32) -> f32 {
+    (diameter * CORONA_PER_LAMP).clamp(CORONA_RANGE.0, CORONA_RANGE.1)
+}
+
 pub(crate) struct Trigger {
     pub group: usize,
     pub path: usize,
@@ -176,6 +190,14 @@ impl Collector {
             }
             let p =
                 centre(object).ok_or_else(|| anyhow::anyhow!("invalid traffic-light marker"))?;
+            let diameter = {
+                let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+                for &v in &object.positions {
+                    lo = lo.min(v);
+                    hi = hi.max(v);
+                }
+                (hi - lo).max_element()
+            };
             if tag.starts_with("trigger_") || tag.starts_with("meshtrigger_") {
                 ensure!(
                     self.triggers.len() < 20_000,
@@ -277,10 +299,11 @@ impl Collector {
                 &vec![mode; sink.mesh.materials.len()],
             );
             sco.push_str(&format!(
-                "[light_enh]\n0\n0\n0\n{}\n{}\n{}\n0.4\n{variable}\n0.5\n0\n2\n0\n",
+                "[light_enh]\n0\n0\n0\n{}\n{}\n{}\n{}\n{variable}\n{CORONA_BRIGHTNESS}\n0\n2\n0\n",
                 r * 255.0,
                 g * 255.0,
-                b * 255.0
+                b * 255.0,
+                corona_size(diameter)
             ));
             std::fs::write(dir.join(format!("proton-import/{stem}.sco")), sco)?;
             let key = ((p.x / EDGE).floor() as i32, (p.y / EDGE).floor() as i32);

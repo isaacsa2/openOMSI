@@ -31,6 +31,7 @@ pub(crate) struct Point {
     pub density: f32,
 }
 
+#[derive(Clone)]
 pub(crate) struct DrivePath {
     pub points: Vec<Point>,
     pub pedestrian: bool,
@@ -322,6 +323,8 @@ impl Collector {
         self.data.road_triangles.truncate(MAX_TRIANGLES.saturating_sub(self.triangles));
         report.road_surface_triangles = self.data.road_triangles.len();
         if report.road_surface_triangles < surfaces { report.warnings.push("3D road overview reduced to reserve navigation space for authored GPS routes".into()); }
+        let connectors = crate::path_corners::connect(&mut gameplay, report);
+        gameplay.extend(connectors);
         ensure!(self.data.roads.len() <= 4096, "too many navigation roads");
         ensure!(
             self.data

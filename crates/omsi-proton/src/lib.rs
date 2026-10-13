@@ -26,6 +26,7 @@ mod vehicle_cabin;
 mod vehicle_sounds;
 mod optimise;
 mod paths;
+mod path_corners;
 mod path_smoothing;
 mod settings;
 mod signals;
@@ -65,6 +66,12 @@ pub struct Report {
     pub pedestrian_segments_imported: usize,
     pub signals_imported: usize,
     pub signal_paths_imported: usize,
+    pub traffic_light_triggers: usize,
+    pub traffic_light_triggers_matched: usize,
+    pub road_corners_rounded: usize,
+    pub road_joints_connected: usize,
+    pub road_gaps_bridged: usize,
+    pub road_ends_open: usize,
     pub vertices_removed: usize,
     pub warnings: Vec<String>,
 }

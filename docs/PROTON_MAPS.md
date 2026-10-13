@@ -203,6 +203,11 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   Red/yellow/green channels and stop-trigger channels remain independent. Lamps
   and glows follow the program, and matching vehicle paths are split at stop lines.
   Decorative/flashing lights without an authored stop trigger do not hold traffic.
+  A stop trigger holds the vehicle paths whose axis lies within its radius plus 1.2 m (a
+  vehicle stops when its body, not its axis, meets the trigger's capsule); chains that
+  overlap on the stop line and head the same way are all held. A lamp's glow is drawn about
+  3.5 lamp diameters wide (0.6 to 1.2 m) at full brightness factor, so it can be seen from a
+  block away.
 - Simulation helper geometry identified by the map's pedestrian, traffic, stop and
   traffic-light prefixes is left out rather than drawn as obstacles.
 
@@ -347,6 +352,19 @@ and lateral deviation is bounded to 2 m. This is an approximation, not PBSU's ex
 spline implementation. Both navigation and native AI use the same sampled points;
 pedestrian and manual-link paths are not smoothed.
 
+Whether or not `useSplines` is set, the native traffic network joins a lane to the next only
+when the end of one lies within 1.5 m of the start of the other and its heading changes by
+less than 40 degrees; a car that reaches any other end is taken off the road there, in plain
+view. A corner inside a chain of 36 degrees or more (up to a turn-back of 115 degrees, which
+stays a U-turn) is therefore rounded with a curve of up to 8 m radius that takes at most 45 %
+of each of its two lanes, two chains that meet within 1.5 m at 40 degrees or more are joined
+by a short curve chain, and a hole of up to 6 m between a dead end and a compatible start is
+closed. A corner where another chain begins or ends, a junction that already joins and a
+chain that ends in the open stay as drawn. The import report counts what was done
+(`road_corners_rounded`, `road_joints_connected`, `road_gaps_bridged`) and how many path ends
+still have no continuation (`road_ends_open`), naming the first few: a street that goes on
+past one is a missing link in the source paths, which only the author can place.
+
 The in-game navigator and city map also recognize approximate road footprints from
 near-horizontal faces of road-named meshes, asphalt/dirt-road texture names or authored
 asphalt material presets. Names indicating walls, roofs, signs or sidewalks are excluded.
@@ -366,12 +384,14 @@ turns or create a timetable. Format conventions follow the public
 [lights](https://www.busmods.com/ciano/help/map-lights.html) references.
 
 Signal clocks use native game time; random/first-tick startup timing is approximate.
-Mesh-shaped stop triggers use bounded horizontal bounds. A normal trigger attaches
-to the closest unambiguous authored vehicle path; `_anyangle_` can affect multiple
-paths. Triggers without a matching path or with ambiguous matches are reported and
-left unlinked. Signal lamps emit native glows; coloured real-light range/shadows are
-not imported. Native path linking uses the engine's endpoint tolerance, so very close
-but separate source endpoints should be checked in game.
+Mesh-shaped stop triggers use bounded horizontal bounds. A trigger attaches to the nearest
+authored vehicle path within its radius plus half a vehicle's width (1.2 m), one piece per
+chain; chains that overlap on the stop line and head the same way share it, and
+`_anyangle_` takes every direction. Paths going different ways on the same line, and
+triggers with no path in reach, are left unlinked and reported with their number
+(`traffic_light_triggers`, `traffic_light_triggers_matched`) and the nearest miss. Signal
+lamps emit native glows; coloured real-light range/shadows are not imported. Native path
+linking uses the engine's endpoint tolerance (see the corners above).
 
 Streetlight rendering is approximate. Imported point lights follow the native
 night cycle and do not allocate additional lamp shadow maps; source shadow options
