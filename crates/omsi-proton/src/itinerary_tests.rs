@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    depot::Destination,
     gameplay_tests::{config, loaded, sco},
     import,
     tests::{setup, Fixture},
@@ -20,15 +21,24 @@ fn known() -> Vec<Known> {
     .collect()
 }
 
-fn destinations() -> BTreeMap<String, bool> {
+/// (name, out of service, service): "Terminal Pimentas" exists only as a stop that ends a line.
+fn destinations() -> Destinations {
     [
-        ("490 TERMINAL PIMENTAS", false),
-        ("Terminal Pimentas", false),
-        ("Garagem", true),
-        ("Start", false),
+        ("490 TERMINAL PIMENTAS", false, true),
+        ("Terminal Pimentas", false, false),
+        ("Garagem", true, true),
+        ("Start", false, true),
     ]
     .iter()
-    .map(|(n, r)| (n.to_string(), *r))
+    .map(|(n, reserved, service)| {
+        (
+            n.to_string(),
+            Destination {
+                reserved: *reserved,
+                service: *service,
+            },
+        )
+    })
     .collect()
 }
 
@@ -152,7 +162,7 @@ fn what_cannot_be_told_for_certain_is_left_out_with_its_reason() {
         ..Default::default()
     })
     .contains("no destination"));
-    // a destination that is a stop's name is the terminal, so it must come last
+    // a destination that exists only because a stop ends a line is where it ends: it comes last
     let wrong = why(&raw("Terminal Pimentas", &["@fim", "Praca Central"]));
     assert!(wrong.contains("is a stop, but the last stop is"), "{wrong}");
     assert!(resolve(
@@ -161,6 +171,20 @@ fn what_cannot_be_told_for_certain_is_left_out_with_its_reason() {
         &destinations()
     )
     .is_ok());
+}
+
+#[test]
+fn a_service_named_like_a_stop_is_not_read_as_ending_there() {
+    // "Terminal Pimentas" is both an entry point (a service, named for where it begins) and the
+    // name of a stop: the author may begin the service at that stop, so nothing is demanded
+    let mut both = destinations();
+    both.get_mut("Terminal Pimentas").unwrap().service = true;
+    let begins_there = raw("Terminal Pimentas", &["@fim", "Praca Central"]);
+    let ends_there = raw("Terminal Pimentas", &["Praca Central", "@fim"]);
+    assert!(resolve(&begins_there, &known(), &both).is_ok());
+    assert!(resolve(&ends_there, &known(), &both).is_ok());
+    // a stop that ends a line still has to end the itinerary
+    assert!(resolve(&begins_there, &known(), &destinations()).is_err());
 }
 
 #[test]

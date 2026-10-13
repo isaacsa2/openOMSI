@@ -3,7 +3,9 @@
 //! Only free driving is supported. Source mods are never embedded in the program.
 mod convert;
 mod export;
+mod author_file;
 pub mod depot;
+mod destination_text;
 pub mod permission;
 pub mod package;
 mod materials;
@@ -55,6 +57,7 @@ pub struct Report {
     pub lights_imported: usize,
     pub stops_imported: usize,
     pub destinations_imported: usize,
+    pub destination_signs_imported: usize,
     pub itineraries_imported: usize,
     pub prefabs_imported: usize,
     pub ai_vehicles_imported: usize,
@@ -475,8 +478,11 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     drop(paths);
     let stops = stops.finish(&mut gameplay, &mut report)?;
     let known: Vec<_> = stops.iter().map(|s| itinerary::Known { id: s.id.clone(), name: s.name.clone() }).collect();
-    let itineraries = itinerary::load(&configs[0], &known, &depot::destinations(&base, &spawns, &stops)?, &mut report).context("reading the itineraries file")?;
-    depot::export(dir, &base, installed_rel, &spawns, &stops, &mut report).context("exporting map HOF")?;
+    let mut destinations = depot::destinations(&base, &spawns, &stops, &mut report.warnings)?;
+    let signs = destination_text::load(&configs[0], &destinations, &mut report).context("reading the destinations file")?;
+    destination_text::apply(&signs, &mut destinations);
+    let itineraries = itinerary::load(&configs[0], &known, &destinations, &mut report).context("reading the itineraries file")?;
+    depot::export(dir, installed_rel, &destinations, &signs, &stops, &mut report).context("exporting map HOF")?;
     let placed = gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel).context("exporting map paths, stops and signals")?;
     itinerary::export(dir, itineraries, &placed, &mut report).context("exporting itineraries")?;
     let file = std::fs::File::create(dir.join("proton-import/navigation.json"))?;

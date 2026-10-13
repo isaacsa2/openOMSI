@@ -8,35 +8,37 @@
 //! ```ini
 //! [itinerary]
 //! line=490
-//! direction=Centro
+//! direction=Sao Joao
 //! destination=490 TERMINAL PIMENTAS
-//! stop=Praca Central
-//! stop=@busstop_17
 //! stop=Terminal Pimentas
+//! stop=@busstop_17
+//! stop=Terminal Sao Joao
 //! ```
 //!
 //! `line` and `direction` are optional text kept as written (a generated HOF index is never a
-//! line number). `destination` must be one of the generated HOF's destinations. Two or more
-//! `stop` keys name the stops in order: a display name that belongs to exactly one imported
-//! stop, or `@` and the stop's file name in `busstops/` to tell apart stops that share a name.
-//! Comments are whole lines starting with `;` or `#`.
+//! line number). `destination` must be one of the generated HOF's destinations. A service (an
+//! entry point or a `dest/` folder) is named for its entry point, where it begins, so the
+//! order of its stops is the author's alone; a destination that exists only because a stop is
+//! marked as the latest stop is where the line ends, and that stop has to be the last one.
+//! Two or more `stop` keys name the stops in order: a display name that belongs to exactly one
+//! imported stop, or `@` and the stop's file name in `busstops/` to tell apart stops that share
+//! a name. Comments are whole lines starting with `;` or `#`.
 //!
 //! The file is read strictly: a line that is not understood, a repeated key, a missing section
 //! or a size over the limits stops the import and names the line, since guessing what the
 //! author meant would invent a service. An itinerary whose stops or destination cannot be
 //! resolved to exactly one thing is left out and reported instead, so one mistake does not
 //! take the others with it.
-use crate::{gameplay::PlacedStop, settings::label, Report};
+use crate::{depot::Destinations, gameplay::PlacedStop, settings::label, Report};
 use anyhow::{bail, ensure, Result};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use std::path::Path;
 
 /// Generated next to the navigation data.
 pub const FILE: &str = "proton-import/itineraries.json";
 /// What the installed map holds once its generated files are sealed.
 pub const SEALED: &str = "proton-import/itineraries.jsonoi";
 
-const FILE_MAX: u64 = 1 << 20;
 const MAX_ITINERARIES: usize = 512;
 const MAX_STOPS: usize = 512;
 const MAX_REFERENCES: usize = 20_000;
@@ -223,19 +225,21 @@ fn resolve_stop<'a>(known: &'a [Known], reference: &str) -> Result<&'a Known, St
 fn resolve(
     raw: &Raw,
     known: &[Known],
-    destinations: &BTreeMap<String, bool>,
+    destinations: &Destinations,
 ) -> Result<Draft, String> {
     let wanted = raw.destination.as_deref().ok_or("no destination")?;
     if raw.stops.len() < 2 {
         return Err("an itinerary needs at least two stops".into());
     }
-    let hits: Vec<(&String, &bool)> = destinations
+    let hits: Vec<(&String, &crate::depot::Destination)> = destinations
         .iter()
         .filter(|(d, _)| d.eq_ignore_ascii_case(wanted))
         .collect();
-    let destination = match hits.as_slice() {
-        [(name, false)] => (*name).clone(),
-        [(_, true)] => return Err(format!("{wanted:?} is an out-of-service destination")),
+    let (destination, service) = match hits.as_slice() {
+        [(_, d)] if d.reserved => {
+            return Err(format!("{wanted:?} is an out-of-service destination"))
+        }
+        [(name, d)] => ((*name).clone(), d.service),
         [] => return Err(format!("{wanted:?} is no destination of the generated HOF")),
         _ => {
             return Err(format!(
@@ -251,11 +255,14 @@ fn resolve(
         }
         stops.push(stop);
     }
-    // A destination that is also a stop's name is the terminal: it has to be the last stop.
+    // A destination that exists only because a stop ends a line, and is also that stop's name,
+    // is where the line ends: it has to be the last stop. A service is named for where it
+    // begins, so nothing is read into a stop that happens to share its name.
     let last = stops.last().expect("two stops at least");
-    if known
-        .iter()
-        .any(|k| k.name.eq_ignore_ascii_case(&destination))
+    if !service
+        && known
+            .iter()
+            .any(|k| k.name.eq_ignore_ascii_case(&destination))
         && !last.name.eq_ignore_ascii_case(&destination)
     {
         return Err(format!(
@@ -299,7 +306,7 @@ impl Draft {
 fn drafts(
     raws: &[Raw],
     known: &[Known],
-    destinations: &BTreeMap<String, bool>,
+    destinations: &Destinations,
     report: &mut Report,
 ) -> Vec<Draft> {
     let mut out: Vec<(usize, Draft)> = Vec::new();
@@ -345,46 +352,13 @@ fn drafts(
 pub(crate) fn load(
     config: &Path,
     known: &[Known],
-    destinations: &BTreeMap<String, bool>,
+    destinations: &Destinations,
     report: &mut Report,
 ) -> Result<Vec<Draft>> {
-    let Some(name) = config.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+    let Some(bytes) = crate::author_file::read(config, ".itineraries.txt")? else {
         return Ok(Vec::new());
     };
-    let wanted = format!(
-        "{}.itineraries.txt",
-        &name[..name.len().saturating_sub(".map.txt".len())]
-    );
-    let Some(folder) = config.parent() else {
-        return Ok(Vec::new());
-    };
-    let mut found = None;
-    for entry in std::fs::read_dir(folder)? {
-        let entry = entry?;
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&wanted)
-        {
-            ensure!(
-                found.is_none(),
-                "more than one {wanted} (they differ in case only)"
-            );
-            ensure!(
-                entry.file_type()?.is_file(),
-                "{wanted} is not a regular file"
-            );
-            found = Some(entry.path());
-        }
-    }
-    let Some(path) = found else {
-        return Ok(Vec::new());
-    };
-    ensure!(
-        std::fs::metadata(&path)?.len() <= FILE_MAX,
-        "{wanted} exceeds 1 MiB"
-    );
-    let raws = parse(&std::fs::read(&path)?)?;
+    let raws = parse(&bytes)?;
     Ok(drafts(&raws, known, destinations, report))
 }
 

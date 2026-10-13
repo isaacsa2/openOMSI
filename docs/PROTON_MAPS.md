@@ -184,8 +184,13 @@ with openOMSI. Imported maps still use openOMSI's normal OMSI 2 installation set
   and nonzero passenger density remain necessary. With no ordered native trips,
   riders use the existing free-drive behavior rather than an invented stop sequence.
 - A basic textual HOF lists entrypoint names, `dest/` folder names and imported stop
-  names. Exact duplicate destination names are combined. `outofservice.txt` makes a
-  destination unload passengers and refuse boarding. Stops explicitly marked
+  names. Exact duplicate destination names are combined, and so are a `dest/` folder and an
+  entry point that differ only in case (the importer reports it). The services (entry points
+  and `dest/` folders) come first, by name with numbers read as numbers (44, 420AT, 434VP,
+  490…), then the stops that only end a line; the codes of services do not move when such
+  stops come or go (adding or renaming a service renumbers, so a reimport can). A
+  destination's text is its name unless the author declares another (see *Author-declared
+  sign texts*). `outofservice.txt` makes a destination unload passengers and refuse boarding. Stops explicitly marked
   `isLatestStop=1` also become selectable terminal destinations: choosing the stop's
   own destination makes the native passenger logic unload there. No entrypoint is
   guessed to serve a particular terminal. Codes are generated indices, not original
@@ -214,19 +219,22 @@ declaration of its own (the conversion gate above still applies to the map).
 ; whole-line comments start with ; or #
 [itinerary]
 line=490
-direction=Centro
+direction=Sao Joao
 destination=490 TERMINAL PIMENTAS
-stop=Praca Central
-stop=@busstop_17
 stop=Terminal Pimentas
+stop=@busstop_17
+stop=Terminal Sao Joao
 ```
 
 * `line` and `direction` are optional text, kept as written. A generated HOF index is
   never taken for a line number.
 * `destination` must be one of the generated HOF's destinations (an entry point, a
   `dest/` folder or a latest-stop name), compared whole and without regard to case.
-  `490` does not match `4900`. An out-of-service destination is refused. A destination
-  that is also a stop's name is the terminal, so it must be the last stop.
+  `490` does not match `4900`. An out-of-service destination is refused. A *service* (an
+  entry point or a `dest/` folder) is named for its entry point, where it begins, so the
+  order of its stops is yours alone. A destination that exists only because a stop is marked
+  `isLatestStop=1` is where the line ends: when it is also a stop's name, that stop must be
+  the last one.
 * Two or more `stop` keys, in order. A stop is named by its display name when exactly one
   imported stop has it, or by `@` and its file name in `busstops/` (the way to tell apart
   two stops that share a name). A loop may call at a stop twice, but not twice in a row.
@@ -250,6 +258,54 @@ with `omsi_proton::itinerary::from_bytes`. **The game does not use it yet:** pas
 do not look at the line, and the GPS does not show the next stop. Those are the next
 steps; today the file is validated data and the import report counts it
 (`itineraries_imported`). Reimport a map to get it.
+
+## Author-declared sign texts (optional)
+
+A Proton map keeps what a destination sign says only in images (`dest/<name>/`), and
+OpenOMSI reads no text back from them. A bus display shows the HOF's text, which on its own
+is the name of the destination, and for a service that is the name of its entry point (where
+it begins), not what the sign should say. When the creator wants the displays to say where a
+service goes, they write it in a text file beside the map configuration, named after it:
+`Town.map.txt` takes `Town.destinations.txt` (any letter case). Like the itineraries file it
+is an OpenOMSI file, not a Proton one: the original configuration is not edited.
+
+```ini
+; whole-line comments start with ; or #
+[destination]
+name=490 TERMINAL PIMENTAS
+text=TERM. SAO JOAO
+via=VIA LAVRAS
+
+[destination]
+name=GARAGEM
+text=GARAGEM
+out_of_service=1
+```
+
+* `name` is a destination of the generated HOF (an entry point, a `dest/` folder or a
+  latest-stop name), compared without regard to case, exactly when two differ only in case.
+  `490` does not match `4900`.
+* `text` is the first line of its displays and `via` the second; either may be left out. The
+  first line is repeated on the side and rear signs, as the stock HOF files do. A `via` with
+  no `text` keeps the name as first line.
+* `out_of_service=1` marks a destination everybody leaves at (a garage run), as an
+  `outofservice.txt` in its `dest/` folder does; `0` clears that mark. Nothing is inferred
+  from a name such as GARAGEM.
+* A destination the file does not mention is exactly as it was: its name is its text.
+
+The file is read strictly. A line that is not understood, an unknown key or section, a
+repeated key in one section, an empty value, a value over 256 characters or holding a control
+character (a tab or line break would start another HOF column or record), or a size over
+1 MiB **stops the import** and names the line. A `[destination]` whose name is no destination
+of the HOF, or that gives nothing, is **left out and reported**, so one mistake does not take
+the others with it; the same destination given twice is one when the values agree and neither
+when they differ. The import report counts what was applied (`destination_signs_imported`).
+
+This changes the text of the displays that read the HOF (the textual front and rear displays
+and the destination menu's typed text). It does not touch the images: the map's
+`1/2/3.png`, `capelinhaDigital`, `lona*`, `capelinhaPVC`, `placa*` and `scrollPanel*` are the
+author's own sign graphics, and they are still not imported. Which characters the installed
+`Annax` display fonts can draw was not checked here.
 
 ## Current limits
 
