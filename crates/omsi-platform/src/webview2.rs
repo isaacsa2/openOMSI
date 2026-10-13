@@ -9,22 +9,60 @@
 /// Microsoft's permanent link to the Evergreen Bootstrapper.
 const BOOTSTRAPPER: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
 
-/// Download the installer and run it, waiting until it has finished; Ok once it reported
-/// success. Only Windows has WebView2.
+/// Download the installer and run it only after Windows verifies that Microsoft
+/// signed it. Each attempt gets a separate directory instead of reusing a predictable
+/// executable name in the shared temp directory.
 pub fn install() -> anyhow::Result<()> {
     if !cfg!(windows) {
         anyhow::bail!("WebView2 is only needed on Windows");
     }
-    let path = std::env::temp_dir().join("MicrosoftEdgeWebview2Setup.exe");
-    let resp = crate::updater::agent().get(BOOTSTRAPPER).call()?;
-    let mut out = std::fs::File::create(&path)?;
-    std::io::copy(&mut resp.into_reader(), &mut out)?;
-    drop(out);
-    // (its own window shows the progress; Windows asks for the administrator's consent)
-    let status = std::process::Command::new(&path).arg("/install").status()?;
-    let _ = std::fs::remove_file(&path);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+    let dir = std::env::temp_dir().join(format!("openomsi-webview2-{}-{stamp}", std::process::id()));
+    std::fs::create_dir(&dir)?;
+    let path = dir.join("MicrosoftEdgeWebview2Setup.exe");
+    let result = (|| -> anyhow::Result<()> {
+        use std::io::Read;
+        let resp = crate::updater::agent().get(BOOTSTRAPPER).call()?;
+        let mut out = std::fs::File::create(&path)?;
+        // The Evergreen bootstrapper is small, not an offline 150 MB runtime.
+        // Refuse implausibly large network responses before running an EXE.
+        let mut reader = resp.into_reader().take(64 * 1024 * 1024 + 1);
+        let size = std::io::copy(&mut reader, &mut out)?;
+        drop(out);
+        if size == 0 || size > 64 * 1024 * 1024 {
+            anyhow::bail!("WebView2 bootstrapper has an unexpected size");
+        }
+        verify_microsoft_signature(&path)?;
+        // (its own window shows the progress; Windows asks for administrator consent)
+        let status = std::process::Command::new(&path).arg("/install").status()?;
+        if !status.success() {
+            anyhow::bail!("the WebView2 installer ended with {status}");
+        }
+        Ok(())
+    })();
+    let _ = std::fs::remove_dir_all(dir);
+    result
+}
+
+/// Verify both the Authenticode trust chain AND Microsoft's signing identity.
+/// A valid signature by an unrelated publisher must not authorize execution.
+fn verify_microsoft_signature(path: &std::path::Path) -> anyhow::Result<()> {
+    let system = std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("Windows system directory was not found"))?;
+    let powershell = system.join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    // Quote an arbitrary temp path as one PowerShell literal, including apostrophes.
+    let quoted = format!("'{}'", path.to_string_lossy().replace('\'', "''"));
+    let script = format!(
+        "$s = Get-AuthenticodeSignature -LiteralPath {quoted}; \
+         if ($s.Status -ne 'Valid' -or $null -eq $s.SignerCertificate -or \
+         $s.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -ne 'Microsoft Corporation') {{ exit 1 }}"
+    );
+    let status = std::process::Command::new(powershell)
+        .arg("-NoProfile").arg("-NonInteractive").arg("-Command").arg(script)
+        .status()?;
     if !status.success() {
-        anyhow::bail!("the WebView2 installer ended with {status}");
+        anyhow::bail!("WebView2 installer does not have a valid Microsoft Authenticode signature");
     }
     Ok(())
 }

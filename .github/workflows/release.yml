@@ -83,16 +83,21 @@ jobs:
       # program): without it wgpu falls back to the old FXC, which is slow and refuses
       # some of the game's shaders. DirectX 12 is the way round a Vulkan driver that fails.
       - name: DirectX shader compiler
-        continue-on-error: true
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          # Pinned stable DXC release (not the moving "latest" or 6.10 preview).
+          DXC_TAG: v1.9.2609
+          DXC_SHA256: ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1
         run: |
-          gh release download -R microsoft/DirectXShaderCompiler --pattern "dxc_*.zip" -D dxc
-          $zip = Get-ChildItem dxc/*.zip | Where-Object { $_.Name -notmatch "linux|pdb" } | Select-Object -First 1
-          Expand-Archive $zip.FullName -DestinationPath dxc/x
+          gh release download $env:DXC_TAG -R microsoft/DirectXShaderCompiler --pattern "dxc_2026_09_29.zip" -D dxc
+          if ($LASTEXITCODE -ne 0) { throw "Could not download pinned DXC release" }
+          $zip = "dxc/dxc_2026_09_29.zip"
+          $have = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($have -ne $env:DXC_SHA256) { throw "DXC archive SHA-256 $have does not match pinned checksum" }
+          Expand-Archive $zip -DestinationPath dxc/x
           $arch = if ("${{ matrix.arch }}" -eq "arm64") { "arm64" } else { "x64" }
-          Copy-Item "dxc/x/bin/$arch/dxcompiler.dll", "dxc/x/bin/$arch/dxil.dll" dist/windows/
+          Copy-Item "dxc/x/bin/$arch/dxcompiler.dll", "dxc/x/bin/$arch/dxil.dll" dist/windows/ -ErrorAction Stop
           Get-ChildItem dist/windows
       # Google's ANGLE (OpenGL ES over Direct3D 11) for the "ANGLE (DirectX 11)" graphics API:
       # libEGL.dll and libGLESv2.dll built from ANGLE's own source by
@@ -142,6 +147,71 @@ jobs:
             Copy-Item (Join-Path $dir $dll) dist/windows/
           }
           Get-ChildItem dist/windows
+      # Signing is deliberately restricted to trusted releases: PRs never see the
+      # signing key, and downloaded vendor DLLs keep their original signatures.
+      # An Authenticode certificate must be provisioned by the release owner.
+      - name: Sign Windows executables (trusted releases only)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_B64: ${{ secrets.WINDOWS_CODESIGN_PFX_B64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CODESIGN_PFX_B64)) {
+            Write-Warning "Windows release is UNSIGNED: configure a trusted code-signing certificate for SmartScreen reputation."
+            exit 0
+          }
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CODESIGN_PFX_PASSWORD)) {
+            throw "WINDOWS_CODESIGN_PFX_PASSWORD missing: refusing to publish a partly signed Windows release"
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "openomsi-release-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_B64))
+            $sdk = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/bin"
+            $signTool = Get-ChildItem $sdk -Recurse -Filter signtool.exe -File -ErrorAction Stop |
+              Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signTool) { throw "Windows SDK SignTool was not found" }
+            $own = @(Get-ChildItem "dist/windows" -Filter '*.exe' -File)
+            if ($own.Count -eq 0) { throw "No Windows executable to sign" }
+            foreach ($exe in $own) {
+              & $signTool.FullName sign /f $pfx /p $env:WINDOWS_CODESIGN_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $exe.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Signing failed: $($exe.Name)" }
+              & $signTool.FullName verify /pa $exe.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $($exe.Name)" }
+            }
+          }
+          finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+      # No newly introduced executable or DLL is packaged without an explicit
+      # allowlist review; a compromised dependency must not silently add binaries.
+      - name: Validate Windows binary inventory
+        shell: pwsh
+        run: |
+          $expectedExe = @("openomsi.exe", "openomsi-launcher.exe", "openomsi-launcher-app.exe")
+          $allowedDll = @("dxcompiler.dll", "dxil.dll", "libEGL.dll", "libGLESv2.dll", "steam_api64.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+          $exe = @(Get-ChildItem "dist/windows" -Filter "*.exe" -File | ForEach-Object Name)
+          $dll = @(Get-ChildItem "dist/windows" -Filter "*.dll" -File | ForEach-Object Name)
+          foreach ($name in $expectedExe) {
+            if ($name -notin $exe) { throw "Missing required game executable: $name" }
+          }
+          foreach ($name in $exe) {
+            if ($name -notin $expectedExe) { throw "Unexpected Windows executable: $name" }
+          }
+          foreach ($name in $dll) {
+            if ($name -notin $allowedDll) { throw "Unexpected Windows DLL, needs provenance review: $name" }
+          }
+          if ("${{ matrix.arch }}" -eq "x64") {
+            $sourceBlob = (git hash-object assets/steam_redist/steam_api64.dll).Trim()
+            if ($sourceBlob -ne "0ca8f77b8a315d2d43ea3087623f61c8fbe9ca3e") {
+              throw "Steam redistributable has changed; review provenance before updating its pinned Git blob"
+            }
+          }
+          Get-ChildItem dist/windows -File | ForEach-Object {
+            $sha = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host "$sha  $($_.Name)"
+          }
       - name: Package
         shell: pwsh
         run: |
@@ -348,6 +418,9 @@ jobs:
       - name: Publish v${{ needs.version.outputs.version }}
         run: |
           ls -l out
+          # Publish a reproducible digest list of the exact archives uploaded below.
+          (cd out && shopt -s nullglob && files=( *.zip *.apk ) && (( ${#files[@]} > 0 )) && sha256sum "${files[@]}" > SHA256SUMS.txt)
+          cat out/SHA256SUMS.txt
           # what changed: this version's section of CHANGELOG.md (up to the next version)
           awk -v v="## $VERSION" 'index($0, v) == 1 && (length($0) == length(v) || substr($0, length(v) + 1, 1) == " ") {f = 1; next} f && /^## / {exit} f {print}' CHANGELOG.md > changes.md
           # a release for every push: without a section of its own, what CHANGELOG.md gained
@@ -389,10 +462,10 @@ jobs:
           if gh release view "v$VERSION" >/dev/null 2>&1; then
             # the same version built again (main was rewritten and pushed once more): the
             # release stays, with this build's files and notes
-            gh release upload "v$VERSION" $(ls out/*.zip out/*.apk 2>/dev/null) --clobber
+            gh release upload "v$VERSION" $(ls out/*.zip out/*.apk 2>/dev/null) out/SHA256SUMS.txt --clobber
             gh release edit "v$VERSION" --title "openOMSI $VERSION" --notes-file notes.md
           else
-            gh release create "v$VERSION" $(ls out/*.zip out/*.apk 2>/dev/null) \
+            gh release create "v$VERSION" $(ls out/*.zip out/*.apk 2>/dev/null) out/SHA256SUMS.txt \
               --verify-tag \
               --title "openOMSI $VERSION" \
               --notes-file notes.md

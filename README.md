@@ -64,8 +64,10 @@ brings no game content of its own; it plays the original's maps, buses and mods.
    into a folder of its own that you can write to - your Documents, a games folder, or the
    OMSI 2 folder itself. Not `Program Files`: the launcher could not update itself there.
 2. **Start it.**
-   * **Windows:** `openomsi.exe`. Windows SmartScreen may warn about an unknown app: *More
-     info* → *Run anyway*.
+   * **Windows:** `openomsi.exe`. If Windows SmartScreen or Defender reports a warning,
+     verify the official download and its SHA-256 before deciding what to do. Never turn
+     off Defender or ignore a malware detection solely because the game is open source.
+     See [Windows download safety](docs/WINDOWS_DOWNLOAD_SECURITY.md).
    * **macOS:** open `openOMSI.app`. The first time, macOS may refuse an app from the
      internet: right-click → *Open* → *Open*, or run
      `xattr -dr com.apple.quarantine /path/to/openOMSI.app` once.

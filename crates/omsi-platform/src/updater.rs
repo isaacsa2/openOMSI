@@ -6,7 +6,8 @@
 //! build it offers it - or, with `update_auto`, installs it at once:
 //!
 //! * **Windows, macOS, Linux**: the archive is downloaded (and checked against the SHA-256
-//!   GitHub lists for it), unpacked into `.openomsi-update` beside the program, and every
+//!   GitHub lists for it; an update without a valid checksum is refused), unpacked into
+//!   `.openomsi-update` beside the program, and every
 //!   program file it holds takes the place of the old one: the old one is renamed to
 //!   `*.old-update` first (Windows lets a running .exe be renamed, not overwritten) and put
 //!   back if anything fails. On macOS the running `.app` bundle is the one replaced,
@@ -22,8 +23,8 @@
 //! fails (a timeout, a dropped connection, a 5xx), a download that breaks off goes on where it
 //! stopped (an HTTP range) instead of starting over, and when the GitHub API does not answer
 //! - or answers 403 because the address has used its 60 requests an hour - the check asks
-//! github.com itself which release is the latest (`releases/latest` redirects to its tag) and
-//! takes the file by its name, as `release.yml` names it.
+//! github.com itself which release is the latest. Without the API-provided SHA-256, it
+//! reports a verification error instead of installing an unchecked executable.
 //!
 //! The game looks for an update too, in the background (omsi-app's `update_watch`): it downloads it
 //! during the session (`Updater::prefetch`) and says so over the navigator; the launcher then
@@ -48,6 +49,11 @@ pub const REPO_URL: &str = "https://github.com/openOMSI-org/openOMSI";
 const LATEST_API: &str = "https://api.github.com/repos/openOMSI-org/openOMSI/releases/latest";
 const RELEASES_API: &str = "https://api.github.com/repos/openOMSI-org/openOMSI/releases?per_page=50";
 pub const FIRST_SELF_TESTED: &str = "0.2.32";
+
+// Untrusted release archives are bounded even if their metadata is malformed.
+const MAX_UPDATE_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_UPDATE_UNPACKED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_UPDATE_ARCHIVE_ENTRIES: usize = 25_000;
 
 /// A build the App Store delivers (every iPhone and iPad build, and a Mac build made with
 /// `OPENOMSI_STORE=1`): the store installs its updates, and a store app may not fetch and run
@@ -360,9 +366,9 @@ pub fn latest() -> anyhow::Result<Option<Release>> {
     }
 }
 
-/// The latest release as github.com's `releases/latest` redirect names it, with this
-/// platform's file at the address `release.yml` publishes it (no SHA-256: GitHub's TLS is
-/// all that vouches for it then, and the size is checked by the download itself).
+/// The latest release as github.com's `releases/latest` redirect names it. This
+/// fallback can check availability but cannot safely install without the asset's SHA-256.
+/// The GitHub API must recover before the launcher offers an automatic update.
 fn latest_from_site() -> anyhow::Result<Option<Release>> {
     let page = format!("{REPO_URL}/releases/latest");
     let r = with_retries("asking github.com", || agent().head(&page).call()).map_err(|e| anyhow::anyhow!("{}", short_error(&e)))?;
@@ -382,7 +388,9 @@ fn latest_from_site() -> anyhow::Result<Option<Release>> {
         Err(ureq::Error::Status(404, _)) => return Ok(None),
         Err(e) => anyhow::bail!("{}", short_error(&e)),
     };
-    Ok(Some(Release { version, page: format!("{REPO_URL}/releases/tag/{tag}"), notes: String::new(), asset_name: name, asset_url: url, size, sha256: None }))
+    // A size and HTTPS alone do not bind the downloaded executable to the release
+    // metadata. Do not turn an API outage into an unchecked software installation.
+    anyhow::bail!("openOMSI {version} is available ({size} bytes), but GitHub's API is needed to verify its SHA-256 before installing; try again later")
 }
 
 /// A release described as the GitHub API does, when newer than `current`.
@@ -472,39 +480,69 @@ fn checked_note(file: &Path) -> PathBuf {
     file.with_extension("checked")
 }
 
-/// Whether `r`'s file waits downloaded and checked in the data folder. A file fetched
-/// without a SHA-256 to check it by (by github.com's way, see `latest_from_site`) is hashed
-/// now when `r` brings one.
+/// A release can only be executed when its archive carries a well-formed SHA-256 from
+/// the release metadata. Development/test releases can provide the same digest.
+fn expected_sha256(r: &Release) -> anyhow::Result<&str> {
+    let digest = r.sha256.as_deref().ok_or_else(|| anyhow::anyhow!(
+        "update {} has no SHA-256; refusing to install an unverified executable", r.version
+    ))?;
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        anyhow::bail!("update {} has an invalid SHA-256", r.version);
+    }
+    Ok(digest)
+}
+
+/// Require the official GitHub release path, not merely a URL that claims to have
+/// come from GitHub. Explicit OMSI_UPDATE_URL is a developer/testing override.
+fn is_official_release_source(r: &Release) -> bool {
+    let Some(name) = asset_name(&r.version) else { return false };
+    r.asset_name == name && r.asset_url == format!("{REPO_URL}/releases/download/v{}/{name}", r.version)
+}
+
+fn verify_update_source(r: &Release) -> anyhow::Result<()> {
+    if r.size == 0 || r.size > MAX_UPDATE_DOWNLOAD_BYTES {
+        anyhow::bail!("update {} has an invalid archive size", r.version);
+    }
+    if !cfg!(test) && omsi_cfg::flags::OMSI_UPDATE_URL.var().is_none()
+        && !is_official_release_source(r)
+    {
+        anyhow::bail!("update {} does not point to the official release archive", r.version);
+    }
+    Ok(())
+}
+
+/// A checked marker is only a hint: another program could alter the cached archive
+/// without changing its size or the marker. Always hash the actual bytes again.
 pub fn downloaded(r: &Release) -> bool {
+    downloaded_file(r, &download_dir().join(&r.asset_name))
+}
+
+fn downloaded_file(r: &Release, file: &Path) -> bool {
     use sha2::Digest;
-    let file = download_dir().join(&r.asset_name);
-    let note = std::fs::read_to_string(checked_note(&file)).unwrap_or_default();
-    let len = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
-    let Some((n, sha)) = note.trim().split_once(' ') else { return false };
-    if len == 0 || n.parse::<u64>().ok() != Some(len) || (r.size > 0 && r.size != len) {
+    let Ok(want) = expected_sha256(r) else { return false };
+    if verify_update_source(r).is_err() { return false; }
+    let note = std::fs::read_to_string(checked_note(file)).unwrap_or_default();
+    let len = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+    let Some((n, marked)) = note.trim().split_once(' ') else { return false };
+    if len == 0 || n.parse::<u64>().ok() != Some(len) || (r.size > 0 && r.size != len)
+        || (marked != want && marked != "-")
+    {
         return false;
     }
-    match (r.sha256.as_deref(), sha) {
-        (None, _) => true,
-        (Some(want), got) if got == want => true,
-        (Some(want), "-") => {
-            let Ok(mut f) = std::fs::File::open(&file) else { return false };
-            // (read in blocks: sha2 0.11's hasher is no `io::Write` any more)
-            let mut h = sha2::Sha256::new();
-            let mut buf = vec![0u8; 1 << 16];
-            loop {
-                match std::io::Read::read(&mut f, &mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => h.update(&buf[..n]),
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => return false,
-                }
-            }
-            let got: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
-            got == want
+    let Ok(mut data) = std::fs::File::open(file) else { return false };
+    let mut hash = sha2::Sha256::new();
+    // sha2 0.11 no longer implements std::io::Write; hash a bounded buffer.
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        match data.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => hash.update(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return false,
         }
-        _ => false,
     }
+    let actual: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    actual == want
 }
 
 /// Download the release file to `to`, with the progress in `status`, and check it. A break
@@ -512,6 +550,8 @@ pub fn downloaded(r: &Release) -> bool {
 /// times, before the download counts as failed.
 fn download(r: &Release, to: &Path, status: &Mutex<Status>) -> anyhow::Result<()> {
     use sha2::Digest;
+    let want = expected_sha256(r)?;
+    verify_update_source(r)?;
     if downloaded(r) {
         return Ok(());
     }
@@ -559,6 +599,9 @@ fn download(r: &Release, to: &Path, status: &Mutex<Status>) -> anyhow::Result<()
                     out.write_all(&buf[..n])?;
                     hasher.update(&buf[..n]);
                     done += n as u64;
+                    if done > r.size {
+                        anyhow::bail!("update {} exceeds its declared download size", r.version);
+                    }
                     *lock(status) = Status::Downloading { release: r.clone(), done, total: total.max(done) };
                 }
                 Err(e) => break Some(e),
@@ -587,15 +630,18 @@ fn download(r: &Release, to: &Path, status: &Mutex<Status>) -> anyhow::Result<()
     if r.size > 0 && done != r.size {
         anyhow::bail!("the download stopped at {} of {} bytes", done, r.size);
     }
-    if let Some(want) = &r.sha256 {
-        let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
-        if &got != want {
-            let _ = std::fs::remove_file(&part);
-            anyhow::bail!("the downloaded file is damaged (SHA-256 {got}, GitHub lists {want})");
-        }
+    let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if got != want {
+        let _ = std::fs::remove_file(&part);
+        anyhow::bail!("the downloaded file is damaged (SHA-256 {got}, GitHub lists {want})");
+    }
+    // A corrupted cache can still exist at this path. On Windows, rename cannot
+    // replace an existing file; discard it only after the replacement verifies.
+    if std::fs::symlink_metadata(to).is_ok() {
+        std::fs::remove_file(to)?;
     }
     std::fs::rename(&part, to)?;
-    let _ = std::fs::write(checked_note(to), format!("{} {}", done, r.sha256.as_deref().unwrap_or("-")));
+    let _ = std::fs::write(checked_note(to), format!("{done} {want}"));
     Ok(())
 }
 
@@ -617,6 +663,11 @@ fn download_and_install(r: &Release, status: &Mutex<Status>) -> anyhow::Result<(
     }
     let file = download_dir().join(&r.asset_name);
     download(r, &file, status)?;
+    // Re-hash again at the execution boundary. A cached file may have been
+    // modified while the downloader or an earlier update was running.
+    if !downloaded_file(r, &file) {
+        anyhow::bail!("update {} failed the final SHA-256 verification", r.version);
+    }
     log::info!("update {}: downloaded {}", r.version, file.display());
     *lock(status) = Status::Installing(r.clone());
     #[cfg(target_os = "android")]
@@ -771,17 +822,56 @@ fn aside_of(target: &Path) -> PathBuf {
     first
 }
 
+/// A ZIP symlink may refer to another path within the archive, but not above its root.
+#[cfg(unix)]
+fn safe_link_target(link: &Path, target: &Path) -> bool {
+    use std::path::Component;
+    if target.as_os_str().is_empty() || target.is_absolute() { return false; }
+    let mut depth = link.parent().map(|p| p.components().count()).unwrap_or(0);
+    for component in target.components() {
+        match component {
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::ParentDir if depth > 0 => depth -= 1,
+            _ => return false,
+        }
+    }
+    true
+}
+
 /// Unpack `zip` into `to` (a fresh folder), with the files' Unix modes and links.
 pub fn unpack(zip: &Path, to: &Path) -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(to);
     std::fs::create_dir_all(to)?;
     let mut a = zip::ZipArchive::new(std::fs::File::open(zip)?)?;
+    if a.len() == 0 || a.len() > MAX_UPDATE_ARCHIVE_ENTRIES {
+        anyhow::bail!("update archive contains an invalid number of entries");
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut expanded = 0u64;
+    // Materialize links after regular files so archive entry order cannot direct a
+    // later file write through a symlink outside the staging directory.
+    #[cfg(unix)]
+    let mut links: Vec<(PathBuf, PathBuf)> = Vec::new();
     for i in 0..a.len() {
         let mut e = a.by_index(i)?;
-        let Some(rel) = e.enclosed_name() else { continue };
+        let Some(rel) = e.enclosed_name() else {
+            anyhow::bail!("update archive has an unsafe path: {}", e.name());
+        };
+        // Even signed release archives must not expand to unbounded disk usage.
+        expanded = expanded.checked_add(e.size()).ok_or_else(|| anyhow::anyhow!("update archive expanded size overflow"))?;
+        if expanded > MAX_UPDATE_UNPACKED_BYTES {
+            anyhow::bail!("update archive expands beyond the allowed size");
+        }
         // (macOS' resource forks, which ditto keeps beside the files)
         if rel.components().next().map(|c| c.as_os_str() == "__MACOSX").unwrap_or(false) || rel.file_name().map(|n| n.to_string_lossy().starts_with("._")).unwrap_or(false) {
             continue;
+        }
+        // Detect duplicate and case-insensitive colliding paths before extraction.
+        // Windows and default macOS file systems can resolve differently cased names
+        // to the same destination.
+        if !seen.insert(rel.to_string_lossy().to_lowercase()) {
+            anyhow::bail!("update archive contains duplicate path: {}", rel.display());
         }
         let out = to.join(&rel);
         if e.is_dir() {
@@ -797,12 +887,19 @@ pub fn unpack(zip: &Path, to: &Path) -> anyhow::Result<()> {
             if m & 0o170000 == 0o120000 {
                 let mut target = String::new();
                 e.read_to_string(&mut target)?;
-                std::os::unix::fs::symlink(target, &out)?;
+                let target = PathBuf::from(target);
+                if !safe_link_target(&rel, &target) {
+                    anyhow::bail!("update archive contains an escaping symlink: {}", rel.display());
+                }
+                links.push((out, target));
                 continue;
             }
         }
         let mut f = std::fs::File::create(&out)?;
-        std::io::copy(&mut e, &mut f)?;
+        let copied = std::io::copy(&mut e, &mut f)?;
+        if copied != e.size() {
+            anyhow::bail!("update archive has an incomplete file: {}", rel.display());
+        }
         drop(f);
         #[cfg(unix)]
         if let Some(m) = mode {
@@ -811,6 +908,20 @@ pub fn unpack(zip: &Path, to: &Path) -> anyhow::Result<()> {
         }
         #[cfg(not(unix))]
         let _ = mode;
+    }
+    #[cfg(unix)]
+    for (out, target) in links {
+        // Never create a symlink through another symlink (including one previously
+        // created by this archive): the path could otherwise resolve outside staging.
+        let mut parent = out.parent();
+        while let Some(dir) = parent {
+            if !dir.starts_with(to) || std::fs::symlink_metadata(dir)?.file_type().is_symlink() {
+                anyhow::bail!("update archive contains a symlink inside a symlinked directory");
+            }
+            if dir == to { break; }
+            parent = dir.parent();
+        }
+        std::os::unix::fs::symlink(target, &out)?;
     }
     Ok(())
 }
@@ -1033,6 +1144,84 @@ pub fn open_url(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn official_release_source_must_match_exactly() {
+        let name = asset_name("0.2.99").unwrap();
+        let mut r = Release {
+            version: "0.2.99".into(), page: String::new(), notes: String::new(),
+            asset_name: name.clone(),
+            asset_url: format!("{REPO_URL}/releases/download/v0.2.99/{name}"),
+            size: 4096,
+            sha256: Some("a".repeat(64)),
+        };
+        assert!(is_official_release_source(&r));
+        r.asset_url = "https://github.com.evil.invalid/openOMSI.zip".into();
+        assert!(!is_official_release_source(&r));
+        r.asset_url = format!("{REPO_URL}/releases/download/v0.2.99/{name}?source=other");
+        assert!(!is_official_release_source(&r));
+        r.asset_url = format!("{REPO_URL}/releases/download/v0.2.99/{name}");
+        r.asset_name = "../evil.zip".into();
+        assert!(!is_official_release_source(&r));
+        r.asset_name = name;
+        assert!(is_official_release_source(&r));
+        r.size = 0;
+        assert!(verify_update_source(&r).is_err());
+        r.size = MAX_UPDATE_DOWNLOAD_BYTES + 1;
+        assert!(verify_update_source(&r).is_err());
+    }
+
+    #[test]
+    fn archive_with_duplicate_paths_is_rejected() {
+        let root = std::env::temp_dir().join(format!("openomsi-duplicate-archive-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let zip = root.join("duplicate.zip");
+        {
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&zip).unwrap());
+            let o = zip::write::SimpleFileOptions::default();
+            z.start_file("openomsi", o).unwrap();
+            z.write_all(b"first").unwrap();
+            z.start_file("openomsi", o).unwrap();
+            z.write_all(b"second").unwrap();
+            z.finish().unwrap();
+        }
+        assert!(unpack(&zip, &root.join("staging")).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_update_must_still_match_its_sha256() {
+        use sha2::Digest;
+        let file = std::env::temp_dir().join(format!("openomsi-cache-hash-{}.zip", std::process::id()));
+        let original = b"good";
+        let digest: String = sha2::Sha256::digest(original).iter().map(|b| format!("{b:02x}")).collect();
+        let r = Release {
+            version: "0.2.99".into(), page: String::new(), notes: String::new(),
+            asset_name: "cached.zip".into(), asset_url: "https://example.org/cached.zip".into(),
+            size: original.len() as u64, sha256: Some(digest.clone()),
+        };
+        std::fs::write(&file, original).unwrap();
+        std::fs::write(checked_note(&file), format!("{} {}", original.len(), digest)).unwrap();
+        assert!(downloaded_file(&r, &file));
+        // Same size, unchanged .checked note, but different contents: never execute.
+        std::fs::write(&file, b"evil").unwrap();
+        assert!(!downloaded_file(&r, &file));
+        let mut missing = r.clone();
+        missing.sha256 = None;
+        assert!(!downloaded_file(&missing, &file));
+        assert!(expected_sha256(&missing).is_err());
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(checked_note(&file));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn archive_symlinks_cannot_escape_staging() {
+        assert!(safe_link_target(Path::new("openOMSI.app/Contents/Versions/Current"), Path::new("A")));
+        assert!(safe_link_target(Path::new("bin/current"), Path::new("../lib/game")));
+        assert!(!safe_link_target(Path::new("bin/current"), Path::new("../../etc/passwd")));
+        assert!(!safe_link_target(Path::new("bin/current"), Path::new("/etc/passwd")));
+    }
 
     #[test]
     fn versions_compare_by_number() {
