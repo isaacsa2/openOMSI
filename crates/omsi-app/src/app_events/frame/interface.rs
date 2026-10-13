@@ -247,16 +247,20 @@ impl App {
                     (t, t)
                 }
             };
-            // (on foot the map follows the walker, not the bus left standing)
-            let (at, heading) = match (self.session.on_foot.as_ref(), p) {
+            // The map follows the walker, but route progress belongs to the bus.
+            let (viewer, viewer_heading) = match (self.session.on_foot.as_ref(), p) {
                 (Some(f), _) => (f.pos, f.heading),
                 (None, Some(p)) => (p.vehicle.position, p.vehicle.heading),
                 (None, None) => return,
             };
+            let (bus, heading) = p.map(|p| (p.vehicle.position, p.vehicle.heading))
+                .unwrap_or((viewer, viewer_heading));
             let frame = navigator::NavFrame {
                 traffic: self.session.traffic.as_ref(),
                 players: self.net.lan.as_ref().map(|l| crate::lan::nav_players(&self.net.remotes, l.my_id)).unwrap_or_default(),
-                bus: at,
+                bus,
+                viewer,
+                viewer_heading,
                 heading,
                 speed_kmh: p.map_or(0.0, |p| p.vehicle.physics.velocity_kmh()),
                 outside_temp,

@@ -337,6 +337,8 @@ impl Offscreen<'_> {
                     traffic: traffic.as_ref(),
                     players: lan_off.as_ref().map(|l| lan::nav_players(remotes_off, l.my_id)).unwrap_or_default(),
                     bus: p.vehicle.position,
+                    viewer: p.vehicle.position,
+                    viewer_heading: p.vehicle.heading,
                     heading: p.vehicle.heading,
                     speed_kmh: p.vehicle.physics.velocity_kmh(),
                     outside_temp,

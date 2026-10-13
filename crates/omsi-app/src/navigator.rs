@@ -187,7 +187,12 @@ pub struct NavFrame<'a> {
     pub traffic: Option<&'a Traffic>,
     /// The other players of a LAN session or server, on both maps (#1011, #1080).
     pub players: Vec<NavPlayer>,
+    /// The driven bus position. Routing must never follow a pedestrian's feet.
     pub bus: DVec3,
+    /// Where the map is viewed from (the walking player, otherwise the bus).
+    pub viewer: DVec3,
+    /// Orientation of the map's viewpoint, independently of the bus's direction.
+    pub viewer_heading: f64,
     /// Compass heading (degrees, 0 = +y, clockwise).
     pub heading: f64,
     pub speed_kmh: f32,
@@ -934,10 +939,10 @@ impl Navigator {
         let want = (110.0 + f.speed_kmh as f64 * 2.2).clamp(110.0, 280.0);
         if self.first {
             self.zoom = want;
-            self.cam_heading = f.heading;
+            self.cam_heading = f.viewer_heading;
         }
         self.zoom += (want - self.zoom) * ease(f.dt, 1.8);
-        self.cam_heading += angle_diff(self.cam_heading, f.heading) * ease(f.dt, 0.3);
+        self.cam_heading += angle_diff(self.cam_heading, f.viewer_heading) * ease(f.dt, 0.3);
         let v = f.speed_kmh.abs() / 3.6;
         self.speed_avg += (v - self.speed_avg) * ease(f.dt, 20.0) as f32;
         self.dist_t -= f.dt;
@@ -1039,12 +1044,12 @@ impl Navigator {
         let lanes_now = net.map(|n| n.lanes.len()).unwrap_or(0);
         let rebuild = match &self.roads {
             None => lanes_now > 0,
-            Some(r) => (r.anchor - f.bus.truncate()).length() > ROAD_RADIUS * 0.45 || (r.lanes_seen != lanes_now && self.time - r.built_at > 1.5),
+            Some(r) => (r.anchor - f.viewer.truncate()).length() > ROAD_RADIUS * 0.45 || (r.lanes_seen != lanes_now && self.time - r.built_at > 1.5),
         };
         let mut road_verts = None;
         if rebuild {
             if let Some(net) = net {
-                let anchor = f.bus.truncate();
+                let anchor = f.viewer.truncate();
                 let mut p = Painter::new();
                 let t0 = std::time::Instant::now();
                 build_roads(&mut p, net, anchor);
@@ -1057,11 +1062,11 @@ impl Navigator {
         }
 
         // --- the map camera (world coordinates relative to the anchor)
-        let anchor = self.roads.as_ref().map(|r| r.anchor).unwrap_or(f.bus.truncate());
+        let anchor = self.roads.as_ref().map(|r| r.anchor).unwrap_or(f.viewer.truncate());
         let rel = |p: DVec3| Vec3::new((p.x - anchor.x) as f32, (p.y - anchor.y) as f32, 0.0);
         let hd = self.cam_heading.to_radians();
         let fwd = DVec2::new(hd.sin(), hd.cos());
-        let look_at = f.bus.truncate() - anchor + fwd * self.zoom * 0.28;
+        let look_at = f.viewer.truncate() - anchor + fwd * self.zoom * 0.28;
         let pitch = PITCH.to_radians();
         let back = fwd * self.zoom * pitch.cos();
         let eye = DVec3::new(look_at.x - back.x, look_at.y - back.y, self.zoom * pitch.sin());
@@ -1116,7 +1121,7 @@ impl Navigator {
         let mut lines: Vec<(DVec3, Color, String)> = Vec::new();
         if let Some(t) = f.traffic.filter(|_| self.show_ai) {
             for c in &t.cars {
-                if c.gone || (c.vehicle.position - f.bus).truncate().length() > self.zoom * 3.5 + 150.0 {
+                if c.gone || (c.vehicle.position - f.viewer).truncate().length() > self.zoom * 3.5 + 150.0 {
                     continue;
                 }
                 let (color, line) = traffic_kind(c);
@@ -1231,7 +1236,7 @@ impl Navigator {
         }
         // the public transport's lines: a tag in its colour above its dot (the nearest first,
         // none on top of another)
-        lines.sort_by(|a, b| (a.0 - f.bus).length().total_cmp(&(b.0 - f.bus).length()));
+        lines.sort_by(|a, b| (a.0 - f.viewer).length().total_cmp(&(b.0 - f.viewer).length()));
         let mut taken: Vec<Rect> = Vec::new();
         // the other players: an arrow each, their name above it (before the lines' tags)
         for pl in &f.players {
@@ -1261,6 +1266,12 @@ impl Navigator {
             taken.push(r);
             ui.rounded(r, 3.5 * s, *color);
             ui.text_in(&mut self.atlas, &self.fonts, &l, px, Weight::Bold, r, Align::Center, LINE_TEXT);
+        }
+        // Show the real bus even while the player's map follows them on foot.
+        if (f.viewer - f.bus).length() > 2.0 {
+            if let Some(wp) = project(vpm, vp, rel(f.viewer)) {
+                ui.circle(wp, 5.0 * s, PLAYER);
+            }
         }
         // the bus: a plain white arrow
         if let Some(bp) = project(vpm, vp, rel(f.bus)) {
@@ -1435,7 +1446,7 @@ fn congestion_on(net: &Network, traffic: &Network, c: &HashMap<usize, f32>) -> H
 
 impl<'a> NavFrame<'a> {
     fn clone_ref(&self) -> NavFrame<'a> {
-        NavFrame { traffic: self.traffic, players: self.players.clone(), bus: self.bus, heading: self.heading, speed_kmh: self.speed_kmh, outside_temp: self.outside_temp, inside_temp: self.inside_temp, line: self.line.clone(), terminus: self.terminus.clone(), stops: self.stops.clone(), delay: self.delay, passengers: self.passengers, time: self.time, weekday: self.weekday, language: self.language, screen: self.screen, ui_scale: self.ui_scale, follow_window: self.follow_window, dt: self.dt, stop_requested: self.stop_requested, info_rect: self.info_rect, touch_gap: self.touch_gap }
+        NavFrame { traffic: self.traffic, players: self.players.clone(), bus: self.bus, viewer: self.viewer, viewer_heading: self.viewer_heading, heading: self.heading, speed_kmh: self.speed_kmh, outside_temp: self.outside_temp, inside_temp: self.inside_temp, line: self.line.clone(), terminus: self.terminus.clone(), stops: self.stops.clone(), delay: self.delay, passengers: self.passengers, time: self.time, weekday: self.weekday, language: self.language, screen: self.screen, ui_scale: self.ui_scale, follow_window: self.follow_window, dt: self.dt, stop_requested: self.stop_requested, info_rect: self.info_rect, touch_gap: self.touch_gap }
     }
 }
 

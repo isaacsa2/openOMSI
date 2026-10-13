@@ -296,7 +296,7 @@ impl Navigator {
             self.city.target = Some((t, tw, th));
         }
         if self.city.follow {
-            self.city.center = f.bus.truncate();
+            self.city.center = f.viewer.truncate();
         }
         let s = (h / 760.0).clamp(0.95, 2.0) * f.ui_scale;
         let global = self.global.clone();
@@ -315,7 +315,7 @@ impl Navigator {
                     }
                 }
                 if lo.x == f64::MAX {
-                    lo = f.bus.truncate();
+                    lo = f.viewer.truncate();
                     hi = lo;
                 }
                 let anchor = (lo + hi) * 0.5;
@@ -336,7 +336,7 @@ impl Navigator {
                 roads_verts = Some(p.verts);
             }
         }
-        let anchor = self.city.roads.map(|r| r.2).unwrap_or(f.bus.truncate());
+        let anchor = self.city.roads.map(|r| r.2).unwrap_or(f.viewer.truncate());
         let rel = |q: DVec3| Vec3::new((q.x - anchor.x) as f32, (q.y - anchor.y) as f32, 0.0);
         // the whole route (buffer 4): the part driven grey, the rest by how busy it is,
         // with arrows about 90 pixels apart (built again when the zoom changes that much)
@@ -494,6 +494,9 @@ impl Navigator {
             ui.text_in(&mut self.atlas, &self.fonts, &name, px, Weight::Bold, r, Align::Center, LINE_TEXT);
         }
         arrow(&mut ui, to_screen(f.bus), (f.heading as f32).to_radians(), 10.0 * s, 1.3, Color::rgba(10, 10, 10, 0.9), TEXT);
+        if (f.viewer - f.bus).length() > 2.0 {
+            ui.circle(to_screen(f.viewer), 5.0 * s, PLAYER);
+        }
         // header: the line and where it goes, the next stop; buttons on the right
         // (opaque: the route and the stops showed through behind its text)
         let head = Rect::new(0.0, 0.0, w, 44.0 * s);
