@@ -21,10 +21,14 @@ pub fn find_cloudflared() -> Option<PathBuf> {
     if let Some(p) = omsi_cfg::flags::OMSI_CLOUDFLARED.live_os().map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
     }
-    // (`OMSI_CLOUDFLARED_OWN=1`: only the game's own copy, for testing the download)
-    let own = own_dir().filter(|d| d.join(VERIFIED).is_file()).map(|d| d.join(exe)).filter(|p| p.is_file());
+    // Validate the actual bytes on every reuse; a text marker alone is not proof
+    // that an executable in the user's writable data folder is unchanged.
+    let own = verified_own_cloudflared();
     if omsi_cfg::flags::OMSI_CLOUDFLARED_OWN.live_os().is_some() {
         return own;
+    }
+    if let Some(p) = own {
+        return Some(p);
     }
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
@@ -35,7 +39,7 @@ pub fn find_cloudflared() -> Option<PathBuf> {
         dirs.extend(std::env::split_paths(&path));
     }
     dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].iter().map(PathBuf::from));
-    dirs.into_iter().map(|d| d.join(exe)).find(|p| p.is_file()).or(own)
+    dirs.into_iter().map(|d| d.join(exe)).find(|p| p.is_file())
 }
 
 /// The game's own folder for the tools it fetches (`~/.openomsi/bin`).
@@ -68,6 +72,48 @@ fn release_asset() -> Option<(&'static str, &'static str)> {
 /// without it - fetched by an older game unchecked - is fetched again).
 const VERIFIED: &str = "cloudflared.verified";
 
+fn sha256_of_file(path: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        match std::io::Read::read(&mut file, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return None,
+        }
+    }
+    Some(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The marker records what we installed; the hash of the actual executable must
+/// match it. Direct (non-tgz) release binaries must ALSO match the compiled-in
+/// upstream release SHA-256, so rewriting the marker cannot bypass verification.
+fn verified_own_cloudflared() -> Option<PathBuf> {
+    let (asset, release_sha) = release_asset()?;
+    let dir = own_dir()?;
+    let text = std::fs::read_to_string(dir.join(VERIFIED)).ok()?;
+    let fields: Vec<&str> = text.split_whitespace().collect();
+    if fields.len() != 4 || fields[0] != RELEASE || fields[1] != asset || fields[2] != release_sha
+        || fields[3].len() != 64 || !fields[3].bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let exe = dir.join(if cfg!(windows) { "cloudflared.exe" } else { "cloudflared" });
+    let len = std::fs::metadata(&exe).ok()?.len();
+    if !(1 << 20..=200 << 20).contains(&len) {
+        return None;
+    }
+    let actual = sha256_of_file(&exe)?;
+    if actual != fields[3] || (!asset.ends_with(".tgz") && actual != release_sha) {
+        log::warn!("tunnel: the cached cloudflared failed its SHA-256 check");
+        return None;
+    }
+    Some(exe)
+}
+
 /// cloudflared, fetched from Cloudflare's releases into the game's data folder when it is
 /// not installed (once; later runs find it there). Blocks while it downloads (~20-40 MB):
 /// call it off the game's main thread.
@@ -99,7 +145,14 @@ pub fn ensure_cloudflared() -> Option<PathBuf> {
     }
     let bin = if asset.ends_with(".tgz") {
         let mut raw = Vec::new();
-        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&data[..]), &mut raw).map_err(|e| log::warn!("tunnel: {asset}: {e}")).ok()?;
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(flate2::read::GzDecoder::new(&data[..]), (256 << 20) + 1),
+            &mut raw,
+        ).map_err(|e| log::warn!("tunnel: {asset}: {e}")).ok()?;
+        if raw.len() > 256 << 20 {
+            log::warn!("tunnel: {asset} expands beyond 256 MiB");
+            return None;
+        }
         tar_entry(&raw, "cloudflared")?
     } else {
         data
@@ -116,8 +169,16 @@ pub fn ensure_cloudflared() -> Option<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
     }
+    // Windows does not replace an existing executable with rename. Its previously
+    // verified replacement may be stale or compromised: replace only after checking
+    // the new download against the pinned release hash above.
+    if std::fs::symlink_metadata(&exe).is_ok() {
+        std::fs::remove_file(&exe).ok()?;
+    }
     std::fs::rename(&tmp, &exe).ok()?;
-    std::fs::write(dir.join(VERIFIED), format!("{RELEASE} {asset} {sha}\n")).ok()?;
+    use sha2::{Digest, Sha256};
+    let binary_sha: String = Sha256::digest(&bin).iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::write(dir.join(VERIFIED), format!("{RELEASE} {asset} {sha} {binary_sha}\n")).ok()?;
     log::info!("tunnel: cloudflared installed at {} ({:.1} MB in {:.1} s)", exe.display(), bin.len() as f64 / 1e6, t0.elapsed().as_secs_f32());
     Some(exe)
 }
@@ -264,6 +325,16 @@ fn trycloudflare_url(line: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cached_binary_hash_detects_same_size_tampering() {
+        let p = std::env::temp_dir().join(format!("openomsi-cloudflared-hash-{}", std::process::id()));
+        std::fs::write(&p, b"original").unwrap();
+        let before = super::sha256_of_file(&p).unwrap();
+        std::fs::write(&p, b"tampered").unwrap();
+        assert_ne!(super::sha256_of_file(&p).as_deref(), Some(before.as_str()));
+        let _ = std::fs::remove_file(p);
+    }
+
     #[test]
     fn url_in_log() {
         let l = "2026-09-26T10:00:00Z INF |  https://quiet-river-sample-words.trycloudflare.com                                   |";
