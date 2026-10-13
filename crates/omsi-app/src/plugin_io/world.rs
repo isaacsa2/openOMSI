@@ -175,8 +175,12 @@ pub(crate) fn set_view(app: &mut App, name: &str) -> bool {
     app.game_action(action)
 }
 
+fn valid_free_camera_pose(at: [f64; 3], yaw: f32, pitch: f32) -> bool {
+    at.iter().all(|v| v.is_finite()) && yaw.is_finite() && pitch.is_finite()
+}
+
 pub(crate) fn set_free_camera(app: &mut App, at: [f64; 3], yaw: f32, pitch: f32) -> bool {
-    if !at.iter().all(|v| v.is_finite()) || !yaw.is_finite() || !pitch.is_finite() || app.camera.is_none() {
+    if !valid_free_camera_pose(at, yaw, pitch) || app.camera.is_none() {
         return false;
     }
     app.view = "free".into();
@@ -373,4 +377,18 @@ pub(crate) fn lan_chat(app: &mut App, text: &str) -> Result<(), String> {
         return Err("nothing to say".into());
     }
     l.say(&text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_free_camera_pose;
+
+    #[test]
+    fn camera_pose_rejects_non_finite_angles_and_positions() {
+        assert!(valid_free_camera_pose([0.0, 1.0, 2.0], 90.0, -45.0));
+        assert!(!valid_free_camera_pose([f64::NAN, 0.0, 0.0], 0.0, 0.0));
+        assert!(!valid_free_camera_pose([0.0, f64::INFINITY, 0.0], 0.0, 0.0));
+        assert!(!valid_free_camera_pose([0.0; 3], f32::NAN, 0.0));
+        assert!(!valid_free_camera_pose([0.0; 3], 0.0, f32::NEG_INFINITY));
+    }
 }
