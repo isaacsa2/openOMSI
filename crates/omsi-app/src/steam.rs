@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn status_rejects_nul_and_respects_the_steam_limit() {
-        let source = format!("Bus\\0{}", "ä".repeat(200));
+        let source = format!("Bus\0{}", "ä".repeat(200));
         let status = Steam::status(None, Some(&source), None, false);
         assert!(!status.contains('\0'));
         assert!(status.len() <= 200);
