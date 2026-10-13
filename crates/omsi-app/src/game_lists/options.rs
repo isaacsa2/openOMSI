@@ -91,8 +91,15 @@ pub(super) fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option
         }
         "traffic" => {
             if let Some(t) = app.session.traffic.as_mut() {
-                t.target = v.round() as usize;
+                t.target = (v.round() as usize).min(TRAFFIC_MAX);
                 app.args.traffic = t.target;
+                // The launcher remembers its traffic level in launcher-duty.json,
+                // rather than in settings.cfg alongside AI scheduling limits.
+                let mut choice = omsi_launcher_model::Choice::load();
+                if choice.traffic != t.target as f32 {
+                    choice.traffic = t.target as f32;
+                    choice.save();
+                }
             }
             None
         }
