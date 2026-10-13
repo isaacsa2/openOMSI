@@ -41,6 +41,10 @@ impl App {
         #[cfg(steam)]
         if let Some(steam) = self.integrations.steam.as_ref() {
             steam.client.run_callbacks();
+            let map = self.world.as_ref().map(|w| w.global.name.as_str());
+            let bus = self.player.as_ref().map(|p| p.vehicle.ty.def.type_name.as_str());
+            let line = self.session.duty.as_ref().map(|d| d.line.as_str());
+            steam.set_presence(map, bus, line, self.net.lan.is_some());
         }
         // the plugins' frame, with the bus's scripts done
         let mut plugins = self.integrations.plugins.take().unwrap_or_else(crate::plugins::load);
