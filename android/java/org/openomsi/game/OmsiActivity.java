@@ -141,6 +141,14 @@ public class OmsiActivity extends NativeActivity {
         }
     }
 
+    /** The answer of the launcher's file dialog (see LauncherBridge.pickArchive). */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (!LauncherBridge.onPickResult(requestCode, resultCode, data)) {
+            super.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
     /** A short buzz (called from the native side for the on-screen buttons). */
     @SuppressWarnings("deprecation")
     public void vibrate(int ms) {
