@@ -20,6 +20,9 @@ pub(super) fn fleet_ahead() -> f64 {
 /// minutes wants, leaves the GPU.
 pub(super) const FLEET_IDLE: std::time::Duration = std::time::Duration::from_secs(90);
 
+/// The same when the graphics memory has no room to speak of (see `omsi_render::memory_pressure`).
+const FLEET_IDLE_CRITICAL: std::time::Duration = std::time::Duration::from_secs(15);
+
 impl Schedule {
     /// Upload the vehicles of the buses on the road at `day_time` and of the departures of the
     /// next minutes before the first frame, so that they spawn without a hitch; the rest of
@@ -143,7 +146,10 @@ impl Schedule {
         scene: &mut Scene,
         day_time: f64,
     ) {
-        let ready = self.fleet_ready.lock().pop();
+        // (the graphics memory, where the driver tells it and OMSI_MEMORY_PRESSURE is set: only
+        // what is done in advance waits for room - nothing in use is let go because of it)
+        let pressure = omsi_render::memory_pressure();
+        let ready = if pressure < omsi_render::Pressure::Critical { self.fleet_ready.lock().pop() } else { None };
         if let Some(key) = ready {
             if let Some(ty) = self.fleet_reading.remove(&key) {
                 let t = std::time::Instant::now();
@@ -178,8 +184,12 @@ impl Schedule {
             .parse::<f32>()
             .map(std::time::Duration::from_secs_f32)
             .unwrap_or(FLEET_IDLE);
+        let idle = if pressure == omsi_render::Pressure::Critical { idle.min(FLEET_IDLE_CRITICAL) } else { idle };
         if world.trim_vehicle_sets(renderer, scene, &keep, idle) > 0 {
             crate::release_free_memory();
+        }
+        if pressure != omsi_render::Pressure::Calm {
+            return;
         }
         let prefetch = world.vehicle_prefetch(renderer);
         for (ty, scheme) in sets {

@@ -322,6 +322,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_IBIS_BUDGET` | num | 10 | use | sim | Seconds the IBIS typist may take per entry. |
 | `OMSI_LAN_JOIN_TIMEOUT` | num | default | use | net | LAN: seconds to wait when joining a game. |
 | `OMSI_MAX_FPS` | num | settings | use | app | Frame rate limit for this run. |
+| `OMSI_MEMORY_PRESSURE` | bool | off | use | render | Watch the graphics memory in use against its budget (where the backend reports it) and put off reading vehicles ahead when it runs short; logs the figures every minute. An experiment. |
 | `OMSI_METER` | text | - | use | render | gain,target,dark,bright,bias,night: the exposure metering. |
 | `OMSI_MIRROR_HUD` | num | settings | use | app | Mirror HUD mode (number). |
 | `OMSI_OPENXR` | bool | off | use | app | Start in OpenXR (VR) mode. |
