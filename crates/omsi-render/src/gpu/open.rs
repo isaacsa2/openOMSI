@@ -370,8 +370,12 @@ impl Opened {
             // (the format chosen for the window before: the same the surface would give)
             return Box::pin(Renderer::new_on(adapter, None, Some(format), asked_options)).await;
         }
-        match &made {
-            Ok(_) => pipeline_cache::save(),
+        let mut made = made;
+        match &mut made {
+            Ok(r) => {
+                pipeline_cache::save();
+                r.adapter = Some(adapter);
+            }
             Err(_) => pipeline_cache::close(&device),
         }
         made
@@ -669,6 +673,7 @@ impl Renderer {
             freed: std::cell::OnceCell::new(),
             rt,
             mesh_pages: false,
+            adapter: None,
         }
     }
 }

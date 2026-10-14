@@ -869,6 +869,29 @@ impl World {
         self.texture_budget_pass(renderer, scene, centers, BudgetPass::AfterStreaming)
     }
 
+    /// `limit`, or less when the driver's count of the graphics memory in use has stayed near
+    /// what it lets the game keep (see `memory_watch`): the textures give way before the card
+    /// pages, and the smaller budget stays. OMSI_NO_MEMORY_WATCH=1 leaves the budget as set,
+    /// and so do phones and tablets, whose drivers' counts were never tried against it.
+    fn watch_graphics_memory(&self, renderer: &Renderer, memo: &mut BudgetMemo, limit: u64) -> u64 {
+        if cfg!(any(target_os = "android", target_os = "ios")) || omsi_cfg::flags::OMSI_NO_MEMORY_WATCH.is_set() {
+            return limit;
+        }
+        let Some((used, allowed)) = renderer.graphics_memory() else { return limit };
+        let Some(less) = memo.memory.look(limit, used, allowed, std::time::Instant::now()) else { return limit };
+        log::warn!(
+            "graphics memory: {:.0} of the {:.0} MB the driver lets the game keep are in use - textures kept to {:.0} MB from now on (were {:.0} MB)",
+            used as f64 / 1e6,
+            allowed as f64 / 1e6,
+            less as f64 / 1e6,
+            limit as f64 / 1e6
+        );
+        self.texture_limit.store(less, std::sync::atomic::Ordering::Relaxed);
+        // (the last look's "nothing to do" was for the old budget)
+        memo.idle = false;
+        less
+    }
+
     fn texture_budget_pass(
         &self,
         renderer: &Renderer,
@@ -899,6 +922,7 @@ impl World {
                 return 0;
             }
         }
+        let limit = if pass == BudgetPass::Timed { self.watch_graphics_memory(renderer, &mut memo, limit) } else { limit };
         let t0 = std::time::Instant::now();
         let vehicle_bytes: u64 = self
             .vehicle_textures
@@ -1361,6 +1385,8 @@ pub(super) struct BudgetMemo {
     generation: u64,
     usage: u64,
     centers: Vec<DVec3>,
+    /// The driver's count of the graphics memory, as the last looks found it.
+    memory: crate::memory_watch::MemoryWatch,
 }
 
 impl BudgetMemo {

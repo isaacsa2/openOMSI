@@ -53,6 +53,7 @@ mod upload;
 mod place_step;
 mod props;
 mod lightmaps;
+mod memory_watch;
 mod scripted;
 pub use scripted::DayKind;
 mod vehicle_materials;

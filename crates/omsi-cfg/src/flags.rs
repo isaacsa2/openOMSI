@@ -355,6 +355,7 @@ flags! {
     OMSI_NO_LIGHT_MAP: Bool, Switch, Use, "off", "No night light maps on the tiles (A/B).";
     OMSI_NO_MAIN_SPLIT: Bool, Switch, Frame, "off", "Do not split the main pass's bundles in two.";
     OMSI_NO_MATERIAL_SPLINE_BATCHING: Bool, Switch, Use, "off", "No batching of splines by material.";
+    OMSI_NO_MEMORY_WATCH: Bool, Switch, Use, "off", "Keep the texture budget when the driver's count of the graphics memory in use nears its budget (DirectX 12, Vulkan, Metal).";
     OMSI_NO_MODEL_ORDER: Bool, Switch, Use, "off", "Draw the opaque parts of ordered models first again (A/B).";
     OMSI_NO_MSAA_PREPASS: Bool, Switch, Frame, "off", "No depth prepass with multisampling.";
     OMSI_NO_PBR: Bool, Switch, Use, "off", "No PBR materials.";

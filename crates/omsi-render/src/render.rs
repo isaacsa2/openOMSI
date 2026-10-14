@@ -192,11 +192,14 @@ impl Renderer {
     pub(crate) fn rebuilt(&self, options: RenderOptions) -> Renderer {
         let (device, queue, name, format) = (self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format);
         let build = move || Self::build(device, queue, name, format, options);
-        if cfg!(windows) && gl_backend() && self.adapter_name.contains("ANGLE") {
+        let mut renderer = if cfg!(windows) && gl_backend() && self.adapter_name.contains("ANGLE") {
             angle::compile(&self.device, build)
         } else {
             build()
-        }
+        };
+        // (the driver's count of the graphics memory goes on with it, see `graphics_memory`)
+        renderer.adapter = self.adapter.clone();
+        renderer
     }
 
     /// Rebuild without the ray tracing after a GPU error while it was on (see `rt_error`).

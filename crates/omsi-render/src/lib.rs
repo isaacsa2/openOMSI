@@ -212,6 +212,9 @@ pub struct Renderer {
     history: ViewHistory,
     /// What the device's error handlers report: errors with multisampling or ray tracing on, out of memory, the device lost.
     errors: GpuErrors,
+    /// The adapter the device was opened on, for the driver's count of the graphics memory
+    /// in use (see `graphics_memory`); none for a renderer built without one (the tests).
+    adapter: Option<wgpu::Adapter>,
 }
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;

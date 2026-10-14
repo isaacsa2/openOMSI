@@ -115,6 +115,18 @@ pub(super) fn adapter_vram_mb(adapter: &wgpu::Adapter, info: &wgpu::AdapterInfo,
     }
 }
 
+impl Renderer {
+    /// The graphics memory the game uses and the most the driver lets it keep before it pages
+    /// (bytes), as the driver counts them now: the card's own memory on Direct3D 12 (DXGI's
+    /// local segment) and on Vulkan (`VK_EXT_memory_budget`'s device heaps), Metal's working
+    /// set. None where nothing is told: OpenGL, ANGLE, a Vulkan driver without the extension.
+    pub fn graphics_memory(&self) -> Option<(u64, u64)> {
+        let m = self.adapter.as_ref()?.memory_info()?;
+        let (used, allowed) = (m.usage_bytes?, m.budget_bytes?);
+        (allowed > 0).then_some((used, allowed))
+    }
+}
+
 /// What the driver says it really hands out (MB): the memory budget, the amount the
 /// adapter may take all together. None where nothing is told, as on the older phones
 /// whose allowance stays the 1000 MB guess (#323).

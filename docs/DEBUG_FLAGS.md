@@ -272,6 +272,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_LIGHT_MAP` | bool | off | use | scene | No night light maps on the tiles (A/B). |
 | `OMSI_NO_MAIN_SPLIT` | bool | off | frame | render | Do not split the main pass's bundles in two. |
 | `OMSI_NO_MATERIAL_SPLINE_BATCHING` | bool | off | use | scene | No batching of splines by material. |
+| `OMSI_NO_MEMORY_WATCH` | bool | off | use | scene | Keep the texture budget when the driver's count of the graphics memory in use nears its budget (DirectX 12, Vulkan, Metal). |
 | `OMSI_NO_MODEL_ORDER` | bool | off | use | scene | Draw the opaque parts of ordered models first again (A/B). |
 | `OMSI_NO_MSAA_PREPASS` | bool | off | frame | render | No depth prepass with multisampling. |
 | `OMSI_NO_PBR` | bool | off | use | scene | No PBR materials. |
