@@ -88,6 +88,10 @@ impl Renderer {
             let mb = |b: Option<u64>| b.map_or_else(|| "-".to_string(), |b| format!("{} MB", b >> 20));
             log::info!("graphics memory as {:?} reports it: {} MB its own, {} MB shared, budget {}, in use {}", info.backend, m.dedicated_bytes >> 20, m.shared_bytes >> 20, mb(m.budget_bytes), mb(m.usage_bytes));
         }
+        if info.backend == wgpu::Backend::Dx12 {
+            let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+            log::info!("{}", dx12_compiler_note(std::env::var("WGPU_DX12_COMPILER").ok().as_deref(), dir.as_deref()));
+        }
         // The legacy Intel Windows Vulkan branch has repeatedly crashed inside igvk64.dll
         // while compiling the larger multisampled/SSAO pipeline set. This is a driver access
         // violation, so wgpu cannot turn it into a recoverable error. Start those adapters
@@ -675,5 +679,42 @@ impl Renderer {
             mesh_pages: false,
             adapter: None,
         }
+    }
+}
+
+/// Which shader compiler Direct3D 12 most likely got, for the log: `WGPU_DX12_COMPILER`
+/// when it is set, else wgpu loads `dxcompiler.dll` where Windows finds it (beside the game
+/// first) and takes the old FXC without a word where it finds none. The release ships DXC
+/// beside the game, but a step that failed to fetch it leaves it out quietly, and FXC
+/// refuses some of the game's shaders and builds others its own way.
+fn dx12_compiler_note(chosen: Option<&str>, dir: Option<&std::path::Path>) -> String {
+    if let Some(c) = chosen.map(str::trim).filter(|c| !c.is_empty()) {
+        return format!("Direct3D 12 shader compiler: {c} (WGPU_DX12_COMPILER)");
+    }
+    let beside = |file: &str| dir.is_some_and(|d| d.join(file).is_file());
+    match (beside("dxcompiler.dll"), beside("dxil.dll")) {
+        (true, true) => "Direct3D 12 shader compiler: DXC (dxcompiler.dll and dxil.dll beside the game)".to_string(),
+        (true, false) => "Direct3D 12 shader compiler: DXC, but no dxil.dll beside the game".to_string(),
+        _ => "Direct3D 12 shader compiler: no dxcompiler.dll beside the game - the old FXC, unless Windows finds DXC elsewhere".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod dx12_compiler_tests {
+    use super::dx12_compiler_note;
+
+    #[test]
+    fn the_log_says_which_compiler_direct3d_12_got() {
+        let dir = std::env::temp_dir().join(format!("omsi-dxc-note-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(dx12_compiler_note(None, Some(&dir)).contains("the old FXC"));
+        assert!(dx12_compiler_note(None, None).contains("the old FXC"));
+        std::fs::write(dir.join("dxcompiler.dll"), b"").unwrap();
+        assert!(dx12_compiler_note(None, Some(&dir)).contains("no dxil.dll"));
+        std::fs::write(dir.join("dxil.dll"), b"").unwrap();
+        assert!(dx12_compiler_note(None, Some(&dir)).contains("DXC (dxcompiler.dll and dxil.dll"));
+        assert!(dx12_compiler_note(Some(" fxc "), Some(&dir)).contains("fxc (WGPU_DX12_COMPILER)"));
+        assert!(dx12_compiler_note(Some(""), Some(&dir)).starts_with("Direct3D 12 shader compiler: DXC"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

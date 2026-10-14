@@ -333,6 +333,9 @@ fn software_adapter(name: &str, device_type: wgpu::DeviceType) -> bool {
 fn backend_instance(api: GraphicsApi) -> wgpu::Instance {
     let mut d = wgpu::InstanceDescriptor::new_without_display_handle();
     d.backend_options.gl.context_lock_timeout = Some(GL_CONTEXT_LOCK_TIMEOUT);
+    // (WGPU_DX12_COMPILER=fxc or dxc picks Direct3D 12's shader compiler, as the tests'
+    // instances do; else wgpu takes dxcompiler.dll where Windows finds it, FXC without it)
+    d.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::from_env().unwrap_or_default();
     d.backends = api.backends();
     if api == GraphicsApi::Angle {
         return omsi_render::angle::instance(d);
