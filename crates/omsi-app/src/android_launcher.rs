@@ -101,24 +101,18 @@ pub extern "system" fn Java_org_openomsi_game_LauncherBridge_bytes<'a>(mut env: 
     env.byte_array_from_slice(&out).map(JByteArray::into_raw).unwrap_or(std::ptr::null_mut())
 }
 
-/// `LauncherBridge.importArchive(fd, name, size)`: copy the archive the file dialog chose into
-/// the Mods folder (`omsi_launcher_lib::import`). `fd` is the dialog's file, detached from its
-/// `ParcelFileDescriptor`: this takes it over and closes it. `size` is -1 when unknown. "1" and
-/// the new file's path as JSON, "1null" when cancelled, "0" and why when it failed; progress
-/// goes to the page as `mod-import` events.
+/// `LauncherBridge.importArchive(fd, name, size)`: copy the archive the file dialog chose (`fd`,
+/// detached from its `ParcelFileDescriptor`: taken over here; `size` -1 when unknown) into the
+/// Mods folder, answering as `omsi_launcher_lib::import::import_for_page`; progress goes to the
+/// page as `mod-import` events.
 #[no_mangle]
 pub extern "system" fn Java_org_openomsi_game_LauncherBridge_importArchive<'a>(mut env: JNIEnv<'a>, _class: JClass<'a>, fd: jint, name: JString<'a>, size: jlong) -> jstring {
     use std::os::fd::FromRawFd;
     // SAFETY: the descriptor was detached on the Java side, so nothing else closes it
     let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
-    let name = take(&mut env, &name);
-    let size = u64::try_from(size).ok();
+    let (name, size) = (take(&mut env, &name), u64::try_from(size).ok());
     let mut tell = |done: u64| omsi_launcher_api::Platform::emit(&Phone, "mod-import", serde_json::json!({ "name": name, "done": done, "total": size }));
-    let out = match omsi_launcher_lib::import::import_picked(&name, size, &mut file, &mut tell) {
-        Ok(Some(path)) => format!("1{}", Value::String(path.to_string_lossy().into_owned())),
-        Ok(None) => "1null".to_string(),
-        Err(e) => format!("0{e:#}"),
-    };
+    let out = omsi_launcher_lib::import::import_for_page(&name, size, &mut file, &mut tell);
     env.new_string(out).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 

@@ -48,6 +48,16 @@ pub fn import_picked(name: &str, size: Option<u64>, from: &mut dyn Read, progres
     picked_into(&content, name, size, from, progress)
 }
 
+/// [`import_picked`] as the phone's page is answered: "1" and the new file's path as JSON, "1null"
+/// when the player cancelled, "0" and why when it failed.
+pub fn import_for_page(name: &str, size: Option<u64>, from: &mut dyn Read, progress: &mut dyn FnMut(u64)) -> String {
+    match import_picked(name, size, from, progress) {
+        Ok(Some(path)) => format!("1{}", serde_json::Value::String(path.to_string_lossy().into_owned())),
+        Ok(None) => "1null".to_string(),
+        Err(e) => format!("0{e:#}"),
+    }
+}
+
 fn picked_into(content: &Path, name: &str, size: Option<u64>, from: &mut dyn Read, progress: &mut dyn FnMut(u64)) -> Result<Option<PathBuf>> {
     CANCEL.store(false, Ordering::Relaxed);
     // (the page needs a few updates a second, not one per megabyte)
@@ -236,6 +246,17 @@ mod tests {
         let out = picked_into(&c, "b.zip", Some(data.len() as u64), &mut Cursor::new(data), &mut |_| cancel_import()).unwrap();
         assert_eq!(out, None);
         assert!(!c.join("Mods").join("b.zip").exists() && leftovers(&c).is_empty());
+        let _ = std::fs::remove_dir_all(&c);
+    }
+
+    #[test]
+    fn the_page_is_answered_in_the_bridges_words() {
+        let c = dir("answers");
+        let ok = picked_into(&c, "a.zip", Some(3), &mut Cursor::new(vec![1u8; 3]), &mut |_| {}).unwrap().unwrap();
+        // (a path with a quote and a backslash is a JSON string, not a broken answer)
+        let json = serde_json::Value::String(ok.to_string_lossy().into_owned()).to_string();
+        assert!(format!("1{json}").starts_with("1\""));
+        assert_eq!(serde_json::from_str::<String>(&json).unwrap(), ok.to_string_lossy());
         let _ = std::fs::remove_dir_all(&c);
     }
 
