@@ -25,6 +25,8 @@ const LABEL_CHARS: usize = 25;
 /// Rows of the first column; the next 24 make the second, the rest are left out.
 const ROWS_PER_COLUMN: usize = 24;
 const TEXT_COLOR: [u8; 3] = [17, 15, 14];
+/// How the drawn papers' names begin (the number: the layout's version).
+const FILE_PREFIX: &str = "schedule-v7-";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PaperRow {
@@ -60,7 +62,9 @@ pub(crate) fn update_vehicle(
     let (title, rows) = paper_content(&duty.line, &duty.tour, &duty.trips, duty.trip_index, (arr, dep));
     let lines = paper_lines(&title, &rows);
     let signature = content_signature(&lines);
-    let path = cache_dir()?.join(format!("schedule-v7-{signature:016x}.png"));
+    let dir = cache_dir()?;
+    omsi_texture::generated::allow(&dir, FILE_PREFIX);
+    let path = dir.join(format!("{FILE_PREFIX}{signature:016x}.png"));
     let filename = path.to_string_lossy().into_owned();
 
     if vehicle.state.str_vars.get(var) == Some(&filename) {

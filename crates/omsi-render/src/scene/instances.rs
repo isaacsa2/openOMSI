@@ -8,6 +8,7 @@ impl Renderer {
         Scene {
             meshes: Vec::new(),
             textures: Vec::new(),
+            script_sent: Default::default(),
             glass_slot: None,
             materials: Vec::new(),
             instances: Vec::new(),
@@ -67,6 +68,7 @@ impl Renderer {
             lamp_shadow_last: Vec::new(),
             last_lights: Vec::new(),
             bind_groups: HashMap::new(),
+            uniform_pages: Default::default(),
             looks: hashbrown::HashMap::new(),
             pbr_maps: HashMap::new(),
             snow_textures: Default::default(),

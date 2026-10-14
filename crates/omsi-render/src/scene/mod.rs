@@ -171,6 +171,9 @@ pub struct Instance {
 pub struct Scene {
     pub meshes: Vec<GpuMesh>,
     pub textures: Vec<GpuTexture>,
+    /// What `Renderer::update_script_texture` last wrote into a script texture: the texture's
+    /// `gen` and a digest of the picture.
+    pub(crate) script_sent: std::collections::HashMap<TextureId, (u64, u64)>,
     /// Texture slot read by procedural rain films.
     pub(crate) glass_slot: Option<TextureId>,
     pub materials: Vec<Material>,
@@ -277,7 +280,9 @@ pub struct Scene {
     /// hold: materials made in one go with the same textures and values share them (a C2's
     /// 965 materials need about a tenth as many). Only for a frame, so that nothing keeps a
     /// freed or replaced texture alive.
-    pub(crate) bind_groups: HashMap<BindKey, (wgpu::BindGroup, wgpu::Buffer)>,
+    pub(crate) bind_groups: HashMap<BindKey, (wgpu::BindGroup, UniformSlot)>,
+    /// The pages the materials' uniform values are in (`Renderer::uniform_slot`).
+    pub(crate) uniform_pages: UniformPages,
     /// The number of each material look seen so far, by its key's hash (see `Material::look`).
     pub(crate) looks: hashbrown::HashMap<u64, u32>,
     /// The PBR maps of a diffuse texture (register them before making its materials).

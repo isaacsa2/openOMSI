@@ -4,7 +4,7 @@
 import { html, useState, useEffect } from '../../vendor/preact-htm.js';
 import { useStore, set, toast } from '../store.js';
 import { t, bytes, ago } from '../i18n.js';
-import { call } from '../api.js';
+import { call, on, onPhone } from '../api.js';
 import { Icon } from '../icons.js';
 import { Button, Card, Empty, PageHead, Search, Select, Spinner, Tag, Toggle, Notice, useConfirm } from '../ui.js';
 import { pollNow, loadContent, cached, installMod, jobRunning } from '../data.js';
@@ -24,9 +24,19 @@ export function ModsPage() {
   useEffect(() => {
     read();
   }, []);
+  // (on the phone the archive is copied into the Mods folder first: its progress)
+  const [copying, setCopying] = useState(null);
+  useEffect(() => on('mod-import', setCopying), []);
   const pick = async (archive) => {
-    const p = await call('pick_mod', { archive }).catch(() => null);
-    if (p) installMod(p);
+    try {
+      // nothing back is the dialog closed without a choice; a failure says why
+      const p = await call('pick_mod', { archive });
+      if (p) installMod(p);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setCopying(null);
+    }
   };
   const jobs = s.poll.jobs || [];
   const all = status?.installed || [];
@@ -118,9 +128,18 @@ export function ModsPage() {
         <${Card} title="Install a mod">
           <div class="stack">
             <div class="grid-2" style="gap:8px">
-              <${Button} icon="folder" label="Choose a folder" onClick=${() => pick(false)} />
-              <${Button} icon="download" label="Choose archive" onClick=${() => pick(true)} />
+              ${!onPhone && html`<${Button} icon="folder" label="Choose a folder" onClick=${() => pick(false)} />`}
+              <${Button} icon="download" label="Choose archive" disabled=${!!copying} onClick=${() => pick(true)} />
             </div>
+            ${copying && html`<${Notice}>
+              <div class="row">
+                <${Spinner} />
+                <b class="grow ellipsis">${t('Copying {name}…', { name: copying.name })}</b>
+                <${Button} small kind="ghost" icon="x" title="Cancel" onClick=${() => call('mod_import_cancel').catch((e) => toast(e.message, 'error'))} />
+              </div>
+              ${copying.total > 0 && html`<div class="progress"><div style=${`width:${Math.min(100, (copying.done / copying.total) * 100).toFixed(1)}%`}></div></div>
+                <div class="muted small">${bytes(copying.done)} / ${bytes(copying.total)}</div>`}
+            </${Notice}>`}
             <div class="field"><span class="label">${t('Archive install mode')}</span>
               <${Select} value=${mode} options=${[['auto', 'Auto'], ['extract', 'Unpacked'], ['inplace', 'Used in place']]} onChange=${(v) => set({ modMode: v })} />
             </div>

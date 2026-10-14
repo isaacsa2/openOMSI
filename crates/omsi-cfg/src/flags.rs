@@ -321,6 +321,7 @@ flags! {
     OMSI_LAUNCHER: Text, Setup, Use, "-", "Program a plain start opens as the launcher instead of the desktop launcher (openomsi-launcher-app) beside the game.";
     OMSI_LIST_ALIGNED: Bool, Debug, Use, "off", "Log the splines aligned to the terrain.";
     OMSI_MAX_FPS: Num, Tuning, Use, "settings", "Frame rate limit for this run.";
+    OMSI_MEMORY_PRESSURE: Bool, Tuning, Use, "off", "Watch the graphics memory in use against its budget (where the backend reports it) and put off reading vehicles ahead when it runs short; logs the figures every minute. An experiment.";
     OMSI_METER: Text, Tuning, Use, "-", "gain,target,dark,bright,bias,night: the exposure metering.";
     OMSI_MIRROR_ENHANCED: Bool, Switch, Frame, "off", "Draw the mirrors with the enhanced shading again.";
     OMSI_MIRROR_HUD: Num, Tuning, Use, "settings", "Mirror HUD mode (number).";
@@ -374,10 +375,12 @@ flags! {
     OMSI_NO_SNOWFALL: Bool, Switch, Frame, "off", "No snowfall.";
     OMSI_NO_SPLINE_BATCHING: Bool, Switch, Use, "off", "No spline batching.";
     OMSI_NO_SPLINE_HOLES: Bool, Switch, Use, "off", "Splines without hole rims.";
+    OMSI_NO_SPLINE_RANGE_MERGE: Bool, Switch, Use, "off", "Splines keep one draw range per profile in the batching (no joining of neighbouring ranges of one texture).";
     OMSI_NO_SPRAY: Bool, Switch, Use, "off", "No tyre spray.";
     OMSI_NO_SURF: Bool, Switch, Once, "off", "Every road as smooth as before (no surface texture) (A/B).";
     OMSI_NO_TEXCOMPRESS: Bool, Switch, Use, "off", "No runtime texture compression.";
     OMSI_NO_TUNNEL: Bool, Switch, Use, "off", "LAN: no tunnel.";
+    OMSI_NO_UNIFORM_PAGES: Bool, Switch, Use, "off", "A GPU buffer of its own for the uniform values of every material (no pages shared by many).";
     OMSI_NO_UPDATE: Bool, Switch, Use, "off", "No update check.";
     OMSI_NO_VAR_SYNC: Bool, Switch, Use, "off", "LAN: no variable sync.";
     OMSI_NO_WHEEL_SLIP: Bool, Switch, Use, "off", "Every wheel grips, as before wheels turned on their own (A/B).";
@@ -430,6 +433,7 @@ flags! {
     OMSI_SIM_THREAD: Bool, Switch, Use, "off", "Window: the AI traffic's, the people's and the scenery scripts' steps run on a thread of its own while the picture is drawn (one frame later); the offscreen run ignores it.";
     OMSI_SKIP_OBJECT: Text, Test, Use, "-", "Leave out the objects whose file name contains this text.";
     OMSI_SKIP_PIPE: Text, Test, Frame, "-", "Pipeline kinds to leave out of the main pass (comma-separated numbers).";
+    OMSI_SPLINE_CELL_M: Num, Tuning, Use, "48", "Static spline batching: the side of a cell in metres (16 to 400; 48 is the shipped value). A bigger cell joins more splines into one draw, and draws more geometry that is out of sight with it: an experiment, compare the frame time.";
     OMSI_SPOT_SELECT: Num, Test, Use, "-", "Turn on spotlight n (headlight pictures).";
     OMSI_SURFACE_BIAS: Num, Tuning, Use, "-24", "Depth bias of road surfaces.";
     OMSI_SURFACE_FLUSH: Num, Tuning, Once, "0.12", "Height in metres under which a surface counts as flush with the road.";

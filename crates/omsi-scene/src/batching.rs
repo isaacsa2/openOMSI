@@ -1,21 +1,35 @@
 //! Static spline batching and the GPU cache of meshes, textures and materials.
 use super::*;
 
+/// The side of a batching cell in metres (`OMSI_SPLINE_CELL_M`; 48 as shipped).
+fn spline_cell() -> f32 {
+    omsi_cfg::flags::OMSI_SPLINE_CELL_M.parse::<f32>().filter(|c| c.is_finite()).map_or(48.0, |c| c.clamp(16.0, 400.0))
+}
+
 /// Short static spline segments with matching materials share a mesh within a 48 m cell.
 /// Their coordinates, material order, terrain mapping and shadow flag stay intact; long segments retain
 /// their own culling bounds. The original meshes remain in the staging/collision data.
 pub(super) fn batch_static_splines(
     splines: Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3)>,
 ) -> Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3)> {
+    batch_static_splines_in(splines, spline_cell())
+}
+
+/// [`batch_static_splines`] with cells `cell` metres on a side.
+pub(super) fn batch_static_splines_in(
+    splines: Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3)>,
+    cell: f32,
+) -> Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3)> {
     if omsi_cfg::flags::OMSI_NO_SPLINE_BATCHING.is_set() {
         return splines;
     }
+    let merge_ranges = !omsi_cfg::flags::OMSI_NO_SPLINE_RANGE_MERGE.is_set();
     let mut groups: Vec<(Vec<Arc<MeshData>>, Arc<SplineType>, bool, DVec3)> = Vec::new();
     let mut cells = HashMap::new();
     let mut signatures = HashMap::new();
     let mut type_materials = HashMap::new();
     let material_batching = !omsi_cfg::flags::OMSI_NO_MATERIAL_SPLINE_BATCHING.is_set();
-    for (mesh, ty, casts, sort_origin) in splines {
+    for (mut mesh, ty, casts, sort_origin) in splines {
         let (lo, hi) = mesh.positions.iter().fold(
             (glam::Vec3::splat(f32::INFINITY), glam::Vec3::splat(f32::NEG_INFINITY)),
             |(lo, hi), &p| (lo.min(p), hi.max(p)),
@@ -23,7 +37,16 @@ pub(super) fn batch_static_splines(
         let centre = (lo + hi) * 0.5;
         // Blended segments retain their individual placement origins and draw order.
         let blended = mesh.ranges.iter().any(|r| ty.def.textures.get(r.2 as usize).is_some_and(|t| t.alpha >= 2));
-        let short = !blended && centre.is_finite() && (hi - lo).length() <= 48.0;
+        // A profile per texture, two of them in a row with one texture: one range draws what
+        // the two did, in the same order (nothing is moved), and the spline is then of the
+        // same kind as one made with a single profile - which is what the batching asks for.
+        // (The original mesh stays as it is in the collision data; the copy is the drawn one.)
+        if merge_ranges && !blended {
+            if let Some(ranges) = mesh.merged_adjacent_ranges() {
+                mesh = Arc::new(MeshData { ranges, ..(*mesh).clone() });
+            }
+        }
+        let short = !blended && centre.is_finite() && (hi - lo).length() <= cell;
         let group = if short {
             let slots: Vec<_> = mesh.ranges.iter().map(|r| r.2).collect();
             // UV generation is already complete. Only the textures of the remaining
@@ -44,8 +67,8 @@ pub(super) fn batch_static_splines(
             };
             let key = (
                 material_type,
-                (centre.x / 48.0).floor() as i32,
-                (centre.y / 48.0).floor() as i32,
+                (centre.x / cell).floor() as i32,
+                (centre.y / cell).floor() as i32,
                 casts,
                 mesh.one_sided,
                 slots,

@@ -15,6 +15,7 @@ use std::sync::Arc;
 pub mod bc;
 pub mod blocks;
 pub mod dds;
+pub mod generated;
 pub mod ktx;
 pub mod gpu;
 pub mod tga;
@@ -351,6 +352,10 @@ fn find_texture_in_season(name: &str, dirs: &[&Path], season: Option<&str>) -> O
     let full = Path::new(name.trim());
     let remote = names_another_machine(name);
     if full.is_absolute() || remote {
+        // (a picture the game drew itself, in its own folder: see `generated`)
+        if let Some(found) = generated::resolve(full) {
+            return Some(found);
+        }
         if under_content_root(full) {
             if let (Some(parent), Some(file)) = (full.parent(), full.file_name().and_then(|f| f.to_str())) {
                 if let Some(found) = find_texture_in_dir(parent, file) {
@@ -894,6 +899,41 @@ mod tests {
         assert!(!stays_inside(&tex, "..\\C:\\x.bmp"));
         assert!(stays_inside(&outside, "x.bmp"));
         assert!(!stays_inside(&outside, "..\\outside\\secret.bmp"));
+        omsi_cfg::remove_content_root(&root);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The paper timetable is drawn into the game's cache folder (`~/.openomsi/cache/schedules`),
+    /// which is no content root; the vehicle names it by its full path (#2575).
+    #[test]
+    fn a_picture_the_game_drew_is_found_by_its_full_path_outside_the_content_roots() {
+        let dir = std::env::temp_dir().join(format!("omsi-generated-find-{} x", std::process::id()));
+        let root = dir.join("content");
+        let tex = root.join("Vehicles/Bus/texture");
+        let cache = dir.join("Ana Maria/.openomsi/cache/schedules");
+        let private = dir.join("Ana Maria/.openomsi/private");
+        for d in [&tex, &cache, &private] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let paper = cache.join("schedule-v7-0123456789abcdef.png");
+        for f in [&paper, &cache.join("diary.png"), &private.join("schedule-v7-0123456789abcdef.png")] {
+            std::fs::write(f, b"x").unwrap();
+        }
+        omsi_cfg::add_content_root(root.clone());
+        // (the folders of a stock bus, and of a mod's beside it)
+        let modded = root.join("Vehicles/Mod/Texture");
+        std::fs::create_dir_all(&modded).unwrap();
+        let find = |p: &Path| find_texture_uncached(p.to_str().unwrap(), &[modded.as_path(), tex.as_path()]);
+        assert_eq!(find(&paper), None, "refused until the game says it writes there");
+        generated::allow(&cache, "schedule-v7-");
+        assert_eq!(find(&paper), Some(paper.clone()));
+        assert_eq!(find_texture(paper.to_str().unwrap(), &[tex.as_path()]), Some(paper.clone()), "also through the memo");
+        // what the game did not write there stays out of reach
+        assert_eq!(find(&cache.join("diary.png")), None);
+        assert_eq!(find(&private.join("schedule-v7-0123456789abcdef.png")), None);
+        assert_eq!(find(&cache.join("..").join("private").join("schedule-v7-0123456789abcdef.png")), None);
+        let elsewhere = format!("\\\\203.0.113.5\\share\\{}", paper.file_name().unwrap().to_str().unwrap());
+        assert_eq!(find_texture_in_season(&elsewhere, &[tex.as_path()], None), None);
         omsi_cfg::remove_content_root(&root);
         std::fs::remove_dir_all(&dir).ok();
     }
