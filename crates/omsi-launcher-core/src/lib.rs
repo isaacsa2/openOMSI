@@ -8,6 +8,7 @@
 //! tells the page when they changed, `instances` keeps track of the games started.
 
 pub mod crash;
+pub mod import;
 pub mod index;
 pub mod install;
 pub mod instances;
@@ -544,6 +545,11 @@ pub fn start_install(src: &Path, mode: &str) -> Result<install::Progress> {
         return Err(anyhow!("{} does not exist", src.display()));
     }
     let from_inbox = src.starts_with(content.join("Mods"));
+    // (a file just copied into the Mods folder is also what the inbox watcher looks at: one
+    // install of it, whoever asks first)
+    if let Some(job) = install::active_for(src) {
+        return Ok(job.snapshot());
+    }
     let job = install::start(content, root().ok(), src.to_path_buf(), install::InstallMode::parse(mode), from_inbox);
     Ok(job.snapshot())
 }

@@ -3,6 +3,11 @@ package org.openomsi.game;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ContentResolver;
+import android.content.Intent;
+import android.database.Cursor;
+import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
 import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.graphics.Color;
@@ -21,6 +26,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -50,6 +57,11 @@ public final class LauncherBridge {
 
     static native String call(String cmd, String args);
     static native byte[] bytes(String cmd, String args);
+    /** Copy the file the dialog chose (a descriptor this takes over) into the Mods folder;
+     * "1" and the path as JSON, "1null" when cancelled, "0" and why when it failed
+     * (android_launcher.rs). */
+    static native String importArchive(int fd, String name, long size);
+    static native void cancelImport();
 
     private LauncherBridge() {}
 
@@ -263,6 +275,133 @@ public final class LauncherBridge {
         }
     }
 
+    // --- the file dialog
+
+    private static final int REQUEST_PICK = 0x0A5E;
+    private static final Object PICK_LOCK = new Object();
+    /** The answer of the dialog now open (its result code and the intent it gave back); only
+     * one dialog at a time. It is kept in a static: the activity can be made again while the
+     * dialog is up, and the answer arrives at the new one. */
+    private static CompletableFuture<Object[]> picking;
+
+    /** From the activity's onActivityResult: whether the answer was the launcher's dialog's. */
+    static boolean onPickResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode != REQUEST_PICK) {
+            return false;
+        }
+        CompletableFuture<Object[]> wait;
+        synchronized (PICK_LOCK) {
+            wait = picking;
+        }
+        if (wait != null) {
+            wait.complete(new Object[] {resultCode, data});
+        }
+        return true;
+    }
+
+    /**
+     * The dialog for a mod archive: the system's own (storage access framework), so a file of
+     * the phone's storage, of a card, of a cloud drive or of another app can be chosen without
+     * any more permission. What it gives is a stream, copied into the Mods folder by the game
+     * program. "1null" when the dialog was closed without a choice.
+     */
+    private static String pickArchive() throws Exception {
+        final CompletableFuture<Object[]> wait = new CompletableFuture<>();
+        synchronized (PICK_LOCK) {
+            if (picking != null) {
+                return "0A file dialog is already open.";
+            }
+            picking = wait;
+        }
+        try {
+            final Intent dialog = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            dialog.addCategory(Intent.CATEGORY_OPENABLE);
+            dialog.setType("*/*");
+            // (providers name an archive by several types, or by none: octet-stream)
+            dialog.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                "application/zip", "application/x-zip-compressed", "application/x-7z-compressed",
+                "application/vnd.rar", "application/x-rar-compressed", "application/octet-stream"});
+            activity.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        activity.startActivityForResult(dialog, REQUEST_PICK);
+                    } catch (Exception e) {
+                        wait.completeExceptionally(e);
+                    }
+                }
+            });
+            Object[] answer;
+            try {
+                answer = wait.get();
+            } catch (ExecutionException e) {
+                return "0This phone has no file dialog to choose a file with.";
+            }
+            Intent data = (Intent) answer[1];
+            if ((Integer) answer[0] != Activity.RESULT_OK || data == null || data.getData() == null) {
+                return "1null";
+            }
+            return copyChosen(data.getData());
+        } finally {
+            synchronized (PICK_LOCK) {
+                picking = null;
+            }
+        }
+    }
+
+    private static String copyChosen(Uri uri) {
+        ContentResolver cr = activity.getContentResolver();
+        String name = null;
+        long size = -1;
+        Cursor c = null;
+        try {
+            c = cr.query(uri, new String[] {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null);
+            if (c != null && c.moveToFirst()) {
+                int n = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (n >= 0 && !c.isNull(n)) {
+                    name = c.getString(n);
+                }
+                int sz = c.getColumnIndex(OpenableColumns.SIZE);
+                if (sz >= 0 && !c.isNull(sz)) {
+                    size = c.getLong(sz);
+                }
+            }
+        } catch (Exception e) {
+            // (a provider without the columns: the name comes from the address, no size)
+        } finally {
+            if (c != null) {
+                c.close();
+            }
+        }
+        if (name == null) {
+            name = uri.getLastPathSegment();
+        }
+        if (size <= 0) {
+            // (0 is what some providers say for a size they do not know)
+            size = -1;
+        }
+        ParcelFileDescriptor pfd;
+        try {
+            pfd = cr.openFileDescriptor(uri, "r");
+        } catch (Exception e) {
+            return "0Android did not let the game read the chosen file: " + e.getMessage();
+        }
+        if (pfd == null) {
+            return "0The chosen file could not be opened.";
+        }
+        int fd = pfd.detachFd();
+        try {
+            return importArchive(fd, name == null ? "" : name, size);
+        } catch (Throwable t) {
+            // (the native side did not take the descriptor over)
+            try {
+                ParcelFileDescriptor.adoptFd(fd).close();
+            } catch (Exception ignored) {
+            }
+            return "0" + t;
+        }
+    }
+
     /** The phone's own answers to what the desktop window does itself; the rest is the game's. */
     private static String page(String cmd, String args) throws Exception {
         switch (cmd) {
@@ -270,11 +409,18 @@ public final class LauncherBridge {
                 openUrl(new org.json.JSONObject(args).getString("url"));
                 return "1true";
             }
+            case "pick_mod":
+                if (new org.json.JSONObject(args).optBoolean("archive", true)) {
+                    return pickArchive();
+                }
+                return "0Choosing a folder is not possible on the phone yet: put the folder into the Mods folder (or pack it as a .zip and choose that).";
+            case "mod_import_cancel":
+                cancelImport();
+                return "1null";
             case "pick_folder":
             case "pick_file":
-            case "pick_mod":
-                // (no file dialogs on a phone: mods go into openOMSI/Mods on the storage)
-                return "1null";
+                // (the phone's setup has no Browse buttons: the OMSI 2 folder is found in openOMSI/OMSI 2)
+                return "0Choosing a folder or a program is not possible on the phone.";
             case "open_path":
             case "selftest_done":
                 return "1null";
