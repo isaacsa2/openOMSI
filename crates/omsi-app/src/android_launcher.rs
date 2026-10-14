@@ -7,7 +7,7 @@
 //! service on a thread of this process (`launcher::InProcess`).
 
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
-use jni::sys::{jbyteArray, jstring};
+use jni::sys::{jbyteArray, jint, jlong, jstring};
 use jni::JNIEnv;
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -99,4 +99,22 @@ pub extern "system" fn Java_org_openomsi_game_LauncherBridge_bytes<'a>(mut env: 
         Err(e) => [&[0u8][..], e.as_bytes()].concat(),
     };
     env.byte_array_from_slice(&out).map(JByteArray::into_raw).unwrap_or(std::ptr::null_mut())
+}
+
+/// `LauncherBridge.importArchive(fd, name, size)`: copy the archive the file dialog chose (`fd`
+/// is taken over here; `size` -1 when unknown) into the Mods folder (`import::import_for_page`).
+#[no_mangle]
+pub extern "system" fn Java_org_openomsi_game_LauncherBridge_importArchive<'a>(mut env: JNIEnv<'a>, _class: JClass<'a>, fd: jint, name: JString<'a>, size: jlong) -> jstring {
+    // SAFETY: the descriptor was detached on the Java side, so nothing else closes it
+    let mut file = unsafe { <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd) };
+    let (name, size) = (take(&mut env, &name), u64::try_from(size).ok());
+    let mut tell = |done: u64| omsi_launcher_api::Platform::emit(&Phone, "mod-import", serde_json::json!({ "name": name, "done": done, "total": size }));
+    let out = omsi_launcher_lib::import::import_for_page(&name, size, &mut file, &mut tell);
+    env.new_string(out).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// `LauncherBridge.cancelImport()`: stop the copy under way.
+#[no_mangle]
+pub extern "system" fn Java_org_openomsi_game_LauncherBridge_cancelImport<'a>(_env: JNIEnv<'a>, _class: JClass<'a>) {
+    omsi_launcher_lib::import::cancel_import();
 }

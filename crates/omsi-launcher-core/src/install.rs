@@ -194,6 +194,11 @@ pub fn is_busy(source: &Path) -> bool {
     JOBS.lock().unwrap().iter().any(|j| j.is_active() && j.source == source)
 }
 
+/// The install of `source` that is queued or running, if there is one.
+pub fn active_for(source: &Path) -> Option<Arc<Job>> {
+    JOBS.lock().unwrap().iter().find(|j| j.is_active() && j.source == source).cloned()
+}
+
 /// Queue an install; it runs on its own thread. `content` is the content folder.
 pub fn start(content: PathBuf, root: Option<PathBuf>, source: PathBuf, mode: InstallMode, from_inbox: bool) -> Arc<Job> {
     start_inner(content, root, source, mode, from_inbox, u64::MAX)

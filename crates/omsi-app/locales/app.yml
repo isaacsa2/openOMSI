@@ -45454,3 +45454,10 @@ _version: 2
   ms: "Mari mula"
   tl: "Tara na"
   sv: "Kör"
+"Copying {name}…":
+  es: "Copiando {name}…"
+  pt: "Copiando {name}…"
+  pt-pt: "A copiar {name}…"
+  fr: "Copie de {name}…"
+  de: "{name} wird kopiert…"
+  it: "Copia di {name}…"
