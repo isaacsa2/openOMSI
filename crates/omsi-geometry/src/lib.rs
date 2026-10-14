@@ -60,6 +60,26 @@ impl MeshData {
         out
     }
 
+    /// The ranges with neighbours of one material slot made one: two ranges that follow each
+    /// other in the index list and use the same slot draw what one range over both would, in the
+    /// same order, so nothing moves. `None` when no two are alike (the common case of a spline
+    /// with a texture per profile). A spline whose profiles name a texture twice in a row is
+    /// otherwise a different "kind" to the batching than one that names it once.
+    pub fn merged_adjacent_ranges(&self) -> Option<Vec<(u32, u32, u32)>> {
+        let joins = |a: &(u32, u32, u32), b: &(u32, u32, u32)| a.2 == b.2 && a.0.checked_add(a.1) == Some(b.0);
+        if !self.ranges.windows(2).any(|w| joins(&w[0], &w[1])) {
+            return None;
+        }
+        let mut out: Vec<(u32, u32, u32)> = Vec::with_capacity(self.ranges.len());
+        for r in &self.ranges {
+            match out.last_mut() {
+                Some(last) if joins(last, r) => last.1 += r.1,
+                _ => out.push(*r),
+            }
+        }
+        Some(out)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
     }
@@ -1149,5 +1169,55 @@ mod winding_transform_tests {
         assert_eq!(positive_det_faces_forward(&mesh), Some(false));
         assert!(!turns_round(&mesh));
         assert_eq!(mesh_from_o3d(&mesh).indices[..3], [0, 1, 2]);
+    }
+}
+
+#[cfg(test)]
+mod merged_range_tests {
+    use super::*;
+
+    fn mesh(ranges: Vec<(u32, u32, u32)>) -> MeshData {
+        let n = ranges.iter().map(|r| r.0 + r.1).max().unwrap_or(0);
+        MeshData { indices: (0..n).collect(), ranges, ..Default::default() }
+    }
+
+    /// What drawing the ranges in order draws: the slot and the indices of each triangle.
+    fn drawn(m: &MeshData, ranges: &[(u32, u32, u32)]) -> Vec<(u32, [u32; 3])> {
+        ranges.iter().flat_map(|&(first, count, slot)| m.indices[first as usize..(first + count) as usize].chunks_exact(3).map(move |t| (slot, [t[0], t[1], t[2]]))).collect()
+    }
+
+    #[test]
+    fn neighbours_of_one_slot_become_one_range_and_nothing_else_moves() {
+        let m = mesh(vec![(0, 6, 0), (6, 6, 0), (12, 3, 1), (15, 3, 1), (18, 3, 1), (21, 6, 2)]);
+        let merged = m.merged_adjacent_ranges().expect("some are alike");
+        assert_eq!(merged, vec![(0, 12, 0), (12, 9, 1), (21, 6, 2)]);
+        // the same triangles, in the same order, with the same slots
+        assert_eq!(drawn(&m, &m.ranges), drawn(&m, &merged));
+    }
+
+    #[test]
+    fn a_slot_that_comes_back_later_is_not_pulled_forward() {
+        // 0, 1, 0: moving the second 0 next to the first would change what is drawn on top of what
+        let m = mesh(vec![(0, 3, 0), (3, 3, 1), (6, 3, 0)]);
+        assert_eq!(m.merged_adjacent_ranges(), None);
+        // alike but not touching in the index list (a gap): not one range either
+        let gap = MeshData { indices: (0..12).collect(), ranges: vec![(0, 3, 0), (6, 3, 0)], ..Default::default() };
+        assert_eq!(gap.merged_adjacent_ranges(), None);
+    }
+
+    #[test]
+    fn nothing_to_join_is_none() {
+        assert_eq!(MeshData::default().merged_adjacent_ranges(), None);
+        assert_eq!(mesh(vec![(0, 3, 0)]).merged_adjacent_ranges(), None);
+        assert_eq!(mesh(vec![(0, 3, 0), (3, 3, 1), (6, 3, 2)]).merged_adjacent_ranges(), None);
+        // an empty range between two alike ones does not stop them joining
+        let m = mesh(vec![(0, 3, 4), (3, 0, 4), (3, 3, 4)]);
+        assert_eq!(m.merged_adjacent_ranges(), Some(vec![(0, 6, 4)]));
+    }
+
+    #[test]
+    fn the_end_of_the_index_list_cannot_overflow() {
+        let m = MeshData { ranges: vec![(u32::MAX - 2, 3, 0), (0, 3, 0)], ..Default::default() };
+        assert_eq!(m.merged_adjacent_ranges(), None);
     }
 }

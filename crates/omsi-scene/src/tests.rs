@@ -382,6 +382,69 @@ fn spline_batches_keep_materials_cells_shadows_and_long_segments_separate() {
     assert_eq!(batched.iter().map(|b| b.0.indices.len()).sum::<usize>(), 36);
 }
 
+/// Two splines that draw the same - one profile per texture, or two profiles in a row of one
+/// texture - are of the same kind to the batching; what is drawn, and in which order, is as before.
+#[test]
+fn splines_with_a_texture_named_twice_in_a_row_batch_with_those_naming_it_once() {
+    use omsi_scenery::sli::SplineTexture;
+    let def = |alpha: i32| Spline {
+        textures: vec![SplineTexture { file: "curb.dds".into(), ..Default::default() }, SplineTexture { file: "grass.dds".into(), alpha, ..Default::default() }],
+        ..Default::default()
+    };
+    let ty = Arc::new(SplineType { def: def(0), dir: PathBuf::new(), surf: Vec::new(), surface: Vec::new() });
+    let blended = Arc::new(SplineType { def: def(2), dir: PathBuf::new(), surf: Vec::new(), surface: Vec::new() });
+    // a strip of `triangles` triangles at x, with the given (first, count, slot) ranges
+    let mesh = |x: f32, ranges: Vec<(u32, u32, u32)>| {
+        let tris = ranges.iter().map(|r| r.0 + r.1).max().unwrap() / 3;
+        let mut m = MeshData { ranges, one_sided: true, ..Default::default() };
+        for t in 0..tris {
+            let b = m.positions.len() as u32;
+            let at = x + t as f32;
+            m.positions.extend([glam::Vec3::new(at, 0.0, 0.0), glam::Vec3::new(at + 0.5, 0.0, 0.0), glam::Vec3::new(at, 1.0, 0.0)]);
+            m.normals.extend([glam::Vec3::Z; 3]);
+            m.uvs.extend([glam::Vec2::new(t as f32, 0.0); 3]);
+            m.indices.extend([b, b + 1, b + 2]);
+        }
+        Arc::new(m)
+    };
+    // what drawing the ranges in order draws: the slot and the corners of each triangle
+    let drawn = |m: &MeshData| -> Vec<(u32, [glam::Vec3; 3])> {
+        m.ranges.iter().flat_map(|&(first, count, slot)| m.indices[first as usize..(first + count) as usize].chunks_exact(3).map(move |t| (slot, [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]]))).collect()
+    };
+    let twice = mesh(1.0, vec![(0, 3, 0), (3, 3, 0), (6, 3, 1)]);
+    let once = mesh(10.0, vec![(0, 6, 0), (6, 3, 1)]);
+    let returns = mesh(20.0, vec![(0, 3, 0), (3, 3, 1), (6, 3, 0)]);
+    let before: Vec<_> = [&twice, &once, &returns].iter().map(|m| drawn(m)).collect();
+
+    let batched = batch_static_splines_in(vec![
+        (twice.clone(), ty.clone(), false, DVec3::ZERO),
+        (once.clone(), ty.clone(), false, DVec3::ZERO),
+        (returns.clone(), ty.clone(), false, DVec3::ZERO),
+    ], 48.0);
+    // the two that come to [0, 1] are one mesh; [0, 1, 0] is its own (the 0 is not pulled forward)
+    assert_eq!(batched.len(), 2);
+    let (joined, apart) = (&batched[0].0, &batched[1].0);
+    assert_eq!(joined.ranges, vec![(0, 12, 0), (12, 6, 1)]);
+    assert_eq!(apart.ranges, returns.ranges);
+    // the same triangles with the same slots, in the order they were drawn in
+    let slot = |v: &[(u32, [glam::Vec3; 3])], s: u32| v.iter().filter(|t| t.0 == s).cloned().collect::<Vec<_>>();
+    assert_eq!(drawn(joined), [slot(&before[0], 0), slot(&before[1], 0), slot(&before[0], 1), slot(&before[1], 1)].concat());
+    assert_eq!(drawn(apart), before[2]);
+    // the originals (the collision data's) keep their ranges
+    assert_eq!(twice.ranges, vec![(0, 3, 0), (3, 3, 0), (6, 3, 1)]);
+
+    // blended segments keep their ranges and their own draw
+    let blended_twice = mesh(1.0, vec![(0, 3, 1), (3, 3, 1)]);
+    let out = batch_static_splines_in(vec![(blended_twice.clone(), blended, false, DVec3::ZERO)], 48.0);
+    assert_eq!(out[0].0.ranges, blended_twice.ranges);
+
+    // a bigger cell joins what a small one keeps apart
+    let far = mesh(60.0, vec![(0, 6, 0), (6, 3, 1)]);
+    let small = batch_static_splines_in(vec![(once.clone(), ty.clone(), false, DVec3::ZERO), (far.clone(), ty.clone(), false, DVec3::ZERO)], 48.0);
+    let big = batch_static_splines_in(vec![(once, ty.clone(), false, DVec3::ZERO), (far, ty, false, DVec3::ZERO)], 150.0);
+    assert_eq!((small.len(), big.len()), (2, 1));
+}
+
 #[test]
 fn ground_spline_batches_preserve_faces_and_uvs_with_local_bounds() {
     let mesh = |x: f32, z: f32, length: f32, one_sided: bool| Arc::new(MeshData {

@@ -291,6 +291,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_SNOWFALL` | bool | off | frame | render | No snowfall. |
 | `OMSI_NO_SPLINE_BATCHING` | bool | off | use | scene | No spline batching. |
 | `OMSI_NO_SPLINE_HOLES` | bool | off | use | scene | Splines without hole rims. |
+| `OMSI_NO_SPLINE_RANGE_MERGE` | bool | off | use | scene | Splines keep one draw range per profile in the batching (no joining of neighbouring ranges of one texture). |
 | `OMSI_NO_SPRAY` | bool | off | use | app | No tyre spray. |
 | `OMSI_NO_SURF` | bool | off | once | scene | Every road as smooth as before (no surface texture) (A/B). |
 | `OMSI_NO_TEXCOMPRESS` | bool | off | use | render | No runtime texture compression. |
@@ -332,6 +333,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_PAX_ANIMATION` | text | settings | use | app | Override the passenger animation for a game session: original (OMSI) or enhanced (procedural IK). |
 | `OMSI_PUDDLE_F0` | num | 0.08 | use | render | Puddle reflectance at normal incidence (0.02 to 0.2). |
 | `OMSI_PUDDLE_THICKNESS` | num | 0.12 | use | render | Puddle water film thickness. |
+| `OMSI_SPLINE_CELL_M` | num | 48 | use | scene | Static spline batching: the side of a cell in metres (16 to 400; 48 is the shipped value). A bigger cell joins more splines into one draw, and draws more geometry that is out of sight with it: an experiment, compare the frame time. |
 | `OMSI_SURFACE_BIAS` | num | -24 | use | render | Depth bias of road surfaces. |
 | `OMSI_SURFACE_FLUSH` | num | 0.12 | once | sim | Height in metres under which a surface counts as flush with the road. |
 | `OMSI_TEXTURE_MEMORY` | num | settings | use | app | Texture budget in MB. |
