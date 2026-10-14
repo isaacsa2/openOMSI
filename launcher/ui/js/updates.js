@@ -83,7 +83,7 @@ export function UpdateDialog() {
         <${Button} label="Not now" onClick=${dismissUpdate} />
         <${Button} kind="primary" icon="download" label="Update now" onClick=${installUpdate} />`
     : u.state === 'failed'
-      ? html`<${Button} kind="ghost" icon="external" label="Open on GitHub" onClick=${() => open(`${u.repo}/releases/latest`)} />
+      ? html`<${Button} kind="ghost" icon="external" label="Open on GitHub" onClick=${() => open(u.downloads_page || `${u.repo}/releases/latest`)} />
           <${Button} icon="refresh" label="Try again" onClick=${() => checkUpdates(true)} />
           <${Button} label="Close" onClick=${dismissUpdate} />`
       : null;
@@ -110,8 +110,9 @@ export function UpdateRow() {
   const s = useStore();
   const u = s.update;
   if (!u?.allowed) return null;
+  const channel = t(s.settings?.update_channel === 'beta' ? 'Beta (testing)' : 'Stable (recommended)');
   const line = u.state === 'checking' ? t('Looking for updates…')
-    : u.state === 'up_to_date' ? t('openOMSI {version} is the latest version.', { version: u.current })
+    : u.state === 'up_to_date' ? t('No newer version is available for this channel. Installed: {version}.', { version: u.current })
     : u.state === 'available' ? t('openOMSI {version} is available', { version: u.release.version })
     : u.state === 'downloading' ? `${t('Downloading openOMSI {version}', { version: u.release.version })} (${t('{done} of {total} from GitHub', { done: mb(u.done), total: mb(u.total) })})`
     : u.state === 'installing' || u.state === 'installer' || u.state === 'restarting' ? t('Installing openOMSI {version}', { version: u.release.version })
@@ -119,7 +120,7 @@ export function UpdateRow() {
     : '';
   return html`<div class="setting-row full">
     <div class="row wrap">
-      <span class=${'small grow' + (u.state === 'failed' ? '' : ' muted')}>${line}</span>
+      <span class=${'small grow' + (u.state === 'failed' ? '' : ' muted')}>${channel} · ${line}</span>
       ${u.state === 'available'
         ? html`<${Button} small kind="primary" icon="download" label="Update now" disabled=${playing()} onClick=${installUpdate} />`
         : html`<${Button} small icon="refresh" label="Check now" disabled=${BUSY.includes(u.state)} onClick=${() => checkUpdates(true)} />`}

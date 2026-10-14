@@ -49,6 +49,12 @@ jobs:
           git show "$BASE:$LOCALES" > "$RUNNER_TEMP/app.base.yml" 2>/dev/null || : > "$RUNNER_TEMP/app.base.yml"
           python3 .github/scripts/check_locales.py "$RUNNER_TEMP/app.base.yml" "$LOCALES"
 
+      - name: Release channel regression checks
+        run: |
+          pip install --quiet pyyaml
+          python3 scripts/tests/test_release_channels.py
+          node --test scripts/tests/release-channels-site.test.cjs
+
   # No Rust file and no function may grow past its recorded size (+5 %), and new ones stay
   # under 1500 / 300 lines: scripts/size-budget.sh, baseline in scripts/size-budget.txt.
   size-budget:

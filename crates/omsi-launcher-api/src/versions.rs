@@ -136,6 +136,7 @@ pub fn list() -> Answer {
             };
             json!({
                 "version": v,
+                "channel": l.release.channel.as_str(),
                 "date": l.published,
                 "size": l.release.size,
                 "page": l.release.page,
@@ -166,6 +167,9 @@ pub fn install(version: String) -> Answer {
         let found = listed.iter().find(|l| l.release.version == version).ok_or("Open the list of versions again.")?;
         (found.release.clone(), listed.first().is_some_and(|l| l.release.version == version))
     };
+    if !updater::Channel::configured().allows(release.channel) {
+        return Err("The update channel changed. Open the list of versions again.".into());
+    }
     if version == updater::current_version() {
         return Err("This version is installed already.".into());
     }

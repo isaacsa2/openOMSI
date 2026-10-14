@@ -11,6 +11,7 @@ pub mod discord;
 pub mod presence;
 pub mod proxy;
 pub mod recovery;
+pub mod release_channel;
 pub mod updater;
 pub mod webview2;
 

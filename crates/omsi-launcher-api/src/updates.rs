@@ -14,7 +14,7 @@ pub fn allowed() -> bool {
 }
 
 fn release_json(r: &Release) -> Value {
-    json!({ "version": r.version, "page": r.page, "size": r.size })
+    json!({ "version": r.version, "page": r.page, "size": r.size, "channel": r.channel.as_str() })
 }
 
 pub fn status() -> Value {
@@ -32,6 +32,8 @@ pub fn status() -> Value {
             Status::Restarting(r) => json!({ "state": "restarting", "release": release_json(&r) }),
             Status::Failed(msg) => json!({ "state": "failed", "message": msg }),
         };
+        v["channel"] = json!(u.channel.as_str());
+        v["downloads_page"] = json!(u.channel.downloads_page());
         v["current"] = json!(updater::current_version());
         v["allowed"] = json!(allowed());
         v["dismissed"] = json!(u.dismissed);

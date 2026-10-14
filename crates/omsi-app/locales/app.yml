@@ -44479,3 +44479,24 @@ _version: 2
   tl: "Nagpapahinga ang launcher habang nagmamaneho ka para buong magamit ng laro ang graphics card. Babalik ito pagkatapos ng laro."
   sv: "Startprogrammet vilar medan du kör, så att spelet får grafikkortet för sig själv. Det är tillbaka så snart spelet är slut."
 
+
+# Release update subscriptions (development stage remains independent).
+Update channel:
+  pt: Canal de atualização
+  pt-pt: Canal de atualização
+Stable (recommended):
+  pt: Stable (recomendado)
+  pt-pt: Stable (recomendado)
+Beta (testing):
+  pt: Beta (testes)
+  pt-pt: Beta (testes)
+? Stable receives approved builds. Beta also receives changes awaiting validation. Both channels are early development
+  releases. Switching to Stable keeps your installed build until a newer Stable is available.
+: pt: Stable recebe versões aprovadas. Beta também recebe mudanças aguardando validação. Os dois canais têm versões
+    em desenvolvimento inicial. Ao voltar para Stable, a versão instalada é mantida até surgir uma Stable mais nova.
+  pt-pt: Stable recebe versões aprovadas. Beta também recebe alterações a aguardar validação. Ambos os canais têm
+    versões numa fase inicial de desenvolvimento. Ao voltar para Stable, a versão instalada é mantida até estar
+    disponível uma Stable mais recente.
+'No newer version is available for this channel. Installed: {version}.':
+  pt: 'Nenhuma versão mais nova está disponível neste canal. Instalada: {version}.'
+  pt-pt: 'Não está disponível uma versão mais recente neste canal. Instalada: {version}.'

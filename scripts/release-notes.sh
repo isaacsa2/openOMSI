@@ -33,12 +33,14 @@ else
 fi
 printf '%s' "$changes" | grep -q '[^[:space:]]' || changes="Small changes and fixes."
 
-echo "**openOMSI $version**"
+channel=Beta
+[ -z "$since" ] || channel=Stable
+echo "**openOMSI $version — $channel**"
 echo
 if [ -z "$since" ]; then
-  echo "> **Beta, for testing.** The launcher keeps players on the stable release; this build is for anyone who wants to try what comes next. Report what breaks in an issue, with the version. openOMSI needs an original OMSI 2 installation to run; it contains no game content."
+  echo "> **Beta channel — testing release, expect bugs and regressions.** This build includes changes awaiting validation before promotion to Stable; opt into Beta in the launcher to receive testing updates. Report what breaks in an issue, with the version. openOMSI needs an original OMSI 2 installation to run; it contains no game content."
 else
-  echo "> **Early release, expect bugs.** openOMSI needs an original OMSI 2 installation to run; it contains no game content."
+  echo "> **Stable channel — early release, expect bugs.** This is the recommended build; openOMSI remains in early development. openOMSI needs an original OMSI 2 installation to run; it contains no game content."
   echo
   echo "Changes since $since:"
 fi

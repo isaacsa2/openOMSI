@@ -141,6 +141,13 @@ pub fn previous_version(place: &Place) -> Option<String> {
     (!v.is_empty() && !asides(&place.dir).is_empty()).then_some(v)
 }
 
+pub fn rollback_allowed(place: &Place) -> bool {
+    let prior = std::fs::read_to_string(place.dir.join(crate::release_channel::PREVIOUS_CHANNEL)).unwrap_or_else(|_| {
+        if previous_version(place).is_some_and(|version| updater::newer(&version, crate::release_channel::LAST_LEGACY_STABLE)) { "beta".into() } else { "stable".into() }
+    });
+    updater::Channel::configured().allows(updater::Channel::from_setting(&prior))
+}
+
 /// The `*.old-update` files in `dir` by the name they were set aside from; of several
 /// (`x.old-update`, `x.2.old-update`: an older one could not be deleted at the time) the one
 /// with the highest number, the last set aside.
@@ -187,6 +194,9 @@ fn remove_any(p: &Path) {
 /// update brought new goes aside, and the version gone back from is marked broken here.
 /// Returns the version now installed.
 pub fn rollback(place: &Place) -> anyhow::Result<String> {
+    if !rollback_allowed(place) {
+        anyhow::bail!("the previous build belongs to Beta; the selected channel is Stable");
+    }
     let Some(previous) = previous_version(place) else {
         anyhow::bail!("no earlier version is kept");
     };
@@ -213,6 +223,7 @@ pub fn rollback(place: &Place) -> anyhow::Result<String> {
         let _ = std::fs::remove_file(place.dir.join(updater::MANIFEST));
     }
     let _ = std::fs::remove_file(place.dir.join(PREVIOUS));
+    let _ = std::fs::remove_file(place.dir.join(crate::release_channel::PREVIOUS_CHANNEL));
     mark_bad(&from);
     log::warn!("guard: went back from {from} to {previous} in {}", place.dir.display());
     Ok(previous)

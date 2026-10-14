@@ -99,7 +99,7 @@ pub fn run(reason: &str, mode: Mode) -> bool {
     }
     // 2. the version before the last update, kept for this
     if let Ok(place) = updater::install_place() {
-        if recovery::previous_version(&place).is_some_and(|prev| !recovery::is_bad(&prev)) {
+        if recovery::rollback_allowed(&place) && recovery::previous_version(&place).is_some_and(|prev| !recovery::is_bad(&prev)) {
             match recovery::rollback(&place) {
                 Ok(prev) => {
                     show(&match &listed {

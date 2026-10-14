@@ -298,6 +298,7 @@ async function applyLanguage() {
 }
 
 export async function saveSettings(patch, whole = false) {
+  const previousChannel = S.settings?.update_channel || 'stable';
   set({ settings: whole ? patch : { ...S.settings, ...patch } });
   const mine = ++settingsSeq;
   let ok = true;
@@ -305,6 +306,14 @@ export async function saveSettings(patch, whole = false) {
     try {
       const saved = await call(whole ? 'settings_save' : 'settings_patch', whole ? { settings: patch } : { patch });
       if (mine === settingsSeq) set({ settings: saved });
+      if (previousChannel !== saved.update_channel) {
+        // Replace an old channel's offer immediately, including an automatic update.
+        set({ update: await call('update_status') });
+        if (saved.update_check !== false) {
+          const { checkUpdates } = await import('./updates.js');
+          await checkUpdates(true);
+        }
+      }
     } catch (e) {
       ok = false;
       toast(t('The settings could not be saved: {e}', { e: e.message }), 'error');

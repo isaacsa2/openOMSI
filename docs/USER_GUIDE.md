@@ -86,11 +86,10 @@ second (starter), **Shift+D** (drive), **.** (parking brake off), then throttle.
 whole start-up by itself (main switch, ignition, starter, gearbox to neutral); `--autostart`
 is the same thing for an offscreen run.
 
-**Updates.** (Not yet in the desktop launcher and the Android page: offering and installing an
-update was the game's old launcher window's, which is gone, and their update page is still to
-come - until then a new release is downloaded from the
-[latest release](https://github.com/openOMSI-org/openOMSI/releases/latest) page. During a session the game
-still downloads a newer release and says so, as below.) When the launcher starts it asks
+**Updates.** In **Settings → General → Updates**, select **Stable (recommended)** or
+**Beta (testing)**. Stable is the default and receives tested releases; Beta also receives
+pre-releases. Both are early development builds. Switching to Stable waits for a newer
+Stable without downgrading the installed game. When the launcher starts it asks
 [github.com/openOMSI-org/openOMSI](https://github.com/openOMSI-org/openOMSI) for the latest release
 and, when there is a newer one, offers it: **Update now** downloads it (checked against the
 SHA-256 GitHub lists), puts the new program in place of the old one and starts the launcher

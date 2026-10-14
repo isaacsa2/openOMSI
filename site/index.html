@@ -127,7 +127,10 @@
       <span class="material-icons card-icon">warning</span>
       <div><h3>OMSI&nbsp;2 is required</h3><p>Install the original OMSI&nbsp;2 first. On the first start, point the launcher to its folder (the one with <code>maps</code> and <code>Vehicles</code>).</p></div>
     </div>
-    <p class="lead" id="dl-version">Loading the latest release…</p>
+    <p><label for="dl-channel">Release channel:</label>
+      <select id="dl-channel"><option value="stable">Stable (recommended)</option><option value="beta">Beta (testing)</option></select>
+    </p>
+    <p class="lead" id="dl-version">Loading the selected release…</p>
     <div class="grid" id="dl-grid"></div>
     <h2 class="section-title">Installing</h2>
     <ul class="steps">

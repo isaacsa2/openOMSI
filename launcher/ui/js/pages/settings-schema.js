@@ -404,6 +404,7 @@ const general = {
       // updates from the GitHub releases
       title: 'Updates',
       rows: [
+        { type: 'select', key: 'update_channel', label: 'Update channel', options: [['stable', 'Stable (recommended)'], ['beta', 'Beta (testing)']], help: 'Stable receives approved builds. Beta also receives changes awaiting validation. Both channels are early development releases. Switching to Stable keeps your installed build until a newer Stable is available.' },
         { type: 'toggle', key: 'update_check', label: 'Look for updates when the launcher starts' },
         { type: 'toggle', key: 'update_auto', label: 'Install updates without asking' },
         { type: 'toggle', key: 'update_notify', label: 'Tell me about a new version during a session' },

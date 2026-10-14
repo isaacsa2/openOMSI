@@ -1,8 +1,9 @@
 //! Updates from the project's GitHub releases (github.com/openOMSI-org/openOMSI).
 //!
-//! Every push to main publishes a release `v<MAJOR.MINOR.COMMIT>` with one archive per
+//! Every push to main publishes a Beta release `v<MAJOR.MINOR.COMMIT>` with one archive per
 //! platform (see .github/workflows/release.yml). The launcher asks the GitHub API for the
-//! latest release when it starts (setting `update_check`), and when it is newer than this
+//! latest release in the selected channel when it starts (`update_channel=stable|beta`,
+//! Stable by default; setting `update_check`), and when it is newer than this
 //! build it offers it - or, with `update_auto`, installs it at once:
 //!
 //! * **Windows, macOS, Linux**: the archive is downloaded (and checked against the SHA-256
@@ -41,6 +42,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+pub use crate::release_channel::Channel;
 
 /// The project on GitHub.
 pub const REPO: &str = "openOMSI-org/openOMSI";
@@ -59,6 +61,7 @@ pub const STORE_BUILD: bool = cfg!(target_os = "ios") || option_env!("OPENOMSI_S
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
     pub version: String,
+    pub channel: Channel,
     /// The release's page on GitHub.
     pub page: String,
     pub notes: String,
@@ -92,6 +95,7 @@ pub enum Status {
 /// player put the offer aside for this start.
 pub struct Updater {
     status: Arc<Mutex<Status>>,
+    pub channel: Channel,
     pub dismissed: bool,
     /// Checked (or asked not to) once since the start.
     pub checked_once: bool,
@@ -112,7 +116,7 @@ pub struct Updater {
 
 impl Default for Updater {
     fn default() -> Self {
-        Updater { status: Arc::new(Mutex::new(Status::Idle)), dismissed: false, checked_once: false, auto_started: false, relaunched: false, updated: None, last_check: None, dismissed_version: None, game_was_running: false }
+        Updater { status: Arc::new(Mutex::new(Status::Idle)), channel: Channel::configured(), dismissed: false, checked_once: false, auto_started: false, relaunched: false, updated: None, last_check: None, dismissed_version: None, game_was_running: false }
     }
 }
 
@@ -121,6 +125,25 @@ fn lock(s: &Mutex<Status>) -> std::sync::MutexGuard<'_, Status> {
 }
 
 impl Updater {
+    /// Detach an old check so it cannot publish a stale offer into the new state.
+    /// Downloads finish before another starts; installation rechecks the subscription.
+    pub fn sync_channel(&mut self) {
+        self.sync_to(Channel::configured());
+    }
+
+    fn sync_to(&mut self, channel: Channel) {
+        if channel == self.channel || matches!(self.status(), Status::Downloading { .. } | Status::Installing(_) | Status::WaitingForInstaller(_) | Status::Restarting(_)) {
+            return;
+        }
+        self.channel = channel;
+        self.status = Arc::new(Mutex::new(Status::Idle));
+        self.dismissed = false;
+        self.dismissed_version = None;
+        self.checked_once = false;
+        self.auto_started = false;
+        self.last_check = None;
+    }
+
     pub fn status(&self) -> Status {
         lock(&self.status).clone()
     }
@@ -131,6 +154,7 @@ impl Updater {
 
     /// Ask GitHub for the latest release (in the background).
     pub fn check(&mut self) {
+        self.sync_channel();
         self.checked_once = true;
         self.last_check = Some(std::time::Instant::now());
         if matches!(self.status(), Status::Checking | Status::Downloading { .. } | Status::Downloaded(_) | Status::Installing(_) | Status::WaitingForInstaller(_) | Status::Restarting(_)) {
@@ -139,8 +163,9 @@ impl Updater {
         self.dismissed = false;
         self.set(Status::Checking);
         let status = self.status.clone();
+        let channel = self.channel;
         std::thread::spawn(move || {
-            let s = match latest() {
+            let s = match latest_for_channel(channel) {
                 Ok(Some(r)) => Status::Available(r),
                 Ok(None) => Status::UpToDate,
                 Err(e) => {
@@ -155,6 +180,10 @@ impl Updater {
 
     /// Download and install `r` (in the background).
     pub fn install(&mut self, r: Release) {
+        self.sync_channel();
+        if !self.channel.allows(r.channel) {
+            return;
+        }
         if matches!(self.status(), Status::Downloading { .. } | Status::Installing(_) | Status::WaitingForInstaller(_) | Status::Restarting(_)) {
             return;
         }
@@ -173,6 +202,10 @@ impl Updater {
     /// Download `r` without installing it (in the background, the game's way): the file
     /// waits in the data folder, checked, until `install` puts it in place.
     pub fn prefetch(&mut self, r: Release) {
+        self.sync_channel();
+        if !self.channel.allows(r.channel) {
+            return;
+        }
         if matches!(self.status(), Status::Downloading { .. } | Status::Downloaded(_) | Status::Installing(_) | Status::WaitingForInstaller(_) | Status::Restarting(_)) {
             return;
         }
@@ -196,6 +229,7 @@ impl Updater {
     /// Android: what the system's installer answered (polled every frame while it has the
     /// APK). A computer: nothing to poll.
     pub fn poll(&mut self) {
+        self.sync_channel();
         #[cfg(target_os = "android")]
         if let Status::WaitingForInstaller(r) = self.status() {
             match crate::android::hooks().and_then(|h| (h.install_status)()) {
@@ -345,12 +379,20 @@ fn short_error(e: &ureq::Error) -> String {
 
 /// The latest release when it is newer than this build and has a file for this platform.
 pub fn latest() -> anyhow::Result<Option<Release>> {
+    latest_for_channel(Channel::configured())
+}
+
+fn latest_for_channel(channel: Channel) -> anyhow::Result<Option<Release>> {
     if STORE_BUILD {
         return Ok(None);
     }
-    let url = omsi_cfg::flags::OMSI_UPDATE_URL.var().map(str::to_string).unwrap_or_else(|| LATEST_API.to_string());
+    let custom = omsi_cfg::flags::OMSI_UPDATE_URL.var();
+    if custom.is_none() && channel == Channel::Beta {
+        return latest_beta();
+    }
+    let url = custom.map(str::to_string).unwrap_or_else(|| LATEST_API.to_string());
     match fetch_text(&url).and_then(|t| Ok(serde_json::from_str::<serde_json::Value>(&t)?)) {
-        Ok(v) => parse_release(&v, current_version()),
+        Ok(v) => newest_release(&v, current_version(), channel),
         // (the API: an address over its limit gets 403 for an hour, and some networks reach
         // github.com but not api.github.com - github.com says the latest tag as well)
         Err(e) if url == LATEST_API => {
@@ -383,18 +425,23 @@ fn latest_from_site() -> anyhow::Result<Option<Release>> {
         Err(ureq::Error::Status(404, _)) => return Ok(None),
         Err(e) => anyhow::bail!("{}", short_error(&e)),
     };
-    Ok(Some(Release { version, page: format!("{REPO_URL}/releases/tag/{tag}"), notes: String::new(), asset_name: name, asset_url: url, size, sha256: None }))
+    Ok(Some(Release { version, channel: Channel::Stable, page: format!("{REPO_URL}/releases/tag/{tag}"), notes: String::new(), asset_name: name, asset_url: url, size, sha256: None }))
 }
 
 /// A release described as the GitHub API does, when newer than `current`.
+#[cfg(test)]
 fn parse_release(v: &serde_json::Value, current: &str) -> anyhow::Result<Option<Release>> {
+    parse_release_on(v, current, Channel::Stable)
+}
+
+fn parse_release_on(v: &serde_json::Value, current: &str, channel: Channel) -> anyhow::Result<Option<Release>> {
     let tag = v["tag_name"].as_str().ok_or_else(|| anyhow::anyhow!("the release has no tag"))?;
     let version = tag.trim_start_matches(['v', 'V']).to_string();
     if is_test_build(current) {
         log::info!("update check: {current} is a pull request's test build, {version} is not offered");
         return Ok(None);
     }
-    if v["draft"].as_bool() == Some(true) || v["prerelease"].as_bool() == Some(true) || !newer(&version, current) {
+    if !channel.accepts(v) || !newer(&version, current) {
         return Ok(None);
     }
     // (a release that failed to start here, or would not even run its self-test, is not
@@ -411,6 +458,30 @@ fn parse_release(v: &serde_json::Value, current: &str) -> anyhow::Result<Option<
     Ok(found)
 }
 
+/// The catalogue is ordered by creation time, not version or promotion time.
+/// Select the highest compatible version and keep PR builds untouched.
+fn newest_release(v: &serde_json::Value, current: &str, channel: Channel) -> anyhow::Result<Option<Release>> {
+    let Some(entries) = v.as_array() else { return parse_release_on(v, current, channel) };
+    let mut newest: Option<Release> = None;
+    for entry in entries {
+        if let Some(release) = parse_release_on(entry, current, channel)? {
+            if newest.as_ref().is_none_or(|old| newer(&release.version, &old.version)) {
+                newest = Some(release);
+            }
+        }
+    }
+    Ok(newest)
+}
+
+fn latest_beta() -> anyhow::Result<Option<Release>> {
+    if is_test_build(current_version()) {
+        return Ok(None);
+    }
+    let list = releases_paged_on(|page| fetch_text(&format!("{RELEASES_API}&page={page}")), Channel::Beta)?;
+    Ok(list.into_iter().map(|entry| entry.release)
+        .find(|release| newer(&release.version, current_version()) && !crate::recovery::is_bad(&release.version)))
+}
+
 fn release_of(v: &serde_json::Value) -> anyhow::Result<Option<Release>> {
     let tag = v["tag_name"].as_str().ok_or_else(|| anyhow::anyhow!("the release has no tag"))?;
     let version = tag.trim_start_matches(['v', 'V']).to_string();
@@ -418,6 +489,7 @@ fn release_of(v: &serde_json::Value) -> anyhow::Result<Option<Release>> {
     let Some(a) = v["assets"].as_array().and_then(|a| a.iter().find(|a| a["name"].as_str() == Some(want.as_str()))) else { return Ok(None) };
     Ok(Some(Release {
         version,
+        channel: if v["prerelease"].as_bool() == Some(true) { Channel::Beta } else { Channel::Stable },
         page: v["html_url"].as_str().map(str::to_string).unwrap_or_else(|| format!("{REPO_URL}/releases/tag/{tag}")),
         notes: v["body"].as_str().unwrap_or("").to_string(),
         asset_name: want,
@@ -437,10 +509,15 @@ pub fn releases() -> anyhow::Result<Vec<Listed>> {
     if STORE_BUILD {
         return Ok(Vec::new());
     }
-    releases_paged(|page| fetch_text(&format!("{RELEASES_API}&page={page}")))
+    releases_paged_on(|page| fetch_text(&format!("{RELEASES_API}&page={page}")), Channel::configured())
 }
 
+#[cfg(test)]
 fn releases_paged(fetch: impl Fn(u32) -> anyhow::Result<String>) -> anyhow::Result<Vec<Listed>> {
+    releases_paged_on(fetch, Channel::Stable)
+}
+
+fn releases_paged_on(fetch: impl Fn(u32) -> anyhow::Result<String>, channel: Channel) -> anyhow::Result<Vec<Listed>> {
     let mut all = Vec::new();
     for page in 1..=RELEASE_PAGES {
         let items = match fetch(page).and_then(|t| Ok(serde_json::from_str::<serde_json::Value>(&t)?)) {
@@ -455,15 +532,20 @@ fn releases_paged(fetch: impl Fn(u32) -> anyhow::Result<String>) -> anyhow::Resu
             break;
         }
     }
-    Ok(releases_of(&serde_json::Value::Array(all)))
+    Ok(releases_on(&serde_json::Value::Array(all), channel))
 }
 
+#[cfg(test)]
 fn releases_of(v: &serde_json::Value) -> Vec<Listed> {
+    releases_on(v, Channel::Stable)
+}
+
+fn releases_on(v: &serde_json::Value, channel: Channel) -> Vec<Listed> {
     let mut list: Vec<Listed> = v
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|r| r["draft"].as_bool() != Some(true) && r["prerelease"].as_bool() != Some(true))
+        .filter(|r| channel.accepts(r))
         .filter_map(|r| {
             let release = release_of(r).ok().flatten()?;
             let published = r["published_at"].as_str().and_then(|d| d.get(..10)).unwrap_or("").to_string();
@@ -624,6 +706,9 @@ pub fn install_now(r: &Release) -> anyhow::Result<()> {
 }
 
 fn download_and_install(r: &Release, status: &Mutex<Status>) -> anyhow::Result<()> {
+    if !Channel::configured().allows(r.channel) {
+        anyhow::bail!("the update channel changed; check for updates again");
+    }
     // (on a computer: where it goes must be writable before 15 MB are fetched for nothing)
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -636,6 +721,9 @@ fn download_and_install(r: &Release, status: &Mutex<Status>) -> anyhow::Result<(
     let file = download_dir().join(&r.asset_name);
     download(r, &file, status)?;
     log::info!("update {}: downloaded {}", r.version, file.display());
+    if !Channel::configured().allows(r.channel) {
+        anyhow::bail!("the update channel changed during the download; no update was installed");
+    }
     *lock(status) = Status::Installing(r.clone());
     #[cfg(target_os = "android")]
     {
@@ -655,6 +743,7 @@ fn download_and_install(r: &Release, status: &Mutex<Status>) -> anyhow::Result<(
             }
             return Err(e);
         }
+        crate::release_channel::remember_installed(&place.dir, r);
         let _ = std::fs::write(download_dir().join("updating-to"), &r.version);
         let _ = std::fs::remove_file(&file);
         let _ = std::fs::remove_file(checked_note(&file));
@@ -884,6 +973,8 @@ pub(crate) fn install_archive_with(zip: &Path, place: &Place, self_test: bool) -
     // the version these files are, for going back to it; and the earlier list of what an
     // update brought, set aside with the files it lists
     let _ = std::fs::write(place.dir.join(crate::recovery::PREVIOUS), current_version());
+    let channel = crate::release_channel::installed_at(&place.dir, current_version());
+    std::fs::write(place.dir.join(crate::release_channel::PREVIOUS_CHANNEL), channel.as_str())?;
     let manifest = place.dir.join(MANIFEST);
     let mut manifest_aside = None;
     if manifest.exists() {
@@ -995,6 +1086,7 @@ pub fn cleanup_now() {
                 remove_any(&staging);
             }
             let _ = std::fs::remove_file(place.dir.join(crate::recovery::PREVIOUS));
+            let _ = std::fs::remove_file(place.dir.join(crate::release_channel::PREVIOUS_CHANNEL));
             if !left {
                 return;
             }
@@ -1221,6 +1313,7 @@ mod tests {
         });
         let r = Release {
             version: "9.9.9".into(),
+            channel: Channel::Stable,
             page: String::new(),
             notes: String::new(),
             asset_name: format!("openOMSI-test-{}.zip", std::process::id()),
@@ -1313,3 +1406,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+#[cfg(test)]
+#[path = "updater_channel_tests.rs"]
+mod channel_tests;

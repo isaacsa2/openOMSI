@@ -148,6 +148,7 @@ jobs:
         run: |
           $name = "openOMSI-$env:OPENOMSI_VERSION-windows-${{ matrix.arch }}"
           New-Item -ItemType Directory -Force out | Out-Null
+          @{version=$env:OPENOMSI_VERSION; channel="beta"} | ConvertTo-Json -Compress | Set-Content dist/windows/openomsi-release.json -Encoding utf8
           Copy-Item README.md, LICENSE dist/windows/
           Compress-Archive -Path dist/windows/* -DestinationPath "out/$name.zip"
           # the dedicated server for Windows (Server 2016 and later): the same program
@@ -156,6 +157,7 @@ jobs:
           Copy-Item dist/windows/openomsi.exe, dist/windows/vcruntime140.dll, dist/windows/vcruntime140_1.dll, dist/windows/msvcp140.dll, scripts/server/start.cmd, LICENSE dist/server/
           # (Steam's library: the x64 program does not start without it beside it)
           if (Test-Path dist/windows/steam_api64.dll) { Copy-Item dist/windows/steam_api64.dll dist/server/ }
+          Copy-Item dist/windows/openomsi-release.json dist/server/
           Copy-Item docs/SERVER.md dist/server/README.md
           New-Item -ItemType File -Force dist/server/.openomsi-content | Out-Null
           Compress-Archive -Path dist/server/* -DestinationPath "out/openOMSI-$env:OPENOMSI_VERSION-server-windows-${{ matrix.arch }}.zip"
@@ -199,6 +201,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p out
+          printf '{"version":"%s","channel":"beta"}\n' "$OPENOMSI_VERSION" > dist/macos/openomsi-release.json
           cp README.md LICENSE dist/macos/
           cd dist/macos && ditto -c -k --sequesterRsrc . "../../out/openOMSI-$OPENOMSI_VERSION-macos-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v7
@@ -272,6 +275,8 @@ jobs:
       - name: Package
         run: |
           mkdir -p out
+          printf '{"version":"%s","channel":"beta"}\n' "$OPENOMSI_VERSION" > dist/linux/openomsi-release.json
+          cp dist/linux/openomsi-release.json dist/server/
           cp README.md LICENSE dist/linux/
           cp LICENSE dist/server/
           (cd dist/linux && zip -qr "../../out/openOMSI-$OPENOMSI_VERSION-linux-${{ matrix.arch }}.zip" .)
@@ -368,5 +373,5 @@ jobs:
           gh release create "v$VERSION" $files SHA256SUMS \
             --verify-tag \
             --prerelease \
-            --title "openOMSI $VERSION" \
+            --title "openOMSI $VERSION — Beta" \
             --notes-file ../notes.md

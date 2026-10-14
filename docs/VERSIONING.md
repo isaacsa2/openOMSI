@@ -28,8 +28,31 @@ There are two channels:
 
 | Channel | What it is | Who gets it |
 | --- | --- | --- |
-| **Beta** | every push to `main`, published as a GitHub **pre-release** | testers, who download it from the [Releases](https://github.com/openOMSI-org/openOMSI/releases) page |
-| **Stable** | a beta the maintainers have tested and promoted | every player: the launcher's updater, the start guard, the website's Download page, `releases/latest` and the README badge only ever see stable releases |
+| **Beta** | every push to `main`, published as a GitHub **pre-release** | testers who select **Beta** in the launcher, or download it from the Releases page |
+| **Stable** | a beta the maintainers have tested and promoted | the default launcher/update channel, the website's default Download page, `releases/latest` and the README badge |
+
+The channel is separate from the game's Alpha/Beta development stage: **Stable** means
+recommended after testing, not a finished game or a guarantee of no bugs.
+
+In **Settings → General → Updates → Update channel**, choose **Stable (recommended)** or
+**Beta (testing)**. This saves `update_channel=stable|beta` in `settings.cfg`; old or invalid
+settings default to Stable. Beta includes both pre-releases and promoted builds. Launcher
+updates, background downloads during a drive, the version picker and start-guard update
+recovery use the same subscription. Pull-request builds still do not update themselves;
+store-managed builds still use their store.
+
+Switching from Beta to Stable does not downgrade the installed version. It waits for a
+strictly newer Stable; if the installed Beta is promoted, the identical files need no
+replacement. A pending offer is invalidated on a channel change. Downloads finish before
+another starts, and the subscription is checked again before installation. An installation
+already in progress finishes normally. The APK's package ID and signing key stay the same.
+
+Desktop packages carry `openomsi-release.json` for safe rollback classification, also when
+extracted manually. Updates record the release's actual channel (including promotion).
+Stable recovery never restores a previous build marked Beta; it tries the existing safe
+mode flow instead. Unmarked legacy packages through 0.2.48 remain eligible; unknown newer
+packages are conservatively treated as Beta.
+A manually extracted promoted package conservatively retains its original Beta marker.
 
 ### Beta: every push to `main`
 

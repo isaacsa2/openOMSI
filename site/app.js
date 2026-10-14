@@ -111,17 +111,36 @@ async function playingNow() {
   playingTimer = setTimeout(playingNow, wait);
 }
 
-async function download() {
+let downloadRequest = 0;
+
+async function latestBetaRelease() {
+  const list = await gh("releases?per_page=100");
+  const versions = r => r.tag_name.slice(1).split('.').map(Number);
+  return list.filter(r => !r.draft && /^v[0-9]+\.[0-9]+\.[0-9]+$/.test(r.tag_name))
+    .sort((a, b) => {
+      const x = versions(a), y = versions(b);
+      for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return y[i] - x[i];
+      return 0;
+    })[0] || { none: true };
+}
+
+async function download(channel = "stable") {
+  const request = ++downloadRequest;
   showTemplate("download");
-  const rel = await latestRelease();
+  const picker = document.getElementById("dl-channel");
+  picker.value = channel;
+  picker.onchange = () => download(picker.value);
+  const rel = await (channel === "beta" ? latestBetaRelease().catch(() => ({ none: true })) : latestRelease());
+  if (request !== downloadRequest) return;
   const grid = document.getElementById("dl-grid");
   const ver = document.getElementById("dl-version");
+  if (!grid || !ver) return;
   if (!rel.tag_name) {
-    ver.textContent = "No release has been published yet.";
+    ver.textContent = `No ${channel === "beta" ? "Beta" : "Stable"} release is available. See Releases for all builds.`;
     return;
   }
   const v = rel.tag_name.replace(/^v/, "");
-  ver.innerHTML = `Latest version: <b>${v}</b> · ${new Date(rel.published_at).toLocaleDateString()}`;
+  ver.innerHTML = `${channel === "beta" && rel.prerelease ? "Beta — for testing" : "Stable — recommended"}: <b>${esc(v)}</b> · ${new Date(rel.published_at).toLocaleDateString()}`;
   // Each file by its exact name: matched by its ending alone, "-windows-x64.zip" was the
   // dedicated server's zip as well, and the Windows button downloaded the server.
   const card = p => {
@@ -257,7 +276,8 @@ async function releases() {
   let list;
   try { list = await gh("releases?per_page=30"); } catch (e) { box.innerHTML = `<p>${esc(e.message)} <a href="https://github.com/${REPO}/releases">Releases on GitHub</a></p>`; return; }
   if (!list.length) { box.innerHTML = "<p>No release has been published yet.</p>"; return; }
-  const latest = list.findIndex(r => !r.prerelease && !r.draft);
+  const stable = await latestRelease();
+  const latest = list.findIndex(r => r.tag_name === stable.tag_name);
   box.innerHTML = list.map((r, i) => {
     const assets = (r.assets || []).map(a => `<a class="asset" href="${esc(a.browser_download_url)}"><span class="material-icons">download</span>${esc(a.name)} <small>${(a.size / 1048576).toFixed(0)} MB</small></a>`).join("");
     return `<details class="card elevation-1 release"${i === latest ? " open" : ""}>
