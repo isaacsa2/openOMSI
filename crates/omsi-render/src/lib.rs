@@ -21,6 +21,8 @@ pub mod clouds;
 mod cookies;
 pub use cookies::{Cookie, COOKIE_LAYERS};
 mod gpu_memory;
+mod memory_pressure;
+pub use memory_pressure::{memory_pressure, Governor, Pressure};
 mod passes;
 mod device_selection;
 use passes::{Encoders, FrameArgs, FrameEnv, PassTimers, StageClock};
