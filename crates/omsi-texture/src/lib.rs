@@ -920,7 +920,10 @@ mod tests {
             std::fs::write(f, b"x").unwrap();
         }
         omsi_cfg::add_content_root(root.clone());
-        let find = |p: &Path| find_texture_uncached(p.to_str().unwrap(), &[tex.as_path()]);
+        // (the folders of a stock bus, and of a mod's beside it)
+        let modded = root.join("Vehicles/Mod/Texture");
+        std::fs::create_dir_all(&modded).unwrap();
+        let find = |p: &Path| find_texture_uncached(p.to_str().unwrap(), &[modded.as_path(), tex.as_path()]);
         assert_eq!(find(&paper), None, "refused until the game says it writes there");
         generated::allow(&cache, "schedule-v7-");
         assert_eq!(find(&paper), Some(paper.clone()));
