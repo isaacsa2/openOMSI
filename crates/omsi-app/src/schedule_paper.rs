@@ -63,7 +63,6 @@ pub(crate) fn update_vehicle(
     let lines = paper_lines(&title, &rows);
     let signature = content_signature(&lines);
     let dir = cache_dir()?;
-    // (no content root: the lookup is told these files are the game's own, #2575)
     omsi_texture::generated::allow(&dir, FILE_PREFIX);
     let path = dir.join(format!("{FILE_PREFIX}{signature:016x}.png"));
     let filename = path.to_string_lossy().into_owned();
