@@ -535,4 +535,33 @@ mod freetex_path_tests {
         assert_eq!(found.as_deref(), Some(wanted.as_path()));
         let _ = std::fs::remove_dir_all(root);
     }
+
+    /// The driver's paper lies in the game's cache, below the player's home and not below a
+    /// content root, and the model names it by that full path (#2575): found for a stock bus
+    /// and for a mod's, whichever texture folders they search, and nothing else of the folder.
+    #[test]
+    fn the_papers_full_path_is_found_for_stock_and_mod_vehicles() {
+        let base = std::env::temp_dir().join(format!("openomsi-freetex-paper-{} x", std::process::id()));
+        let root = base.join("content");
+        let stock = root.join("Vehicles/Stock/Texture");
+        let modded = root.join("Vehicles/Mod/Texture");
+        let home = base.join("Ana Maria");
+        let cache = home.join(".openomsi/cache/schedules");
+        for d in [&stock, &modded, &cache] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let paper = cache.join("schedule-v7-00000000deadbeef.png");
+        let private = home.join(".openomsi/cache/schedules/notes.png");
+        std::fs::write(&paper, b"x").unwrap();
+        std::fs::write(&private, b"x").unwrap();
+        omsi_cfg::add_content_root(root.clone());
+        omsi_texture::generated::allow(&cache, "schedule-v7-");
+        let name = paper.to_string_lossy().into_owned();
+        for dirs in [vec![stock.as_path()], vec![modded.as_path(), stock.as_path()]] {
+            assert_eq!(find_vehicle_freetex(&name, &dirs).as_deref(), Some(paper.as_path()));
+            assert_eq!(find_vehicle_freetex(&private.to_string_lossy(), &dirs), None);
+        }
+        omsi_cfg::remove_content_root(&root);
+        let _ = std::fs::remove_dir_all(base);
+    }
 }
