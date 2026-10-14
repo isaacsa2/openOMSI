@@ -143,7 +143,6 @@ impl Schedule {
         scene: &mut Scene,
         day_time: f64,
     ) {
-        // (OMSI_MEMORY_PRESSURE: only what is done in advance waits for room, nothing in use goes)
         let pressure = omsi_render::memory_pressure();
         let ready = if pressure < omsi_render::Pressure::Critical { self.fleet_ready.lock().pop() } else { None };
         if let Some(key) = ready {
