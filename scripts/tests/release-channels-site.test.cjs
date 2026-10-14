@@ -24,3 +24,26 @@ test('Beta subscribers receive the promoted Stable when only Stable is available
   const release = await vm.runInContext(betaSource + '\nlatestBetaRelease()', context);
   assert.equal(release.tag_name, 'v0.2.48');
 });
+
+test('A saved channel remains saved when update-status refresh fails, without enabling checks', async () => {
+  const data = fs.readFileSync(path.join(__dirname, '../../launcher/ui/js/data.js'), 'utf8');
+  const saveSource = data.slice(data.indexOf('export async function saveSettings('), data.indexOf('/** The trip of the tour'))
+    .replace('export async function', 'async function');
+  const S = { settings: { update_channel: 'stable', update_check: false } };
+  const calls = [];
+  const toasts = [];
+  const context = vm.createContext({
+    S, set: values => Object.assign(S, values), toast: (...args) => toasts.push(args), t: text => text,
+    call: async command => {
+      calls.push(command);
+      if (command === 'settings_patch') return { update_channel: 'beta', update_check: false };
+      throw new Error('Update status is unavailable');
+    },
+  });
+  const saved = await vm.runInContext('let settingsSaved = Promise.resolve(); let settingsSeq = 0;\n' + saveSource + '\nsaveSettings({ update_channel: "beta" })', context);
+  assert.equal(saved, true);
+  assert.equal(S.settings.update_channel, 'beta');
+  assert.equal(S.settings.update_check, false);
+  assert.deepEqual(calls, ['settings_patch', 'update_status']);
+  assert.equal(toasts.length, 0);
+});

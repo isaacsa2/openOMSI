@@ -308,7 +308,8 @@ export async function saveSettings(patch, whole = false) {
       if (mine === settingsSeq) set({ settings: saved });
       if (previousChannel !== saved.update_channel) {
         // Replace an old channel's offer immediately, including an automatic update.
-        set({ update: await call('update_status') });
+        const update = await call('update_status').catch(() => null);
+        if (update) set({ update });
         if (saved.update_check !== false) {
           const { checkUpdates } = await import('./updates.js');
           await checkUpdates(true);
