@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 /// Kept free besides the archive itself (the install that follows checks its own needs).
 const MARGIN: u64 = 64 << 20;
@@ -31,12 +32,37 @@ impl std::fmt::Display for Cancelled {
 }
 impl std::error::Error for Cancelled {}
 
+/// Set by [`cancel_import`] while the copy of [`import_picked`] is under way.
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Stop the copy of [`import_picked`] that is under way (the page's "cancel").
+pub fn cancel_import() {
+    CANCEL.store(true, Ordering::Relaxed);
+}
+
 /// Copy the archive `from` (the dialog's stream) named `name` of `size` bytes (when known) into
-/// the content folder's Mods folder and give the new file's path. `progress` is told the
-/// bytes copied so far after each piece.
-pub fn import_archive(name: &str, size: Option<u64>, from: &mut dyn Read, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<PathBuf> {
+/// the content folder's Mods folder and give the new file's path, or `None` when the player
+/// cancelled. `progress` is told the bytes copied so far, a few times a second.
+pub fn import_picked(name: &str, size: Option<u64>, from: &mut dyn Read, progress: &mut dyn FnMut(u64)) -> Result<Option<PathBuf>> {
     let content = crate::content_dir().ok_or_else(|| anyhow!("no game binary configured, so no content folder"))?;
-    import_into(&content, name, size, from, cancel, progress)
+    picked_into(&content, name, size, from, progress)
+}
+
+fn picked_into(content: &Path, name: &str, size: Option<u64>, from: &mut dyn Read, progress: &mut dyn FnMut(u64)) -> Result<Option<PathBuf>> {
+    CANCEL.store(false, Ordering::Relaxed);
+    // (the page needs a few updates a second, not one per megabyte)
+    let mut last: Option<std::time::Instant> = None;
+    let mut throttled = |done: u64| {
+        if last.is_none_or(|t| t.elapsed() >= Duration::from_millis(250)) {
+            last = Some(std::time::Instant::now());
+            progress(done);
+        }
+    };
+    match import_into(content, name, size, from, &CANCEL, &mut throttled) {
+        Ok(path) => Ok(Some(path)),
+        Err(e) if e.downcast_ref::<Cancelled>().is_some() => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 fn import_into(content: &Path, name: &str, size: Option<u64>, from: &mut dyn Read, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<PathBuf> {
@@ -195,6 +221,21 @@ mod tests {
         .unwrap_err();
         assert!(e.downcast_ref::<Cancelled>().is_some(), "{e}");
         assert!(!c.join("Mods").join("big.7z").exists() && leftovers(&c).is_empty());
+        let _ = std::fs::remove_dir_all(&c);
+    }
+
+    #[test]
+    fn the_page_cancels_a_copy_and_hears_a_few_updates_not_one_per_piece() {
+        let c = dir("picked");
+        let data = vec![3u8; 6 << 20];
+        let mut told = Vec::new();
+        let done = picked_into(&c, "a.zip", Some(data.len() as u64), &mut Cursor::new(data.clone()), &mut |n| told.push(n)).unwrap();
+        assert_eq!(done, Some(c.join("Mods").join("a.zip")));
+        assert!(!told.is_empty() && told.len() < 6, "{told:?}");
+        // cancelled from the callback, as the page does: nothing is kept, and it is no error
+        let out = picked_into(&c, "b.zip", Some(data.len() as u64), &mut Cursor::new(data), &mut |_| cancel_import()).unwrap();
+        assert_eq!(out, None);
+        assert!(!c.join("Mods").join("b.zip").exists() && leftovers(&c).is_empty());
         let _ = std::fs::remove_dir_all(&c);
     }
 
