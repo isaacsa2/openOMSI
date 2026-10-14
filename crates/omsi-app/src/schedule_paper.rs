@@ -25,8 +25,7 @@ const LABEL_CHARS: usize = 25;
 /// Rows of the first column; the next 24 make the second, the rest are left out.
 const ROWS_PER_COLUMN: usize = 24;
 const TEXT_COLOR: [u8; 3] = [17, 15, 14];
-/// How the names of the drawn papers begin; the number is the layout's version, so a new
-/// layout is not shown from an older cache.
+/// How the drawn papers' names begin (the number: the layout's version).
 const FILE_PREFIX: &str = "schedule-v7-";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
