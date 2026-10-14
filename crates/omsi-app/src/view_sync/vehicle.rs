@@ -457,19 +457,22 @@ pub fn sync_vehicle_textures(
                     continue;
                 }
                 let Some(rgba) = st.take_upload() else { continue };
-                *budget = budget.saturating_sub(rgba.len());
+                let bytes = rgba.len();
                 let img = Image {
                     width: st.width,
                     height: st.height,
                     rgba,
                     has_alpha: true,
                 };
-                if st.mipmaps {
-                    if renderer.update_texture_mips(scene, *tex, &img) {
+                // (a script that drew the picture it drew before: nothing goes up, and the
+                // frame's upload budget is not spent on it)
+                match renderer.update_script_texture(scene, *tex, &img, st.mipmaps) {
+                    omsi_render::ScriptWrite::Unchanged => {}
+                    omsi_render::ScriptWrite::Written => *budget = budget.saturating_sub(bytes),
+                    omsi_render::ScriptWrite::Replaced => {
+                        *budget = budget.saturating_sub(bytes);
                         rebound.push(*tex);
                     }
-                } else {
-                    renderer.update_texture(scene, *tex, &img);
                 }
             }
         }
