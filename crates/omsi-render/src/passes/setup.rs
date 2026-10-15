@@ -229,7 +229,7 @@ impl Renderer {
         {
             let (lx, ly, side) = self.lights.lm_place.get();
             let v: [f32; 4] = [(lx - ro.x) as f32, (ly - ro.y) as f32, side as f32, if side > 0.0 { 1.0 } else { 0.0 }];
-            self.queue.write_buffer(&self.lights.lm_uniform, 0, bytemuck::cast_slice(&v));
+            self.lights.lm_upload.write(&self.queue, &self.lights.lm_uniform, v);
         }
         {
             let v = &lighting.vanilla_sky;
@@ -237,7 +237,7 @@ impl Renderer {
                 cloud: [v.cloud_height, v.cloud_size, v.cloud_offset[0], v.cloud_offset[1]],
                 haze: [v.fog_range, v.visibility, if v.overcast { 1.0 } else { 0.0 }, ro.z as f32],
             };
-            self.queue.write_buffer(&self.sky.vanilla_sky_buf, 0, bytemuck::bytes_of(&u));
+            self.sky.vanilla_sky_upload.write(&self.queue, &self.sky.vanilla_sky_buf, u);
         }
         let cu = CameraUniform {
             post: [

@@ -179,10 +179,10 @@ impl Renderer {
         let overlays = &f.overlays;
         if let Some((_, bg)) = &f.scene_target {
             let sharpen = (1.0 - width as f32 / full_w as f32) * 2.0;
-            self.queue.write_buffer(
+            self.scale.upscale_upload.write(
+                &self.queue,
                 &self.scale.upscale_buf,
-                0,
-                bytemuck::cast_slice(&[width as f32, height as f32, sharpen.clamp(0.0, 0.8), if f.vanilla_fxaa { 1.0 } else { 0.0 }]),
+                [width as f32, height as f32, sharpen.clamp(0.0, 0.8), if f.vanilla_fxaa { 1.0 } else { 0.0 }],
             );
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("upscale"),
