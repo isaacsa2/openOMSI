@@ -159,6 +159,12 @@ impl PreparedPlayer {
         let path = player_bus_path(&args.root, bus)?;
         let ty = Arc::new(omsi_sim::VehicleType::load(&args.root, &path)?);
         let parts = load_coupled_types(&args.root, ty.clone());
+        // Build on the loading worker, rather than hitch on the first hover in a dense cab.
+        for ty in std::iter::once(&ty).chain(parts.iter().map(|(ty, _)| ty)) {
+            for mesh in &ty.meshes {
+                mesh.prepare_picking();
+            }
+        }
         Ok(Self { ty, parts, staged: None })
     }
 
