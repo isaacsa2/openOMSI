@@ -29,6 +29,7 @@ mod pose;
 mod program_ids;
 mod props;
 mod radio;
+mod raycast;
 mod trailer;
 mod types;
 mod update;

@@ -545,6 +545,7 @@ impl Renderer {
                 panel_pipeline: upscale.panel_pipeline,
                 upscale_layout: upscale.layout,
                 upscale_buf: upscale.buf,
+                upscale_upload: Default::default(),
                 dynamic_scale: std::cell::Cell::new(1.0),
             },
             sky: SkyRes {
@@ -557,6 +558,7 @@ impl Renderer {
                 sky_layout: sky.layout,
                 sky_sampler,
                 vanilla_sky_buf: sky.vanilla_buf,
+                vanilla_sky_upload: Default::default(),
                 cloud_shape_view: sky.cloud_shape_view,
                 cloud_detail_view: sky.cloud_detail_view,
                 cloud_sampler: sky.cloud_sampler,
@@ -568,6 +570,7 @@ impl Renderer {
                 lm_atlas_view: scene.lm_atlas.create_view(&wgpu::TextureViewDescriptor::default()),
                 lm_atlas: scene.lm_atlas,
                 lm_uniform: scene.lm_uniform,
+                lm_upload: Default::default(),
                 lm_place: std::cell::Cell::new((0.0, 0.0, 0.0)),
                 fog_lamps_pipeline: fog_lamps.pipeline,
                 fog_lamps_layout: fog_lamps.layout,

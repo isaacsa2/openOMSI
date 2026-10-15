@@ -1053,6 +1053,8 @@ mod tests;
 
 mod raycast;
 pub use raycast::*;
+mod mesh_ray;
+pub use mesh_ray::MeshRaycast;
 mod drive_grid;
 pub use drive_grid::*;
 mod tile_surface;

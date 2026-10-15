@@ -43,6 +43,7 @@ mod sky;
 mod surface;
 mod targets;
 mod uniforms;
+mod uniform_upload;
 mod view;
 pub(crate) use frame_plan::*;
 pub use gpu::*;

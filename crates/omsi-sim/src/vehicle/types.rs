@@ -145,6 +145,8 @@ pub struct VehicleMesh {
     /// The mesh, or (for a type loaded with [`VehicleType::load_ai`]) only its material
     /// ranges: the vertices are read again from `file` when the GPU needs them.
     pub data: MeshData,
+    /// Picking bounds for immutable `data`; reset when replacing its geometry.
+    pub ray_bounds: std::sync::OnceLock<Arc<omsi_geometry::MeshRaycast>>,
     /// The `.o3d` file the mesh came from.
     pub file: PathBuf,
     pub materials: Vec<omsi_o3d::Material>,
@@ -433,6 +435,7 @@ impl VehicleType {
                         meshes.push(VehicleMesh {
                             def_index: start + i,
                             data: mesh_from_o3d(&m),
+                            ray_bounds: Default::default(),
                             file: p,
                             materials: m.materials.clone(),
                             overrides: md.materials.clone(),
@@ -545,6 +548,7 @@ impl VehicleType {
             // meshes in a model, so keeping them costs nothing like the half gigabyte this
             // was written to save.
             for m in meshes.iter_mut().filter(|m| m.skin.is_empty()) {
+                m.ray_bounds.take();
                 m.data = MeshData {
                     ranges: std::mem::take(&mut m.data.ranges),
                     ..Default::default()

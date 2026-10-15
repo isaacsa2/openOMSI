@@ -191,6 +191,7 @@ pub(crate) struct SkyRes {
     pub(crate) sky_sampler: wgpu::Sampler,
     /// The classic sky's weather (`VanillaSkyUniform`, sky bind group binding 10).
     pub(crate) vanilla_sky_buf: wgpu::Buffer,
+    pub(crate) vanilla_sky_upload: crate::uniform_upload::UniformUpload<VanillaSkyUniform>,
     /// The enhanced clouds' noise (clouds.rs): the shape map, the detail volume and their
     /// repeating, mip-mapped sampler (sky bind group bindings 6-8).
     pub(crate) cloud_shape_view: wgpu::TextureView,
