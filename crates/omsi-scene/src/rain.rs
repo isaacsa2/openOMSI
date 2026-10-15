@@ -265,7 +265,7 @@ mod tests {
         assert!(img.rgba.chunks_exact(4).all(|p| p[..3] == [255, 255, 255]));
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         descriptor.backends = wgpu::Backends::NOOP;
-        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
         let instance = wgpu::Instance::new(descriptor);
         let renderer = pollster::block_on(omsi_render::Renderer::new_with(
             &instance,

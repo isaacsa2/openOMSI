@@ -83,7 +83,7 @@ impl ExposureLog {
         self.frame += 1;
         if self.waiting && self.ready.swap(false, std::sync::atomic::Ordering::Relaxed) {
             {
-                let view = self.buf.slice(0..8).get_mapped_range();
+                let view = self.buf.slice(0..8).get_mapped_range().expect("GPU readback was mapped");
                 let bits = u16::from_le_bytes([view[0], view[1]]);
                 let metered = half_to_f32(bits);
                 let (pre, m) = self.pending;
@@ -625,8 +625,10 @@ impl Renderer {
         if !self.frame_hooks(scene, &env, with_overlays) {
             return;
         }
-        // OMSI_GPU_TIMERS: GPU time per pass, one frame at a time
+        let mut clock = StageClock::new(with_overlays);
+        // Readback can submit work too, especially costly on GL; keep it separate from setup.
         self.collect_gpu_timers();
+        clock.stage(self, "timer_readback", "mirror.timer_readback");
         let mut timers = PassTimers {
             set: self.gpu_timers[with_overlays as usize]
                 .as_ref()
@@ -635,7 +637,6 @@ impl Renderer {
             timed: Vec::new(),
         };
         // OMSI_PROFILE: time per stage, the mirrors apart from the window's picture
-        let mut clock = StageClock::new(with_overlays);
         let args = FrameArgs { target, width, height, camera, lighting, with_overlays, exclude_texture, projection, second_eye };
         let f = self.begin_frame(scene, env, args, &mut clock);
         let sh = self.plan_shadow_cache(scene, &f);
@@ -868,7 +869,7 @@ impl Renderer {
         rx.recv()
             .context("map")?
             .map_err(|e| anyhow!("map: {e:?}"))?;
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("GPU readback was mapped");
         let mut out = Vec::with_capacity((row_bytes * height) as usize);
         for row in 0..height {
             let start = (row * bpr) as usize;

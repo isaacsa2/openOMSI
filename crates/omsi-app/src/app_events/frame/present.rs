@@ -182,7 +182,10 @@ impl App {
         let hidden_now = hide_test
             .map(|(a, b)| (a..b).contains(&self.started.elapsed().as_secs_f32()))
             .unwrap_or(false);
-        let acquired = match s.acquire() {
+        let surface_start = Instant::now();
+        let surface_frame = s.acquire();
+        self.perf.profile.add(crate::profile_keys::ProfKey::AcquireSurface, surface_start.elapsed().as_secs_f64());
+        let acquired = match surface_frame {
             wgpu::CurrentSurfaceTexture::Success(_)
             | wgpu::CurrentSurfaceTexture::Suboptimal(_)
             if hidden_now =>
@@ -360,7 +363,13 @@ impl App {
                 if self.settings.vsync {
                     win.pre_present_notify();
                 }
-                s.present(&r.device, &r.queue, frame);
+                if omsi_cfg::flags::OMSI_PROFILE.is_set() {
+                    let (encode, surface) = s.present_timed(&r.device, &r.queue, frame);
+                    self.perf.profile.add(crate::profile_keys::ProfKey::PresentEncode, encode);
+                    self.perf.profile.add(crate::profile_keys::ProfKey::PresentSurface, surface);
+                } else {
+                    s.present(&r.device, &r.queue, frame);
+                }
             }
             None => {
                 let _ = omsi_render::wait_gpu(&r.device, None);

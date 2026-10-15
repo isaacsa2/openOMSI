@@ -9,7 +9,7 @@ fn pictures_larger_than_the_chip_takes_are_made_to_fit() {
     std::env::set_var("OMSI_GPU_LIMITS", "downlevel");
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let renderer = pollster::block_on(omsi_render::Renderer::new_with(&instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb), Default::default()))
         .expect("renderer on the no-op device");

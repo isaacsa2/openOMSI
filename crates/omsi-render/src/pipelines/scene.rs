@@ -103,7 +103,7 @@ impl SceneBase {
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs_main"),
-                buffers: &[self.vertex_layout.clone()],
+                buffers: &[Some(self.vertex_layout.clone())],
                 compilation_options: Default::default(),
             },
             primitive: one_sided_primitive(cull),
@@ -218,7 +218,7 @@ pub(crate) fn prepass(device: &wgpu::Device, scene: &SceneBase, msaa: u32, enhan
                 module: &scene.shader,
                 // (the place and the cut-out's coverage only: see `vs_depth`)
                 entry_point: Some("vs_depth"),
-                buffers: &[scene.vertex_layout.clone()],
+                buffers: &[Some(scene.vertex_layout.clone())],
                 compilation_options: Default::default(),
             },
             primitive: one_sided_primitive(cull),

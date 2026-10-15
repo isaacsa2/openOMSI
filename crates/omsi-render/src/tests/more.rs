@@ -180,7 +180,7 @@ fn a_smoke_sprite_carries_its_spin_ground_and_z_offset() {
 fn launcher_preview_initializes_without_enhanced_or_ray_tracing_resources() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let mut renderer = pollster::block_on(Renderer::new_with(&instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb), RenderOptions { msaa: 1, preview_only: true, no_enhanced: true, ray_tracing: false, ..Default::default() })).unwrap();
     assert!(renderer.hdr_pass.is_none());
@@ -200,7 +200,7 @@ fn launcher_preview_initializes_without_enhanced_or_ray_tracing_resources() {
 fn noop_backend_initializes_renderer() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let res = pollster::block_on(Renderer::new_with(
         &instance,
@@ -221,7 +221,7 @@ fn noop_backend_initializes_renderer() {
 fn vanilla_gl_build_omits_unused_enhanced_resources() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let base = pollster::block_on(Renderer::new_with(
         &instance,
@@ -275,7 +275,7 @@ fn vanilla_gl_build_omits_unused_enhanced_resources() {
 fn excavation_keeps_ordinary_depth_prefilling_without_a_gpu() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let mut renderer = pollster::block_on(Renderer::new_with(
         &instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb),
@@ -334,7 +334,7 @@ fn excavation_keeps_ordinary_depth_prefilling_without_a_gpu() {
 fn an_excavation_is_prefilled_at_1x_only_on_apple_graphics() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let mut renderer = pollster::block_on(Renderer::new_with(
         &instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb),
@@ -368,7 +368,7 @@ fn an_excavation_is_prefilled_at_1x_only_on_apple_graphics() {
 fn declared_transmap_ignores_slot_alpha() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let renderer = pollster::block_on(Renderer::new_with(
         &instance,
@@ -1188,7 +1188,7 @@ fn display_behind_a_pane_keeps_its_pixel_contrast() {
 fn a_texture_the_card_refuses_is_drawn_plain_without_cutting_the_texture_budget() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let renderer = pollster::block_on(Renderer::new_with(
         &instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb),

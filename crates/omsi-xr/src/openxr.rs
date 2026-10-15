@@ -314,7 +314,7 @@ impl Vr {
                 let texture = unsafe {
                     renderer
                         .device
-                        .create_texture_from_hal::<wgpu_hal::api::Dx12>(hal_texture, &desc)
+                        .create_texture_from_hal::<wgpu_hal::api::Dx12>(hal_texture, &desc, wgpu::TextureUses::UNINITIALIZED)
                 };
                 Ok((texture, resource))
             })

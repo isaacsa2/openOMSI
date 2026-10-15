@@ -100,7 +100,7 @@ impl LampSight {
         match self.state.swap(0, Ordering::Relaxed) {
             1 => {
                 {
-                    let bytes = self.readback.slice(..).get_mapped_range();
+                    let bytes = self.readback.slice(..).get_mapped_range().expect("GPU readback was mapped");
                     self.seen = lamps.iter().enumerate().map(|(i, p)| (*p, bytes[i * 4] as f32 / 255.0)).collect();
                 }
                 self.readback.unmap();

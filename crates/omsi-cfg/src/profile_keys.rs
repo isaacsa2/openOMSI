@@ -9,6 +9,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ProfKey {
     Acquire,
+    AcquireSurface,
     Clock,
     Drive,
     Duty,
@@ -35,6 +36,8 @@ pub enum ProfKey {
     Player,
     PlayerHover,
     Present,
+    PresentEncode,
+    PresentSurface,
     Record,
     Render,
     Scripted,
@@ -71,12 +74,12 @@ pub enum ProfKey {
 
 impl ProfKey {
     /// Every key, in the order of their names.
-    pub const ALL: [ProfKey; 59] = {
+    pub const ALL: [ProfKey; 62] = {
         use ProfKey::*;
         [
-            Acquire, Clock, Drive, Duty, Gpu, GroundGap, Hud, HudNavigator, Humans, Integrations, Lan, Lighting,
+            Acquire, AcquireSurface, Clock, Drive, Duty, Gpu, GroundGap, Hud, HudNavigator, Humans, Integrations, Lan, Lighting,
             LightsAndRain, LightsAmbience, LightsAtlas, LightsCollect, LightsRain, LightsSoundscape, LightsSpray,
-            Limiter, Mirrors, OnFoot, Photo, Placement, Player, PlayerHover, Present, Record, Render, Scripted,
+            Limiter, Mirrors, OnFoot, Photo, Placement, Player, PlayerHover, Present, PresentEncode, PresentSurface, Record, Render, Scripted,
             ScriptedApply, ScriptedBoards, ScriptedInputs, ScriptedLamps, ScriptedLock, ScriptedScripts,
             ScriptedTextures, Server, Service, Shell, SimThreadStep, SimThreadWait, Snapshot, Startup, Streaming, Surroundings, Traffic,
             TrafficAudio, TrafficPopulate, TrafficSchedule, TrafficSync, TrafficTick, TrafficTickAi,
@@ -89,6 +92,7 @@ impl ProfKey {
         use ProfKey::*;
         match self {
             Acquire => "acquire",
+            AcquireSurface => "acquire.surface",
             Clock => "clock",
             Drive => "drive",
             Duty => "duty",
@@ -115,6 +119,8 @@ impl ProfKey {
             Player => "player",
             PlayerHover => "player.hover",
             Present => "present",
+            PresentEncode => "present.encode",
+            PresentSurface => "present.surface",
             Record => "record",
             Render => "render",
             Scripted => "scripted",

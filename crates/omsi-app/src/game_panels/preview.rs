@@ -56,7 +56,7 @@ fn picture(name: &str, panels: &[(Panel, Option<&str>)]) {
     queue.submit([enc.finish()]);
     buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
     device.poll(wgpu::PollType::wait_indefinitely()).ok();
-    let data = buf.slice(..).get_mapped_range();
+    let data = buf.slice(..).get_mapped_range().expect("GPU readback was mapped");
     let mut img = image::RgbaImage::new(w, h);
     for y in 0..h {
         for x in 0..w {

@@ -75,7 +75,7 @@ pub(crate) fn build(device: &wgpu::Device, scene: &SceneBase, shadow_size: u32) 
                     5 => "vs_shadow_lamp2",
                     _ => "vs_shadow_lamp3",
                 }),
-                buffers: &[scene.vertex_layout.clone()],
+                buffers: &[Some(scene.vertex_layout.clone())],
                 compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState {

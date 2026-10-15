@@ -110,7 +110,7 @@ impl Gpu {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<Vertex>() as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &attrs }],
+                buffers: &[Some(wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<Vertex>() as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &attrs })],
                 compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
@@ -377,7 +377,7 @@ impl Gpu {
                 continue;
             }
             pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
-            pass.set_vertex_buffer(0, buf.slice(..));
+            pass.set_vertex_buffer(0, Some(buf.slice(..)));
             pass.draw(d.range.clone(), 0..1);
         }
     }

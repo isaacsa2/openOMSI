@@ -241,7 +241,7 @@ fn read_jpeg(r: &Renderer, tex: &wgpu::Texture, quality: u8) -> anyhow::Result<V
     let slice = buf.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
     omsi_render::wait_gpu(&r.device, None).ok();
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().expect("GPU readback was mapped");
     let bgra = matches!(tex.format(), wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
     let mut rgb = Vec::with_capacity((w * h * 3) as usize);
     for y in 0..h as usize {

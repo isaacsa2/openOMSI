@@ -170,11 +170,11 @@ impl Pipelines {
                 vertex: wgpu::VertexState {
                     module: scene_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[wgpu::VertexBufferLayout {
+                    buffers: &[Some(wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<Vertex>() as u64,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
-                    }],
+                    })],
                     compilation_options: Default::default(),
                 },
                 primitive: one_sided_primitive(cull),
@@ -247,11 +247,11 @@ impl Pipelines {
                         vertex: wgpu::VertexState {
                             module: scene_shader,
                             entry_point: Some("vs_puddle_vehicle"),
-                            buffers: &[wgpu::VertexBufferLayout {
+                            buffers: &[Some(wgpu::VertexBufferLayout {
                                 array_stride: std::mem::size_of::<Vertex>() as u64,
                                 step_mode: wgpu::VertexStepMode::Vertex,
                                 attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
-                            }],
+                            })],
                             compilation_options: Default::default(),
                         },
                         primitive,
