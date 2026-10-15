@@ -157,6 +157,11 @@ impl App {
             cmd.arg("--autostart");
         }
         cmd.env("OMSI_SAFE_GPU", (n + 1).to_string());
+        // Carry the running world's limit, which may already have been cut after OOM.
+        // Reading settings.cfg alone can otherwise raise 1440 MB back to 2666 MB.
+        if let Some(mb) = self.world.as_ref().and_then(|w| omsi_cfg::gpu_recovery::restart_limit_mb(w.texture_budget_bytes())) {
+            cmd.env("OMSI_SAFE_TEXTURE_MB", mb.to_string());
+        }
         // (on Windows the other interface: DirectX 12 after Vulkan, Vulkan after DirectX 12 -
         // an AMD Radeon's DX12 driver lost the device where its Vulkan one did not, #274)
         let name = self.renderer.as_ref().map(|r| r.adapter_name.clone()).unwrap_or_default();

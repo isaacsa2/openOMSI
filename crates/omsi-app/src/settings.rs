@@ -898,13 +898,11 @@ impl Settings {
         self.ssao = false;
         self.shadow_size = self.shadow_size.min(2048);
         self.mirror_size = self.mirror_size.min(256);
-        let budget = if self.texture_memory > 0 { self.texture_memory } else { 1200 };
-        self.texture_memory = (budget * 2 / 3).max(400);
+        self.texture_memory = omsi_cfg::gpu_recovery::texture_budget_mb(self.texture_memory, n, omsi_cfg::flags::OMSI_SAFE_TEXTURE_MB.parse());
         if n >= 2 {
             self.shadows = false;
             self.shadow_size = 1024;
             self.render_scale = if self.render_scale > 0.0 { self.render_scale.min(0.75) } else { 0.75 };
-            self.texture_memory = self.texture_memory.min(700);
             self.mirror_size = self.mirror_size.min(128);
         }
         log::warn!("safer graphics after a lost graphics device ({n}): msaa 1, SSAO off, shadows {} ({}), textures {} MB, render scale {}", self.shadows, self.shadow_size, self.texture_memory, self.render_scale_text());

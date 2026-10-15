@@ -424,6 +424,7 @@ flags! {
     OMSI_RT_REFL_HALF: Bool, Switch, Use, "off", "Trace reflections at half size.";
     OMSI_SAFE_GPU: Num, Setup, Use, "0", "Restarts after a lost graphics device: lighter on the card each time. Set at runtime on Android and by the restart.";
     OMSI_SAFE_MODE: Bool, Setup, Use, "off", "Safe mode, set by the start guard after failed starts: the basic render pipelines and no plugins.";
+    OMSI_SAFE_TEXTURE_MB: Num, Setup, Use, "-", "Texture budget in MB carried into a restart after device loss; only caps the safer graphics profile.";
     OMSI_SCENE_DIGEST: Bool, Test, Use, "off", "Log a hash of the renderer's scene (its instances in order, their places, materials and parameters) before each offscreen picture: two runs whose renderers saw the same calls log the same digests.";
     OMSI_SCREEN_AT: Text, Setup, Once, "-", "x,y: the screen (a point on the desktop, pixels) the game window opens on; the launcher sets it to where it stands.";
     OMSI_SEED: Num, Test, Use, "random", "Seed of the scripts' random numbers (repeat a session).";
