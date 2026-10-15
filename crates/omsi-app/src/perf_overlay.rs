@@ -467,6 +467,9 @@ mod tests {
         assert_eq!(part_of("hud"), Some(Part::Interface));
         assert_eq!(part_of("render"), Some(Part::Drawing));
         assert_eq!(part_of("present"), Some(Part::Gpu));
+        assert_eq!(part_of("acquire.surface"), None);
+        assert_eq!(part_of("present.encode"), None);
+        assert_eq!(part_of("present.surface"), None);
         assert_eq!(part_of("limiter"), Some(Part::Limit));
     }
 

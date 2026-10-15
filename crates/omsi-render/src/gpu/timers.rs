@@ -175,7 +175,7 @@ impl GpuTimers {
         }
         let n = t.pending.len() * 2;
         {
-            let view = t.read.slice(0..n as u64 * 8).get_mapped_range();
+            let view = t.read.slice(0..n as u64 * 8).get_mapped_range().expect("GPU readback was mapped");
             let stamps: &[u64] = bytemuck::cast_slice(&view[..n * 8]);
             // The passes in the order the GPU finished them, each counted from where the one
             // before it ended (the untimed passes in between go to the next timed one). A

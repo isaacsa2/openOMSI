@@ -93,7 +93,7 @@ mod tests {
     fn noop_device() -> wgpu::Device {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         descriptor.backends = wgpu::Backends::NOOP;
-        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
         let instance = wgpu::Instance::new(descriptor);
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap().0

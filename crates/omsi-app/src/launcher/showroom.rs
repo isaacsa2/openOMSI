@@ -578,7 +578,7 @@ impl Showroom {
         });
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv().ok()?.ok()?;
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().expect("GPU readback was mapped");
         let bgra = matches!(renderer.format(), wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
         let mut out = Vec::with_capacity((row * h) as usize);
         for y in 0..h as usize {

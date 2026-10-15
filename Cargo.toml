@@ -64,11 +64,11 @@ parking_lot = "0.12"
 # (the world snapshot the simulation reads without a lock: `omsi-sim::world_data`)
 arc-swap = "1.7"
 rand = "0.10"
-wgpu = { version = "29", default-features = false, features = ["std", "parking_lot", "metal", "vulkan", "dx12", "gles", "wgsl", "noop"] }
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "metal", "vulkan", "dx12", "gles", "wgsl", "noop"] }
 # wgpu's parts that are used directly: always wgpu's own version, or their types do not
 # match wgpu's (Dependabot's `wgpu` group updates the three together)
-wgpu-hal = "29"
-naga = "29"
+wgpu-hal = "30.0.1"
+naga = "30.0.1"
 winit = "0.30"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "1.0"
@@ -108,17 +108,17 @@ strip = "debuginfo"
 # the Security audit workflow fails when Cargo.lock lists one as unused)
 [patch.crates-io]
 gpu-allocator = { git = "https://github.com/openOMSI-Project/gpu-allocator", rev = "6ad8a7eeb9c3e1dcd65656f718c593a0a1a3915d" }
-# wgpu from the org's fork (upstream v29.0.4 plus fixes): GL texture units sized from the driver,
-# the GL context released while a thread waits for the GPU, errors instead of panics on driver
-# failures, Adapter::memory_info, GLES over ANGLE (Direct3D 11) on Windows, and fixes backported from
-# v30 (Vulkan acquire fence, out-of-memory checks, DX12 textureNumLevels, 3D texture init); every crate of the
-# fork that Cargo.lock lists is patched, or the fork's and crates.io's halves would not match
-wgpu = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-wgpu-core = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-wgpu-core-deps-apple = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-wgpu-core-deps-emscripten = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-wgpu-core-deps-windows-linux-android = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-wgpu-hal = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-wgpu-types = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-wgpu-naga-bridge = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
-naga = { git = "https://github.com/openOMSI-Project/wgpu-openomsi", rev = "4eb06e5bf8062be2978d93e95556a4dd83f1d3b8" }
+# Stable wgpu v30.0.1 plus the existing openOMSI compatibility patches (ANGLE, GL
+# context waits/limits/cache, memory info, shader errors and DX12 interop). This test
+# revision also adds opt-in WGPU_GL_PROFILE submission timings, without changing waits.
+# Patch every shared crate, including v30's naga-types, to keep their types identical.
+wgpu = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+wgpu-core = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+wgpu-core-deps-apple = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+wgpu-core-deps-emscripten = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+wgpu-hal = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+wgpu-types = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+wgpu-naga-bridge = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+naga = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }
+naga-types = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "f24e8254b513a3a580b095b4199cc9ea826a025f" }

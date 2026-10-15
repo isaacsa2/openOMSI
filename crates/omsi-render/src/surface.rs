@@ -52,6 +52,7 @@ impl<'w> SurfaceState<'w> {
         let surface = instance.create_surface(window).context("create_surface")?;
         let encode = srgb_encode::SrgbEncode::wanted(renderer, renderer.format());
         let mut config = wgpu::SurfaceConfiguration {
+            color_space: wgpu::SurfaceColorSpace::Auto,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: encode.as_ref().map_or(renderer.format(), |e| e.window_format()),
             width: width.max(1),
@@ -82,6 +83,7 @@ impl<'w> SurfaceState<'w> {
     pub fn early(instance: &wgpu::Instance, window: Arc<winit_window::Window>, device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32, vsync: bool) -> Result<Self> {
         let surface = instance.create_surface(window).context("create_surface")?;
         let config = wgpu::SurfaceConfiguration {
+            color_space: wgpu::SurfaceColorSpace::Auto,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: width.max(1),
@@ -126,7 +128,16 @@ impl<'w> SurfaceState<'w> {
         if let Some(e) = &self.encode {
             e.encode(device, queue, &frame);
         }
-        frame.present();
+        queue.present(frame);
+    }
+
+    /// CPU wall times of the optional sRGB conversion and the surface presentation.
+    pub fn present_timed(&self, device: &wgpu::Device, queue: &wgpu::Queue, frame: wgpu::SurfaceTexture) -> (f64, f64) {
+        let start = std::time::Instant::now();
+        if let Some(e) = &self.encode { e.encode(device, queue, &frame); }
+        let encoded = std::time::Instant::now();
+        queue.present(frame);
+        (encoded.duration_since(start).as_secs_f64(), encoded.elapsed().as_secs_f64())
     }
 
     pub fn resize(&mut self, renderer: &Renderer, width: u32, height: u32) {

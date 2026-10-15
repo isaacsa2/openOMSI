@@ -179,7 +179,7 @@ pub(crate) fn encode_batches_filtered<'a, E: wgpu::util::RenderEncoder<'a>>(
         if b.mesh != mesh {
             let m = &scene.meshes[b.mesh as usize];
             if page.is_none_or(|(v, i)| *v != m.vertex_buf || *i != m.index_buf) {
-                pass.set_vertex_buffer(0, m.vertex_buf.slice(..));
+                pass.set_vertex_buffer(0, Some(m.vertex_buf.slice(..)));
                 pass.set_index_buffer(m.index_buf.slice(..), wgpu::IndexFormat::Uint32);
                 page = Some((&m.vertex_buf, &m.index_buf));
             }

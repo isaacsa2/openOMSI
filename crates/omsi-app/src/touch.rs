@@ -1224,7 +1224,7 @@ impl Touch {
         r.queue.submit([enc.finish()]);
         buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         omsi_render::wait_gpu(&r.device, None).ok();
-        let data = buf.slice(..).get_mapped_range();
+        let data = buf.slice(..).get_mapped_range().expect("GPU readback was mapped");
         let mut out = vec![0u8; (w * h * 4) as usize];
         for y in 0..h as usize {
             let row = &data[y * stride as usize..y * stride as usize + w as usize * 4];

@@ -133,7 +133,7 @@ impl Coronas {
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs_main"),
-                buffers: &[corona_vertex],
+                buffers: &[Some(corona_vertex)],
                 compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState {

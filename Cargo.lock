@@ -505,9 +505,9 @@ dependencies = [
 
 [[package]]
 name = "bit-set"
-version = "0.9.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ddef2995421ab6a5c779542c81ee77c115206f4ad9d5a8e05f4ff49716a3dd"
+checksum = "09ec2f926cc3060f09db9ebc5b52823d85268d24bb917e472c0c4bea35780a7d"
 dependencies = [
  "bit-vec",
 ]
@@ -2036,26 +2036,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpu-descriptor"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b89c83349105e3732062a895becfc71a8f921bb71ecbbdd8ff99263e3b53a0ca"
-dependencies = [
- "bitflags 2.13.2",
- "gpu-descriptor-types",
- "hashbrown 0.15.5",
-]
-
-[[package]]
-name = "gpu-descriptor-types"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
-dependencies = [
- "bitflags 2.13.2",
-]
-
-[[package]]
 name = "granit-parser"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2125,12 +2105,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hexf-parse"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "hkdf"
@@ -2913,8 +2887,8 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "naga"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -2923,17 +2897,28 @@ dependencies = [
  "cfg_aliases",
  "codespan-reporting",
  "half",
- "hashbrown 0.16.1",
- "hexf-parse",
+ "hashbrown 0.17.1",
  "indexmap",
  "libm",
  "log",
+ "naga-types",
  "num-traits",
  "once_cell",
  "rustc-hash 1.1.0",
  "spirv",
  "thiserror 2.0.21",
  "unicode-ident",
+]
+
+[[package]]
+name = "naga-types"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
+dependencies = [
+ "hashbrown 0.17.1",
+ "indexmap",
+ "rustc-hash 1.1.0",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3338,6 +3323,7 @@ dependencies = [
  "bitflags 2.13.2",
  "objc2 0.6.5",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
 ]
@@ -6392,8 +6378,8 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "wgpu"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.2",
@@ -6401,7 +6387,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "document-features",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "js-sys",
  "log",
  "parking_lot",
@@ -6420,8 +6406,8 @@ dependencies = [
 
 [[package]]
 name = "wgpu-core"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -6430,10 +6416,11 @@ dependencies = [
  "bytemuck",
  "cfg_aliases",
  "document-features",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "indexmap",
  "log",
  "naga",
+ "naga-types",
  "once_cell",
  "parking_lot",
  "portable-atomic",
@@ -6452,32 +6439,32 @@ dependencies = [
 
 [[package]]
 name = "wgpu-core-deps-apple"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "wgpu-hal",
 ]
 
 [[package]]
 name = "wgpu-core-deps-emscripten"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "wgpu-hal",
 ]
 
 [[package]]
 name = "wgpu-core-deps-windows-linux-android"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "wgpu-hal",
 ]
 
 [[package]]
 name = "wgpu-hal"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -6491,17 +6478,18 @@ dependencies = [
  "glow",
  "glutin_wgl_sys",
  "gpu-allocator",
- "gpu-descriptor",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "js-sys",
  "khronos-egl",
  "libc",
  "libloading 0.8.9",
  "log",
  "naga",
+ "naga-types",
  "ndk-sys 0.6.0+11769913",
  "objc2 0.6.5",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
@@ -6516,6 +6504,7 @@ dependencies = [
  "raw-window-metal",
  "renderdoc-sys",
  "smallvec",
+ "static_assertions",
  "thiserror 2.0.21",
  "wasm-bindgen",
  "wayland-sys",
@@ -6529,8 +6518,8 @@ dependencies = [
 
 [[package]]
 name = "wgpu-naga-bridge"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "naga",
  "wgpu-types",
@@ -6538,14 +6527,16 @@ dependencies = [
 
 [[package]]
 name = "wgpu-types"
-version = "29.0.4"
-source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
+version = "30.0.1"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=f24e8254b513a3a580b095b4199cc9ea826a025f#f24e8254b513a3a580b095b4199cc9ea826a025f"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
  "js-sys",
  "log",
+ "naga-types",
  "raw-window-handle",
+ "static_assertions",
  "web-sys",
 ]
 

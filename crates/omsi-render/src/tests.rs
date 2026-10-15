@@ -410,7 +410,7 @@ fn a_mesh_page_hands_freed_space_to_the_next_mesh_and_joins_its_holes() {
 fn on_no_device_the_mesh_pages_hold_places_but_no_bytes() {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let renderer = pollster::block_on(Renderer::new_with(
         &instance, None, Some(wgpu::TextureFormat::Rgba8UnormSrgb),

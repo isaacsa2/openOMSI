@@ -6,7 +6,7 @@ fn texture_unit_fallback_builds_and_draws_without_enhanced() {
     std::env::set_var("OMSI_GL_TEXTURE_UNITS", "1");
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::NOOP;
-    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+    descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
     let instance = wgpu::Instance::new(descriptor);
     let mut renderer = pollster::block_on(omsi_render::Renderer::new_with(
         &instance,

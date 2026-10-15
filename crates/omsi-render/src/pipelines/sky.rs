@@ -66,7 +66,7 @@ impl SkyBase {
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs_main"),
-                buffers: &[sky_vertex],
+                buffers: &[Some(sky_vertex)],
                 compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState {

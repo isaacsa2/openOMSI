@@ -173,7 +173,7 @@ impl Renderer {
         if let Some(sky) = &scene.sky_bind_group {
             pass.set_pipeline(sky_pipe);
             pass.set_bind_group(1, sky, &[]);
-            pass.set_vertex_buffer(0, self.sky.sky_mesh.0.slice(..));
+            pass.set_vertex_buffer(0, Some(self.sky.sky_mesh.0.slice(..)));
             pass.set_index_buffer(self.sky.sky_mesh.1.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.sky.sky_mesh.2, 0, 0..1);
         }
@@ -352,7 +352,7 @@ impl Renderer {
             if let Some(sb) = &scene.smoke_buf {
                 pass.set_pipeline(&pp.smoke_pipeline);
                 pass.set_bind_group(1, &self.lights.smoke_bind_group, &[]);
-                pass.set_vertex_buffer(0, sb.slice(..));
+                pass.set_vertex_buffer(0, Some(sb.slice(..)));
                 pass.draw(0..6, 0..scene.smoke_count);
             }
         }
@@ -381,7 +381,7 @@ impl Renderer {
             if let Some(cb) = scene.corona_buf.as_ref().filter(|_| coronas_on) {
                 pass.set_pipeline(&pp.corona_pipeline);
                 pass.set_bind_group(0, scene.camera_bind_group.as_ref().unwrap(), &[]);
-                pass.set_vertex_buffer(0, cb.slice(..));
+                pass.set_vertex_buffer(0, Some(cb.slice(..)));
                 // in runs by picture (the standard glow, the lights' own bitmaps, the cone)
                 for &(tex, first, count, _) in scene.corona_runs.iter().filter(|r| r.3 == late) {
                     let bg = self.lights.corona_textures.get(tex as usize).and_then(|b| b.as_ref()).unwrap_or(&self.lights.corona_bind_group);

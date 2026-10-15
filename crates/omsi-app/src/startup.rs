@@ -204,7 +204,7 @@ pub(crate) fn graphics_instance() -> wgpu::Instance {
     if crate::server::SERVER_MODE.load(std::sync::atomic::Ordering::Relaxed) {
         // the dedicated server draws nothing: wgpu's no-op device takes every call
         descriptor.backends = wgpu::Backends::NOOP;
-        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true };
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions { enable: true, ..Default::default() };
         return wgpu::Instance::new(descriptor);
     }
     descriptor.backend_options.gl.context_lock_timeout = Some(GL_CONTEXT_LOCK_TIMEOUT);
@@ -579,7 +579,7 @@ pub(crate) fn present_clear(surface: &mut SurfaceState<'_>, device: &wgpu::Devic
     }));
     queue.submit([enc.finish()]);
     window.pre_present_notify();
-    frame.present();
+    queue.present(frame);
     true
 }
 
