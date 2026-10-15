@@ -94,6 +94,64 @@ impl MeshRaycast {
         best.is_finite().then_some(best / scale)
     }
 
+    /// The same candidates, in index order, as `cone_triangles`, without scanning the
+    /// entire cockpit panel before trying the cursor's rings of rays.
+    pub fn cone_triangles(
+        &self,
+        origin: Vec3,
+        axis: Vec3,
+        tan_half: f32,
+        mesh: &MeshData,
+        transform: &Mat4,
+    ) -> Vec<u32> {
+        let mut out = Vec::new();
+        if !self.nodes.is_empty() {
+            let inv = transform.inverse();
+            let o = inv.transform_point3(origin);
+            let a = inv.transform_vector3(axis).normalize_or_zero();
+            self.collect_cone(0, o, a, tan_half, mesh, &mut out);
+            out.sort_unstable();
+        }
+        out
+    }
+
+    fn collect_cone(
+        &self,
+        index: usize,
+        o: Vec3,
+        a: Vec3,
+        tan_half: f32,
+        mesh: &MeshData,
+        out: &mut Vec<u32>,
+    ) {
+        let node = &self.nodes[index];
+        let c = (node.lo + node.hi) * 0.5;
+        // Each triangle's centroid is in this box (radius R) and its sphere's
+        // radius is at most 2R. Use 3R to contain those spheres too: testing just
+        // the box's own sphere could drop candidates accepted by the old filter.
+        let r = (node.hi - node.lo).length() * 1.5;
+        if !in_cone(o, a, tan_half, c, r) {
+            return;
+        }
+        if let Some((left, right)) = node.children {
+            self.collect_cone(left, o, a, tan_half, mesh, out);
+            self.collect_cone(right, o, a, tan_half, mesh, out);
+        } else {
+            for &k in &self.triangles[node.first..node.first + node.count] {
+                let p = |i| mesh.positions[mesh.indices[k + i] as usize];
+                let (p0, p1, p2) = (p(0), p(1), p(2));
+                let c = (p0 + p1 + p2) / 3.0;
+                let r = (p0 - c)
+                    .length()
+                    .max((p1 - c).length())
+                    .max((p2 - c).length());
+                if in_cone(o, a, tan_half, c, r) {
+                    out.push(k as u32);
+                }
+            }
+        }
+    }
+
     fn trace(&self, index: usize, o: Vec3, d: Vec3, mesh: &MeshData, best: &mut f32) {
         let node = &self.nodes[index];
         if !intersects(node, o, d, *best) {
@@ -111,6 +169,16 @@ impl MeshRaycast {
             }
         }
     }
+}
+
+fn in_cone(o: Vec3, a: Vec3, tan_half: f32, c: Vec3, r: f32) -> bool {
+    let w = c - o;
+    let along = w.dot(a);
+    if along < -r {
+        return false;
+    }
+    let across = (w - a * along).length();
+    !(across > (along + r).max(0.0) * tan_half + r + 1e-3)
 }
 
 fn intersects(node: &Node, o: Vec3, d: Vec3, best: f32) -> bool {
