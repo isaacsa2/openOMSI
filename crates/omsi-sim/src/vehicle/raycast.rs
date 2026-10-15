@@ -3,6 +3,21 @@
 use super::*;
 
 impl VehicleMesh {
+    pub fn cone_triangles(
+        &self,
+        origin: Vec3,
+        axis: Vec3,
+        tan_half: f32,
+        transform: &Mat4,
+    ) -> Vec<u32> {
+        if self.data.indices.len() <= 24 {
+            return omsi_geometry::cone_triangles(origin, axis, tan_half, &self.data, transform);
+        }
+        self.ray_bounds
+            .get_or_init(|| Arc::new(omsi_geometry::MeshRaycast::new(&self.data)))
+            .cone_triangles(origin, axis, tan_half, &self.data, transform)
+    }
+
     pub fn prepare_picking(&self) {
         if self.data.indices.len() > 24 {
             self.ray_bounds

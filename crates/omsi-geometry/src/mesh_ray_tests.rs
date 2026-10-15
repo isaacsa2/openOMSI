@@ -93,6 +93,32 @@ fn nearest_surface_is_preserved_when_triangles_overlap() {
 }
 
 #[test]
+fn cone_candidates_match_the_scan_including_wide_and_transformed_cones() {
+    let mesh = panels(16);
+    let tree = MeshRaycast::new(&mesh);
+    let transforms = [
+        Mat4::IDENTITY,
+        Mat4::from_rotation_x(0.9) * Mat4::from_scale(Vec3::new(-0.2, 3.0, 1.7)),
+    ];
+    for xf in transforms {
+        for x in -2..=18 {
+            for y in -2..=18 {
+                let o = xf.transform_point3(Vec3::new(x as f32, y as f32, 4.0));
+                for d in [-Vec3::Z, Vec3::new(0.2, -0.1, -1.0).normalize(), Vec3::Z] {
+                    let d = xf.transform_vector3(d).normalize();
+                    for spread in [0.0, 0.001, 0.02, 0.5] {
+                        assert_eq!(
+                            tree.cone_triangles(o, d, spread, &mesh, &xf),
+                            crate::cone_triangles(o, d, spread, &mesh, &xf)
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "synthetic CPU timing; run with --release --ignored --nocapture"]
 fn dense_body_picking_timing() {
     let mesh = panels(128);
