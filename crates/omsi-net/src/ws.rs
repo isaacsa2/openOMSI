@@ -64,7 +64,9 @@ pub struct ServerInfo {
 /// What a dedicated server's shared world holds: the AI cars on the roads (`cars`), its
 /// timetable buses (`buses`), the cars put to sleep far from every player (`dormant`), the
 /// parked cars (`parked`), the people walking (`walking`), waiting at a stop (`waiting`) or
-/// in a bus (`aboard`), and the traffic density asked for (`traffic`, as `server.cfg`'s).
+/// in a bus (`aboard`), the traffic density asked for (`traffic`, as `server.cfg`'s), whether
+/// the server has people at all (`passengers`) and the passenger density it applies now
+/// (`passenger_density`, the factor on the map's own demand).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct WorldCounts {
     pub cars: usize,
@@ -75,13 +77,24 @@ pub struct WorldCounts {
     pub waiting: usize,
     pub aboard: usize,
     pub traffic: usize,
+    pub passengers: bool,
+    pub passenger_density: f32,
 }
 
 impl WorldCounts {
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"cars\":{},\"buses\":{},\"dormant\":{},\"parked\":{},\"walking\":{},\"waiting\":{},\"aboard\":{},\"traffic\":{}}}",
-            self.cars, self.buses, self.dormant, self.parked, self.walking, self.waiting, self.aboard, self.traffic
+            "{{\"cars\":{},\"buses\":{},\"dormant\":{},\"parked\":{},\"walking\":{},\"waiting\":{},\"aboard\":{},\"traffic\":{},\"passengers\":{},\"passenger_density\":{}}}",
+            self.cars,
+            self.buses,
+            self.dormant,
+            self.parked,
+            self.walking,
+            self.waiting,
+            self.aboard,
+            self.traffic,
+            self.passengers,
+            if self.passenger_density.is_finite() { format!("{:.2}", self.passenger_density) } else { "null".into() }
         )
     }
 }
@@ -657,6 +670,19 @@ fn serve(stream: TcpStream, slot: Option<SourceSlot>, target: SocketAddr, info: 
         // (the request is read off the socket before the answer: some proxies wait)
         let got = s.read(&mut head).unwrap_or(0);
         let mut request = head[..got].to_vec();
+        // a dedicated server's administration (`ws_api`): its own answer and headers
+        if crate::ws_api::wants(&path) {
+            read_body(&mut s, &mut request);
+            let r = crate::ws_api::answer(&request, peer);
+            let mut hdr = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n", r.status, r.content_type, r.body.len());
+            for (k, v) in &r.headers {
+                hdr.push_str(&format!("{k}: {}\r\n", v.replace(['\r', '\n'], " ")));
+            }
+            hdr.push_str("\r\n");
+            s.write_all(hdr.as_bytes()).map_err(|e| e.to_string())?;
+            s.write_all(&r.body).map_err(|e| e.to_string())?;
+            return Ok(());
+        }
         let (status, ctype, body): (&str, &str, Vec<u8>) = match path.as_str() {
             "/admin" => {
                 read_body(&mut s, &mut request);
@@ -1073,9 +1099,9 @@ mod tests {
     fn status_counts_a_servers_world() {
         let mut i = ServerInfo { name: "NEROSY".into(), players: 2, vehicles: vec!["Vehicles/A/a.bus".into()], ..Default::default() };
         assert!(i.to_json().ends_with(",\"world\":null}"));
-        i.world = Some(WorldCounts { cars: 41, buses: 7, dormant: 12, parked: 230, walking: 55, waiting: 18, aboard: 9, traffic: 30 });
+        i.world = Some(WorldCounts { cars: 41, buses: 7, dormant: 12, parked: 230, walking: 55, waiting: 18, aboard: 9, traffic: 30, passengers: true, passenger_density: 1.5 });
         let j = i.to_json();
-        assert!(j.ends_with(",\"world\":{\"cars\":41,\"buses\":7,\"dormant\":12,\"parked\":230,\"walking\":55,\"waiting\":18,\"aboard\":9,\"traffic\":30}}"), "{j}");
+        assert!(j.ends_with(",\"world\":{\"cars\":41,\"buses\":7,\"dormant\":12,\"parked\":230,\"walking\":55,\"waiting\":18,\"aboard\":9,\"traffic\":30,\"passengers\":true,\"passenger_density\":1.50}}"), "{j}");
         // the launcher still reads the rest (the world's keys are none of the server's own)
         let back = ServerInfo::from_json(&j).unwrap();
         assert_eq!((back.name.as_str(), back.players, back.vehicles.len()), ("NEROSY", 2, 1));
