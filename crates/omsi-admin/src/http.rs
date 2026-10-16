@@ -622,18 +622,20 @@ mod tests {
     fn the_panels_files() {
         let (h, cfg) = (hub(), WebCfg::default());
         for (path, kind) in [("/admin/", "text/html"), ("/admin/index.html", "text/html"), ("/admin/panel.js", "text/javascript"), ("/admin/panel.css", "text/css")] {
-            let r = handle(&h, &cfg, &Request { method: "GET", path, query: "", headers: "", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap();
+            let r = handle(&h, &cfg, &Request { method: "GET", path, query: "", headers: "Host: 127.0.0.1:27025", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap();
             assert_eq!(r.status, "200 OK", "{path}");
             assert!(r.content_type.starts_with(kind), "{path}");
             assert!(r.headers.iter().any(|(k, v)| *k == "Content-Security-Policy" && v.contains("script-src 'self'") && !v.contains("unsafe")), "{path}");
         }
-        let page = handle(&h, &cfg, &Request { method: "GET", path: "/admin/", query: "", headers: "", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap();
+        let page = handle(&h, &cfg, &Request { method: "GET", path: "/admin/", query: "", headers: "Host: 127.0.0.1:27025", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap();
         let html = String::from_utf8(page.body).unwrap();
         // no inline script (the policy would refuse it), no password in the page
         assert!(!html.contains("<script>") && html.contains("src=\"panel.js\""));
-        assert_eq!(handle(&h, &cfg, &Request { method: "GET", path: "/admin/../server.cfg", query: "", headers: "", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap().status, "404 Not Found");
-        assert_eq!(handle(&h, &cfg, &Request { method: "GET", path: "/admin/", query: "", headers: "X-Forwarded-For: 203.0.113.9", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap().status, "403 Forbidden");
-        assert_eq!(handle(&h, &cfg, &Request { method: "GET", path: "/admin/", query: "", headers: "", body: &[], peer: Some("192.0.2.4:1".parse().unwrap()) }).unwrap().status, "403 Forbidden");
+        assert_eq!(handle(&h, &cfg, &Request { method: "GET", path: "/admin/../server.cfg", query: "", headers: "Host: 127.0.0.1:27025", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap().status, "404 Not Found");
+        assert_eq!(handle(&h, &cfg, &Request { method: "GET", path: "/admin/", query: "", headers: "Host: 127.0.0.1:27025\r\nX-Forwarded-For: 203.0.113.9", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap().status, "403 Forbidden");
+        assert_eq!(handle(&h, &cfg, &Request { method: "GET", path: "/admin/", query: "", headers: "Host: 127.0.0.1:27025", body: &[], peer: Some("192.0.2.4:1".parse().unwrap()) }).unwrap().status, "403 Forbidden");
+        // (and only by this machine's own names)
+        assert_eq!(handle(&h, &cfg, &Request { method: "GET", path: "/admin/", query: "", headers: "Host: rebound.example:27025", body: &[], peer: Some(HERE.parse().unwrap()) }).unwrap().status, "403 Forbidden");
     }
 
     #[test]
