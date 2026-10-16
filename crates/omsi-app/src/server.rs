@@ -40,7 +40,11 @@ pub(crate) fn info_of(cfg: &ServerCfg) -> omsi_net::ws::ServerInfo {
 /// Set up the arguments for a server run from `server.cfg` (the rest is the offscreen
 /// host loop, see `offscreen::run_offscreen`).
 pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
-    let cfg = ServerCfg::load(path, crate::game_lists::TRAFFIC_MAX)?;
+    let mut cfg = ServerCfg::load(path, crate::game_lists::TRAFFIC_MAX)?;
+    // (the map a start script picked, over server.cfg's)
+    if let Some(m) = args.server_map.take().filter(|m| !m.trim().is_empty()) {
+        cfg.map = m.trim().replace('\\', "/");
+    }
     SERVER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = SERVER_ADMIN.set((cfg.admin_password.clone(), cfg.moderator_password.clone(), if cfg.real_time { 1.0 } else { cfg.time_speed }));
     start_administration(&cfg, path);
@@ -87,6 +91,27 @@ pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
 /// A dedicated server's people: whether it has any (`passengers`) and its
 /// `passenger_density` (None: the machine's own passengers setting).
 pub(crate) static SERVER_PASSENGERS: std::sync::OnceLock<(bool, Option<f32>)> = std::sync::OnceLock::new();
+
+/// The map of `server.cfg` is installed (in the original folder or the content folder), or
+/// what to do: the maps there are.
+pub(crate) fn check_map(args: &Args) -> Result<(), String> {
+    let path = omsi_cfg::resolve_path(&args.root, &args.map);
+    if omsi_cfg::vfs::exists(&path) {
+        return Ok(());
+    }
+    Err(format!("the map {} (server.cfg's map, or --server-map) is not installed ({} not found). Installed maps: {}", args.map, path.display(), Some(installed_maps().join(", ")).filter(|l| !l.is_empty()).unwrap_or_else(|| "none".into())))
+}
+
+/// The installed maps as server.cfg names them (`maps/<folder>/global.cfg`), sorted.
+pub(crate) fn installed_maps() -> Vec<String> {
+    let mut maps: Vec<String> = omsi_cfg::read_dir_merged("maps")
+        .into_iter()
+        .filter(|d| omsi_cfg::vfs::exists(&d.join("global.cfg")))
+        .filter_map(|d| d.file_name().map(|n| format!("maps/{}/global.cfg", n.to_string_lossy())))
+        .collect();
+    maps.sort_by_key(|m| m.to_lowercase());
+    maps
+}
 
 /// The airport whose METAR report a dedicated server's weather follows (None: no METAR sync).
 pub(crate) static SERVER_METAR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
