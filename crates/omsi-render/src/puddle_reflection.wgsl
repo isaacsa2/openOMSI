@@ -16,7 +16,8 @@ struct PuddleParams {
     // xyz: capture count and scene size; w: -1 Vanilla+, 0 Vanilla, 1 Enhanced
     vehicle_info: vec4<f32>,
     vehicle_parts: array<PuddleVehicleBox, 4>,
-    // x: the farthest wet pixel traced (m), y: the most steps a ray takes
+    // x: the farthest wet pixel traced (m), y: the most steps a ray takes, z: the picture
+    // pixels one ray stands for, each way
     quality: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> p: PuddleParams;
@@ -120,13 +121,16 @@ fn receiver_normal(px: vec2<i32>, uv: vec2<f32>, world: vec3<f32>, depth: f32) -
 fn fs_trace(in: PuddleVertex) -> @location(0) vec4<f32> {
     let size = vec2<i32>(textureDimensions(t_scene));
     let centre = vec2<i32>(in.uv * vec2<f32>(size));
-    // Pick a wet sample from the nearest 2x2 pixels, so a small pool at a half-size
-    // pixel's edge still gets a ray. The full-size resolve reapplies the exact mask.
+    // Pick a wet sample from all the pixels this ray stands for (2x2 at half size, 4x4 on
+    // Low), so a small pool off its centre still gets a ray. The full-size resolve
+    // reapplies the exact mask.
     var px = clamp(centre, vec2<i32>(0), size - vec2<i32>(1));
     var weight = 0.0;
-    for (var y = 0; y < 2; y++) {
-        for (var x = 0; x < 2; x++) {
-            let q = clamp(centre + vec2<i32>(x - 1, y - 1), vec2<i32>(0), size - vec2<i32>(1));
+    let span = clamp(i32(p.quality.z), 1, 8);
+    let half = span / 2;
+    for (var y = 0; y < span; y++) {
+        for (var x = 0; x < span; x++) {
+            let q = clamp(centre + vec2<i32>(x - half, y - half), vec2<i32>(0), size - vec2<i32>(1));
             let w = textureLoad(t_mask, q, 0).b;
             if (w > weight) { weight = w; px = q; }
         }

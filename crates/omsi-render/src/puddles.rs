@@ -362,6 +362,13 @@ pub(super) struct Targets {
     pub(super) classic_bg: wgpu::BindGroup,
 }
 
+/// How many picture pixels one ray stands for, each way (2 at half size; 4 on Low, or on
+/// High past the budget): the wet pixel looked for in all of them.
+fn footprint(w: u32, h: u32, low: bool) -> f32 {
+    let (tw, th) = trace_size(w, h, low);
+    (w as f32 / tw as f32).max(h as f32 / th as f32).ceil().clamp(1.0, 8.0)
+}
+
 fn trace_size(w: u32, h: u32, low: bool) -> (u32, u32) {
     let (half, budget) = if low { (0.25_f32, MAX_TRACE_PIXELS_LOW) } else { (0.5, MAX_TRACE_PIXELS) };
     let scale = half.min((budget / (w.max(1) as f32 * h.max(1) as f32)).sqrt());
@@ -635,7 +642,11 @@ impl Renderer {
                 },
             ],
             vehicle_parts: parts,
-            quality: reach(low),
+            quality: {
+                let mut q = reach(low);
+                q[2] = footprint(w, h, low);
+                q
+            },
         };
         self.queue.write_buffer(
             &self.puddles.as_ref().unwrap().vehicle_params,
@@ -1344,6 +1355,25 @@ mod tests {
             assert!(lw * lh <= MAX_TRACE_PIXELS_LOW as u32);
             if w >= 4 && h >= 4 {
                 assert!(lw <= w / 4 && lh <= h / 4);
+            }
+        }
+    }
+
+    /// The wet pixel is looked for in every picture pixel a ray stands for: 2x2 at half size,
+    /// 4x4 on Low - and more past the budget.
+    #[test]
+    fn a_ray_looks_at_all_its_pixels() {
+        assert_eq!(footprint(1920, 1080, false), 2.0);
+        assert_eq!(footprint(1920, 1080, true), 4.0);
+        assert_eq!(footprint(3840, 2160, false), 4.0);
+        assert_eq!(footprint(3840, 2160, true), 8.0);
+        for (w, h) in [(1, 1), (1279, 719), (2160, 3840), (7680, 4320)] {
+            for low in [false, true] {
+                let (tw, th) = trace_size(w, h, low);
+                let f = footprint(w, h, low);
+                assert!(f >= 1.0 && f <= 8.0);
+                // (the pixels looked at cover the picture, up to the 8x8 cap)
+                assert!((tw as f32 * f >= w as f32 && th as f32 * f >= h as f32) || f == 8.0, "{w}x{h} {low}");
             }
         }
     }
