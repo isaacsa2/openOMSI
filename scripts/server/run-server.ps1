@@ -105,7 +105,57 @@ function List-Maps([string]$root) {
 
 function Ask([string]$en, [string]$ptText) { return Read-Host (T $en $ptText) }
 
+# a folder as typed: no quotes, and no backslash at its end (passed on as "D:\Games\OMSI 2\",
+# Windows PowerShell 5.1 hands the program a quote that swallows the next arguments) - a
+# drive's own D:\ stays
+function Clean-Folder([string]$a) {
+    $a = $a.Trim().Trim('"').Trim("'").Trim()
+    if ($a -match '^(.*[^:\\])\\+$') { $a = $Matches[1] }
+    return $a
+}
+
+# The server ends with this window. Its output comes through a pipe, so it gets neither the
+# window's closing nor Ctrl+C: closed, the window left it running and holding its port (the
+# next start then stopped with code 3). This PowerShell joins a job whose processes all end
+# when its last handle goes - this PowerShell's own, when it ends; the server, started from
+# it, is in the job too. (Nothing on another system, or where Windows refuses: as before.)
+function Join-WindowJob {
+    if ($env:OS -ne 'Windows_NT') { return }
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class OpenOmsiWindowJob {
+    [StructLayout(LayoutKind.Sequential)]
+    struct Basic { public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct Io { public ulong ReadOps; public ulong WriteOps; public ulong OtherOps; public ulong ReadBytes; public ulong WriteBytes; public ulong OtherBytes; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct Extended { public Basic BasicLimits; public Io IoInfo; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed; }
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref Extended info, uint length);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    // (kept open for this process's life: its end is the job's)
+    static IntPtr job;
+    public static bool Join() {
+        job = CreateJobObject(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) return false;
+        Extended info = new Extended();
+        info.BasicLimits.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if (!SetInformationJobObject(job, 9, ref info, (uint)Marshal.SizeOf(typeof(Extended)))) return false; // JobObjectExtendedLimitInformation
+        return AssignProcessToJobObject(job, GetCurrentProcess());
+    }
+}
+'@
+        if (-not [OpenOmsiWindowJob]::Join()) { Say 'Note: closing this window may leave the server running (Task Manager ends it).' 'Aviso: fechar esta janela pode deixar o servidor rodando (o Gerenciador de Tarefas o encerra).' }
+    } catch {
+        Say 'Note: closing this window may leave the server running (Task Manager ends it).' 'Aviso: fechar esta janela pode deixar o servidor rodando (o Gerenciador de Tarefas o encerra).'
+    }
+}
+
 $root = Conf-Get 'root'
+if ($root) { $root = Clean-Folder $root }
 $first = [bool]($root -and -not (Test-Path -LiteralPath $cfg))
 $maps = $null
 if (-not $root -or $Setup) {
@@ -114,7 +164,7 @@ if (-not $root -or $Setup) {
         $a = Ask 'Folder of the original OMSI 2 (the one with Omsi.exe, maps and Vehicles)' 'Pasta do OMSI 2 original (a que tem Omsi.exe, maps e Vehicles)'
         if ($null -eq $a) { Quit 1 '' '' }
         # (a path pasted from Explorer comes in quotes)
-        $a = $a.Trim().Trim('"').Trim("'").Trim()
+        $a = Clean-Folder $a
         if (-not $a) { continue }
         $maps = List-Maps $a
         if ($null -ne $maps) { $root = $a; Conf-Set 'root' $root; break }
@@ -233,6 +283,7 @@ if ($askShortcut) {
 
 Write-Host ''
 Say "Starting on $Map (the log also goes to server.log; Ctrl+C stops the server)." "Iniciando em $Map (o log também vai para server.log; Ctrl+C para o servidor)."
+Join-WindowJob
 $writer = New-Object System.IO.StreamWriter($log, $true, $utf8)
 $writer.AutoFlush = $true
 $code = 0
