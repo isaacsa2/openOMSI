@@ -40,6 +40,9 @@ pub struct ServerCfg {
     /// The proxies whose word about a request's source and scheme is believed
     /// (`admin_trusted_proxies`; this machine by default).
     pub admin_trusted_proxies: Vec<std::net::IpAddr>,
+    /// The header in which they name the client (`admin_proxy_header`; the last
+    /// `X-Forwarded-For` by default).
+    pub admin_proxy_header: omsi_admin::ProxyHeader,
     /// How fast the server's clock runs (1 real time).
     pub time_speed: f64,
     /// The clock follows the server machine's real date and time (the speed and the
@@ -114,6 +117,9 @@ moderator_password =
 admin_web = local
 admin_web_origins =
 admin_trusted_proxies =
+# the header in which those proxies name the client: x-forwarded-for (its last address: Caddy,
+# nginx, Cloudflare), x-real-ip or cf-connecting-ip - only that one is believed
+admin_proxy_header = x-forwarded-for
 
 # how fast the clock runs (1 = real time, 2 = twice as fast, up to 30)
 time_speed = 1
@@ -198,6 +204,7 @@ impl ServerCfg {
             admin_web: web_mode(kv.get("admin_web").map(String::as_str).unwrap_or("")),
             admin_web_origins: kv.get("admin_web_origins").map(|v| v.split(';').map(|o| o.trim().trim_end_matches('/').to_string()).filter(|o| o.starts_with("https://") || o.starts_with("http://")).collect()).unwrap_or_default(),
             admin_trusted_proxies: trusted_proxies(kv.get("admin_trusted_proxies").map(String::as_str).unwrap_or("")),
+            admin_proxy_header: proxy_header(kv.get("admin_proxy_header").map(String::as_str).unwrap_or("")),
             time_speed: kv.get("time_speed").and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite()).unwrap_or(1.0).clamp(1.0, 30.0),
             real_time: flag("real_time", false),
             metar_sync: flag("metar_sync", false),
@@ -217,6 +224,14 @@ fn web_mode(v: &str) -> omsi_admin::WebMode {
     omsi_admin::WebMode::parse(v).unwrap_or_else(|| {
         log::warn!("server.cfg: admin_web = {v} is not local, remote or off: local");
         omsi_admin::WebMode::Local
+    })
+}
+
+/// `admin_proxy_header`: a wrong word is the default (the last `X-Forwarded-For`).
+fn proxy_header(v: &str) -> omsi_admin::ProxyHeader {
+    omsi_admin::ProxyHeader::parse(v).unwrap_or_else(|| {
+        log::warn!("server.cfg: admin_proxy_header = {v} is not x-forwarded-for, x-real-ip or cf-connecting-ip: x-forwarded-for");
+        omsi_admin::ProxyHeader::ForwardedFor
     })
 }
 
@@ -350,6 +365,7 @@ mod passenger_density_tests {
         // and keeps the web administration on this machine
         assert_eq!(d.admin_web, omsi_admin::WebMode::Local);
         assert_eq!(d.admin_trusted_proxies, omsi_admin::WebCfg::default().trusted_proxies);
+        assert_eq!(d.admin_proxy_header, omsi_admin::ProxyHeader::ForwardedFor);
     }
 
     /// The web administration's keys: a wrong word is never the open door.
@@ -363,6 +379,9 @@ mod passenger_density_tests {
         assert_eq!(r.admin_trusted_proxies, vec!["10.0.0.1".parse::<std::net::IpAddr>().unwrap(), "::1".parse().unwrap()]);
         assert_eq!(load("admin_web = public\n").admin_web, omsi_admin::WebMode::Local);
         assert_eq!(load("admin_web = off\n").admin_web, omsi_admin::WebMode::Off);
+        assert_eq!(load("admin_proxy_header = X-Real-IP\n").admin_proxy_header, omsi_admin::ProxyHeader::RealIp);
+        assert_eq!(load("admin_proxy_header = cf-connecting-ip\n").admin_proxy_header, omsi_admin::ProxyHeader::CfConnectingIp);
+        assert_eq!(load("admin_proxy_header = forwarded\n").admin_proxy_header, omsi_admin::ProxyHeader::ForwardedFor);
     }
 }
 
