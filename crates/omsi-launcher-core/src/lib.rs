@@ -2056,9 +2056,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     v["units"] = json!("metric");
     // the trees' foliage bends and sways in the weather's wind
     v["windy_trees"] = json!(true);
-    // (the game's Graphics menu switches it: read and written here, or the game's save
-    // through this page's writer would drop it)
-    v["sim_thread"] = json!(true);
+    v["sim_thread"] = json!(true); // (switched in the game's Graphics menu, saved through this writer)
     v["mirror_hud_every_frame"] = json!(false);
     // an early timetable bus waits only at the stops the timetable times (off: at every
     // stop, as in OMSI; #1773)
