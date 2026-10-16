@@ -2017,10 +2017,8 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
         }
     }
     v["touch_door_mode"] = json!("standard");
-    // switches of the game's own menus: read and written here too, or the game's save
-    // (through this page's writer) would drop what was switched there
-    v["full_tank"] = json!(true);
-    v["trip_summary"] = json!(true);
+    // (the game's menus switch these: saved through this page's writer, unknown they were dropped)
+    for k in ["full_tank", "trip_summary"] { v[k] = json!(true); }
     v["triple_screen"] = json!(false);
     v["triple_span"] = json!(true);
     v["triple_hud_center"] = json!(true);
