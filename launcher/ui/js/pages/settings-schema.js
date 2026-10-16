@@ -105,6 +105,7 @@ const graphics = {
         // (the wet roads' reflections need the reflection maps on)
         { type: 'select', key: 'puddles', label: 'Puddles', options: [['high', 'High'], ['low', 'Low'], ['off', 'Off']], when: (s) => !traced(s) && Number(s.reflections ?? 1) > 0.005 },
         { type: 'toggle', key: 'windy_trees', label: 'Windy trees' },
+        { type: 'toggle', key: 'sim_thread', label: 'Simulation on its own thread' },
       ],
     },
     {
