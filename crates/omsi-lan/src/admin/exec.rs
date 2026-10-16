@@ -137,19 +137,20 @@ pub fn report(lan: &mut LanSession, hub: Option<&Hub>, actor: &Actor, record: u6
 
 /// An `admin <action>` line: the action, and the player picked in it if it names one as
 /// `<number>#<connection>` (the new menus do; an older game's `kick 3` names no connection).
+/// Only the word where the action names its player counts: a `12#3` in a chat line or a
+/// reason is text.
 pub fn split_guard(line: &str) -> (String, Option<Target>) {
-    let mut guard = None;
-    let words: Vec<String> = line
-        .split(' ')
-        .map(|w| match (guard.is_none(), Target::parse_tag(w)) {
-            (true, Some(t)) => {
-                guard = Some(t);
-                t.id.to_string()
-            }
-            _ => w.to_string(),
-        })
-        .collect();
-    (words.join(" "), guard)
+    let mut words: Vec<&str> = line.split(' ').collect();
+    // (where each action that names a player names it)
+    let at = match words.first().copied().unwrap_or("") {
+        "kick" | "ban" | "bring" | "goto" | "tell" | "duty" | "duty-off" | "unstick" | "notify" => 1,
+        "service" => 2,
+        _ => return (line.to_string(), None),
+    };
+    let Some(guard) = words.get(at).and_then(|w| Target::parse_tag(w)) else { return (line.to_string(), None) };
+    let id = guard.id.to_string();
+    words[at] = &id;
+    (words.join(" "), Some(guard))
 }
 
 /// An `admin <action>` from a player's game (or the machine's own tool), whose role is `role`.
@@ -283,6 +284,12 @@ mod tests {
         assert_eq!(split_guard("kick 3#17 spam and 4#2"), ("kick 3 spam and 4#2".into(), Some(Target { id: 3, conn: 17 })));
         assert_eq!(split_guard("kick 3 spam"), ("kick 3 spam".into(), None));
         assert_eq!(split_guard("say #1 rule: be nice"), ("say #1 rule: be nice".into(), None));
+        // only where the action names its player: in a chat line or a reason it is text
+        assert_eq!(split_guard("say meet at stop 12#3"), ("say meet at stop 12#3".into(), None));
+        assert_eq!(split_guard("say 12#3 hi"), ("say 12#3 hi".into(), None));
+        assert_eq!(split_guard("kick 3 spam like 12#3"), ("kick 3 spam like 12#3".into(), None));
+        assert_eq!(split_guard("service repair 4#8"), ("service repair 4".into(), Some(Target { id: 4, conn: 8 })));
+        assert_eq!(split_guard("tell 5#2 see 6#1"), ("tell 5 see 6#1".into(), Some(Target { id: 5, conn: 2 })));
     }
 
     #[test]

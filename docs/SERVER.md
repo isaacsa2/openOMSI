@@ -161,6 +161,10 @@ or `admin-ok moderator` (a game before the roles reads the first word), and the 
 *Administration* sends every line to the server as `admin <action>`. The rights end when the
 player leaves or talks from another address.
 
+A game from before the roles, given the moderator's password, shows the admin's whole old menu:
+the server still refuses the world's actions, but that game does not read the answer
+(`admin-result`), so nothing happens on its screen. Moderators should play a current game.
+
 **The Administration menu, from afar.** A player who administers a dedicated server gets
 the server's own menu under Esc → *Administration*: who they are (admin or moderator), the
 clock and the weather; *Players...* - every player the server lists, by name and number, with
@@ -287,20 +291,32 @@ a browser).
 * `admin_web = remote`: also through the proxies listed in `admin_trusted_proxies` (addresses
   separated by `;`; this machine by default), and only for requests they say came over HTTPS
   (`X-Forwarded-Proto: https`, or Cloudflare's `CF-Visitor`). The address they say a request came
-  from (`CF-Connecting-IP`, `X-Real-IP`, the last `X-Forwarded-For`) is believed of them alone,
-  and counts its wrong passwords. A plain HTTP request from another machine is refused. Mind
+  from is believed of them alone, and only in the header they write: `admin_proxy_header`, the
+  last address of `X-Forwarded-For` by default (Caddy, nginx, Cloudflare), or `x-real-ip`, or
+  `cf-connecting-ip` - the other headers may be the client's own, passed on. That address counts
+  its wrong passwords and names it in the records; a request the proxy names nobody for is
+  refused. A plain HTTP request from another machine is refused. Mind
   that with `tunnel = 1` the local cloudflared is such a proxy: the panel is then on the public
   tunnel address, guarded by the passwords alone. A proxy of your own (Caddy, nginx with a
   certificate) in front of `127.0.0.1:<web_port>` is the safer way; it must not pass `/admin`
   (the machine's own door) on.
+* On this machine the panel answers to its own names only (`127.0.0.1`, `localhost`, `[::1]`): a
+  page of another site whose name was turned to this machine (DNS rebinding) is refused.
+* Mind that a tunnel working below HTTP (`ssh -R`, frp, playit, `ngrok tcp`) hands every client
+  over as this machine, with no header to tell: with one in front of the web port, anybody who
+  reaches it meets the login as if they were here (the passwords and their locks still hold).
+  Point such a tunnel at the game's port only, or keep `admin_web = off`.
 * `admin_web = off`: none (the machine's own `POST /admin` stays as it is).
 * `admin_web_origins`: other `https://` sites whose pages may send requests (a dispatch page
   elsewhere); a request whose browser names another origin is refused. No answer allows
   another site's page to read it (no `Access-Control-Allow-Origin`).
 
 A session ends after 30 minutes unused, after 12 hours, at logout, or when the server stops;
-at most 16 at once. Five wrong passwords in two minutes lock a source for a while, thirty from
-anywhere lock the door for everybody. The server's `POST /admin` for a tool on its machine stays
+at most 16 at once (a moderator's login makes room among the moderators' sessions only, never an
+admin's). Five wrong passwords in two minutes lock a source for a while, thirty from anywhere
+lock the door for everybody but this machine itself (a flood from afar cannot keep the operator
+out of their own panel). A wrong password is noted in the audit log, a lock once - not each
+knock on it. The server's `POST /admin` for a tool on its machine stays
 as it was (one command a line, `X-Admin-Password`, the loopback only, `202` when taken): its
 commands go the same way as the others and are in the audit log, with what became of them.
 
