@@ -42,6 +42,29 @@ impl WebMode {
     }
 }
 
+/// The header in which the trusted proxy puts the client's address (`admin_proxy_header`):
+/// only that one is believed - the others may be the client's own, passed through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyHeader {
+    /// `X-Forwarded-For`, its last address (the one the proxy added): Caddy, nginx, Cloudflare.
+    ForwardedFor,
+    /// `X-Real-IP`, for a proxy set to write it.
+    RealIp,
+    /// `CF-Connecting-IP`: Cloudflare (its tunnel too).
+    CfConnectingIp,
+}
+
+impl ProxyHeader {
+    pub fn parse(s: &str) -> Option<ProxyHeader> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" | "x-forwarded-for" => Some(ProxyHeader::ForwardedFor),
+            "x-real-ip" => Some(ProxyHeader::RealIp),
+            "cf-connecting-ip" => Some(ProxyHeader::CfConnectingIp),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WebCfg {
     pub mode: WebMode,
@@ -49,13 +72,15 @@ pub struct WebCfg {
     pub origins: Vec<String>,
     /// The proxies whose word about a request's source and scheme is believed.
     pub trusted_proxies: Vec<IpAddr>,
+    /// Where they say it.
+    pub proxy_header: ProxyHeader,
     /// The highest traffic density (for the operations' checks).
     pub traffic_max: usize,
 }
 
 impl Default for WebCfg {
     fn default() -> WebCfg {
-        WebCfg { mode: WebMode::Local, origins: Vec::new(), trusted_proxies: vec![IpAddr::from([127, 0, 0, 1]), IpAddr::from(std::net::Ipv6Addr::LOCALHOST)], traffic_max: 120 }
+        WebCfg { mode: WebMode::Local, origins: Vec::new(), trusted_proxies: vec![IpAddr::from([127, 0, 0, 1]), IpAddr::from(std::net::Ipv6Addr::LOCALHOST)], proxy_header: ProxyHeader::ForwardedFor, traffic_max: 120 }
     }
 }
 
@@ -75,6 +100,11 @@ pub struct Request<'a> {
 impl Request<'_> {
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.lines().find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim()))
+    }
+
+    /// A header's last line (a proxy adds its own after the client's).
+    fn last_header(&self, name: &str) -> Option<&str> {
+        self.headers.lines().filter_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim())).last()
     }
 
     fn param(&self, name: &str) -> Option<String> {
@@ -140,6 +170,9 @@ fn admitted(req: &Request, cfg: &WebCfg) -> Result<IpAddr, Response> {
     let proxied = ["cf-connecting-ip", "cf-ray", "x-forwarded-for", "forwarded", "x-real-ip", "x-forwarded-proto"].iter().any(|h| req.header(h).is_some());
     match cfg.mode {
         WebMode::Off => Err(error("404 Not Found", "the web administration is off on this server (admin_web = off)")),
+        // (a page of another site whose name was turned to this machine - DNS rebinding -
+        // still names its own site)
+        _ if peer.ip().is_loopback() && !proxied && !local_host(req.header("host").unwrap_or("")) => Err(error("403 Forbidden", "reach the administration as 127.0.0.1 or localhost on this machine")),
         _ if peer.ip().is_loopback() && !proxied => Ok(peer.ip()),
         WebMode::Local => Err(error("403 Forbidden", "the administration is reached from the server's own machine only (admin_web = local), not through a tunnel or a proxy")),
         WebMode::Remote => {
@@ -150,10 +183,22 @@ fn admitted(req: &Request, cfg: &WebCfg) -> Result<IpAddr, Response> {
             if !https {
                 return Err(error("403 Forbidden", "the administration is reached over HTTPS only"));
             }
-            let said = req.header("cf-connecting-ip").or_else(|| req.header("x-real-ip")).or_else(|| req.header("x-forwarded-for").and_then(|v| v.rsplit(',').next()));
-            Ok(said.and_then(|v| v.trim().parse::<IpAddr>().ok()).unwrap_or(peer.ip()))
+            // (only the header the proxy writes: another one may be the client's own)
+            let said = match cfg.proxy_header {
+                ProxyHeader::ForwardedFor => req.last_header("x-forwarded-for").and_then(|v| v.rsplit(',').next()),
+                ProxyHeader::RealIp => req.last_header("x-real-ip"),
+                ProxyHeader::CfConnectingIp => req.last_header("cf-connecting-ip"),
+            };
+            said.and_then(|v| v.trim().parse::<IpAddr>().ok()).ok_or_else(|| error("403 Forbidden", "the proxy did not say whose request it is (admin_proxy_header)"))
         }
     }
+}
+
+/// The machine's own names, with or without a port.
+fn local_host(host: &str) -> bool {
+    let h = host.trim().to_ascii_lowercase();
+    let name = if h.starts_with('[') { h.split(']').next().map(|n| format!("{n}]")).unwrap_or_default() } else { h.split(':').next().unwrap_or("").to_string() };
+    matches!(name.as_str(), "127.0.0.1" | "localhost" | "[::1]")
 }
 
 /// A request that changes something comes from a page of the server's own address (or one
@@ -266,11 +311,16 @@ fn login(hub: &Hub, source: IpAddr, body: &Value) -> Response {
             json_answer("200 OK", json!({ "token": token, "session": info }))
         }
         Err(e) => {
-            hub.note(&format!("web ({source})"), None, "login", "refused", &e.message());
+            // (a wrong password noted each, a lock once: knocking on it fills nothing; no
+            // password set, nothing to note)
+            if matches!(e, LoginError::Wrong | LoginError::Full | LoginError::Locked { first: true, .. }) {
+                hub.note(&format!("web ({source})"), None, "login", "refused", &e.message());
+            }
             match e {
                 LoginError::Disabled => error("404 Not Found", e.message()),
-                LoginError::Locked(s) => json_answer("429 Too Many Requests", json!({ "error": e.message(), "retry_after": s })),
+                LoginError::Locked { wait, .. } => json_answer("429 Too Many Requests", json!({ "error": e.message(), "retry_after": wait })),
                 LoginError::Wrong => error("401 Unauthorized", e.message()),
+                LoginError::Full => error("503 Service Unavailable", e.message()),
             }
         }
     }
@@ -406,8 +456,8 @@ mod tests {
         assert_eq!(v["session"]["role"], "moderator");
         assert!(v["session"]["actor"].as_str().unwrap().contains("203.0.113.9"));
         let t = v["token"].as_str().unwrap().to_string();
-        assert_eq!(R::post("/api/admin/logout", json!({})).token(&t).with("X-Forwarded-Proto: https").send(&h, &remote).0, "200 OK");
-        assert_eq!(R::get("/api/admin/session").token(&t).with("X-Forwarded-Proto: https").send(&h, &remote).0, "401 Unauthorized");
+        assert_eq!(R::post("/api/admin/logout", json!({})).token(&t).with("X-Forwarded-Proto: https").with("X-Forwarded-For: 203.0.113.9").send(&h, &remote).0, "200 OK");
+        assert_eq!(R::get("/api/admin/session").token(&t).with("X-Forwarded-Proto: https").with("X-Forwarded-For: 203.0.113.9").send(&h, &remote).0, "401 Unauthorized");
         // the log has the logins and the refusals, and no password
         let audit = h.audit_since(0, 100);
         assert!(audit.iter().any(|e| e.action == "login" && e.result == "refused"));
@@ -439,9 +489,67 @@ mod tests {
         assert_eq!(R::post("/api/admin/login", pw.clone()).from("10.0.0.1:1").with("X-Forwarded-Proto: http").send(&h, &cfg).0, "403 Forbidden");
         // this machine directly, still
         assert_eq!(R::post("/api/admin/login", pw.clone()).send(&h, &cfg).0, "200 OK");
-        // the proxy, over https (Cloudflare's way of saying so too)
-        assert_eq!(R::post("/api/admin/login", pw.clone()).from("10.0.0.1:1").with("X-Forwarded-Proto: https").send(&h, &cfg).0, "200 OK");
-        assert_eq!(R::post("/api/admin/login", pw).from("10.0.0.1:1").with("CF-Visitor: {\"scheme\":\"https\"}").send(&h, &cfg).0, "200 OK");
+        // the proxy, over https (Cloudflare's way of saying so too), saying whose request it is
+        assert_eq!(R::post("/api/admin/login", pw.clone()).from("10.0.0.1:1").with("X-Forwarded-Proto: https").with("X-Forwarded-For: 203.0.113.9").send(&h, &cfg).0, "200 OK");
+        assert_eq!(R::post("/api/admin/login", pw.clone()).from("10.0.0.1:1").with("CF-Visitor: {\"scheme\":\"https\"}").with("X-Forwarded-For: 203.0.113.9").send(&h, &cfg).0, "200 OK");
+        // a proxy that does not say whose: turned away (not taken for the proxy itself)
+        assert_eq!(R::post("/api/admin/login", pw).from("10.0.0.1:1").with("X-Forwarded-Proto: https").send(&h, &cfg).0, "403 Forbidden");
+    }
+
+    /// Only the header the proxy writes names the source: what the client sends through it
+    /// (a CF-Connecting-IP behind Caddy, the first X-Forwarded-For addresses) is not believed -
+    /// a new one on each try would get around the lock and lie in the records.
+    #[test]
+    fn the_source_is_the_proxys_word_alone() {
+        let h = hub();
+        let cfg = WebCfg { mode: WebMode::Remote, trusted_proxies: vec!["10.0.0.1".parse().unwrap()], ..WebCfg::default() };
+        let wrong = |n: u8| R::post("/api/admin/login", json!({ "password": "nope" })).from("10.0.0.1:1").with("X-Forwarded-Proto: https").with(&format!("CF-Connecting-IP: 198.51.100.{n}")).with(&format!("X-Forwarded-For: 198.51.100.{n}, 203.0.113.9"));
+        for n in 0..5 {
+            assert_eq!(wrong(n).send(&h, &cfg).0, "401 Unauthorized");
+        }
+        // (all from 203.0.113.9, whatever else they said: locked)
+        assert_eq!(wrong(9).send(&h, &cfg).0, "429 Too Many Requests");
+        assert!(h.audit_since(0, 100).iter().all(|e| e.actor.contains("203.0.113.9")), "{:?}", h.audit_since(0, 100));
+        // a proxy set to write X-Real-IP (or CF-Connecting-IP) is believed of that one
+        let real = WebCfg { proxy_header: ProxyHeader::RealIp, ..cfg.clone() };
+        let (st, v) = R::post("/api/admin/login", json!({ "password": "admin secret" })).from("10.0.0.1:1").with("X-Forwarded-Proto: https").with("X-Forwarded-For: 203.0.113.9").with("X-Real-IP: 192.0.2.44").send(&h, &real);
+        assert_eq!(st, "200 OK", "{v}");
+        assert!(v["session"]["actor"].as_str().unwrap().contains("192.0.2.44"), "{v}");
+        assert_eq!(ProxyHeader::parse("CF-Connecting-IP"), Some(ProxyHeader::CfConnectingIp));
+        assert_eq!(ProxyHeader::parse(""), Some(ProxyHeader::ForwardedFor));
+        assert_eq!(ProxyHeader::parse("forwarded"), None);
+    }
+
+    /// A page of another site whose name was turned to this machine (DNS rebinding) still
+    /// names that site: this machine's own names only.
+    #[test]
+    fn this_machine_by_its_own_names() {
+        let (h, cfg) = (hub(), WebCfg::default());
+        let pw = || R::post("/api/admin/login", json!({ "password": "admin secret" }));
+        let as_host = |host: &str| {
+            let mut r = pw();
+            r.headers = r.headers.replace("Host: 127.0.0.1:27025", &format!("Host: {host}"));
+            r
+        };
+        for host in ["127.0.0.1:27025", "localhost:27025", "LOCALHOST", "[::1]:27025", "127.0.0.1"] {
+            assert_eq!(as_host(host).send(&h, &cfg).0, "200 OK", "{host}");
+        }
+        for host in ["evil.example:27025", "127.0.0.1.evil.example", "", "localhost.evil.example:27025"] {
+            assert_eq!(as_host(host).send(&h, &cfg).0, "403 Forbidden", "{host}");
+        }
+    }
+
+    /// Knocking on a lock is noted once, not each time: a flood of logins does not push the
+    /// real history out of the audit log.
+    #[test]
+    fn a_lock_is_noted_once() {
+        let (h, cfg) = (hub(), WebCfg::default());
+        for _ in 0..200 {
+            let _ = R::post("/api/admin/login", json!({ "password": "nope" })).send(&h, &cfg);
+        }
+        let refused = h.audit_since(0, 1000).into_iter().filter(|e| e.action == "login" && e.result == "refused").count();
+        // (the 5 wrong passwords, then the lock once)
+        assert_eq!(refused, 6);
     }
 
     /// A page of another site cannot act: JSON only, and its origin refused.
