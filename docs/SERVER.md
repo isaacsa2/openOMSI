@@ -119,6 +119,10 @@ or `admin-ok moderator` (a game before the roles reads the first word), and the 
 *Administration* sends every line to the server as `admin <action>`. The rights end when the
 player leaves or talks from another address.
 
+A game from before the roles, given the moderator's password, shows the admin's whole old menu:
+the server still refuses the world's actions, but that game does not read the answer
+(`admin-result`), so nothing happens on its screen. Moderators should play a current game.
+
 **One way of doing it.** Whatever way an operation comes - a player's menu, the machine's own
 tool (`POST /admin`, see above: the admin's role), the web panel - it is checked against the
 role, done by the server's own loop on its tick (never by a web request's thread), and
