@@ -9,3 +9,18 @@ fn the_sim_thread_is_on_until_turned_off() {
     let saved = omsi_launcher_lib::settings_to_text(&launcher, Some("sim_thread=0\n"));
     assert!(!super::Settings::from_text(&saved).sim_thread, "{saved}");
 }
+
+/// Switched in the game's menu, the value saved (through the launcher's writer, as the game
+/// saves) is the one read back at the next start - with or without the key in the file.
+#[test]
+fn switched_in_the_game_it_stays_switched() {
+    for old in ["", "sim_thread=1\n", "sim_thread=0\n"] {
+        for on in [false, true] {
+            let mut v = omsi_launcher_lib::settings_from_text(Some(old));
+            crate::game_lists::apply_pending(&mut v, &[("sim_thread".to_string(), (on as u8).to_string())]);
+            let saved = omsi_launcher_lib::settings_to_text(&v, Some(old));
+            assert_eq!(super::Settings::from_text(&saved).sim_thread, on, "switched to {on} over {old:?}:\n{saved}");
+            assert_eq!(saved.matches("sim_thread=").count(), 1, "{saved}");
+        }
+    }
+}
