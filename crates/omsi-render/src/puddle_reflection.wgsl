@@ -1,4 +1,5 @@
-// Current-frame puddle reflections. Rays are capped at 48 screen-space steps and 80 m;
+// Current-frame puddle reflections. Rays are capped at quality.y screen-space steps and
+// quality.x m (48 and 100 m high, 24 and 40 m low);
 // only wet pixels run them. Misses leave the main shader's sky reflection untouched.
 struct PuddleVehicleBox { a: vec4<f32>, b: vec4<f32>, c: vec4<f32> };
 struct PuddleParams {
@@ -15,6 +16,8 @@ struct PuddleParams {
     // xyz: capture count and scene size; w: -1 Vanilla+, 0 Vanilla, 1 Enhanced
     vehicle_info: vec4<f32>,
     vehicle_parts: array<PuddleVehicleBox, 4>,
+    // x: the farthest wet pixel traced (m), y: the most steps a ray takes
+    quality: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> p: PuddleParams;
 @group(0) @binding(1) var t_scene: texture_2d<f32>;
@@ -134,7 +137,7 @@ fn fs_trace(in: PuddleVertex) -> @location(0) vec4<f32> {
     let uv = (vec2<f32>(px) + vec2<f32>(0.5)) / vec2<f32>(size);
     let world = world_pos(uv, depth);
     let distance = length(world - p.eye_time.xyz);
-    if (distance > 100.0) { return vec4<f32>(0.0); }
+    if (distance > p.quality.x) { return vec4<f32>(0.0); }
     let ripple = puddle_ripple(world.xy + p.origin_rain.xy, p.eye_time.w, p.origin_rain.z, 1.0);
     var surface_normal = p.vehicle_plane.xyz;
     if (!local_vehicle_plane(world)) { surface_normal = receiver_normal(px, uv, world, depth); }
@@ -170,7 +173,7 @@ fn fs_trace(in: PuddleVertex) -> @location(0) vec4<f32> {
     }
     let pixels = length(duv * end * vec2<f32>(size));
     if (pixels < 2.0) { return trace_miss(depth); }
-    let steps = i32(clamp(ceil(pixels / 8.0), 8.0, 48.0));
+    let steps = i32(clamp(ceil(pixels / 8.0), 8.0, p.quality.y));
     let z0 = c0.z / c0.w;
     let z1 = c1.z / c1.w;
     var previous = 0.0;
@@ -202,7 +205,7 @@ fn fs_trace(in: PuddleVertex) -> @location(0) vec4<f32> {
             if (hit_depth > 0.0 && gap >= 0.0 && gap < p.projection_trace.w + hit_linear * 0.015
                 && dot(hit_world - world, normal) > 0.05) {
                 let border = min(min(hit_uv.x, hit_uv.y), min(1.0 - hit_uv.x, 1.0 - hit_uv.y));
-                let confidence = smoothstep(0.0, 0.04, border) * (1.0 - smoothstep(75.0, 100.0, distance));
+                let confidence = smoothstep(0.0, 0.04, border) * (1.0 - smoothstep(p.quality.x * 0.75, p.quality.x, distance));
                 let colour = finite_colour(textureSampleLevel(t_scene, s_linear, hit_uv, 0.0).rgb);
                 if (p.projection_trace.z == 2.0) { return vec4<f32>(0.0, 1.0, 0.0, depth); }
                 if (p.projection_trace.z == 3.0) { return vec4<f32>(colour, depth); }
