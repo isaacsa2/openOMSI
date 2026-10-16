@@ -670,6 +670,19 @@ fn serve(stream: TcpStream, slot: Option<SourceSlot>, target: SocketAddr, info: 
         // (the request is read off the socket before the answer: some proxies wait)
         let got = s.read(&mut head).unwrap_or(0);
         let mut request = head[..got].to_vec();
+        // a dedicated server's administration (`ws_api`): its own answer and headers
+        if crate::ws_api::wants(&path) {
+            read_body(&mut s, &mut request);
+            let r = crate::ws_api::answer(&request, peer);
+            let mut hdr = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n", r.status, r.content_type, r.body.len());
+            for (k, v) in &r.headers {
+                hdr.push_str(&format!("{k}: {}\r\n", v.replace(['\r', '\n'], " ")));
+            }
+            hdr.push_str("\r\n");
+            s.write_all(hdr.as_bytes()).map_err(|e| e.to_string())?;
+            s.write_all(&r.body).map_err(|e| e.to_string())?;
+            return Ok(());
+        }
         let (status, ctype, body): (&str, &str, Vec<u8>) = match path.as_str() {
             "/admin" => {
                 read_body(&mut s, &mut request);

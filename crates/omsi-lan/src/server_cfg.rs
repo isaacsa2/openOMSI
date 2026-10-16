@@ -33,6 +33,13 @@ pub struct ServerCfg {
     /// The same with this password gives the moderator's role: the players and the chat,
     /// not the world (empty: none; one equal to `admin_password` is the admin's).
     pub moderator_password: String,
+    /// Who may reach the web panel and its API (`admin_web`: `local`, `remote`, `off`).
+    pub admin_web: omsi_admin::WebMode,
+    /// Pages of these origins may act besides the server's own (`admin_web_origins`).
+    pub admin_web_origins: Vec<String>,
+    /// The proxies whose word about a request's source and scheme is believed
+    /// (`admin_trusted_proxies`; this machine by default).
+    pub admin_trusted_proxies: Vec<std::net::IpAddr>,
     /// How fast the server's clock runs (1 real time).
     pub time_speed: f64,
     /// The clock follows the server machine's real date and time (the speed and the
@@ -98,6 +105,15 @@ admin_password =
 # to them, but leaves the clock, the weather, the traffic and the passengers alone
 # (at least 8 characters; empty: no moderators)
 moderator_password =
+
+# the web panel (http://127.0.0.1:<web_port>/admin/) and its API: local = from this machine
+# only (not through the tunnel or a proxy); remote = also over HTTPS through the proxies in
+# admin_trusted_proxies (this machine by default: with tunnel = 1 that is the public tunnel -
+# then the passwords alone guard it); off = none. admin_web_origins: other https:// sites
+# whose pages may use it, separated by ;
+admin_web = local
+admin_web_origins =
+admin_trusted_proxies =
 
 # how fast the clock runs (1 = real time, 2 = twice as fast, up to 30)
 time_speed = 1
@@ -179,6 +195,9 @@ impl ServerCfg {
             icon,
             admin_password: admin_password(kv.get("admin_password").cloned().unwrap_or_default()),
             moderator_password: checked_password(kv.get("moderator_password").cloned().unwrap_or_default(), "moderator_password"),
+            admin_web: web_mode(kv.get("admin_web").map(String::as_str).unwrap_or("")),
+            admin_web_origins: kv.get("admin_web_origins").map(|v| v.split(';').map(|o| o.trim().trim_end_matches('/').to_string()).filter(|o| o.starts_with("https://") || o.starts_with("http://")).collect()).unwrap_or_default(),
+            admin_trusted_proxies: trusted_proxies(kv.get("admin_trusted_proxies").map(String::as_str).unwrap_or("")),
             time_speed: kv.get("time_speed").and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite()).unwrap_or(1.0).clamp(1.0, 30.0),
             real_time: flag("real_time", false),
             metar_sync: flag("metar_sync", false),
@@ -192,6 +211,29 @@ impl ServerCfg {
 
 /// (one check for `server.cfg` and the admins: `omsi_admin::passenger_density`)
 pub use omsi_admin::{passenger_density, PASSENGER_DENSITY_MAX};
+
+/// `admin_web`: a wrong word is the default (this machine only), never the open door.
+fn web_mode(v: &str) -> omsi_admin::WebMode {
+    omsi_admin::WebMode::parse(v).unwrap_or_else(|| {
+        log::warn!("server.cfg: admin_web = {v} is not local, remote or off: local");
+        omsi_admin::WebMode::Local
+    })
+}
+
+/// `admin_trusted_proxies`: addresses separated by `;` (empty: this machine).
+fn trusted_proxies(v: &str) -> Vec<std::net::IpAddr> {
+    let list: Vec<std::net::IpAddr> = v
+        .split(';')
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .filter_map(|a| a.parse().map_err(|_| log::warn!("server.cfg: admin_trusted_proxies: '{a}' is not an address: left out")).ok())
+        .collect();
+    if list.is_empty() {
+        omsi_admin::WebCfg::default().trusted_proxies
+    } else {
+        list
+    }
+}
 
 fn admin_password(password: String) -> String {
     checked_password(password, "admin_password")
@@ -305,6 +347,22 @@ mod passenger_density_tests {
         let d = load(super::DEFAULT_CFG);
         assert_eq!(d.passenger_density, Some(1.0));
         assert!(d.passengers);
+        // and keeps the web administration on this machine
+        assert_eq!(d.admin_web, omsi_admin::WebMode::Local);
+        assert_eq!(d.admin_trusted_proxies, omsi_admin::WebCfg::default().trusted_proxies);
+    }
+
+    /// The web administration's keys: a wrong word is never the open door.
+    #[test]
+    fn the_web_administration_keys() {
+        let old = load("admin_password = 12345678\n");
+        assert_eq!(old.admin_web, omsi_admin::WebMode::Local);
+        let r = load("admin_web = remote\nadmin_web_origins = https://admin.example.org/; javascript:x; http://lan.example\nadmin_trusted_proxies = 10.0.0.1; nonsense; ::1\n");
+        assert_eq!(r.admin_web, omsi_admin::WebMode::Remote);
+        assert_eq!(r.admin_web_origins, vec!["https://admin.example.org".to_string(), "http://lan.example".to_string()]);
+        assert_eq!(r.admin_trusted_proxies, vec!["10.0.0.1".parse::<std::net::IpAddr>().unwrap(), "::1".parse().unwrap()]);
+        assert_eq!(load("admin_web = public\n").admin_web, omsi_admin::WebMode::Local);
+        assert_eq!(load("admin_web = off\n").admin_web, omsi_admin::WebMode::Off);
     }
 }
 

@@ -87,6 +87,7 @@ pub mod wire;
 pub mod world;
 pub mod vars;
 pub mod ws;
+pub mod ws_api;
 pub mod tunnel;
 pub mod official;
 pub mod hostkey;
