@@ -62,7 +62,10 @@ cfg_set() {
 maps_file="$(mktemp)"
 err_file="$(mktemp)"
 status_file="$(mktemp)"
-trap 'rm -f "$maps_file" "$err_file" "$status_file"' EXIT
+# (the terminal's echo comes back however the script ends: a Ctrl+C at the password left it off)
+trap 'rm -f "$maps_file" "$err_file" "$status_file"; if [ -t 0 ]; then stty echo 2>/dev/null; fi' EXIT
+# (Ctrl+C during the questions ends the script through its EXIT trap, in every sh)
+trap 'exit 130' INT
 
 # the installed maps of a folder (and server.cfg written with its defaults when missing);
 # false with the reason shown when the folder is not a complete OMSI 2
