@@ -16,6 +16,9 @@ From the repository root:
 
 ~~~sh
 cargo run -p omsi-net --example chat_only -- 127.0.0.1:27015 --name Isaac
+
+# Legacy protocol 7 (explicit)
+cargo run -p omsi-net --example chat_only -- https://your-server.example --name DEV_TEST_001 --protocol 7
 ~~~
 
 Other supported targets:
@@ -81,3 +84,33 @@ Manual integration smoke test:
    rate limit.
 
 No live multiplayer server or CI result is implied by this document.
+
+## Legacy protocol 7
+
+Use --protocol 7 for servers that reject protocol 14. This separate adapter
+is in crates/omsi-net/examples/chat_only/legacy.rs and follows the original
+protocol 7 HELLO/WELCOME, INFO, empty-vehicle heartbeat, CHAT and SAY frames.
+
+~~~sh
+cargo run -p omsi-net --example chat_only -- https://your-tunnel.trycloudflare.com/ --name DEV_TEST_001 --protocol 7
+~~~
+
+This is an **ordinary player connection**. It obeys rejection, capacity,
+kicking, bans and the legacy chat rate limit, without supplying any staff
+identity or admin privilege. The protocol is never downgraded automatically.
+Protocol 7's protections are older than protocol 14's; only use it with
+servers you trust.
+
+WebSocket tunnels and direct UDP addresses are supported. Session codes work
+when one of their IP addresses is directly reachable; v7 mode does not
+implement rendezvous/punch-through. Restart the client after a WebSocket
+reconnection (the legacy challenge requires fresh admission). Versions other
+than 7 or the current 14 are not implemented.
+
+Test the adapter's layouts and no-vehicle heartbeat:
+
+~~~sh
+cargo test -p omsi-net --example chat_only
+~~~
+
+A live protocol-7 test server is still needed to verify chat end to end.
