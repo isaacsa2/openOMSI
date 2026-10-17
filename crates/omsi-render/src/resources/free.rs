@@ -10,7 +10,7 @@ pub(crate) struct Freed {
     pub(crate) vertex_buf: wgpu::Buffer,
     pub(crate) index_buf: wgpu::Buffer,
     pub(crate) bind_group: wgpu::BindGroup,
-    pub(crate) buf: wgpu::Buffer,
+    pub(crate) buf: UniformSlot,
 }
 
 /// Letting go of scene resources again (tile streaming). Ids stay stable: a freed mesh,
