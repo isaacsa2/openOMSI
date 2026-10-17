@@ -5,6 +5,7 @@
 //!
 //! This is an ordinary player connection, NOT an administrative bypass or a verified staff identity.
 
+#[path = "chat_only/legacy.rs"]
 mod legacy;
 
 use omsi_net::{LanEvent, LanSession, Pose, WorldInfo, MAX_CHAT, MAX_NAME};
