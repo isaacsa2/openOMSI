@@ -127,6 +127,7 @@ pub(crate) use omsi_sim::ground_gap;
 mod on_foot;
 use omsi_scene::route_arrows;
 mod server;
+mod server_world;
 mod player;
 mod plugin_io;
 // the plugins' panels (`omsi-plugin-ui`) at their old path, and the app's side of their input

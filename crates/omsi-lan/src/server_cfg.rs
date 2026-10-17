@@ -17,6 +17,11 @@ pub struct ServerCfg {
     pub traffic: usize,
     pub timetable: bool,
     pub passengers: bool,
+    /// `passenger_density`: the factor on the map's own passenger demand (its hourly
+    /// `[trafficdensity_passenger]` and each stop's own numbers). None: the key is not in the
+    /// file (or not a valid number), and the server goes on using its machine's
+    /// `settings.cfg` `pax_density`, as it always did.
+    pub passenger_density: Option<f32>,
     pub port: u16,
     pub web_port: u16,
     pub max_players: usize,
@@ -25,6 +30,9 @@ pub struct ServerCfg {
     pub icon: Vec<u8>,
     /// Players who say `/admin <password>` in the chat administer the server (empty: nobody).
     pub admin_password: String,
+    /// The same with this password gives the moderator's role: the players and the chat,
+    /// not the world (empty: none; one equal to `admin_password` is the admin's).
+    pub moderator_password: String,
     /// How fast the server's clock runs (1 real time).
     pub time_speed: f64,
     /// The clock follows the server machine's real date and time (the speed and the
@@ -65,6 +73,12 @@ traffic = 30
 timetable = 1
 passengers = 1
 
+# how many people the map's stops and pavements get: a factor on the map's own demand for
+# the time of day (1 = as the map says, 0.5 = half, 2 = twice; 0 to 3). 0 brings no new
+# people but keeps the passengers on (passengers = 0 switches them off). Not the AI traffic.
+# The admins can change it while the server runs; the people already there stay
+passenger_density = 1
+
 # UDP port of the session, TCP port of the web gateway (status, icon, WebSocket players)
 port = 27015
 web_port = 27025
@@ -77,9 +91,13 @@ tunnel = 1
 radius = 0
 
 # players who say \"/admin <password>\" in the chat get the Administration menu (Esc):
-# send players away, bring them, the clock, its speed, the weather. The password needs at
-# least 8 characters; empty: nobody
+# send players away, bring them, the clock, its speed, the weather, the traffic and the
+# passengers. The password needs at least 8 characters; empty: nobody
 admin_password =
+# the same with this password: a moderator, who sees the players and sends them away, talks
+# to them, but leaves the clock, the weather, the traffic and the passengers alone
+# (at least 8 characters; empty: no moderators)
+moderator_password =
 
 # how fast the clock runs (1 = real time, 2 = twice as fast, up to 30)
 time_speed = 1
@@ -150,6 +168,9 @@ impl ServerCfg {
             traffic: (num("traffic", 30).max(0) as usize).min(traffic_max),
             timetable: flag("timetable", true),
             passengers: flag("passengers", true),
+            passenger_density: kv.get("passenger_density").filter(|v| !v.is_empty()).and_then(|v| {
+                passenger_density(v).map_err(|e| log::warn!("server.cfg: passenger_density = {v}: {e}; the machine's own passengers setting is used")).ok()
+            }),
             port: num("port", 27015).clamp(1, 65535) as u16,
             web_port: num("web_port", 27025).clamp(1, 65535) as u16,
             max_players: num("max_players", 16).clamp(1, 64) as usize,
@@ -157,6 +178,7 @@ impl ServerCfg {
             radius: num("radius", 0) as i32,
             icon,
             admin_password: admin_password(kv.get("admin_password").cloned().unwrap_or_default()),
+            moderator_password: checked_password(kv.get("moderator_password").cloned().unwrap_or_default(), "moderator_password"),
             time_speed: kv.get("time_speed").and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite()).unwrap_or(1.0).clamp(1.0, 30.0),
             real_time: flag("real_time", false),
             metar_sync: flag("metar_sync", false),
@@ -168,9 +190,17 @@ impl ServerCfg {
     }
 }
 
+/// (one check for `server.cfg` and the admins: `omsi_admin::passenger_density`)
+pub use omsi_admin::{passenger_density, PASSENGER_DENSITY_MAX};
+
 fn admin_password(password: String) -> String {
+    checked_password(password, "admin_password")
+}
+
+/// A password of `server.cfg` (`key`), or none when it is too short (and the log says so).
+fn checked_password(password: String, key: &str) -> String {
     if !password.is_empty() && password.chars().count() < crate::admin::MIN_PASSWORD {
-        log::warn!("server.cfg: admin_password has fewer than {} characters: nobody administers this server until it is longer", crate::admin::MIN_PASSWORD);
+        log::warn!("server.cfg: {key} has fewer than {} characters: it lets nobody in until it is longer", crate::admin::MIN_PASSWORD);
         return String::new();
     }
     password
@@ -231,6 +261,51 @@ pub fn player_info<'a>(q: &omsi_net::Pose, pose_of: impl Fn(u32) -> Option<&'a o
         aboard,
         lat_lon: omsi_map::world_to_lat_lon(x, y),
     })
+}
+
+#[cfg(test)]
+mod passenger_density_tests {
+    use super::ServerCfg;
+
+    fn load(text: &str) -> ServerCfg {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("omsi-pax-cfg-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("server.cfg");
+        std::fs::write(&path, text).unwrap();
+        let cfg = ServerCfg::load(&path, 120).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        cfg
+    }
+
+    /// An old server.cfg (no key) keeps what it had: the machine's own setting; `passengers`
+    /// stays the switch it was (`passengers = 50` is not fifty passengers).
+    #[test]
+    fn old_and_new_files_are_read() {
+        let old = load("passengers = 1\n");
+        assert!(old.passengers);
+        assert_eq!(old.passenger_density, None);
+        let new = load("passengers = 1\npassenger_density = 2.5\n");
+        assert_eq!(new.passenger_density, Some(2.5));
+        let off = load("passengers = 0\npassenger_density = 0\n");
+        assert!(!off.passengers);
+        assert_eq!(off.passenger_density, Some(0.0));
+        // a wrong value: as if it were not there (and said in the log)
+        for bad in ["-1", "10", "lots", "NaN"] {
+            assert_eq!(load(&format!("passenger_density = {bad}\n")).passenger_density, None, "{bad}");
+        }
+        // the old trap: a number for the switch is not a density, and not on
+        assert!(!load("passengers = 50\n").passengers);
+    }
+
+    /// The file written for a new server says what it means, and is read back as 1.
+    #[test]
+    fn the_default_file_has_the_density() {
+        let d = load(super::DEFAULT_CFG);
+        assert_eq!(d.passenger_density, Some(1.0));
+        assert!(d.passengers);
+    }
 }
 
 #[cfg(test)]
