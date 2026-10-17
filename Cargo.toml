@@ -116,12 +116,12 @@ gpu-allocator = { git = "https://github.com/openOMSI-Project/gpu-allocator", rev
 # failures, Adapter::memory_info, GLES over ANGLE (Direct3D 11) on Windows, and fixes backported from
 # v30 (Vulkan acquire fence, out-of-memory checks, DX12 textureNumLevels, 3D texture init); every crate of the
 # fork that Cargo.lock lists is patched, or the fork's and crates.io's halves would not match
-wgpu = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-wgpu-core = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-wgpu-core-deps-apple = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-wgpu-core-deps-emscripten = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-wgpu-core-deps-windows-linux-android = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-wgpu-hal = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-wgpu-types = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-wgpu-naga-bridge = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
-naga = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "2409547bccdacb323dcf65e1ec11b1c519c41f92" }
+wgpu = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+wgpu-core = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+wgpu-core-deps-apple = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+wgpu-core-deps-emscripten = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+wgpu-hal = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+wgpu-types = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+wgpu-naga-bridge = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
+naga = { git = "https://github.com/isaacsa2/wgpu-openomsi", rev = "3caafa697fea9be157c0fd481c9ecb02a546c14b" }
