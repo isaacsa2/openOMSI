@@ -1,10 +1,12 @@
 # Publishes the website (site/) with the documentation (docs/*.md) to GitHub Pages.
+# In this fork it runs on every push to fork-pages (see `on:` below).
 name: Website
 
 on:
   push:
-    branches: [main]
-    paths: ["site/**", "docs/**", "assets/logos/**", "assets/icons/app/**", "README.md", ".github/workflows/pages.yml"]
+    # (this fork only: the website is published from the fork-pages branch; no path filter, so
+    # that the first push of the branch publishes too)
+    branches: [fork-pages]
   workflow_dispatch:
 
 permissions:
