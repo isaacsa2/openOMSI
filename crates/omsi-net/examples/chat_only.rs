@@ -5,6 +5,8 @@
 //!
 //! This is an ordinary player connection, NOT an administrative bypass or a verified staff identity.
 
+mod legacy;
+
 use omsi_net::{LanEvent, LanSession, Pose, WorldInfo, MAX_CHAT, MAX_NAME};
 use std::collections::VecDeque;
 use std::io::{self, BufRead};
@@ -17,12 +19,14 @@ struct Args {
     target: String,
     name: String,
     message: Option<String>,
+    protocol: u8,
 }
 
 fn usage() -> &'static str {
-    "Usage: cargo run -p omsi-net --example chat_only -- <server> [--name NAME] [--message TEXT]\n\
+    "Usage: cargo run -p omsi-net --example chat_only -- <server> [--name NAME] [--message TEXT] [--protocol 7|14]\n\
      Server: IP:UDP_PORT, OMSI session code, http(s):// gateway, or official alias\n\
      Interactive commands: :help, :quit\n\
+     Protocol 14 is the default; --protocol 7 explicitly enables legacy chat only.\n\
      Connects as a regular chat-only player; it does not grant administrator rights."
 }
 
@@ -42,11 +46,20 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Args>, St
     }
     let mut name = "Chat Console".to_string();
     let mut message = None;
+    let mut protocol = omsi_net::PROTOCOL as u8;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--name" => name = args.next().ok_or("--name requires a value")?,
             "--message" if message.is_none() => {
                 message = Some(args.next().ok_or("--message requires a value")?);
+            }
+            "--protocol" => {
+                let version = args.next().ok_or("--protocol requires 7 or 14")?;
+                protocol = match version.as_str() {
+                    "7" => 7,
+                    "14" if omsi_net::PROTOCOL == 14 => 14,
+                    _ => return Err(format!("unsupported chat protocol: {version} (supported: 7 and {})", omsi_net::PROTOCOL)),
+                };
             }
             "--help" | "-h" => return Ok(None),
             _ => return Err(format!("unknown or repeated option: {option}\n{}", usage())),
@@ -58,7 +71,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Args>, St
     if message.as_ref().is_some_and(|m| !valid_field(m, MAX_CHAT)) {
         return Err(format!("message must be 1 to {MAX_CHAT} characters, without controls or |"));
     }
-    Ok(Some(Args { target, name, message }))
+    Ok(Some(Args { target, name, message, protocol }))
 }
 
 fn stdin_lines() -> Receiver<String> {
@@ -186,6 +199,9 @@ fn main() {
             println!("{}", usage());
             return Ok(());
         };
+        if args.protocol == 7 {
+            return legacy::run(&args.target, &args.name, args.message);
+        }
         let (lan, bridge) = connect(&args.target, &args.name)?;
         println!("Joining {} as {} (chat only).", args.target, args.name);
         if args.message.is_none() {
@@ -210,6 +226,17 @@ mod tests {
         assert_eq!(a.target, "127.0.0.1:27015");
         assert_eq!(a.name, "Isaac");
         assert_eq!(a.message.as_deref(), Some("Hi"));
+        assert_eq!(a.protocol, omsi_net::PROTOCOL as u8);
+    }
+
+
+    #[test]
+    fn selects_explicit_legacy_protocol_and_rejects_unknown_versions() {
+        let args = parse_args(["https://example.org", "--protocol", "7", "--name", "Dev"]
+            .into_iter().map(str::to_string)).unwrap().unwrap();
+        assert_eq!(args.protocol, 7);
+        assert!(parse_args(["https://example.org", "--protocol", "8"]
+            .into_iter().map(str::to_string)).is_err());
     }
 
     #[test]
