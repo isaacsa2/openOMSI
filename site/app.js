@@ -108,10 +108,27 @@ function showTemplate(id) {
 
 async function home() {
   showTemplate("home");
+  ledSign();
   playingNow();
   const rel = await latestRelease();
   const chip = document.querySelector("#version-chip span:last-child");
   if (chip) chip.textContent = rel.tag_name ? `Latest: ${rel.tag_name.replace(/^v/, "")}` : "No release yet";
+}
+
+// The destination sign of the overview cycles through a few lines, like a bus on its route
+// (it keeps its first line when the visitor prefers reduced motion)
+let ledTimer = null;
+function ledSign() {
+  clearInterval(ledTimer);
+  const el = document.getElementById("led-text");
+  if (!el || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const lines = ["openOMSI", "Every map", "Every bus", "Every mod", "Rust · 64-bit", "Einsteigen bitte"];
+  let i = 0;
+  ledTimer = setInterval(() => {
+    if (!el.isConnected) { clearInterval(ledTimer); return; }
+    el.classList.add("off");
+    setTimeout(() => { i = (i + 1) % lines.length; el.textContent = lines[i]; el.classList.remove("off"); }, 160);
+  }, 2600);
 }
 
 // How many play openOMSI right now: the counter's count of these ten minutes (the README's
