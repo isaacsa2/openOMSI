@@ -10,7 +10,7 @@
 <link rel="apple-touch-icon" href="assets/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@400;500&family=Material+Icons&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Barlow+Condensed:wght@600;700;800&family=JetBrains+Mono:wght@400;500&family=Material+Icons&display=swap" rel="stylesheet">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
@@ -90,20 +90,21 @@
         </div>
       </div>
       <div class="hero-art" aria-hidden="true">
+        <div class="led-sign">
+          <span class="led-line">2</span>
+          <span class="led-screen"><span class="led-text" id="led-text">openOMSI</span></span>
+        </div>
         <svg viewBox="0 0 640 340" xmlns="http://www.w3.org/2000/svg" focusable="false">
           <path class="route-glow" d="M24 270H150Q190 270 190 230V130Q190 90 230 90H400Q440 90 440 130V210Q440 250 480 250H590" fill="none" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
           <path class="route-line" d="M24 270H150Q190 270 190 230V130Q190 90 230 90H400Q440 90 440 130V210Q440 250 480 250H590" fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
           <path class="route-line-dash" d="M24 270H150Q190 270 190 230V130Q190 90 230 90H400Q440 90 440 130V210Q440 250 480 250H590" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 20"/>
-          <circle class="stop stop-a" cx="100" cy="270" r="14"/>
-          <circle class="stop stop-b" cx="310" cy="90" r="14"/>
-          <circle class="stop stop-c" cx="440" cy="170" r="14"/>
+          <g class="stop"><circle cx="100" cy="270" r="17"/><text x="100" y="276" text-anchor="middle">H</text></g>
+          <g class="stop"><circle cx="310" cy="90" r="17"/><text x="310" y="96" text-anchor="middle">H</text></g>
+          <g class="stop"><circle cx="440" cy="170" r="17"/><text x="440" y="176" text-anchor="middle">H</text></g>
           <circle class="stop-end" cx="606" cy="250" r="17"/>
-          <text class="stop-label" x="100" y="306" text-anchor="middle">Every map</text>
+          <text class="stop-label" x="100" y="310" text-anchor="middle">Every map</text>
           <text class="stop-label" x="310" y="58" text-anchor="middle">Every bus</text>
-          <text class="stop-sub" x="310" y="42" text-anchor="middle">STOP 2</text>
-          <text class="stop-sub" x="100" y="322" text-anchor="middle">STOP 1</text>
-          <text class="stop-label" x="418" y="175" text-anchor="end">Every mod</text>
-          <text class="stop-sub" x="418" y="191" text-anchor="end">STOP 3</text>
+          <text class="stop-label" x="416" y="175" text-anchor="end">Every mod</text>
           <text class="stop-label" x="606" y="296" text-anchor="middle">Drive</text>
           <g class="live-static"><circle cx="190" cy="180" r="9" fill="var(--primary)"/></g>
           <g class="live-dot">
@@ -114,13 +115,60 @@
         </svg>
       </div>
     </div>
+    <div class="hero-road" aria-hidden="true"></div>
   </section>
 
-  <div class="stats">
-    <div class="stat"><b>100%</b><span>map &amp; mod compatibility</span></div>
-    <div class="stat"><b>64-bit</b><span>no 2&nbsp;GB limit</span></div>
-    <div class="stat"><b>4</b><span>platforms: Windows, macOS, Linux, Android</span></div>
-    <div class="stat"><b>Open</b><span>source, GNU AGPL v3</span></div>
+  <div class="cluster" role="group" aria-label="openOMSI at a glance">
+    <div class="cluster-panel">
+    <div class="gauge">
+      <svg viewBox="0 0 140 112" aria-hidden="true" focusable="false">
+        <g class="g-ticks"><line x1="20.6" y1="96.5" x2="13.7" y2="100.5"/><line x1="13.3" y1="74.0" x2="8.8" y2="74.4"/><line x1="15.8" y1="50.4" x2="11.5" y2="49.0"/><line x1="27.6" y1="29.9" x2="24.3" y2="26.8"/><line x1="46.8" y1="15.9" x2="45.0" y2="11.8"/><line x1="70.0" y1="11.0" x2="70.0" y2="3.0"/><line x1="93.2" y1="15.9" x2="95.0" y2="11.8"/><line x1="112.4" y1="29.9" x2="115.7" y2="26.8"/><line x1="124.2" y1="50.4" x2="128.5" y2="49.0"/><line x1="126.7" y1="74.0" x2="131.2" y2="74.4"/><line x1="119.4" y1="96.5" x2="126.3" y2="100.5"/></g>
+        <circle class="g-track" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="209.44 314.16"/>
+        <circle class="g-arc" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="209.44 314.16" style="--c:314.16"/>
+        <g class="g-needle" style="--a:390deg"><line x1="64" y1="68" x2="108" y2="68"/></g>
+        <circle class="g-hub" cx="70" cy="68" r="5"/>
+        <text class="g-val" x="70" y="98" text-anchor="middle">100</text>
+        <text class="g-unit" x="70" y="111" text-anchor="middle">% COMPAT</text>
+      </svg>
+      <span class="g-cap">map &amp; mod compatibility</span>
+    </div>
+    <div class="gauge">
+      <svg viewBox="0 0 140 112" aria-hidden="true" focusable="false">
+        <g class="g-ticks"><line x1="20.6" y1="96.5" x2="13.7" y2="100.5"/><line x1="13.3" y1="74.0" x2="8.8" y2="74.4"/><line x1="15.8" y1="50.4" x2="11.5" y2="49.0"/><line x1="27.6" y1="29.9" x2="24.3" y2="26.8"/><line x1="46.8" y1="15.9" x2="45.0" y2="11.8"/><line x1="70.0" y1="11.0" x2="70.0" y2="3.0"/><line x1="93.2" y1="15.9" x2="95.0" y2="11.8"/><line x1="112.4" y1="29.9" x2="115.7" y2="26.8"/><line x1="124.2" y1="50.4" x2="128.5" y2="49.0"/><line x1="126.7" y1="74.0" x2="131.2" y2="74.4"/><line x1="119.4" y1="96.5" x2="126.3" y2="100.5"/></g>
+        <circle class="g-track" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="209.44 314.16"/>
+        <circle class="g-arc" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="134.04 314.16" style="--c:314.16"/>
+        <g class="g-needle" style="--a:304deg"><line x1="64" y1="68" x2="108" y2="68"/></g>
+        <circle class="g-hub" cx="70" cy="68" r="5"/>
+        <text class="g-val" x="70" y="98" text-anchor="middle">64</text>
+        <text class="g-unit" x="70" y="111" text-anchor="middle">BIT</text>
+      </svg>
+      <span class="g-cap">no 2&nbsp;GB limit</span>
+    </div>
+    <div class="gauge">
+      <svg viewBox="0 0 140 112" aria-hidden="true" focusable="false">
+        <g class="g-ticks"><line x1="20.6" y1="96.5" x2="13.7" y2="100.5"/><line x1="13.3" y1="74.0" x2="8.8" y2="74.4"/><line x1="15.8" y1="50.4" x2="11.5" y2="49.0"/><line x1="27.6" y1="29.9" x2="24.3" y2="26.8"/><line x1="46.8" y1="15.9" x2="45.0" y2="11.8"/><line x1="70.0" y1="11.0" x2="70.0" y2="3.0"/><line x1="93.2" y1="15.9" x2="95.0" y2="11.8"/><line x1="112.4" y1="29.9" x2="115.7" y2="26.8"/><line x1="124.2" y1="50.4" x2="128.5" y2="49.0"/><line x1="126.7" y1="74.0" x2="131.2" y2="74.4"/><line x1="119.4" y1="96.5" x2="126.3" y2="100.5"/></g>
+        <circle class="g-track" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="209.44 314.16"/>
+        <circle class="g-arc" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="167.55 314.16" style="--c:314.16"/>
+        <g class="g-needle" style="--a:342deg"><line x1="64" y1="68" x2="108" y2="68"/></g>
+        <circle class="g-hub" cx="70" cy="68" r="5"/>
+        <text class="g-val" x="70" y="98" text-anchor="middle">4</text>
+        <text class="g-unit" x="70" y="111" text-anchor="middle">PLATFORMS</text>
+      </svg>
+      <span class="g-cap">Windows, macOS, Linux, Android</span>
+    </div>
+    <div class="gauge">
+      <svg viewBox="0 0 140 112" aria-hidden="true" focusable="false">
+        <g class="g-ticks"><line x1="20.6" y1="96.5" x2="13.7" y2="100.5"/><line x1="13.3" y1="74.0" x2="8.8" y2="74.4"/><line x1="15.8" y1="50.4" x2="11.5" y2="49.0"/><line x1="27.6" y1="29.9" x2="24.3" y2="26.8"/><line x1="46.8" y1="15.9" x2="45.0" y2="11.8"/><line x1="70.0" y1="11.0" x2="70.0" y2="3.0"/><line x1="93.2" y1="15.9" x2="95.0" y2="11.8"/><line x1="112.4" y1="29.9" x2="115.7" y2="26.8"/><line x1="124.2" y1="50.4" x2="128.5" y2="49.0"/><line x1="126.7" y1="74.0" x2="131.2" y2="74.4"/><line x1="119.4" y1="96.5" x2="126.3" y2="100.5"/></g>
+        <circle class="g-track" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="209.44 314.16"/>
+        <circle class="g-arc" cx="70" cy="68" r="50" transform="rotate(150 70 68)" stroke-dasharray="209.44 314.16" style="--c:314.16"/>
+        <g class="g-needle" style="--a:390deg"><line x1="64" y1="68" x2="108" y2="68"/></g>
+        <circle class="g-hub" cx="70" cy="68" r="5"/>
+        <text class="g-val" x="70" y="98" text-anchor="middle">OPEN</text>
+        <text class="g-unit" x="70" y="111" text-anchor="middle">AGPL v3</text>
+      </svg>
+      <span class="g-cap">source code, free to use</span>
+    </div>
+    </div>
   </div>
 
   <div class="content">
