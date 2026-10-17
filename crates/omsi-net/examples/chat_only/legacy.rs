@@ -18,7 +18,7 @@ const CHAT_DELAY: Duration = Duration::from_millis(1100);
 fn hello(name: &str, session: Option<u64>, nonce: u64) -> String {
     let session = session.map(omsi_net::session_hex).unwrap_or_else(|| "-".into());
     // HELLO|protocol|session|name|bus|map|date|time|weather|season|nonce
-    format!("HELLO|{VERSION}|{session}|{name}|||0.00|||{nonce:016X}")
+    format!("HELLO|{VERSION}|{session}|{name}||||0.00|||{nonce:016X}")
 }
 
 fn info(id: u32, name: &str) -> String {
