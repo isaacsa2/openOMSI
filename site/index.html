@@ -10,10 +10,10 @@
 <link rel="apple-touch-icon" href="assets/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Material+Icons&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@400;500&family=Material+Icons&display=swap" rel="stylesheet">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1f2227" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
 <script src="theme.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -72,18 +72,56 @@
 
 <template id="home">
   <section class="hero">
-    <img class="hero-logo logo-on-dark" src="assets/logos/openomsi-wordmark-light.svg" alt="openOMSI">
-    <img class="hero-logo logo-on-light" src="assets/logos/openomsi-wordmark-dark.svg" alt="openOMSI">
-    <p class="hero-text">OMSI&nbsp;2, recreated from scratch in Rust - with full compatibility for every map, bus and mod.</p>
-    <div class="hero-actions">
-      <a class="btn btn-contained" href="#/download"><span class="material-icons">download</span>Download</a>
-      <a class="btn btn-outlined" href="#/docs/USER_GUIDE"><span class="material-icons">menu_book</span>Documentation</a>
-      <a class="btn btn-outlined btn-discord" href="https://discord.gg/openomsi"><span class="material-icons">forum</span>Discord</a>
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <img class="hero-logo logo-on-dark" src="assets/logos/openomsi-wordmark-light.svg" alt="openOMSI">
+        <img class="hero-logo logo-on-light" src="assets/logos/openomsi-wordmark-dark.svg" alt="openOMSI">
+        <h1 class="hero-title">OMSI&nbsp;2, recreated from scratch in <em>Rust</em></h1>
+        <p class="hero-text">With full compatibility for every map, bus and mod.</p>
+        <div class="hero-actions">
+          <a class="btn btn-contained" href="#/download"><span class="material-icons">download</span>Download</a>
+          <a class="btn btn-outlined" href="#/docs/USER_GUIDE"><span class="material-icons">menu_book</span>Documentation</a>
+          <a class="btn btn-outlined btn-discord" href="https://discord.gg/openomsi"><span class="material-icons">forum</span>Discord</a>
+        </div>
+        <div class="hero-chips">
+          <div class="chip chip-warn"><span class="material-icons">construction</span><span>Early release: expect bugs</span></div>
+          <div class="chip" id="version-chip"><span class="material-icons">sell</span><span>latest version…</span></div>
+          <div class="chip chip-live" id="players-chip" hidden><span class="material-icons">sports_esports</span><span></span></div>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 640 340" xmlns="http://www.w3.org/2000/svg" focusable="false">
+          <path class="route-glow" d="M24 270H150Q190 270 190 230V130Q190 90 230 90H400Q440 90 440 130V210Q440 250 480 250H590" fill="none" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+          <path class="route-line" d="M24 270H150Q190 270 190 230V130Q190 90 230 90H400Q440 90 440 130V210Q440 250 480 250H590" fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+          <path class="route-line-dash" d="M24 270H150Q190 270 190 230V130Q190 90 230 90H400Q440 90 440 130V210Q440 250 480 250H590" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 20"/>
+          <circle class="stop stop-a" cx="100" cy="270" r="14"/>
+          <circle class="stop stop-b" cx="310" cy="90" r="14"/>
+          <circle class="stop stop-c" cx="440" cy="170" r="14"/>
+          <circle class="stop-end" cx="606" cy="250" r="17"/>
+          <text class="stop-label" x="100" y="306" text-anchor="middle">Every map</text>
+          <text class="stop-label" x="310" y="58" text-anchor="middle">Every bus</text>
+          <text class="stop-sub" x="310" y="42" text-anchor="middle">STOP 2</text>
+          <text class="stop-sub" x="100" y="322" text-anchor="middle">STOP 1</text>
+          <text class="stop-label" x="418" y="175" text-anchor="end">Every mod</text>
+          <text class="stop-sub" x="418" y="191" text-anchor="end">STOP 3</text>
+          <text class="stop-label" x="606" y="296" text-anchor="middle">Drive</text>
+          <g class="live-static"><circle cx="190" cy="180" r="9" fill="var(--primary)"/></g>
+          <g class="live-dot">
+            <circle r="9" fill="var(--primary)" opacity=".35"><animate attributeName="r" values="9;22" dur="1.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".45;0" dur="1.6s" repeatCount="indefinite"/></circle>
+            <circle r="9" fill="var(--primary)" stroke="#fff" stroke-width="3"/>
+            <animateMotion dur="9s" repeatCount="indefinite" path="M24 270H150Q190 270 190 230V130Q190 90 230 90H400Q440 90 440 130V210Q440 250 480 250H590"/>
+          </g>
+        </svg>
+      </div>
     </div>
-    <div class="chip chip-warn"><span class="material-icons">construction</span><span>Early release: expect bugs</span></div>
-    <div class="chip" id="version-chip"><span class="material-icons">sell</span><span>latest version…</span></div>
-    <div class="chip chip-live" id="players-chip" hidden><span class="material-icons">sports_esports</span><span></span></div>
   </section>
+
+  <div class="stats">
+    <div class="stat"><b>100%</b><span>map &amp; mod compatibility</span></div>
+    <div class="stat"><b>64-bit</b><span>no 2&nbsp;GB limit</span></div>
+    <div class="stat"><b>4</b><span>platforms: Windows, macOS, Linux, Android</span></div>
+    <div class="stat"><b>Open</b><span>source, GNU AGPL v3</span></div>
+  </div>
 
   <div class="content">
     <div class="card card-warning elevation-2">
@@ -106,17 +144,17 @@
     exactly as OMSI&nbsp;2.2.032 does, so existing maps and mods run unchanged. Underneath it is a new engine:
     64-bit, multithreaded, with a modern renderer.</p>
 
-    <div class="grid">
-      <div class="card elevation-1"><span class="material-icons card-icon">extension</span><h3>100% mod compatibility</h3><p>Maps, buses, AI vehicles, scenery and plugins from the community work as they are - no conversion.</p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">speed</span><h3>A modern engine</h3><p>64-bit, no 2&nbsp;GB limit, tile streaming and texture loading on worker threads, Metal / Vulkan / DirectX&nbsp;12.</p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">devices</span><h3>Windows, macOS, Linux, Android</h3><p>Native builds for every platform, with betas for testers and tested stable releases.</p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">smartphone</span><h3>On your phone</h3><p>The full game on Android: on-screen wheel or tilt steering, analog pedals, doors, gearbox and a cab panel - with the same maps, buses and mods. <a href="#/docs/ANDROID">More</a></p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">texture</span><h3>PBR materials</h3><p>Normal, roughness, metalness and occlusion maps beside a texture give mods modern materials, and still work in OMSI&nbsp;2. <a href="#/docs/PBR">More</a></p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">handyman</span><h3>No limits for modders</h3><p>Textures up to 16K, any number of interior lights per mesh, no 2&nbsp;GB limit - and OMSI&nbsp;2 content still works as it is. <a href="#/docs/MODDING">More</a></p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">groups</span><h3>Multiplayer</h3><p>LAN sessions and a dedicated server that simulates the whole map without a window.</p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">tune</span><h3>A real launcher</h3><p>Profiles, duties from the timetable, bus and livery preview, settings, one-click mod installs.</p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">code</span><h3>Lua plugins</h3><p>Write plugins in Lua: one text file in <code>plugins/</code>, reloaded as you save it, the same on every platform. <a href="#/docs/PLUGINS">Plugin docs</a>, and the <a href="https://github.com/openOMSI-org/openOMSI-Development-Tools">Development Tools</a> to build and compile them into <code>.oop</code>.</p></div>
-      <div class="card elevation-1"><span class="material-icons card-icon">description</span><h3>Open formats</h3><p>Every OMSI file format is written down - useful for modders and tool makers too.</p></div>
+    <div class="features">
+      <div class="card feature elevation-1 wide"><span class="material-icons card-icon">extension</span><h3>100% mod compatibility</h3><p>Maps, buses, AI vehicles, scenery and plugins from the community work as they are - no conversion.</p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">speed</span><h3>A modern engine</h3><p>64-bit, no 2&nbsp;GB limit, tile streaming and texture loading on worker threads, Metal / Vulkan / DirectX&nbsp;12.</p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">devices</span><h3>Windows, macOS, Linux, Android</h3><p>Native builds for every platform, with betas for testers and tested stable releases.</p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">smartphone</span><h3>On your phone</h3><p>The full game on Android: on-screen wheel or tilt steering, analog pedals, doors, gearbox and a cab panel - with the same maps, buses and mods. <a href="#/docs/ANDROID">More</a></p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">texture</span><h3>PBR materials</h3><p>Normal, roughness, metalness and occlusion maps beside a texture give mods modern materials, and still work in OMSI&nbsp;2. <a href="#/docs/PBR">More</a></p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">handyman</span><h3>No limits for modders</h3><p>Textures up to 16K, any number of interior lights per mesh, no 2&nbsp;GB limit - and OMSI&nbsp;2 content still works as it is. <a href="#/docs/MODDING">More</a></p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">groups</span><h3>Multiplayer</h3><p>LAN sessions and a dedicated server that simulates the whole map without a window.</p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">tune</span><h3>A real launcher</h3><p>Profiles, duties from the timetable, bus and livery preview, settings, one-click mod installs.</p></div>
+      <div class="card feature elevation-1 wide"><span class="material-icons card-icon">code</span><h3>Lua plugins</h3><p>Write plugins in Lua: one text file in <code>plugins/</code>, reloaded as you save it, the same on every platform. <a href="#/docs/PLUGINS">Plugin docs</a>, and the <a href="https://github.com/openOMSI-org/openOMSI-Development-Tools">Development Tools</a> to build and compile them into <code>.oop</code>.</p></div>
+      <div class="card feature elevation-1"><span class="material-icons card-icon">description</span><h3>Open formats</h3><p>Every OMSI file format is written down - useful for modders and tool makers too.</p></div>
     </div>
   </div>
 </template>

@@ -213,6 +213,20 @@ async function doc(name, anchor) {
       a.setAttribute("href", `https://github.com/${REPO}/blob/main/docs/${href}`);
     }
   });
+  // a copy button on every code block
+  box.querySelectorAll("pre").forEach(pre => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "copy-btn";
+    b.textContent = "Copy";
+    b.setAttribute("aria-label", "Copy code");
+    b.onclick = async () => {
+      try { await navigator.clipboard.writeText((pre.querySelector("code") || pre).textContent); b.textContent = "Copied"; }
+      catch { b.textContent = "Press Ctrl+C"; }
+      setTimeout(() => { b.textContent = "Copy"; }, 1500);
+    };
+    pre.appendChild(b);
+  });
   if (anchor) document.getElementById(anchor)?.scrollIntoView();
   else window.scrollTo(0, 0);
 }
@@ -394,6 +408,15 @@ function route() {
   return home();
 }
 window.addEventListener("hashchange", route);
+
+// The app bar gets a hairline once the page has scrolled
+(() => {
+  const bar = document.querySelector(".appbar");
+  if (!bar) return;
+  const update = () => bar.classList.toggle("scrolled", window.scrollY > 4);
+  window.addEventListener("scroll", update, { passive: true });
+  update();
+})();
 
 // Theme: the app bar button goes system -> light -> dark -> system; the choice is kept in
 // localStorage (applied before the first paint by the script in <head>)
