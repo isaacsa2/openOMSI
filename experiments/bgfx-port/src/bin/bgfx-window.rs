@@ -8,7 +8,7 @@
 mod win {
     use std::{collections::HashSet, ffi::c_void, path::PathBuf, ptr, time::Instant};
     use glam::{Mat4, Vec3};
-    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file_with_textures, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, MapPreview, Selection}, texture_bridge::{Texture, Sampler}, drive_bridge::{DrivePreview, DriverKeys}};
+    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file_with_textures, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, MapPreview, Selection}, texture_bridge::{Texture, Sampler}, drive_bridge::{DrivePreview, DriverKeys}, native_backend::BgfxNativeBackend, frame_contract::{NativeRenderer, FrameCommands, ViewCamera, View, Draw, MeshUpload, ResourceId, BlendMode, DepthMode}};
     use winit::{
         application::ApplicationHandler,
         dpi::PhysicalSize,
@@ -31,6 +31,7 @@ mod win {
         vertex_shader: Option<PathBuf>,
         fragment_shader: Option<PathBuf>,
         texture_path: Option<PathBuf>,
+        contract_demo: bool,
     }
 
     fn parse() -> Result<Settings, String> {
@@ -46,8 +47,13 @@ mod win {
         let mut vertex_shader = None;
         let mut fragment_shader = None;
         let mut texture_path = None;
+        let mut contract_demo = false;
         let mut args = std::env::args().skip(1);
         while let Some(flag) = args.next() {
+            if flag == "--contract-demo" {
+                contract_demo = true;
+                continue;
+            }
             let val = match flag.as_str() {
                 "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d | --terrain PATH.map.terrain | --map PATH/global.cfg] [--bus-definition PATH.bus] [--vs PATH.bin --fs PATH.bin] [--frames N]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
                 "--backend" | "--mesh" | "--terrain" | "--map" | "--tile-x" | "--tile-y" | "--radius" | "--vs" | "--fs" | "--frames" | "--texture" | "--bus-definition" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
@@ -90,12 +96,15 @@ mod win {
         if map_radius > 2 {
             return Err("--radius must be between 0 and 2 tiles".into());
         }
-        if selected > 0 && (vertex_shader.is_none() || fragment_shader.is_none()) {
+        if contract_demo && selected != 0 {
+            return Err("--contract-demo cannot be mixed with map/mesh preview".into());
+        }
+        if (selected > 0 || contract_demo) && (vertex_shader.is_none() || fragment_shader.is_none()) {
             return Err("--mesh/--terrain/--map need --vs and --fs matching the backend".into());
         }
         let map_center = tile_x.zip(tile_y);
         Ok(Settings { backend, path, terrain_path, map_path, bus_definition, map_center, map_radius,
-            exit_after_frames, vertex_shader, fragment_shader, texture_path })
+            exit_after_frames, vertex_shader, fragment_shader, texture_path, contract_demo })
     }
 
     struct Viewer {
@@ -110,6 +119,8 @@ mod win {
         texture: Option<Texture>,
         material_textures: Vec<Option<Texture>>,
         sampler: Option<Sampler>,
+        contract: Option<BgfxNativeBackend>,
+        contract_mesh: Option<ResourceId>,
         center: Vec3,
         distance: f32,
         yaw: f32,
@@ -124,11 +135,43 @@ mod win {
         fn new(config: Settings) -> Self {
             Self {
                 config, window: None, initialized: false,
-                mesh: None, map_meshes: Vec::new(), map_preview: None, driving: None, program: None, texture: None, material_textures: Vec::new(), sampler: None, center: Vec3::ZERO,
+                mesh: None, map_meshes: Vec::new(), map_preview: None, driving: None, program: None, texture: None, material_textures: Vec::new(), sampler: None, contract: None, contract_mesh: None, center: Vec3::ZERO,
                 distance: 24., yaw: 0., drawn_frames: 0,
                 map_camera: Vec3::new(150., 150., 120.), map_mode: false,
                 held_keys: HashSet::new(), last_frame: Instant::now(),
             }
+        }
+
+        fn open_contract_demo(&mut self) -> Result<(), String> {
+            let mut backend = BgfxNativeBackend::new(
+                self.config.vertex_shader.as_ref().ok_or("--vs needed")?,
+                self.config.fragment_shader.as_ref().ok_or("--fs needed")?,
+            )?;
+            // Synthetic data, in openOMSI's world coordinate system.
+            // The demo validates the cross-backend frame contract without
+            // requiring any original bus/map content or touching the game.
+            let vertices: [[f32; 8]; 3] = [
+                [-2., 0., 0., 0., -1., 0., 0., 0.],
+                [ 2., 0., 0., 0., -1., 0., 1., 0.],
+                [ 0., 0., 4., 0., -1., 0., 0.5, 1.],
+            ];
+            let mut packed = Vec::with_capacity(3 * 32);
+            for vertex in vertices {
+                for value in vertex {
+                    packed.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+            let mesh_id = backend.upload_mesh(
+                MeshUpload {
+                    vertex_stride: 32, vertex_count: 3, index_count: 3,
+                    index_32bit: false, one_sided: false,
+                },
+                &packed, &[0u8, 0, 1, 0, 2, 0],
+            )?;
+            println!("BGFX_CONTRACT_UPLOAD_OK mesh_id={} vertices=3 indices=3", mesh_id.0);
+            self.contract = Some(backend);
+            self.contract_mesh = Some(mesh_id);
+            Ok(())
         }
 
         fn create_material_preview(&mut self) -> Result<(), String> {
@@ -265,6 +308,35 @@ mod win {
             if size.width == 0 || size.height == 0 { return; }
             let w = size.width.min(u16::MAX as u32) as u16;
             let h = size.height.min(u16::MAX as u32) as u16;
+            if let (Some(renderer), Some(mesh)) = (self.contract.as_mut(), self.contract_mesh) {
+                let eye = Vec3::new(0., -12., 4.);
+                let view = Mat4::look_at_rh(eye, Vec3::new(0., 0., 1.6), Vec3::Z);
+                let projection = Mat4::perspective_rh(
+                    60_f32.to_radians(), w as f32 / h as f32, 0.1, 1000.,
+                );
+                let frame = FrameCommands {
+                    viewport: (u32::from(w), u32::from(h)),
+                    cameras: vec![ViewCamera {
+                        view: View::Main,
+                        world_to_camera: view.to_cols_array(),
+                        camera_to_clip: projection.to_cols_array(),
+                    }],
+                    draws: vec![Draw {
+                        mesh,
+                        material: ResourceId(0),
+                        view: View::Main,
+                        blend: BlendMode::Opaque,
+                        depth: DepthMode::TestWrite,
+                        transform: Mat4::IDENTITY.to_cols_array(),
+                        authored_order: 0,
+                    }],
+                };
+                if let Err(e) = renderer.draw_frame(&frame) {
+                    eprintln!("BGFX_CONTRACT_FRAME_FAILED: {e}");
+                }
+                self.drawn_frames += 1;
+                return;
+            }
             // For OMSI's coordinate convention Z is up and Y goes forwards.
             let (eye, target) = if self.map_mode {
                 let target = if let Some(bus) = self.driving.as_ref() {
@@ -360,6 +432,13 @@ mod win {
                 }
                 self.initialized = true;
                 println!("BGFX initialized: {:?}", bgfx_sys::bgfx_get_renderer_type());
+            }
+            if self.config.contract_demo {
+                if let Err(e) = self.open_contract_demo() {
+                    eprintln!("BGFX_CONTRACT_INIT_FAILED: {e}");
+                    event_loop.exit();
+                    return;
+                }
             }
             if let Some(path) = self.config.path.clone() {
                 match load_file_with_textures(&path)
@@ -459,6 +538,8 @@ mod win {
     impl Drop for Viewer {
         fn drop(&mut self) {
             // The mesh/program must die *before* bgfx, not afterwards.
+            self.contract_mesh.take();
+            self.contract.take();
             self.mesh.take();
             self.map_meshes.clear();
             self.map_preview.take();
