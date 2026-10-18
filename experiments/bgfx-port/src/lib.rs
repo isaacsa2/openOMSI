@@ -10,6 +10,7 @@
 pub mod frame_contract;
 pub mod o3d_bridge;
 pub mod gpu_mesh;
+pub mod geometry_bridge;
 
 use std::{mem::MaybeUninit, time::{Duration, Instant}};
 
