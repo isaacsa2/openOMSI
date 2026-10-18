@@ -33,6 +33,30 @@ pub struct PackedO3d {
     pub model_transform: [f32; 16],
 }
 
+/// Decode geometry and resolve its material texture paths using the same
+/// original-content rules as the production engine. No file contents are
+/// copied into this project. Missing pictures are represented as None and
+/// receive a white texture in the native viewer rather than crashing.
+pub fn load_file_with_textures(path: &Path) -> Result<(PackedO3d, Vec<Option<std::path::PathBuf>>), String> {
+    let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let parsed = omsi_o3d::parse_o3d(&bytes)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let output = pack_visible_omsi_mesh(&parsed)?;
+    // A bus part lies under Vehicles/<name>/model. Put its sibling texture
+    // directory before the model folder; retain fallback for scenery assets.
+    let model_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = model_dir.parent().unwrap_or(model_dir);
+    let bus_textures = parent.join("texture");
+    let model_textures = model_dir.join("texture");
+    let search_dirs: [&Path; 3] = [&bus_textures, &model_textures, model_dir];
+    let resolved = parsed.materials.iter().map(|material| {
+        let name = material.texture.trim();
+        if name.is_empty() || name.len() > 2048 { return None; }
+        omsi_texture::find_texture(name, &search_dirs)
+    }).collect();
+    Ok((output, resolved))
+}
+
 pub fn load_file(path: &Path) -> Result<PackedO3d, String> {
     let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mesh = omsi_o3d::parse_o3d(&bytes)
