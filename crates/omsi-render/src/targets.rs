@@ -530,8 +530,8 @@ pub(crate) struct Upscale {
     /// Render scale: the pipeline that scales the 3D picture up to the window, its
     /// parameters, and the smaller targets per size (with their bind groups).
     pub(crate) upscale_pipeline: wgpu::RenderPipeline,
-    pub(crate) fsr_easu_pipeline: wgpu::RenderPipeline,
-    pub(crate) fsr_rcas_pipeline: wgpu::RenderPipeline,
+    pub(crate) fsr_easu_pipeline: Option<wgpu::RenderPipeline>,
+    pub(crate) fsr_rcas_pipeline: Option<wgpu::RenderPipeline>,
     pub(crate) fsr_target: std::cell::RefCell<Option<FsrTarget>>,
     pub(crate) copy_pipeline: wgpu::RenderPipeline,
     /// Triple screen: a panel's picture copied 1:1 to its place in the window.
