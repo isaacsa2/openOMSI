@@ -11,12 +11,35 @@ use super::{Camera, Scene};
 use crate::AlphaMode;
 use glam::{Mat4, Vec3};
 use omsi_geometry::gpu_contract::{
-    BlendMode, DepthMode, Draw, FrameCommands, ResourceId, View, ViewCamera,
+    BlendMode, DepthMode, Draw, FrameCommands, MaterialUpload, ResourceId, View, ViewCamera,
 };
 
 /// Logical GPU mesh/material IDs use the source slot index plus one. BGFX's
 /// uploader will need a matching id-to-resource mapping in a future step.
 impl Scene {
+    /// Stable CPU-side material descriptions for a future BGFX renderer.
+    /// The same source material slot + 1 used by native_frame_snapshot is
+    /// retained here, so material binds can be updated without rebuilding the
+    /// scene. Texture slot + 1 is the logical source ID: the host must decode
+    /// and upload its original image before registering the material.
+    ///
+    /// This is ONLY the diffuse/color subset. Night maps, environment,
+    /// lighting, CTC repaint, transmap, etc. have not been ported.
+    pub fn native_material_snapshot(&self) -> Result<Vec<(ResourceId, MaterialUpload)>, String> {
+        let mut out = Vec::with_capacity(self.materials.len());
+        for (index, material) in self.materials.iter().enumerate() {
+            let id = ResourceId(index as u64 + 1);
+            let upload = MaterialUpload {
+                diffuse_texture: material.texture.map(|index| ResourceId(index as u64 + 1)),
+                color: material.color,
+            };
+            upload.validate()
+                .map_err(|e| format!("scene material {index}: {e}"))?;
+            out.push((id, upload));
+        }
+        Ok(out)
+    }
+
     pub fn native_frame_snapshot(
         &self,
         camera: &Camera,
