@@ -19,14 +19,11 @@ FSR1 is **disabled by default**. Open **Settings > Graphics > Upscaling** in the
 
 ## Measuring it (send numbers, not impressions)
 
-Compare the **same internal resolution** with and without FSR, at the same place, with MSAA, backend and window size held fixed:
+Compare at the same place, standing still, with MSAA, backend and window size held fixed, and the frame limit off (`max fps` 0 or high: a limit under the card's rate hides every difference, and below 50 it also stops the governor).
 
-1. Start the game with `OMSI_PROFILE=1` and `OMSI_GPU_TIMERS=1` (PowerShell: `$env:OMSI_PROFILE='1'; $env:OMSI_GPU_TIMERS='1'; .\openomsi.exe`).
-2. Stand still at one spot for a minute. Every 15 s the log (`game.log`) has
-   - `profile gpu pass FSR1 EASU` and `profile gpu pass FSR1 RCAS` (or `upscale` with the standard upscaler): the GPU milliseconds of each pass;
-   - `profile: window 1920x1080, scene drawn at 1286x723`: the sizes compared.
-3. Switch the upscaler in Esc > Options > Graphics (no restart needed), wait 30 s, and read the next lines.
-4. For a file to compare two runs: `OMSI_PROFILE_JSON=fsr.json` with `--exit-after <seconds>`, then `scripts/compare-performance.py` on the two files.
+**Frame rate, in one run.** Start with `OMSI_PROFILE=1`: once a second the log (`game.log`) says `profile interval: 30.3 fps over 1.01 s`. Switch the upscaler or the FSR quality in Esc > Options > Graphics (no restart needed) and wait a minute between switches; the averages of each stretch compare. To compare FSR 1 with the standard upscaler *at the same internal resolution*, set the standard one's **Render scale** to the FSR quality's (67 % for Quality).
+
+**GPU time per pass, one run per setting.** The passes' times (`OMSI_GPU_TIMERS=1`) are written once, when the game ends by itself after `--exit-after <seconds>`: `profile gpu pass FSR1 EASU: … ms`, `FSR1 RCAS`, or `upscale` for the standard upscaler, and `profile: window 1161x653, scene drawn at 778x437`. Start `openomsi.exe` with the command line the log's `command line:` names plus `--exit-after 120` (PowerShell: `$env:OMSI_PROFILE='1'; $env:OMSI_GPU_TIMERS='1'; .\openomsi.exe <that command line> --exit-after 120`), once with each setting. With `OMSI_PROFILE_JSON=<file>` the same summary goes to a file, and `scripts/compare-performance.py a.json b.json` compares two.
 
 ## Technical design
 
