@@ -22,7 +22,7 @@ concurrency:
 jobs:
   win32-dx11-triangle:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -41,7 +41,15 @@ jobs:
           git -C vendor-bgfx-sys submodule update --init --recursive --depth 1
           if ($LASTEXITCODE -ne 0) { throw "Matching BGFX submodules unavailable" }
 
+      - name: Cache pinned shaderc compiler binary
+        id: shaderc-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor-bgfx-sys/bgfx/.build/win64_vs2022/bin/shadercRelease.exe
+          key: bgfx-sys-0.15.0-shaderc-win64-v1
+
       - name: Build matching shaderc (Windows x64)
+        if: steps.shaderc-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Push-Location vendor-bgfx-sys/bgfx
