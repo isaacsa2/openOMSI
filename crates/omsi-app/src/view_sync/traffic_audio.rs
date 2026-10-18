@@ -42,27 +42,6 @@ fn sound_plan(
     plan
 }
 
-/// Select the closest AI cars while keeping existing sounds slightly ahead of new
-/// sources, so two cars at the budget's edge do not keep swapping every frame.
-fn selected_sources(
-    cars: impl IntoIterator<Item = (u64, DVec3, bool)>,
-    listener: DVec3,
-    max: usize,
-) -> Vec<u64> {
-    const NEAR2: f64 = 250.0 * 250.0;
-    const KEEP2: f64 = 300.0 * 300.0;
-    let mut candidates: Vec<(u64, f64)> = cars
-        .into_iter()
-        .filter_map(|(id, pos, active)| {
-            let d2 = (pos - listener).length_squared();
-            (d2 <= NEAR2 || (active && d2 <= KEEP2)).then_some((id, d2 * if active { 0.9 } else { 1.0 }))
-        })
-        .collect();
-    candidates.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-    candidates.truncate(max);
-    candidates.into_iter().map(|(id, _)| id).collect()
-}
-
 impl Traffic {
     pub(crate) fn has_sound_set(&self, id: u64) -> bool {
         self.sounds.contains_key(&id) || self.riding_sounds.as_ref().is_some_and(|r| r.0 == id)
@@ -76,7 +55,6 @@ impl Traffic {
     /// a passing car's horn does not simply sound like the street outside once the windows
     /// are shut. `riding`: the AI bus the player rides in on foot - heard from inside it.
     /// `volume`: the traffic's volume (OMSI's `sound_ai`).
-    /// `max_vehicles`: zero keeps unlimited (legacy) traffic sound sets.
     pub fn update_audio(
         &mut self,
         audio: &omsi_audio::AudioEngine,
@@ -85,7 +63,6 @@ impl Traffic {
         muffled: bool,
         riding: Option<u64>,
         volume: f32,
-        max_vehicles: u32,
     ) {
         self.update_riding_audio(audio, riding, volume);
         let freed = audio.trim_clips(std::time::Duration::from_secs(60));
@@ -101,16 +78,7 @@ impl Traffic {
         let near = 250.0;
         // what the sounds read of the cars, taken from the traffic (`SoundFrame`)
         let mut frame = std::mem::take(&mut self.sound_frame);
-        // No budgeting at zero: keep the original unlimited sound behaviour.
-        // The ridden bus has its own full interior SoundSet and uses no budget slot.
-        let selected = (max_vehicles != 0).then(|| selected_sources(
-            self.sim.cars.iter().filter(|c| Some(c.id) != riding).map(|c| {
-                (c.id, c.vehicle.position, self.sounds.contains_key(&c.id))
-            }),
-            listener,
-            max_vehicles as usize,
-        ));
-        self.sim.snapshot_sounds(&mut frame, listener, near * 1.2, street_cond, riding, selected.as_deref());
+        self.sim.snapshot_sounds(&mut frame, listener, near * 1.2, street_cond, riding);
         let mut triggers = Vec::new();
         for c in frame.cars() {
             // (the bus ridden in is heard from inside, by `update_riding_audio`)
@@ -176,15 +144,13 @@ impl Traffic {
     /// sounds OMSI's own AI horn (`Sounds/AI_Cars`, the lorry's for the heavy ones) where it
     /// stands - the stock cars have nothing on that trigger, and the AI's honking was never heard.
     fn play_horns(&mut self, audio: &omsi_audio::AudioEngine, frame: &omsi_sim::view_events::SoundFrame, listener: DVec3, muffled: bool, volume: f32) {
-        for (id, heavy, position, ty) in &frame.honks {
+        for (heavy, position, ty) in &frame.honks {
             if (*position - listener).length() > 250.0 {
                 continue;
             }
             let own = sound_plan(&mut self.sound_plans, &mut self.sound_cfgs, &ty.def)
                 .is_some_and(|p| p.cfg.sounds.iter().any(|s| s.triggers.iter().any(|t| t.trim().eq_ignore_ascii_case("ev_AI_Horn"))));
-            // A car outside the budget has no active sound set to play its
-            // own horn; use the stock fallback rather than losing honks.
-            if own && self.has_sound_set(*id) {
+            if own {
                 continue;
             }
             let file = if *heavy { "Sounds/AI_Cars/Hupe_Lkw.wav" } else { "Sounds/AI_Cars/hupe.wav" };
@@ -266,23 +232,5 @@ impl Traffic {
                 ss.play_file_trigger(audio, t, f, &|n| v.var(n), &xf);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod audio_budget_tests {
-    use super::selected_sources;
-    use glam::DVec3;
-
-    #[test]
-    fn closest_sources_win_but_existing_sounds_have_hysteresis() {
-        let cars = [
-            (1, DVec3::new(10.0, 0.0, 0.0), false),
-            (2, DVec3::new(20.0, 0.0, 0.0), true),
-            (3, DVec3::new(19.5, 0.0, 0.0), false),
-            (4, DVec3::new(310.0, 0.0, 0.0), true),
-        ];
-        assert_eq!(selected_sources(cars, DVec3::ZERO, 2), vec![1, 2]);
-        assert_eq!(selected_sources(cars, DVec3::ZERO, 0), Vec::<u64>::new());
     }
 }
