@@ -17,13 +17,13 @@ introducing unverified native dependencies or changing the production lockfile.
 - [x] Read-only migration inventory tool:
   `python scripts/audit-bgfx-port.py --output bgfx-inventory.json`.
 - [x] Record unsupported features and merge criteria in one place.
-- [ ] A native window/swapchain via winit 0.30 on all supported platforms.
+- [x] A Win32 native-window prototype via winit 0.30 (not verified on a physical GPU).\n- [ ] Native window/swapchain handling on Linux, macOS, Android and iOS.
 - [ ] A production `omsi-render` backend interface independent of wgpu types.
-- [ ] Upload/draw OMSI meshes, textures, materials and shaders with bgfx.
+- [x] Load authentic .o3d via omsi-o3d; pack vertices/indices, upload bgfx buffers, and submit material runs with a normal-colour shader.\n- [ ] Full OMSI material/texture/lighting shaders and compatibility (not implemented).
 - [ ] Interface, navigator, mirrors, previews and OpenXR rendered by bgfx.
-- [ ] Automated cross-platform builds and measured image/performance parity.
+- [x] Targeted source compilation and eight CPU-only tests on Windows and Linux.\n- [ ] Physical-GPU screenshot, parity, Android/iOS/macOS and performance tests.
 
-**No cargo build or GPU run has been completed for this experiment yet.**
+**The Rust/native dependency source build and eight CPU-only unit tests have passed on Windows and Linux in GitHub Actions. No GPU run or game rendering has been verified yet.**
 The prototype is unverified until it passes on a machine with Rust, a C++
 compiler and graphics drivers. A successful clear-only test is not game parity.
 
@@ -156,3 +156,20 @@ than game rendering.
 prototype are a verifiable starting point, not a finished port. The
 experiment should remain a draft PR until implementation and CI prove
 complete coverage.
+
+## Actual code milestone from the latest commits
+
+The draft now includes a Windows-only winit native display test named
+`bgfx-window`, real `omsi-o3d::parse_o3d` mesh decoding, CPU bounds and
+index validation, 16/32-bit index packing, bgfx vertex/index buffer upload,
+`GpuMesh::draw` with source material runs, shaderc-compatible normal-colour
+vertex/fragment shaders, and camera orbit/zoom controls. These are
+**independent** of the shipping openOMSI renderer. A script to compile
+shader binaries and runnable Windows commands are documented under
+`experiments/bgfx-port/RUN_VIEWER.md`.
+
+The native code built and eight CPU unit tests passed on both Windows and
+Linux in GitHub Actions. There is still **no real-game BGFX backend**, no
+GPU screenshot verification, no map streaming integration, no OMSI driving
+input/physics integration, and no genuine BGFX performance measurement.
+Do not call the BGFX port playable or merge-ready.
