@@ -333,6 +333,9 @@ impl NativeRenderer for BgfxNativeBackend {
                     .and_then(|id| self.textures.get(&id))
                     .unwrap_or(&self.fallback);
                 bgfx_set_texture(0, self.sampler.handle(), picture.handle(), u32::MAX);
+                let color = self.materials.get(&draw.material)
+                    .map(|m| m.color).unwrap_or([1.0; 4]);
+                self.program.set_color(color);
                 bgfx_submit(view, self.program.handle(), 0, BGFX_DISCARD_ALL as u8);
             }
             bgfx_frame(false);
