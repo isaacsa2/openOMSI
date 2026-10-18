@@ -8,6 +8,8 @@
 //! own process; never parallelize `run` calls across threads.
 
 pub mod frame_contract;
+pub mod o3d_bridge;
+pub mod gpu_mesh;
 
 use std::{mem::MaybeUninit, time::{Duration, Instant}};
 
