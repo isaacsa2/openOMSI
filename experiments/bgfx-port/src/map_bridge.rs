@@ -137,6 +137,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn loads_synthetic_omsi_global_and_terrain_without_game_assets() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SEQ: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "bgfx-map-fixture-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let global = root.join("global.cfg");
+        std::fs::write(&global, b"[name]\nBGFX synthetic\n[map]\n0\n0\ntile_0_0.map\n").unwrap();
+        let height = omsi_map::Terrain::flat().to_bytes();
+        std::fs::write(root.join("tile_0_0.map.terrain"), height).unwrap();
+        let preview = load_terrain_preview(&global, Selection { center: None, radius: 1 }).unwrap();
+        assert_eq!(preview.tiles.len(), 1);
+        assert!(!preview.tiles[0].was_missing_heightfield);
+        assert_eq!(preview.center, (0, 0));
+        assert_eq!(preview.ground_height(Vec3::new(150., 150., 20.)), Some(0.));
+        assert_eq!(preview.ground_height(Vec3::new(450., 150., 20.)), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn radius_is_limited_to_25_tiles() {
         assert!(Selection { center: None, radius: 2 }.validate().is_ok());
         assert!(Selection { center: None, radius: 3 }.validate().is_err());
