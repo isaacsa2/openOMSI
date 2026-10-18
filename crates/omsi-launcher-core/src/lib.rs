@@ -2639,7 +2639,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!("passenger_animation={}\n", if v.get("passenger_animation").and_then(|x| x.as_str()) == Some("enhanced") { "enhanced" } else { "original" }));
     text.push_str(&format!("character_models={}\n", if v.get("character_models").and_then(|x| x.as_str()) == Some("improved") { "improved" } else { "original" }));
     text.push_str(&format!("units={}\n", units_setting(v.get("units").and_then(|x| x.as_str()).unwrap_or("metric"))));
-    text.push_str(&format!("upscaler={}\\nfsr_quality={}\\nfsr_sharpness={}\\n",
+    text.push_str(&format!("upscaler={}\nfsr_quality={}\nfsr_sharpness={}\n",
         if v.get("upscaler").and_then(|x| x.as_str()) == Some("fsr1") { "fsr1" } else { "default" },
         match v.get("fsr_quality").and_then(|x| x.as_str()).unwrap_or("quality") {
             "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
