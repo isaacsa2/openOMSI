@@ -176,8 +176,8 @@ mod win {
                 self.initialized = true;
                 println!("BGFX initialized: {:?}", bgfx_sys::bgfx_get_renderer_type());
             }
-            if let Some(ref path) = self.config.path {
-                match load_file(path).and_then(|data| self.set_mesh(data)) {
+            if let Some(path) = self.config.path.clone() {
+                match load_file(&path).and_then(|data| self.set_mesh(data)) {
                     Ok(()) => println!("Loaded O3D mesh from {}", path.display()),
                     Err(e) => { eprintln!("O3D mesh viewer initialization: {e}"); event_loop.exit(); return; },
                 }
