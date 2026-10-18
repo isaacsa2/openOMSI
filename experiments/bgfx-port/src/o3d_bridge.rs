@@ -173,6 +173,30 @@ mod tests {
     }
 
     #[test]
+    fn visible_omsi_mesh_uses_production_axes_and_ignores_animation_pivot() {
+        let mut m = example();
+        m.materials = vec![omsi_o3d::Material::default(); 8];
+        m.vertices[0].position = glam::Vec3::new(1., 2., 3.);
+        m.transform = glam::Mat4::from_translation(glam::Vec3::new(400., 500., 600.));
+        m.has_transform = true;
+        let out = pack_visible_omsi_mesh(&m).unwrap();
+        // OMSI/D3D Y is height, Z is forward; in the rendered game Z is up.
+        let read = |at: usize| f32::from_le_bytes(out.vertices[at..at+4].try_into().unwrap());
+        assert_eq!([read(0), read(4), read(8)], [1., 3., 2.]);
+        assert_eq!(out.model_transform, glam::Mat4::IDENTITY.to_cols_array());
+        // Same material buckets as the shipping engine: groups 3 and 7.
+        assert_eq!(out.runs.iter().map(|r| r.material).collect::<Vec<_>>(), [3, 7]);
+    }
+
+    #[test]
+    fn visible_mesh_rejects_corrupt_triangle_before_winding_probe() {
+        let mut m = example();
+        m.materials = vec![omsi_o3d::Material::default()];
+        m.triangles[0].indices[1] = 99999;
+        assert!(pack_visible_omsi_mesh(&m).is_err());
+    }
+
+    #[test]
     fn rejects_nonfinite_vertices() {
         let mut m = example();
         m.vertices[0].position.x = f32::NAN;
