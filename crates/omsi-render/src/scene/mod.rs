@@ -3,6 +3,7 @@
 
 use crate::*;
 
+mod gpu_export;
 mod instances;
 pub(crate) mod overlay;
 mod upload;

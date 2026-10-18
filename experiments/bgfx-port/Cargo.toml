@@ -1,0 +1,23 @@
+[package]
+name = "openomsi-bgfx-port"
+version = "0.0.1"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Isolated native bgfx backend startup and frame-pacing experiment"
+
+# Deliberately independent of the main workspace and lockfile.
+# Nothing in the shipping game links or selects this incomplete backend.
+[workspace]
+
+[dependencies]
+bgfx-sys = "=0.15.0"
+# The real openOMSI mesh parser; unlike a hand-written demo, it handles .o3d variants.
+omsi-o3d = { path = "../../crates/omsi-o3d" }
+omsi-geometry = { path = "../../crates/omsi-geometry" }
+omsi-map = { path = "../../crates/omsi-map" }
+omsi-texture = { path = "../../crates/omsi-texture" }
+omsi-sim = { path = "../../crates/omsi-sim" }
+omsi-vehicle = { path = "../../crates/omsi-vehicle" }
+winit = "0.30"
+glam = "0.30"

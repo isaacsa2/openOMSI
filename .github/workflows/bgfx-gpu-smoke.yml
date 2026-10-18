@@ -1,0 +1,93 @@
+name: BGFX GPU shader and triangle smoke (experimental)
+
+# This deliberately does NOT run on every change to the full openOMSI game:
+# shaderc is a native C++ tool and expensive to build.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "experiments/bgfx-port/shaders/**"
+      - "experiments/bgfx-port/src/native_backend.rs"
+      - "experiments/bgfx-port/src/bin/bgfx-window.rs"
+      - ".github/workflows/bgfx-gpu-smoke.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bgfx-gpu-shaders-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  win32-dx11-triangle:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: microsoft/setup-msbuild@v2
+
+      # The bgfx source bundled by bgfx-sys 0.15.0 corresponds to this
+      # publishing commit. Never compile shaders with an arbitrary latest
+      # upstream shaderc and assume its binary format matches the old FFI.
+      - name: Checkout shaderc source revision corresponding to bgfx-sys 0.15.0
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none https://github.com/emoon/bgfx-sys.git vendor-bgfx-sys
+          if ($LASTEXITCODE -ne 0) { throw "Could not clone matching BGFX sources" }
+          git -C vendor-bgfx-sys checkout 5c82223942b18bc606716488dd04f04c9beeb6e0
+          if ($LASTEXITCODE -ne 0) { throw "Matching BGFX publish commit unavailable" }
+          git -C vendor-bgfx-sys submodule update --init --recursive --depth 1
+          if ($LASTEXITCODE -ne 0) { throw "Matching BGFX submodules unavailable" }
+
+      - name: Cache pinned shaderc compiler binary
+        id: shaderc-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor-bgfx-sys/bgfx/.build/win64_vs2022/bin/shadercRelease.exe
+          key: bgfx-sys-0.15.0-shaderc-win64-v1
+
+      - name: Build matching shaderc (Windows x64)
+        if: steps.shaderc-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Push-Location vendor-bgfx-sys/bgfx
+          & ../bx/tools/bin/windows/genie.exe --with-tools vs2022
+          if ($LASTEXITCODE -ne 0) { throw "BGFX genie project generation failed" }
+          msbuild .build/projects/vs2022/shaderc.vcxproj /m /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "BGFX shaderc native build failed" }
+          Pop-Location
+
+      - name: Store pinned compiler independent of shader compile result
+        if: steps.shaderc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor-bgfx-sys/bgfx/.build/win64_vs2022/bin/shadercRelease.exe
+          key: bgfx-sys-0.15.0-shaderc-win64-v1
+
+      - name: Compile BGFX DX11 shaders for real triangle
+        shell: pwsh
+        run: |
+          $compiler = "vendor-bgfx-sys/bgfx/.build/win64_vs2022/bin/shadercRelease.exe"
+          if (-not (Test-Path $compiler)) { throw "Missing shaderc executable after build: $compiler" }
+          & ./experiments/bgfx-port/build-shaders.ps1 -Shaderc $compiler -BgfxSource "vendor-bgfx-sys/bgfx" -Backend dx11
+
+      - name: Draw actual GPU triangle through NativeRenderer
+        shell: pwsh
+        run: |
+          $logfile = "bgfx-triangle-runtime.log"
+          cargo run --manifest-path experiments/bgfx-port/Cargo.toml --bin bgfx-window -- --backend dx11 --contract-demo --frames 8 --vs experiments/bgfx-port/compiled/dx11/vs_mesh.bin --fs experiments/bgfx-port/compiled/dx11/fs_mesh.bin *>&1 | Tee-Object -FilePath $logfile
+          if ($LASTEXITCODE -ne 0) { throw "BGFX native triangle process failed" }
+          $log = Get-Content -Path $logfile -Raw
+          if ($log -notmatch "BGFX_CONTRACT_FRAME_OK" -or $log -match "BGFX_CONTRACT_FRAME_FAILED|BGFX_CONTRACT_INIT_FAILED") {
+            throw "BGFX native contract did not submit a validated draw"
+          }
+
+      - name: Save the compiled native shaders for repro
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bgfx-dx11-shaders
+          path: experiments/bgfx-port/compiled/dx11/
+          if-no-files-found: warn
