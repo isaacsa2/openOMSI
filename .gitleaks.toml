@@ -1,0 +1,15 @@
+# Gitleaks 8.30.1: keep the entire upstream default ruleset active.
+# Exception: the public, deterministic GitHub Actions cache key below is NOT
+# a credential. The generic-api-key heuristic flags it in two historical
+# BGFX experiment commits. Match the exact line AND exact file, and scope
+# the exception to this one detector only.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "BGFX shaderc pinned build cache key (not an API secret)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^\.github/workflows/bgfx-gpu-smoke\.yml$''']
+regexes = ['''^\s*key:\s+bgfx-sys-0\.15\.0-shaderc-win64-v1\s*$''']
