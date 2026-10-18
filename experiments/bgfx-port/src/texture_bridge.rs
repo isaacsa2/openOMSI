@@ -41,7 +41,7 @@ impl Texture {
             }
             bgfx_sys::bgfx_create_texture_2d(
                 w, h, false, 1, bgfx_sys::BGFX_TEXTURE_FORMAT_RGBA8,
-                bgfx_sys::BGFX_TEXTURE_NONE, mem,
+                u64::from(bgfx_sys::BGFX_TEXTURE_NONE), mem,
             )
         };
         if handle.idx == u16::MAX {
