@@ -321,6 +321,7 @@ mod win {
                         view: View::Main,
                         world_to_camera: view.to_cols_array(),
                         camera_to_clip: projection.to_cols_array(),
+                        reversed_z: false,
                     }],
                     draws: vec![Draw {
                         mesh,
@@ -328,6 +329,7 @@ mod win {
                         view: View::Main,
                         blend: BlendMode::Opaque,
                         depth: DepthMode::TestWrite,
+                        range: None,
                         transform: Mat4::IDENTITY.to_cols_array(),
                         authored_order: 0,
                     }],
