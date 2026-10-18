@@ -75,7 +75,7 @@ impl GpuMesh {
     /// shader does not reproduce material appearance yet.
     pub unsafe fn draw(
         &self,
-        program: bgfx_sys::bgfx_program_handle_t,
+        program: &Program,
         texture: &crate::texture_bridge::Texture,
         sampler: &crate::texture_bridge::Sampler,
         material_textures: &[Option<crate::texture_bridge::Texture>],
@@ -87,7 +87,7 @@ impl GpuMesh {
     /// a moving player's bus without rewriting static vertex buffers.
     pub unsafe fn draw_with_transform(
         &self,
-        program: bgfx_sys::bgfx_program_handle_t,
+        program: &Program,
         texture: &crate::texture_bridge::Texture,
         sampler: &crate::texture_bridge::Sampler,
         material_textures: &[Option<crate::texture_bridge::Texture>],
@@ -113,7 +113,8 @@ impl GpuMesh {
             let picture = material_textures.get(usize::from(range.material))
                 .and_then(Option::as_ref).unwrap_or(texture);
             bgfx_set_texture(0, sampler.handle(), picture.handle(), u32::MAX);
-            bgfx_submit(0, program, 0, BGFX_DISCARD_ALL as u8);
+            program.set_color([1.0; 4]); // The standalone viewer has no material.cfg yet.
+            bgfx_submit(0, program.handle(), 0, BGFX_DISCARD_ALL as u8);
         }
     }
 }
@@ -127,7 +128,10 @@ impl Drop for GpuMesh {
     }
 }
 
-pub struct Program(bgfx_sys::bgfx_program_handle_t);
+pub struct Program {
+    handle: bgfx_sys::bgfx_program_handle_t,
+    color_uniform: bgfx_sys::bgfx_uniform_handle_t,
+}
 
 impl Program {
     pub unsafe fn load(vs: &Path, fs_path: &Path) -> Result<Self, String> {
@@ -164,14 +168,34 @@ impl Program {
             // On failure the bgfx API may already release them; do not double free.
             return Err("vertex/fragment shaders could not be linked".into());
         }
-        Ok(Self(program))
+        let tint = bgfx_create_uniform(
+            c"u_materialColor".as_ptr(), BGFX_UNIFORM_TYPE_VEC4, 1,
+        );
+        if tint.idx == u16::MAX {
+            bgfx_destroy_program(program);
+            return Err("BGFX could not allocate u_materialColor uniform".into());
+        }
+        Ok(Self { handle: program, color_uniform: tint })
     }
 
-    pub fn handle(&self) -> bgfx_sys::bgfx_program_handle_t { self.0 }
+    pub fn handle(&self) -> bgfx_sys::bgfx_program_handle_t { self.handle }
+
+    /// Apply the current material's diffuse RGBA before **every** BGFX
+    /// submit: BGFX_DISCARD_ALL clears encoder uniform state between draws.
+    pub unsafe fn set_color(&self, color: [f32; 4]) {
+        bgfx_sys::bgfx_set_uniform(
+            self.color_uniform,
+            color.as_ptr() as *const c_void,
+            1,
+        );
+    }
 }
 
 impl Drop for Program {
     fn drop(&mut self) {
-        unsafe { bgfx_sys::bgfx_destroy_program(self.0) }
+        unsafe {
+            bgfx_sys::bgfx_destroy_uniform(self.color_uniform);
+            bgfx_sys::bgfx_destroy_program(self.handle);
+        }
     }
 }
