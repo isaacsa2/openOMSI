@@ -70,7 +70,12 @@ impl GpuMesh {
     /// Submit each material run *in original authored order*. Sorting by
     /// material breaks some glass/transmap content. The proof-of-concept
     /// shader does not reproduce material appearance yet.
-    pub unsafe fn draw(&self, program: bgfx_sys::bgfx_program_handle_t) {
+    pub unsafe fn draw(
+        &self,
+        program: bgfx_sys::bgfx_program_handle_t,
+        texture: &crate::texture_bridge::Texture,
+        sampler: &crate::texture_bridge::Sampler,
+    ) {
         use bgfx_sys::*;
         for range in &self.ranges {
             bgfx_set_transform(self.model_transform.as_ptr() as *const c_void, 1);
@@ -82,6 +87,7 @@ impl GpuMesh {
                 BGFX_STATE_DEFAULT & !(BGFX_STATE_CULL_MASK as u64)
             };
             bgfx_set_state(state, 0);
+            bgfx_set_texture(0, sampler.handle(), texture.handle(), u32::MAX);
             bgfx_submit(0, program, 0, BGFX_DISCARD_ALL as u8);
         }
     }
