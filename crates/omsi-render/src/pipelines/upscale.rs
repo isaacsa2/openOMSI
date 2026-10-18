@@ -41,7 +41,7 @@ pub(crate) fn build(device: &wgpu::Device, format: wgpu::TextureFormat, use_fsr1
     let (fsr_easu_pipeline, fsr_rcas_pipeline) = if use_fsr1 {
         let fsr_shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
             label: Some("fsr1 EASU/RCAS"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../fsr1.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source(format).into()),
         });
         let build_fsr = |entry| no_vertex_pipeline("fsr1", &upscale_pl, &fsr_shader, entry, &targets).create(device);
         (Some(build_fsr("fs_easu")), Some(build_fsr("fs_rcas")))

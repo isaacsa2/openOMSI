@@ -18,6 +18,7 @@ The previous `OMSI_FSR1=1` environment override also still works for developer t
 ## Technical design
 
 - Source picture is tone mapped, then **EASU** writes into a cached full-sized color target.
+- Both passes work on a perceptual picture, as FSR 1 is made for: on an sRGB window format the texels read back linear, so they are taken to gamma 2.0 on the way in and back to linear on the way out (as AMD's sample does); on a format that is not sRGB the stored values are used as they are. Without it, EASU's edge test and RCAS's limits ran on linear light (more halos in the darks, uneven sharpening).
 - **RCAS** reads the cached target and writes the final window image.
 - HUD/overlay quads are drawn after RCAS at native resolution.
 - Uses WGSL textureLoad (no textureGather requirement), no changes to the scene shaders, wgpu fork, multiplayer or game asset loading.

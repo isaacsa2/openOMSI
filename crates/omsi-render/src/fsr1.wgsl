@@ -29,10 +29,30 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
     return out;
 }
 
+// FSR 1 works on a perceptual picture (gamma), not on linear light: its edge test and RCAS's
+// limits are made for it. An sRGB target reads back linear, so its texels are taken to
+// gamma 2.0 here and the result back to linear on the way out (as AMD's sample does). A
+// target that is not sRGB already holds encoded values. (`build` sets this per format.)
+const SRGB_TARGET: bool = true;
+
+fn to_perceptual(c: vec3<f32>) -> vec3<f32> {
+    if SRGB_TARGET {
+        return sqrt(max(c, vec3<f32>(0.0)));
+    }
+    return c;
+}
+
+fn from_perceptual(c: vec3<f32>) -> vec3<f32> {
+    if SRGB_TARGET {
+        return c * c;
+    }
+    return c;
+}
+
 fn load_texel(pixel: vec2<i32>) -> vec3<f32> {
     let extent = vec2<i32>(textureDimensions(t_src, 0));
     let bounded = clamp(pixel, vec2<i32>(0), extent - vec2<i32>(1));
-    return textureLoad(t_src, bounded, 0).rgb;
+    return to_perceptual(textureLoad(t_src, bounded, 0).rgb);
 }
 
 // AMD EASU's inexpensive luma approximation.
@@ -152,7 +172,7 @@ fn fs_easu(in: VsOut) -> @location(0) vec4<f32> {
     let lower = min(min(f, g), min(j, k));
     let upper = max(max(f, g), max(j, k));
     let color = clamp(acc.col / max(acc.weight, 1e-6), lower, upper);
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(from_perceptual(color), 1.0);
 }
 
 @fragment
@@ -173,5 +193,5 @@ fn fs_rcas(in: VsOut) -> @location(0) vec4<f32> {
     let lobe = max(-0.1875, min(max(lobes.r, max(lobes.g, lobes.b)), 0.0)) *
                clamp(params.src.z, 0.0, 1.0);
     let color = (e + lobe * (b + d + f + h)) / (1.0 + 4.0 * lobe);
-    return vec4<f32>(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return vec4<f32>(from_perceptual(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0))), 1.0);
 }
