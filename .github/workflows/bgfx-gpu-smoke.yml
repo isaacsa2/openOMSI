@@ -47,7 +47,7 @@ jobs:
           Push-Location vendor-bgfx-sys/bgfx
           & ../bx/tools/bin/windows/genie.exe --with-tools vs2022
           if ($LASTEXITCODE -ne 0) { throw "BGFX genie project generation failed" }
-          msbuild .build/projects/vs2022/bgfx.sln /m /v:minimal /t:shaderc /p:Configuration=Release /p:Platform=x64
+          msbuild .build/projects/vs2022/shaderc.vcxproj /m /v:minimal /p:Configuration=Release /p:Platform=x64
           if ($LASTEXITCODE -ne 0) { throw "BGFX shaderc native build failed" }
           Pop-Location
 
