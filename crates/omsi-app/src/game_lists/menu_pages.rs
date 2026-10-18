@@ -48,6 +48,10 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         omsi_launcher_lib::optimise::backup().is_some().then(|| button("Restore my previous settings", "Restore", "The graphics settings as they were before the last optimisation", "optimise_restore")),
         pick("msaa", "Anti-aliasing", later),
         pick("render_scale", "Render scale", later),
+        pick("upscaler", "Upscaling", "Standard Catmull-Rom or experimental FSR 1; takes effect after restarting the game"),
+        pick("fsr_quality", "FSR quality", "Internal render resolution; takes effect after restarting the game").filter(|_| s.upscaler == "fsr1"),
+        slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength; takes effect after restarting the game", &pct).filter(|_| s.upscaler == "fsr1"),
+
         pick("anisotropy", "Anisotropic", later),
         // (Enhanced+ traces its shadows, occlusion and reflections: always on there)
         switch_row(app, "shadows", "Sun shadows", "Enables/Disables shadows").filter(|_| shown("shadows")),
