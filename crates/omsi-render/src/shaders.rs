@@ -38,6 +38,19 @@ pub(crate) const ENHANCED: &str = concat!(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fsr1_shader_parses_and_validates() {
+        // No GPU or OMSI installation required. Run even though FSR is off by default.
+        let source = include_str!("fsr1.wgsl");
+        let module = naga::front::wgsl::parse_str(source).expect("FSR1 WGSL must parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("FSR1 WGSL must validate");
+    }
+
     /// FNV-1a, 64 bits: enough to tell one text from another, and no dependency for it.
     fn fnv1a(text: &str) -> u64 {
         text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
