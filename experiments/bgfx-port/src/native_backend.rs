@@ -135,11 +135,13 @@ pub fn native_draw_state(draw: &Draw) -> Result<u64, String> {
             // src in the low blend nibble, dst four bits above it.
             let src = BGFX_STATE_BLEND_SRC_ALPHA as u64;
             let dst = BGFX_STATE_BLEND_INV_SRC_ALPHA as u64;
-            state = (state & !(BGFX_STATE_BLEND_MASK as u64)) | src | (dst << 4);
+            let rgb = src | (dst << 4);
+            state = (state & !(BGFX_STATE_BLEND_MASK as u64)) | rgb | (rgb << 8);
         }
         BlendMode::Additive => {
             let one = BGFX_STATE_BLEND_ONE as u64;
-            state = (state & !(BGFX_STATE_BLEND_MASK as u64)) | one | (one << 4);
+            let rgb = one | (one << 4);
+            state = (state & !(BGFX_STATE_BLEND_MASK as u64)) | rgb | (rgb << 8);
         }
     }
     Ok(state)
