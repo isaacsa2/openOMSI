@@ -48,6 +48,8 @@ pub struct MeshUpload {
     pub vertex_count: u32,
     pub index_count: u32,
     pub index_32bit: bool,
+    /// O3D objects are usually one-sided; generated terrain can be two-sided.
+    pub one_sided: bool,
 }
 
 impl MeshUpload {
@@ -218,12 +220,14 @@ mod tests {
             vertex_count: 70000,
             index_count: 3,
             index_32bit: false,
+            one_sided: true,
         }.validate().is_err());
         assert!(MeshUpload {
             vertex_stride: 32,
             vertex_count: 70000,
             index_count: 3,
             index_32bit: true,
+            one_sided: true,
         }.validate().is_ok());
     }
 }
