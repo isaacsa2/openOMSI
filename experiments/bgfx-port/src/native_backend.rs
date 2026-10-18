@@ -191,15 +191,25 @@ impl NativeRenderer for BgfxNativeBackend {
         for draw in frame.ordered_draws() {
             native_view_id(draw.view)?;
             native_draw_state(draw)?;
-            if !self.meshes.contains_key(&draw.mesh) {
-                return Err(format!("BGFX frame references unknown mesh {}", draw.mesh.0));
+            let mesh = self.meshes.get(&draw.mesh)
+                .ok_or_else(|| format!("BGFX frame references unknown mesh {}", draw.mesh.0))?;
+            if let Some((first, count)) = draw.range {
+                if first.checked_add(count).is_none_or(|end| end > mesh.indices) {
+                    return Err("BGFX submesh range exceeds GPU index buffer".into());
+                }
             }
         }
         let mut configured = [false; 256];
         unsafe {
             use bgfx_sys::*;
             bgfx_set_view_rect(0, 0, 0, width as u16, height as u16);
-            bgfx_set_view_clear(0, (BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH) as u16, 0x17212cff, 1.0, 0);
+            let reversed_main = frame.cameras.iter()
+                .find(|camera| camera.view == View::Main)
+                .is_some_and(|camera| camera.reversed_z);
+            bgfx_set_view_clear(
+                0, (BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH) as u16, 0x17212cff,
+                if reversed_main { 0.0 } else { 1.0 }, 0,
+            );
             bgfx_set_view_mode(0, BGFX_VIEW_MODE_SEQUENTIAL);
             bgfx_touch(0);
             configured[0] = true;
@@ -216,7 +226,13 @@ impl NativeRenderer for BgfxNativeBackend {
             }
             for draw in frame.ordered_draws() {
                 let view = native_view_id(draw.view).expect("frame prevalidated");
-                let state = native_draw_state(draw).expect("frame prevalidated");
+                let mut state = native_draw_state(draw).expect("frame prevalidated");
+                let camera = frame.cameras.iter().find(|camera| camera.view == draw.view)
+                    .expect("frame camera prevalidated");
+                if camera.reversed_z && draw.depth != DepthMode::Disabled {
+                    state = (state & !(BGFX_STATE_DEPTH_TEST_MASK as u64))
+                        | (BGFX_STATE_DEPTH_TEST_GREATER as u64);
+                }
                 if !configured[view as usize] {
                     bgfx_set_view_rect(view, 0, 0, width as u16, height as u16);
                     bgfx_set_view_mode(view, BGFX_VIEW_MODE_SEQUENTIAL);
@@ -225,7 +241,8 @@ impl NativeRenderer for BgfxNativeBackend {
                 let mesh = self.meshes.get(&draw.mesh).expect("frame prevalidated");
                 bgfx_set_transform(draw.transform.as_ptr() as *const std::ffi::c_void, 1);
                 bgfx_set_vertex_buffer(0, mesh.vertex_handle(), 0, u32::MAX);
-                bgfx_set_index_buffer(mesh.index_handle(), 0, mesh.indices);
+                let (first, count) = draw.range.unwrap_or((0, mesh.indices));
+                bgfx_set_index_buffer(mesh.index_handle(), first, count);
                 bgfx_set_state(if mesh.one_sided { state } else { state & !BGFX_STATE_CULL_MASK }, 0);
                 bgfx_set_texture(0, self.sampler.handle(), self.fallback.handle(), u32::MAX);
                 bgfx_submit(view, self.program.handle(), 0, BGFX_DISCARD_ALL as u8);
@@ -258,6 +275,7 @@ mod tests {
         let d = Draw {
             mesh: ResourceId(1), material: ResourceId(1), view: View::Main,
             blend: BlendMode::AlphaTest, depth: DepthMode::TestWrite,
+            range: None,
             transform: identity(), authored_order: 0,
         };
         assert!(native_draw_state(&d).is_err());
