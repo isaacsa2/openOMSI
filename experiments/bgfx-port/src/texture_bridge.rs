@@ -93,8 +93,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preconditions_are_documented() {
-        assert!(std::mem::size_of::<bgfx_sys::bgfx_texture_handle_t>() > 0);
-        assert_eq!(bgfx_sys::BGFX_TEXTURE_FORMAT_RGBA8, 66);
+    fn texture_validation_rejects_bad_pixels_without_gpu_initialization() {
+        assert!(Texture::from_rgba(0, 1, &[]).is_err());
+        assert!(Texture::from_rgba(1, 1, &[0, 0, 0]).is_err());
+        assert!(Texture::from_rgba(65536, 1, &[]).is_err());
     }
 }
