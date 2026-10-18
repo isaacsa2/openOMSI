@@ -299,6 +299,7 @@ const sound = {
       rows: [
         vol('volume', 'Volume', 0.6),
         vol('vol_ai', 'Traffic', 1),
+        { type: 'select', key: 'ai_sound_limit', label: 'AI sound detail', options: [['8', 'Performance (8 vehicles)'], ['16', 'Balanced (16 vehicles)'], ['24', 'High (24 vehicles)'], ['32', 'Very high (32 vehicles)'], ['0', 'Unlimited (original)']], help: 'Prioritize the closest traffic sounds while keeping horns and the vehicle you are riding in.' },
         vol('vol_scenery', 'Surroundings', 1),
         { type: 'toggle', key: 'doppler', label: 'Doppler effect' },
         { type: 'toggle', key: 'ambient', label: 'Ambience (places, weather, nature, town)' },

@@ -368,3 +368,19 @@ fn vehicle_smoke_setting_round_trips_through_game_and_launcher() {
     assert_eq!(Settings::from_text("vehicle_smoke=unknown\n").vehicle_smoke, "all");
     assert_eq!(Settings::from_text("vehicle_smoke=PLAYER_ONLY\n").vehicle_smoke, "player");
 }
+
+#[test]
+fn ai_audio_budget_round_trips_and_has_an_unlimited_fallback() {
+    assert_eq!(Settings::default().ai_sound_limit, 16);
+    for limit in [0, 8, 16, 24, 32] {
+        let settings = Settings::from_text(&format!("ai_sound_limit={limit}\n"));
+        assert_eq!(settings.ai_sound_limit, limit);
+        assert_eq!(Settings::from_text(&settings.to_text()).ai_sound_limit, limit);
+        let mut launcher = omsi_launcher_lib::settings_from_text(None);
+        launcher["ai_sound_limit"] = serde_json::json!(limit);
+        let saved = omsi_launcher_lib::settings_to_text(&launcher, None);
+        assert_eq!(Settings::from_text(&saved).ai_sound_limit, limit);
+    }
+    assert_eq!(Settings::from_text("ai_sound_limit=100\n").ai_sound_limit, 64);
+    assert_eq!(Settings::from_text("ai_sound_limit=invalid\n").ai_sound_limit, 16);
+}
