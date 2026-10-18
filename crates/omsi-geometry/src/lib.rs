@@ -6,6 +6,8 @@ use glam::{DVec2, DVec3, Mat4, Quat, Vec2, Vec3};
 use omsi_map::{tile_size, MapSpline, Terrain};
 use omsi_scenery::Spline;
 
+pub mod gpu_contract;
+
 mod hole_rims;
 mod ground_sound;
 pub use ground_sound::{GroundSound, LineKind, SoundLine, SoundSpot};
