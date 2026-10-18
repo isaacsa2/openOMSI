@@ -4,12 +4,14 @@ This branch adds AMD FidelityFX Super Resolution **1.x spatial upscaling** using
 
 ## Enable and compare
 
-FSR1 is **disabled by default**. Set `OMSI_FSR1=1` in the environment **before starting the game**, and select a reduced **render scale** in the existing graphics settings.
+FSR1 is **disabled by default**. Open **Settings > Graphics > Upscaling** in the launcher (or **Esc > Options > Graphics** inside the game) and choose **AMD FSR 1 (experimental)**. Choose an **FSR quality** preset (Ultra Quality 77%, Quality 67%, Balanced 59%, Performance 50%, or Custom) and **FSR sharpening** (0-100%). Settings are persisted in `settings.cfg`, included in graphics profiles and take effect the next time the game starts.
 
-- For a quick 1080p Quality-like test, set render scale to approximately **0.67**.
-- Balanced: ~0.59; Performance: 0.50 (the renderer clamps fixed scales to 0.5).
+The previous `OMSI_FSR1=1` environment override also still works for developer testing. With the override, the existing **Render scale** setting controls the internal resolution.
+
+- For a quick 1080p test, select **Quality**; the game will use a 0.67 internal scale.
+- Ultra Quality: 0.77; Balanced: ~0.59; Performance: 0.50 (the renderer clamps fixed scales to 0.5).
 - FSR is only used for scaled **window** rendering. The unchanged Catmull-Rom upscaler is used elsewhere and whenever FSR is disabled or no scaling is required.
-- The existing sharpness estimate sets the RCAS strength; there is no UI control for RCAS yet.
+- RCAS sharpening is controlled by the FSR sharpening slider (defaults to 30%).
 - On Windows PowerShell: `$env:OMSI_FSR1='1'; .\\openomsi.exe` (adjust executable path). Restart after changing the variable.
 - To disable for comparison: `Remove-Item Env:OMSI_FSR1`, then relaunch.
 
