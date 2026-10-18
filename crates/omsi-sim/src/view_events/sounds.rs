@@ -16,7 +16,7 @@ pub struct SoundFrame {
     vars: Vec<f32>,
     parts: Vec<Mat4>,
     /// The cars that honked (`TrafficSim::honked`) and are on the road: (heavy, where, type).
-    pub honks: Vec<(u64, bool, DVec3, Arc<VehicleType>)>,
+    pub honks: Vec<(bool, DVec3, Arc<VehicleType>)>,
 }
 
 /// One AI car, as its sounds read it.
@@ -74,18 +74,14 @@ impl crate::ai_traffic::TrafficSim {
     /// (they wait in the car while it is not heard) and the road's state `street_cond` is
     /// given to them (`StreetCond`) before their variables are copied. The horns sounded since
     /// the last time are taken too.
-    pub fn snapshot_sounds(&mut self, out: &mut SoundFrame, listener: DVec3, within: f64, street_cond: f32, riding: Option<u64>, selected: Option<&[u64]>) {
+    pub fn snapshot_sounds(&mut self, out: &mut SoundFrame, listener: DVec3, within: f64, street_cond: f32, riding: Option<u64>) {
         out.cars.clear();
         out.vars.clear();
         out.parts.clear();
         out.honks.clear();
         for c in &mut self.cars {
             let v = &mut c.vehicle;
-            // Only selected cars need variable/part snapshots and trigger evaluation.
-            // Unselected cars retain their triggers until they return to earshot.
-            let heard = riding != Some(c.id)
-                && selected.is_none_or(|ids| ids.contains(&c.id))
-                && (v.position - listener).length_squared() <= within * within;
+            let heard = (v.position - listener).length() <= within && riding != Some(c.id);
             let mut car = CarSound {
                 id: c.id,
                 heard,
@@ -119,7 +115,7 @@ impl crate::ai_traffic::TrafficSim {
         }
         for (id, heavy) in std::mem::take(&mut self.honked) {
             if let Some(c) = self.cars.iter().find(|c| c.id == id) {
-                out.honks.push((id, heavy, c.vehicle.position, c.vehicle.ty.clone()));
+                out.honks.push((heavy, c.vehicle.position, c.vehicle.ty.clone()));
             }
         }
     }
