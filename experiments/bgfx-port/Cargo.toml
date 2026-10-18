@@ -15,3 +15,4 @@ bgfx-sys = "=0.15.0"
 # The real openOMSI mesh parser; unlike a hand-written demo, it handles .o3d variants.
 omsi-o3d = { path = "../../crates/omsi-o3d" }
 winit = "0.30"
+glam = "0.30"
