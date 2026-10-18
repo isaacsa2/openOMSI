@@ -14,7 +14,7 @@
 use std::{collections::HashMap, path::Path};
 
 use crate::{
-    frame_contract::{BlendMode, DepthMode, Draw, FrameCommands, MeshUpload, NativeRenderer, ResourceId, View},
+    frame_contract::{BlendMode, DepthMode, Draw, FrameCommands, MeshUpload, NativeRenderer, NativeResourceRenderer, TextureUpload, MaterialUpload, ResourceId, View},
     gpu_mesh::{GpuMesh, Program},
     o3d_bridge::{MaterialRun, PackedO3d, VERTEX_STRIDE},
     texture_bridge::{Sampler, Texture},
@@ -27,7 +27,10 @@ pub struct BgfxNativeBackend {
     sampler: Sampler,
     fallback: Texture,
     meshes: HashMap<ResourceId, GpuMesh>,
+    textures: HashMap<ResourceId, Texture>,
+    materials: HashMap<ResourceId, MaterialUpload>,
     next_id: u64,
+    next_texture_id: u64,
     /// bgfx is a global C API. This marker prevents claiming Send/Sync until
     /// the render-thread lifetime and dispatch model are proven safe.
     _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
@@ -41,12 +44,14 @@ impl BgfxNativeBackend {
         let sampler = Sampler::new()?;
         let fallback = Texture::white()?;
         Ok(Self {
-            program, sampler, fallback, meshes: HashMap::new(), next_id: 1,
+            program, sampler, fallback, meshes: HashMap::new(), textures: HashMap::new(), materials: HashMap::new(), next_id: 1, next_texture_id: 1,
             _not_send: std::marker::PhantomData,
         })
     }
 
     pub fn mesh_count(&self) -> usize { self.meshes.len() }
+    pub fn texture_count(&self) -> usize { self.textures.len() }
+    pub fn material_count(&self) -> usize { self.materials.len() }
 
     pub fn free_mesh(&mut self, id: ResourceId) -> Result<(), String> {
         self.meshes.remove(&id)
@@ -59,6 +64,65 @@ impl BgfxNativeBackend {
     /// first FrameCommands trait revision.
     pub fn create_texture(&self, width: u32, height: u32, rgba: &[u8]) -> Result<Texture, String> {
         Texture::from_rgba(width, height, rgba)
+    }
+}
+
+/// Validate material references without making any BGFX calls. A stale
+/// diffuse-image handle must fail a frame before anything reaches the device.
+fn validate_material_link(
+    materials: &HashMap<ResourceId, MaterialUpload>,
+    textures: &HashMap<ResourceId, Texture>,
+    id: ResourceId,
+) -> Result<(), String> {
+    // Material 0 is an explicit white fallback for the isolated triangle
+    // contract smoke. Production scene exports use IDs starting at 1.
+    if id == ResourceId(0) { return Ok(()); }
+    let material = materials.get(&id).ok_or_else(|| format!("unknown BGFX material {}", id.0))?;
+    if let Some(image) = material.diffuse_texture {
+        if !textures.contains_key(&image) {
+            return Err(format!("material {} references missing BGFX image {}", id.0, image.0));
+        }
+    }
+    Ok(())
+}
+
+impl NativeResourceRenderer for BgfxNativeBackend {
+    fn upload_texture_rgba8(
+        &mut self, desc: TextureUpload, rgba: &[u8],
+    ) -> Result<ResourceId, String> {
+        desc.validate(rgba).map_err(str::to_owned)?;
+        let id = ResourceId(self.next_texture_id);
+        let next = self.next_texture_id.checked_add(1).ok_or("BGFX texture ID space exhausted")?;
+        let texture = Texture::from_rgba(desc.width, desc.height, rgba)?;
+        self.textures.insert(id, texture);
+        self.next_texture_id = next;
+        Ok(id)
+    }
+
+    fn upsert_material(&mut self, id: ResourceId, material: MaterialUpload) -> Result<(), String> {
+        if id.0 == 0 { return Err("BGFX material 0 is reserved for the white fallback".into()); }
+        material.validate().map_err(str::to_owned)?;
+        if let Some(texture) = material.diffuse_texture {
+            if !self.textures.contains_key(&texture) {
+                return Err(format!("BGFX material references nonexistent texture {}", texture.0));
+            }
+        }
+        self.materials.insert(id, material);
+        Ok(())
+    }
+
+    fn release_texture(&mut self, id: ResourceId) -> Result<(), String> {
+        // Do not leave any material pointing at a freed C++ texture handle.
+        if self.materials.values().any(|m| m.diffuse_texture == Some(id)) {
+            return Err("BGFX texture remains referenced by one or more materials".into());
+        }
+        self.textures.remove(&id).map(drop)
+            .ok_or_else(|| format!("unknown BGFX texture {}", id.0))
+    }
+
+    fn release_material(&mut self, id: ResourceId) -> Result<(), String> {
+        self.materials.remove(&id).map(|_| ())
+            .ok_or_else(|| format!("unknown BGFX material {}", id.0))
     }
 }
 
@@ -191,6 +255,7 @@ impl NativeRenderer for BgfxNativeBackend {
         for draw in frame.ordered_draws() {
             native_view_id(draw.view)?;
             native_draw_state(draw)?;
+            validate_material_link(&self.materials, &self.textures, draw.material)?;
             let mesh = self.meshes.get(&draw.mesh)
                 .ok_or_else(|| format!("BGFX frame references unknown mesh {}", draw.mesh.0))?;
             if let Some((first, count)) = draw.range {
@@ -244,7 +309,11 @@ impl NativeRenderer for BgfxNativeBackend {
                 let (first, count) = draw.range.unwrap_or((0, mesh.indices));
                 bgfx_set_index_buffer(mesh.index_handle(), first, count);
                 bgfx_set_state(if mesh.one_sided { state } else { state & !BGFX_STATE_CULL_MASK }, 0);
-                bgfx_set_texture(0, self.sampler.handle(), self.fallback.handle(), u32::MAX);
+                let picture = self.materials.get(&draw.material)
+                    .and_then(|m| m.diffuse_texture)
+                    .and_then(|id| self.textures.get(&id))
+                    .unwrap_or(&self.fallback);
+                bgfx_set_texture(0, self.sampler.handle(), picture.handle(), u32::MAX);
                 bgfx_submit(view, self.program.handle(), 0, BGFX_DISCARD_ALL as u8);
             }
             bgfx_frame(false);
