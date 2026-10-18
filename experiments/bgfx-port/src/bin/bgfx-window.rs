@@ -8,7 +8,7 @@
 mod win {
     use std::{ffi::c_void, path::PathBuf, ptr};
     use glam::{Mat4, Vec3};
-    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file, PackedO3d, VERTEX_STRIDE}};
+    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated};
     use winit::{
         application::ApplicationHandler,
         dpi::PhysicalSize,
@@ -22,6 +22,7 @@ mod win {
     struct Settings {
         backend: Backend,
         path: Option<PathBuf>,
+        terrain_path: Option<PathBuf>,
         vertex_shader: Option<PathBuf>,
         fragment_shader: Option<PathBuf>,
     }
@@ -29,27 +30,32 @@ mod win {
     fn parse() -> Result<Settings, String> {
         let mut backend = Backend::Auto;
         let mut path = None;
+        let mut terrain_path = None;
         let mut vertex_shader = None;
         let mut fragment_shader = None;
         let mut args = std::env::args().skip(1);
         while let Some(flag) = args.next() {
             let val = match flag.as_str() {
-                "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d --vs PATH.bin --fs PATH.bin]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
-                "--backend" | "--mesh" | "--vs" | "--fs" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
+                "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d | --terrain PATH.map.terrain] [--vs PATH.bin --fs PATH.bin]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
+                "--backend" | "--mesh" | "--terrain" | "--vs" | "--fs" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
                 _ => return Err(format!("unrecognized flag: {flag}")),
             };
             match flag.as_str() {
                 "--backend" => backend = Backend::parse(&val).ok_or_else(|| format!("invalid graphics backend: {val}"))?,
                 "--mesh" => path = Some(PathBuf::from(val)),
+                "--terrain" => terrain_path = Some(PathBuf::from(val)),
                 "--vs" => vertex_shader = Some(PathBuf::from(val)),
                 "--fs" => fragment_shader = Some(PathBuf::from(val)),
                 _ => unreachable!(),
             }
         }
-        if path.is_some() && (vertex_shader.is_none() || fragment_shader.is_none()) {
-            return Err("--mesh needs both --vs and --fs compiled for the selected BGFX backend".into());
+        if path.is_some() && terrain_path.is_some() {
+            return Err("--mesh and --terrain cannot be combined in this single-mesh viewer".into());
         }
-        Ok(Settings { backend, path, vertex_shader, fragment_shader })
+        if (path.is_some() || terrain_path.is_some()) && (vertex_shader.is_none() || fragment_shader.is_none()) {
+            return Err("--mesh/--terrain need both --vs and --fs compiled for the selected BGFX backend".into());
+        }
+        Ok(Settings { backend, path, terrain_path, vertex_shader, fragment_shader })
     }
 
     struct Viewer {
@@ -72,7 +78,7 @@ mod win {
             }
         }
 
-        fn set_mesh(&mut self, model: PackedO3d) -> Result<(), String> {
+        fn set_mesh(&mut self, model: PackedO3d, one_sided: bool) -> Result<(), String> {
             let mut min = Vec3::splat(f32::INFINITY);
             let mut max = Vec3::splat(f32::NEG_INFINITY);
             let transform = Mat4::from_cols_array(&model.model_transform);
@@ -88,7 +94,9 @@ mod win {
                 self.center = (min + max) * 0.5;
                 self.distance = ((max - min).length() * 1.8).clamp(4., 10000.);
             }
-            self.mesh = Some(unsafe { GpuMesh::upload(&model)? });
+            let mut gpu = unsafe { GpuMesh::upload(&model)? };
+            gpu.one_sided = one_sided;
+            self.mesh = Some(gpu);
             self.program = Some(unsafe { Program::load(
                 self.config.vertex_shader.as_ref().expect("checked by parse"),
                 self.config.fragment_shader.as_ref().expect("checked by parse"),
@@ -177,9 +185,18 @@ mod win {
                 println!("BGFX initialized: {:?}", bgfx_sys::bgfx_get_renderer_type());
             }
             if let Some(path) = self.config.path.clone() {
-                match load_file(&path).and_then(|data| self.set_mesh(data)) {
+                match load_file(&path).and_then(|data| self.set_mesh(data, true)) {
                     Ok(()) => println!("Loaded O3D mesh from {}", path.display()),
                     Err(e) => { eprintln!("O3D mesh viewer initialization: {e}"); event_loop.exit(); return; },
+                }
+            }
+            if let Some(path) = self.config.terrain_path.clone() {
+                let result = omsi_map::Terrain::load(&path).map_err(|e| e.to_string())
+                    .and_then(|terrain| pack_generated(&omsi_geometry::build_terrain_mesh(&terrain)))
+                    .and_then(|data| self.set_mesh(data.mesh, data.one_sided));
+                match result {
+                    Ok(()) => println!("Loaded OMSI terrain from {}", path.display()),
+                    Err(e) => { eprintln!("Terrain viewer initialization: {e}"); event_loop.exit(); return; }
                 }
             }
             self.window = Some(window);
