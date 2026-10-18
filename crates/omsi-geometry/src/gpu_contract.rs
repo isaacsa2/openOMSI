@@ -159,6 +159,62 @@ impl FrameCommands {
     }
 }
 
+/// Native RGBA8 image upload. Other formats (BC, HDR, depth and mip chains)
+/// will have distinct descriptors rather than being silently reinterpreted.
+/// Resources have stable IDs within a native renderer instance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextureUpload {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl TextureUpload {
+    pub fn validate(self, rgba: &[u8]) -> Result<(), &'static str> {
+        if self.width == 0 || self.height == 0 || self.width > u16::MAX as u32 || self.height > u16::MAX as u32 {
+            return Err("invalid BGFX RGBA8 texture dimensions");
+        }
+        let bytes = (self.width as usize).checked_mul(self.height as usize)
+            .and_then(|p| p.checked_mul(4))
+            .ok_or("RGBA8 texture dimensions overflow")?;
+        if bytes > 256 * 1024 * 1024 || bytes != rgba.len() {
+            return Err("RGBA8 data must match image dimensions and stay within 256MiB");
+        }
+        Ok(())
+    }
+}
+
+/// Material identity and its diffuse image. BGFX implements this subset first;
+/// the full OMSI material representation (all lightmaps, masks, wetness, etc.)
+/// must be added before the shipping renderer can be replaced.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MaterialUpload {
+    pub diffuse_texture: Option<ResourceId>,
+    pub color: [f32; 4],
+}
+
+impl MaterialUpload {
+    pub fn validate(self) -> Result<(), &'static str> {
+        if self.color.iter().any(|c| !c.is_finite() || !(0.0..=1.0).contains(c)) {
+            return Err("native material color must be finite and in [0, 1]");
+        }
+        Ok(())
+    }
+}
+
+/// GPU resource ownership is separate from drawing: maps swap textures, buses
+/// repaint and meshes stream independently of the view's frame cadence.
+/// IDs are in separate domains for meshes, materials and textures.
+pub trait NativeResourceRenderer: NativeRenderer {
+    fn upload_texture_rgba8(
+        &mut self, desc: TextureUpload, rgba: &[u8],
+    ) -> Result<ResourceId, Self::Error>;
+    fn upsert_material(
+        &mut self, id: ResourceId, material: MaterialUpload,
+    ) -> Result<(), Self::Error>;
+    fn release_texture(&mut self, id: ResourceId) -> Result<(), Self::Error>;
+    fn release_material(&mut self, id: ResourceId) -> Result<(), Self::Error>;
+}
+
 /// Future adapter boundary. Each native backend owns its GPU resources and
 /// converts `FrameCommands` to its own passes and shaders. Nothing here
 /// assumes a wgpu device, a bgfx program or a particular swapchain.
@@ -176,6 +232,15 @@ pub trait NativeRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_texture_material_contract_rejects_bad_inputs() {
+        assert!(TextureUpload { width: 2, height: 2 }.validate(&[255; 16]).is_ok());
+        assert!(TextureUpload { width: 2, height: 2 }.validate(&[255; 15]).is_err());
+        assert!(TextureUpload { width: 0, height: 2 }.validate(&[]).is_err());
+        assert!(MaterialUpload { diffuse_texture: None, color: [1.0; 4] }.validate().is_ok());
+        assert!(MaterialUpload { diffuse_texture: None, color: [f32::NAN, 0., 0., 1.] }.validate().is_err());
+    }
 
     fn example(order: u64, blend: BlendMode) -> Draw {
         Draw {
