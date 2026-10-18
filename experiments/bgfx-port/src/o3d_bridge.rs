@@ -37,7 +37,27 @@ pub fn load_file(path: &Path) -> Result<PackedO3d, String> {
     let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mesh = omsi_o3d::parse_o3d(&bytes)
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    pack(&mesh)
+    pack_visible_omsi_mesh(&mesh)
+}
+
+/// Apply the same O3D coordinate, material and winding rules as the shipped
+/// openOMSI game. Raw O3D vertices are in x-right/y-up/z-forward coordinates;
+/// the scene is x-right/y-forward/z-up. File transforms represent **animation
+/// pivots**, not an additional object-to-world matrix to apply while drawing.
+/// Let the established CPU geometry converter make those compatibility choices.
+pub fn pack_visible_omsi_mesh(mesh: &Mesh) -> Result<PackedO3d, String> {
+    for (t, triangle) in mesh.triangles.iter().enumerate() {
+        for &index in &triangle.indices {
+            if index as usize >= mesh.vertices.len() {
+                return Err(format!("triangle {t} uses missing vertex {index}"));
+            }
+        }
+    }
+    let generated = omsi_geometry::mesh_from_o3d(mesh);
+    if generated.ranges.is_empty() {
+        return Err("O3D contains no visible material ranges".into());
+    }
+    crate::geometry_bridge::pack_generated(&generated).map(|output| output.mesh)
 }
 
 pub fn pack(mesh: &Mesh) -> Result<PackedO3d, String> {
