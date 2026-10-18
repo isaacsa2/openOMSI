@@ -17,11 +17,14 @@ introducing unverified native dependencies or changing the production lockfile.
 - [x] Read-only migration inventory tool:
   `python scripts/audit-bgfx-port.py --output bgfx-inventory.json`.
 - [x] Record unsupported features and merge criteria in one place.
-- [x] A Win32 native-window prototype via winit 0.30 (not verified on a physical GPU).\n- [ ] Native window/swapchain handling on Linux, macOS, Android and iOS.
+- [x] A Win32 native-window prototype via winit 0.30 (not verified on a physical GPU).
+- [ ] Native window/swapchain handling on Linux, macOS, Android and iOS.
 - [ ] A production `omsi-render` backend interface independent of wgpu types.
-- [x] Load authentic .o3d via omsi-o3d; pack vertices/indices, upload bgfx buffers, and submit material runs with a normal-colour shader.\n- [ ] Full OMSI material/texture/lighting shaders and compatibility (not implemented).
+- [x] Load authentic .o3d via omsi-o3d; pack vertices/indices, upload bgfx buffers, and submit material runs with a normal-colour shader.
+- [ ] Full OMSI material/texture/lighting shaders and compatibility (not implemented).
 - [ ] Interface, navigator, mirrors, previews and OpenXR rendered by bgfx.
-- [x] Targeted source compilation and eight CPU-only tests on Windows and Linux.\n- [ ] Physical-GPU screenshot, parity, Android/iOS/macOS and performance tests.
+- [x] Targeted source compilation and eight CPU-only tests on Windows and Linux.
+- [ ] Physical-GPU screenshot, parity, Android/iOS/macOS and performance tests.
 
 **The Rust/native dependency source build and eight CPU-only unit tests have passed on Windows and Linux in GitHub Actions. No GPU run or game rendering has been verified yet.**
 The prototype is unverified until it passes on a machine with Rust, a C++
