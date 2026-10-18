@@ -7,6 +7,19 @@
 //! The global bgfx C API is initialized once per process. Run each backend in its
 //! own process; never parallelize `run` calls across threads.
 
+
+// bgfx-sys ships a static Win32/WGL backend but its 0.15 build script does
+// not always forward these Windows system libraries to dependants. Once the
+// simulation and image decoders are linked into the same test binary, the
+// WGL symbols can become live and LNK2019 unless explicitly supplied.
+#[cfg(windows)]
+#[link(name = "gdi32")]
+unsafe extern "system" {}
+
+#[cfg(windows)]
+#[link(name = "user32")]
+unsafe extern "system" {}
+
 pub mod frame_contract;
 pub mod o3d_bridge;
 pub mod gpu_mesh;
