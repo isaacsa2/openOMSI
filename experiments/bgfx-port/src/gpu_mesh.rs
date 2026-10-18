@@ -1,7 +1,7 @@
 //! First real bgfx GPU upload/draw path for an OMSI .o3d mesh.
 //!
-//! This uses a simple NORMAL-as-colour shader. No textures, lighting parity,
-//! animation, world streaming, bus physics or UI: this is a GPU geometry milestone.
+//! This uses a simple NORMAL-as-colour shader. Texture sampling exists, but lighting parity, animation and full scene streaming
+//! are still incomplete: this is an isolated GPU geometry milestone.
 //! Access only from the bgfx API thread. The owner must be destroyed before
 //! calling bgfx_shutdown. All bgfx C calls are unsafe global-state operations.
 
@@ -94,7 +94,13 @@ impl GpuMesh {
         model: &[f32; 16],
     ) {
         use bgfx_sys::*;
+        // An empty draw range must never reach bgfx_submit. Validate indices
+        // against the uploaded buffer before touching global BGFX state.
         for range in &self.ranges {
+            if range.index_count == 0 || range.first_index > self.indices
+                || range.index_count > self.indices - range.first_index {
+                continue;
+            }
             bgfx_set_transform(model.as_ptr() as *const c_void, 1);
             bgfx_set_vertex_buffer(0, self.vertex, 0, u32::MAX);
             bgfx_set_index_buffer(self.index, range.first_index, range.index_count);
