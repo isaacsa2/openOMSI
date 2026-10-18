@@ -186,14 +186,11 @@ impl Renderer {
             );
             // Opt-in FSR1 experiment. Use the existing scene scale setting for quality.
             // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
-            static FSR1: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-            let fsr1_enabled = *FSR1.get_or_init(|| {
-                std::env::var("OMSI_FSR1")
-                    .is_ok_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
-            });
+            let fsr1_enabled = crate::fsr1_enabled();
             let full_h = f.target.texture().height();
             if fsr1_enabled && f.with_overlays && !f.vanilla_fxaa
                 && width < full_w && height < full_h
+                && self.scale.fsr_easu_pipeline.is_some() && self.scale.fsr_rcas_pipeline.is_some()
             {
                 let size = (full_w, full_h);
                 let mut cached = self.scale.fsr_target.borrow_mut();
@@ -233,7 +230,7 @@ impl Renderer {
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
-                    pass.set_pipeline(&self.scale.fsr_easu_pipeline);
+                    pass.set_pipeline(self.scale.fsr_easu_pipeline.as_ref().expect("FSR1 EASU pipeline"));
                     pass.set_bind_group(0, bg, &[]);
                     pass.draw(0..3, 0..1);
                 }
@@ -255,7 +252,7 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                pass.set_pipeline(&self.scale.fsr_rcas_pipeline);
+                pass.set_pipeline(self.scale.fsr_rcas_pipeline.as_ref().expect("FSR1 RCAS pipeline"));
                 pass.set_bind_group(0, &intermediate.bind_group, &[]);
                 pass.draw(0..3, 0..1);
                 if !overlays.is_empty() {
