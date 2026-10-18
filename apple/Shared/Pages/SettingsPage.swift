@@ -80,6 +80,11 @@ struct SettingsPage: View {
             SettingSelect(label: "Graphics", key: "graphics", options: [("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")])
             PresetRow(mode: mode)
             SettingSelect(label: "Anti-aliasing", key: "msaa", options: [("1", "Off"), ("2", "2x MSAA"), ("4", "4x MSAA"), ("8", "8x MSAA")])
+            SettingSelect(label: "Upscaling", key: "upscaler", options: [("default", "Standard (Catmull-Rom)"), ("fsr1", "AMD FSR 1 (experimental)")])
+            if store.setting("upscaler")?.string == "fsr1" {
+                SettingSelect(label: "FSR quality", key: "fsr_quality", options: [("ultra", "Ultra Quality (77%)"), ("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("custom", "Use render scale")])
+                SettingSlider(label: "FSR sharpening", key: "fsr_sharpness", range: 0 ... 1, step: 0.05, fallback: 0.3) { "\(Int($0 * 100))%" }
+            }
             SettingSelect(label: "Render scale", key: "render_scale", options: [("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")])
             SettingSelect(label: "Anisotropic", key: "anisotropy", options: [("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")])
             if !classic {
