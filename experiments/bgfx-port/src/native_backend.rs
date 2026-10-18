@@ -190,6 +190,17 @@ impl NativeRenderer for BgfxNativeBackend {
             bgfx_set_view_mode(0, BGFX_VIEW_MODE_SEQUENTIAL);
             bgfx_touch(0);
             configured[0] = true;
+            for camera in &frame.cameras {
+                let view = native_view_id(camera.view).expect("camera frame prevalidated");
+                bgfx_set_view_rect(view, 0, 0, width as u16, height as u16);
+                bgfx_set_view_mode(view, BGFX_VIEW_MODE_SEQUENTIAL);
+                bgfx_set_view_transform(
+                    view,
+                    camera.world_to_camera.as_ptr() as *const std::ffi::c_void,
+                    camera.camera_to_clip.as_ptr() as *const std::ffi::c_void,
+                );
+                configured[view as usize] = true;
+            }
             for draw in frame.ordered_draws() {
                 let view = native_view_id(draw.view).expect("frame prevalidated");
                 let state = native_draw_state(draw).expect("frame prevalidated");
