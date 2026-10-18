@@ -328,6 +328,25 @@ mod tests {
     fn identity() -> [f32; 16] { glam::Mat4::IDENTITY.to_cols_array() }
 
     #[test]
+    fn rejects_unknown_material_before_native_frame_submission() {
+        let materials = HashMap::new();
+        let textures = HashMap::new();
+        assert!(validate_material_link(&materials, &textures, ResourceId(0)).is_ok());
+        assert!(validate_material_link(&materials, &textures, ResourceId(1)).is_err());
+        let mut materials = materials;
+        materials.insert(ResourceId(1), MaterialUpload {
+            diffuse_texture: Some(ResourceId(8)),
+            color: [1.; 4],
+        });
+        assert!(validate_material_link(&materials, &textures, ResourceId(1)).is_err());
+        materials.insert(ResourceId(1), MaterialUpload {
+            diffuse_texture: None,
+            color: [1.; 4],
+        });
+        assert!(validate_material_link(&materials, &textures, ResourceId(1)).is_ok());
+    }
+
+    #[test]
     fn rejects_corrupted_gpu_mesh_data_before_native_upload() {
         let d = MeshUpload { vertex_stride: 32, vertex_count: 3, index_count: 3, index_32bit: false, one_sided: true };
         let v = vec![0u8; 3 * 32];
