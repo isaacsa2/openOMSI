@@ -7,6 +7,8 @@
 //! The global bgfx C API is initialized once per process. Run each backend in its
 //! own process; never parallelize `run` calls across threads.
 
+pub mod frame_contract;
+
 use std::{mem::MaybeUninit, time::{Duration, Instant}};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
