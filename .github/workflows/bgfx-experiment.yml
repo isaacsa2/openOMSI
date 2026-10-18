@@ -64,3 +64,12 @@ jobs:
           path: experiments/bgfx-port/target/debug/bgfx-window.exe
           if-no-files-found: warn
       # A successful clear-only smoke does not prove OMSI mesh or game rendering.
+
+  production-contract-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Ensure real omsi-render scene compiles with shared BGFX-neutral contract
+        run: cargo check -p omsi-render --locked
