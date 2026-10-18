@@ -43,7 +43,7 @@ jobs:
 
       - name: Cache pinned shaderc compiler binary
         id: shaderc-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: vendor-bgfx-sys/bgfx/.build/win64_vs2022/bin/shadercRelease.exe
           key: bgfx-sys-0.15.0-shaderc-win64-v1
@@ -59,6 +59,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "BGFX shaderc native build failed" }
           Pop-Location
 
+      - name: Store pinned compiler independent of shader compile result
+        if: steps.shaderc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor-bgfx-sys/bgfx/.build/win64_vs2022/bin/shadercRelease.exe
+          key: bgfx-sys-0.15.0-shaderc-win64-v1
+
       - name: Compile BGFX DX11 shaders for real triangle
         shell: pwsh
         run: |
@@ -69,8 +76,13 @@ jobs:
       - name: Draw actual GPU triangle through NativeRenderer
         shell: pwsh
         run: |
-          cargo run --manifest-path experiments/bgfx-port/Cargo.toml --bin bgfx-window -- --backend dx11 --contract-demo --frames 8 --vs experiments/bgfx-port/compiled/dx11/vs_mesh.bin --fs experiments/bgfx-port/compiled/dx11/fs_mesh.bin
-          if ($LASTEXITCODE -ne 0) { throw "BGFX native triangle failed" }
+          $logfile = "bgfx-triangle-runtime.log"
+          cargo run --manifest-path experiments/bgfx-port/Cargo.toml --bin bgfx-window -- --backend dx11 --contract-demo --frames 8 --vs experiments/bgfx-port/compiled/dx11/vs_mesh.bin --fs experiments/bgfx-port/compiled/dx11/fs_mesh.bin *>&1 | Tee-Object -FilePath $logfile
+          if ($LASTEXITCODE -ne 0) { throw "BGFX native triangle process failed" }
+          $log = Get-Content -Path $logfile -Raw
+          if ($log -notmatch "BGFX_CONTRACT_FRAME_OK" -or $log -match "BGFX_CONTRACT_FRAME_FAILED|BGFX_CONTRACT_INIT_FAILED") {
+            throw "BGFX native contract did not submit a validated draw"
+          }
 
       - name: Save the compiled native shaders for repro
         if: always()
