@@ -46,6 +46,11 @@ jobs:
           sudo apt-get install -y build-essential pkg-config libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev libwayland-dev
       - name: Compile isolated BGFX experiment and run CPU-only tests
         run: cargo test --manifest-path experiments/bgfx-port/Cargo.toml
+      - name: Verify real O3D parser and staging through synthetic binary fixture
+        shell: pwsh
+        run: |
+          python experiments/bgfx-port/generate-synthetic-o3d.py experiments/bgfx-port/synthetic-ci.o3d
+          cargo run --manifest-path experiments/bgfx-port/Cargo.toml --bin bgfx-o3d-check -- experiments/bgfx-port/synthetic-ci.o3d
       - name: Initialize BGFX native Win32/DX11 surface and submit 8 frames
         if: runner.os == 'Windows'
         shell: pwsh
