@@ -260,6 +260,10 @@ pub struct RenderOptions {
     /// The 3D picture of the window drawn at this fraction of its size and scaled up
     /// (0.5..1); 0 = automatic: full size up to `AUTO_SCALE_PIXELS`, smaller above.
     pub render_scale: f32,
+    /// Experimental FSR1 spatial upscaler (takes effect when the renderer is created).
+    pub fsr1: bool,
+    /// RCAS sharpening strength, from 0 (none) to 1.
+    pub fsr_sharpness: f32,
     /// Uncompressed texture files (BMP, TGA, JPG) are compressed to BC1/BC3 on loading
     /// where the device takes block formats and the result is close to the picture
     /// (DXT files always go up as blocks there).
@@ -315,6 +319,8 @@ impl Default for RenderOptions {
             shadow_size: SHADOW_SIZE,
             ssao: true,
             render_scale: 0.0,
+            fsr1: false,
+            fsr_sharpness: 0.3,
             compress_textures: true,
             gpu_texture_compression: true,
             fxaa: true,
