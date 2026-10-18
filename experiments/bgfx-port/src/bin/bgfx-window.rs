@@ -121,6 +121,7 @@ mod win {
         sampler: Option<Sampler>,
         contract: Option<BgfxNativeBackend>,
         contract_mesh: Option<ResourceId>,
+        contract_failed: bool,
         center: Vec3,
         distance: f32,
         yaw: f32,
@@ -135,7 +136,7 @@ mod win {
         fn new(config: Settings) -> Self {
             Self {
                 config, window: None, initialized: false,
-                mesh: None, map_meshes: Vec::new(), map_preview: None, driving: None, program: None, texture: None, material_textures: Vec::new(), sampler: None, contract: None, contract_mesh: None, center: Vec3::ZERO,
+                mesh: None, map_meshes: Vec::new(), map_preview: None, driving: None, program: None, texture: None, material_textures: Vec::new(), sampler: None, contract: None, contract_mesh: None, contract_failed: false, center: Vec3::ZERO,
                 distance: 24., yaw: 0., drawn_frames: 0,
                 map_camera: Vec3::new(150., 150., 120.), map_mode: false,
                 held_keys: HashSet::new(), last_frame: Instant::now(),
@@ -333,8 +334,13 @@ mod win {
                 };
                 if let Err(e) = renderer.draw_frame(&frame) {
                     eprintln!("BGFX_CONTRACT_FRAME_FAILED: {e}");
+                    self.contract_failed = true;
+                    return;
                 }
                 self.drawn_frames += 1;
+                if self.drawn_frames == 1 {
+                    println!("BGFX_CONTRACT_FRAME_OK draws={} viewport={}x{}", frame.draws.len(), w, h);
+                }
                 return;
             }
             // For OMSI's coordinate convention Z is up and Y goes forwards.
@@ -525,7 +531,9 @@ mod win {
                 }
                 WindowEvent::RedrawRequested => {
                     self.draw();
-                    if self.config.exit_after_frames.is_some_and(|n| self.drawn_frames >= n) {
+                    if self.contract_failed {
+                        event_loop.exit();
+                    } else if self.config.exit_after_frames.is_some_and(|n| self.drawn_frames >= n) {
                         println!("BGFX_NATIVE_FRAME_SMOKE_OK rendered_frames={}", self.drawn_frames);
                         event_loop.exit();
                     } else if let Some(w) = self.window.as_ref() { w.request_redraw(); }
