@@ -8,7 +8,7 @@
 mod win {
     use std::{collections::HashSet, ffi::c_void, path::PathBuf, ptr, time::Instant};
     use glam::{Mat4, Vec3};
-    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, Selection}, texture_bridge::{Texture, Sampler}};
+    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file_with_textures, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, Selection}, texture_bridge::{Texture, Sampler}};
     use winit::{
         application::ApplicationHandler,
         dpi::PhysicalSize,
@@ -99,6 +99,7 @@ mod win {
         map_meshes: Vec<GpuMesh>,
         program: Option<Program>,
         texture: Option<Texture>,
+        material_textures: Vec<Option<Texture>>,
         sampler: Option<Sampler>,
         center: Vec3,
         distance: f32,
@@ -114,7 +115,7 @@ mod win {
         fn new(config: Settings) -> Self {
             Self {
                 config, window: None, initialized: false,
-                mesh: None, map_meshes: Vec::new(), program: None, texture: None, sampler: None, center: Vec3::ZERO,
+                mesh: None, map_meshes: Vec::new(), program: None, texture: None, material_textures: Vec::new(), sampler: None, center: Vec3::ZERO,
                 distance: 24., yaw: 0., drawn_frames: 0,
                 map_camera: Vec3::new(150., 150., 120.), map_mode: false,
                 held_keys: HashSet::new(), last_frame: Instant::now(),
@@ -136,8 +137,29 @@ mod win {
             Ok(())
         }
 
-        fn set_mesh(&mut self, model: PackedO3d, one_sided: bool) -> Result<(), String> {
+        fn set_mesh(&mut self, model: PackedO3d, one_sided: bool, texture_paths: &[Option<PathBuf>]) -> Result<(), String> {
             self.create_material_preview()?;
+            self.material_textures.clear();
+            if self.config.texture_path.is_none() {
+                let mut bytes = 0usize;
+                // This preview limits texture residency to avoid exhausting
+                // smaller cards: normal openOMSI uses a streaming budget.
+                for path in texture_paths.iter().take(256) {
+                    let picture = path.as_ref().and_then(|p| Texture::from_file(p).ok());
+                    let picture = match picture {
+                        Some(t) if bytes.saturating_add(usize::from(t.width) * usize::from(t.height) * 4)
+                            <= 96 * 1024 * 1024 => {
+                                bytes += usize::from(t.width) * usize::from(t.height) * 4;
+                                Some(t)
+                            },
+                        _ => None,
+                    };
+                    self.material_textures.push(picture);
+                }
+                println!("BGFX material preview: {}/{} textures loaded, decoded RGBA budget {:.1}MiB",
+                    self.material_textures.iter().filter(|p| p.is_some()).count(),
+                    texture_paths.len(), bytes as f64 / 1048576.0);
+            }
             let mut min = Vec3::splat(f32::INFINITY);
             let mut max = Vec3::splat(f32::NEG_INFINITY);
             let transform = Mat4::from_cols_array(&model.model_transform);
@@ -248,7 +270,7 @@ mod win {
                 if let (Some(program), Some(tex), Some(sampler)) =
                     (self.program.as_ref(), self.texture.as_ref(), self.sampler.as_ref()) {
                     for mesh in &self.map_meshes {
-                        mesh.draw(program.handle(), tex, sampler);
+                        mesh.draw(program.handle(), tex, sampler, &self.material_textures);
                     }
                     if let Some(mesh) = self.mesh.as_ref() {
                         mesh.draw(program.handle(), tex, sampler);
@@ -308,7 +330,8 @@ mod win {
                 println!("BGFX initialized: {:?}", bgfx_sys::bgfx_get_renderer_type());
             }
             if let Some(path) = self.config.path.clone() {
-                match load_file(&path).and_then(|data| self.set_mesh(data, true)) {
+                match load_file_with_textures(&path)
+                    .and_then(|(mesh, textures)| self.set_mesh(mesh, true, &textures)) {
                     Ok(()) => println!("Loaded O3D mesh from {}", path.display()),
                     Err(e) => { eprintln!("O3D mesh viewer initialization: {e}"); event_loop.exit(); return; },
                 }
@@ -316,7 +339,7 @@ mod win {
             if let Some(path) = self.config.terrain_path.clone() {
                 let result = omsi_map::Terrain::load(&path).map_err(|e| e.to_string())
                     .and_then(|terrain| pack_generated(&omsi_geometry::build_terrain_mesh(&terrain)))
-                    .and_then(|data| self.set_mesh(data.mesh, data.one_sided));
+                    .and_then(|data| self.set_mesh(data.mesh, data.one_sided, &[]));
                 match result {
                     Ok(()) => println!("Loaded OMSI terrain from {}", path.display()),
                     Err(e) => { eprintln!("Terrain viewer initialization: {e}"); event_loop.exit(); return; }
@@ -381,6 +404,7 @@ mod win {
             self.map_meshes.clear();
             self.program.take();
             self.texture.take();
+            self.material_textures.clear();
             self.sampler.take();
             if self.initialized { unsafe { bgfx_sys::bgfx_shutdown() }; }
         }
