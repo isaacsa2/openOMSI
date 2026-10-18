@@ -8,7 +8,7 @@
 mod win {
     use std::{collections::HashSet, ffi::c_void, path::PathBuf, ptr, time::Instant};
     use glam::{Mat4, Vec3};
-    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file_with_textures, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, Selection}, texture_bridge::{Texture, Sampler}};
+    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file_with_textures, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, MapPreview, Selection}, texture_bridge::{Texture, Sampler}, drive_bridge::{DrivePreview, DriverKeys}};
     use winit::{
         application::ApplicationHandler,
         dpi::PhysicalSize,
@@ -24,6 +24,7 @@ mod win {
         path: Option<PathBuf>,
         terrain_path: Option<PathBuf>,
         map_path: Option<PathBuf>,
+        bus_definition: Option<PathBuf>,
         map_center: Option<(i32, i32)>,
         map_radius: u8,
         exit_after_frames: Option<u32>,
@@ -37,6 +38,7 @@ mod win {
         let mut path = None;
         let mut terrain_path = None;
         let mut map_path = None;
+        let mut bus_definition = None;
         let mut tile_x = None;
         let mut tile_y = None;
         let mut map_radius = 1;
@@ -47,8 +49,8 @@ mod win {
         let mut args = std::env::args().skip(1);
         while let Some(flag) = args.next() {
             let val = match flag.as_str() {
-                "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d | --terrain PATH.map.terrain | --map PATH/global.cfg] [--vs PATH.bin --fs PATH.bin] [--frames N]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
-                "--backend" | "--mesh" | "--terrain" | "--map" | "--tile-x" | "--tile-y" | "--radius" | "--vs" | "--fs" | "--frames" | "--texture" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
+                "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d | --terrain PATH.map.terrain | --map PATH/global.cfg] [--bus-definition PATH.bus] [--vs PATH.bin --fs PATH.bin] [--frames N]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
+                "--backend" | "--mesh" | "--terrain" | "--map" | "--tile-x" | "--tile-y" | "--radius" | "--vs" | "--fs" | "--frames" | "--texture" | "--bus-definition" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
                 _ => return Err(format!("unrecognized flag: {flag}")),
             };
             match flag.as_str() {
@@ -57,6 +59,7 @@ mod win {
                 "--terrain" => terrain_path = Some(PathBuf::from(val)),
                 "--texture" => texture_path = Some(PathBuf::from(val)),
                 "--map" => map_path = Some(PathBuf::from(val)),
+                "--bus-definition" => bus_definition = Some(PathBuf::from(val)),
                 "--tile-x" => tile_x = Some(val.parse::<i32>().map_err(|_| "invalid tile X coordinate")?),
                 "--tile-y" => tile_y = Some(val.parse::<i32>().map_err(|_| "invalid tile Y coordinate")?),
                 "--radius" => map_radius = val.parse::<u8>().map_err(|_| "invalid tile radius")?,
@@ -71,8 +74,12 @@ mod win {
             }
         }
         let selected = usize::from(path.is_some()) + usize::from(terrain_path.is_some()) + usize::from(map_path.is_some());
-        if selected > 1 {
-            return Err("choose one of --mesh, --terrain or --map (one mode per process)".into());
+        if bus_definition.is_some() {
+            if map_path.is_none() || path.is_none() || terrain_path.is_some() {
+                return Err("--bus-definition requires both --map and --mesh, without --terrain".into());
+            }
+        } else if selected > 1 {
+            return Err("choose one of --mesh, --terrain or --map unless using --bus-definition".into());
         }
         if tile_x.is_some() != tile_y.is_some() {
             return Err("--tile-x and --tile-y must be supplied together".into());
@@ -87,7 +94,7 @@ mod win {
             return Err("--mesh/--terrain/--map need --vs and --fs matching the backend".into());
         }
         let map_center = tile_x.zip(tile_y);
-        Ok(Settings { backend, path, terrain_path, map_path, map_center, map_radius,
+        Ok(Settings { backend, path, terrain_path, map_path, bus_definition, map_center, map_radius,
             exit_after_frames, vertex_shader, fragment_shader, texture_path })
     }
 
@@ -97,6 +104,8 @@ mod win {
         initialized: bool,
         mesh: Option<GpuMesh>,
         map_meshes: Vec<GpuMesh>,
+        map_preview: Option<MapPreview>,
+        driving: Option<DrivePreview>,
         program: Option<Program>,
         texture: Option<Texture>,
         material_textures: Vec<Option<Texture>>,
@@ -115,7 +124,7 @@ mod win {
         fn new(config: Settings) -> Self {
             Self {
                 config, window: None, initialized: false,
-                mesh: None, map_meshes: Vec::new(), program: None, texture: None, material_textures: Vec::new(), sampler: None, center: Vec3::ZERO,
+                mesh: None, map_meshes: Vec::new(), map_preview: None, driving: None, program: None, texture: None, material_textures: Vec::new(), sampler: None, center: Vec3::ZERO,
                 distance: 24., yaw: 0., drawn_frames: 0,
                 map_camera: Vec3::new(150., 150., 120.), map_mode: false,
                 held_keys: HashSet::new(), last_frame: Instant::now(),
@@ -207,6 +216,7 @@ mod win {
             println!("Only terrain meshes are rendered; this is NOT a drivable OMSI session.");
             self.map_camera = Vec3::new(preview.tile_size * 0.5, preview.tile_size * 0.5, 120.);
             self.map_meshes = native_meshes;
+            self.map_preview = Some(preview);
             self.program = Some(program);
             self.map_mode = true;
             self.distance = 40.;
@@ -217,6 +227,20 @@ mod win {
             let now = Instant::now();
             let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
             self.last_frame = now;
+            if let (Some(bus), Some(map)) = (self.driving.as_mut(), self.map_preview.as_ref()) {
+                let keys = DriverKeys {
+                    accelerate: self.held_keys.contains(&KeyCode::KeyW),
+                    brake: self.held_keys.contains(&KeyCode::KeyS),
+                    left: self.held_keys.contains(&KeyCode::KeyA),
+                    right: self.held_keys.contains(&KeyCode::KeyD),
+                };
+                let height = map.ground_height(bus.pos);
+                bus.advance(dt, keys, height);
+                self.yaw = bus.yaw_deg.to_radians();
+                let back = Vec3::new(-self.yaw.sin() * 12.0, -self.yaw.cos() * 12.0, 5.0);
+                self.map_camera = bus.pos + back;
+                return;
+            }
             if !self.map_mode { return; }
             let forward = Vec3::new(self.yaw.sin(), self.yaw.cos(), 0.);
             let right = Vec3::new(self.yaw.cos(), -self.yaw.sin(), 0.);
@@ -243,8 +267,11 @@ mod win {
             let h = size.height.min(u16::MAX as u32) as u16;
             // For OMSI's coordinate convention Z is up and Y goes forwards.
             let (eye, target) = if self.map_mode {
-                let target = self.map_camera
-                    + Vec3::new(self.yaw.sin(), self.yaw.cos(), -0.35);
+                let target = if let Some(bus) = self.driving.as_ref() {
+                    bus.pos + Vec3::new(0.0, 0.0, 1.8)
+                } else {
+                    self.map_camera + Vec3::new(self.yaw.sin(), self.yaw.cos(), -0.35)
+                };
                 (self.map_camera, target)
             } else {
                 let eye = self.center + Vec3::new(self.yaw.sin() * self.distance,
@@ -273,7 +300,12 @@ mod win {
                         mesh.draw(program.handle(), tex, sampler, &self.material_textures);
                     }
                     if let Some(mesh) = self.mesh.as_ref() {
-                        mesh.draw(program.handle(), tex, sampler);
+                        if let Some(bus) = self.driving.as_ref() {
+                            let model = bus.model_transform();
+                            mesh.draw_with_transform(program.handle(), tex, sampler, &self.material_textures, &model);
+                        } else {
+                            mesh.draw(program.handle(), tex, sampler, &self.material_textures);
+                        }
                     }
                 }
                 bgfx_sys::bgfx_frame(false);
@@ -352,6 +384,32 @@ mod win {
                     return;
                 }
             }
+            if let Some(path) = self.config.bus_definition.clone() {
+                let Some(map) = self.map_preview.as_ref() else {
+                    eprintln!("Cannot start driving preview without map heightfields");
+                    event_loop.exit();
+                    return;
+                };
+                let mut start = Vec3::new(map.tile_size * 0.5, map.tile_size * 0.5, 0.0);
+                let Some(ground) = map.ground_height(start) else {
+                    eprintln!("No terrain height available at initial bus location");
+                    event_loop.exit();
+                    return;
+                };
+                start.z = ground;
+                match DrivePreview::from_bus_file(&path, start) {
+                    Ok(driving) => {
+                        println!("BGFX_DRIVE_PREVIEW_START bus={} (kinematic physics test; no OMSI scripts, doors, collisions or complete game)", path.display());
+                        self.driving = Some(driving);
+                        self.map_camera = start + Vec3::new(0.0, -12.0, 5.0);
+                    },
+                    Err(e) => {
+                        eprintln!("Bus preview initialization: {e}");
+                        event_loop.exit();
+                        return;
+                    }
+                }
+            }
             self.window = Some(window);
             self.window.as_ref().unwrap().request_redraw();
         }
@@ -360,6 +418,7 @@ mod win {
             if self.window.as_ref().is_none_or(|w| w.id() != id) { return; }
             match event {
                 WindowEvent::CloseRequested => event_loop.exit(),
+                WindowEvent::Focused(false) => self.held_keys.clear(),
                 WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => unsafe {
                     bgfx_sys::bgfx_reset(size.width, size.height, bgfx_sys::BGFX_RESET_VSYNC,
                         bgfx_sys::BGFX_TEXTURE_FORMAT_COUNT);
@@ -402,6 +461,8 @@ mod win {
             // The mesh/program must die *before* bgfx, not afterwards.
             self.mesh.take();
             self.map_meshes.clear();
+            self.map_preview.take();
+            self.driving.take();
             self.program.take();
             self.texture.take();
             self.material_textures.clear();
