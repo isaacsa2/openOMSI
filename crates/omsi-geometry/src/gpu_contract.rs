@@ -74,6 +74,9 @@ pub struct Draw {
     pub view: View,
     pub blend: BlendMode,
     pub depth: DepthMode,
+    /// First triangle-index and count within the native mesh, or None for
+    /// the whole mesh. Stock OMSI materials split one model into many runs.
+    pub range: Option<(u32, u32)>,
     /// Model-to-world, column-major. World-origin rebasing must happen before
     /// this reaches the native backend to retain precision on large OMSI maps.
     pub transform: [f32; 16],
@@ -87,6 +90,11 @@ impl Draw {
         if !self.transform.iter().all(|x| x.is_finite()) {
             return Err("model matrix contains a non-finite value");
         }
+        if let Some((_, count)) = self.range {
+            if count == 0 || count % 3 != 0 {
+                return Err("GPU draw index range must be nonempty triangle list");
+            }
+        }
         Ok(())
     }
 }
@@ -99,6 +107,9 @@ pub struct ViewCamera {
     pub view: View,
     pub world_to_camera: [f32; 16],
     pub camera_to_clip: [f32; 16],
+    /// The shipping renderer uses reversed-Z; keep this explicit so BGFX
+    /// selects GREATER depth testing and clears depth to 0 instead of 1.
+    pub reversed_z: bool,
 }
 
 impl ViewCamera {
@@ -173,6 +184,7 @@ mod tests {
             view: View::Main,
             blend,
             depth: DepthMode::TestOnly,
+            range: None,
             transform: [
                 1., 0., 0., 0., 0., 1., 0., 0.,
                 0., 0., 1., 0., 0., 0., 0., 1.,
@@ -187,7 +199,7 @@ mod tests {
             viewport: (1366, 768),
             cameras: vec![ViewCamera { view: View::Main,
                 world_to_camera: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.],
-                camera_to_clip: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.] }],
+                camera_to_clip: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.], reversed_z: false }],
             draws: vec![
                 example(300, BlendMode::AlphaBlend),
                 example(100, BlendMode::AlphaBlend),
@@ -206,7 +218,7 @@ mod tests {
             viewport: (800, 600),
             cameras: vec![ViewCamera { view: View::Main,
                 world_to_camera: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.],
-                camera_to_clip: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.] }],
+                camera_to_clip: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.], reversed_z: false }],
             draws: vec![example(0, BlendMode::Opaque)],
         };
         frame.draws[0].transform[4] = f32::NAN;
