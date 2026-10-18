@@ -208,9 +208,15 @@ pub trait NativeResourceRenderer: NativeRenderer {
     fn upload_texture_rgba8(
         &mut self, desc: TextureUpload, rgba: &[u8],
     ) -> Result<ResourceId, Self::Error>;
+    /// Install or replace the image at a stable source texture ID. Scene
+    /// snapshots use source slot + 1 and cannot rely on allocation sequence.
+    fn upsert_texture_rgba8(
+        &mut self, id: ResourceId, desc: TextureUpload, rgba: &[u8],
+    ) -> Result<(), Self::Error>;
     fn upsert_material(
         &mut self, id: ResourceId, material: MaterialUpload,
     ) -> Result<(), Self::Error>;
+    fn release_mesh(&mut self, id: ResourceId) -> Result<(), Self::Error>;
     fn release_texture(&mut self, id: ResourceId) -> Result<(), Self::Error>;
     fn release_material(&mut self, id: ResourceId) -> Result<(), Self::Error>;
 }
