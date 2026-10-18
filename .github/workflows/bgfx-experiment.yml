@@ -1,0 +1,35 @@
+name: Experimental bgfx compile check
+
+# Manual only: the production PR CI must not build a very large native
+# graphics experiment on every unrelated commit.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory wgpu references
+        run: python3 scripts/audit-bgfx-port.py --output bgfx-inventory.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bgfx-port-inventory
+          path: bgfx-inventory.json
+
+  native-binding-compile:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile isolated bgfx prototype and run its CPU-only tests
+        run: cargo test --manifest-path experiments/bgfx-port/Cargo.toml
+      # Do not execute the headless graphics smoke on a CI machine with no GPU.
+      # If binding compilation fails, record it rather than affecting releases.
