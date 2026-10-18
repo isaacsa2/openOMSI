@@ -178,7 +178,7 @@ impl Renderer {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
         if let Some((_, bg)) = &f.scene_target {
-            let sharpen = (1.0 - width as f32 / full_w as f32) * 2.0;
+            let sharpen = if self.options.fsr1 || crate::fsr1_enabled() { self.options.fsr_sharpness.clamp(0.0, 1.0) } else { (1.0 - width as f32 / full_w as f32) * 2.0 };
             self.queue.write_buffer(
                 &self.scale.upscale_buf,
                 0,
