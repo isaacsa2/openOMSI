@@ -570,6 +570,9 @@ impl Renderer {
             },
             scale: Upscale {
                 upscale_pipeline: upscale.upscale_pipeline,
+                fsr_easu_pipeline: upscale.fsr_easu_pipeline,
+                fsr_rcas_pipeline: upscale.fsr_rcas_pipeline,
+                fsr_target: std::cell::RefCell::new(None),
                 copy_pipeline: upscale.copy_pipeline,
                 panel_pipeline: upscale.panel_pipeline,
                 upscale_layout: upscale.layout,
