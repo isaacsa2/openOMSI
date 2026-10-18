@@ -13,6 +13,8 @@ pub struct GpuMesh {
     index: bgfx_sys::bgfx_index_buffer_handle_t,
     pub indices: u32,
     pub index32: bool,
+    /// False for generated terrain and spline geometry that can be seen from both sides.
+    pub one_sided: bool,
     pub ranges: Vec<crate::o3d_bridge::MaterialRun>,
     pub model_transform: [f32; 16],
 }
@@ -60,6 +62,7 @@ impl GpuMesh {
         }
         Ok(Self {
             vertex, index, indices: mesh.index_count, index32: mesh.index32,
+            one_sided: true,
             ranges: mesh.runs.clone(), model_transform: mesh.model_transform,
         })
     }
@@ -69,12 +72,16 @@ impl GpuMesh {
     /// shader does not reproduce material appearance yet.
     pub unsafe fn draw(&self, program: bgfx_sys::bgfx_program_handle_t) {
         use bgfx_sys::*;
-        bgfx_set_transform(self.model_transform.as_ptr() as *const c_void, 1);
         for range in &self.ranges {
             bgfx_set_transform(self.model_transform.as_ptr() as *const c_void, 1);
             bgfx_set_vertex_buffer(0, self.vertex, 0, u32::MAX);
             bgfx_set_index_buffer(self.index, range.first_index, range.index_count);
-            bgfx_set_state(BGFX_STATE_DEFAULT, 0);
+            let state = if self.one_sided {
+                BGFX_STATE_DEFAULT
+            } else {
+                BGFX_STATE_DEFAULT & !(BGFX_STATE_CULL_MASK as u64)
+            };
+            bgfx_set_state(state, 0);
             bgfx_submit(0, program, 0, BGFX_DISCARD_ALL as u8);
         }
     }
