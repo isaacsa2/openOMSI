@@ -1,6 +1,6 @@
 # Experimental native BGFX mesh viewer
 
-This is a separate GPU test application, **NOT** the playable openOMSI game.
+This is a separate GPU test application, **NOT** the complete playable openOMSI game.
 The first native mesh milestone can parse authentic OMSI .o3d content via
 omsi-o3d, pack its geometry without dropping authored material runs, upload
 real vertex/index buffers through bgfx, and submit them in a native Win32
@@ -80,3 +80,32 @@ The terrain path above is **illustrative**: replace it with an existing
 *.map.terrain file in the actual installed map. No map or model files are
 bundled into this repository. The viewer shows a single height-field,
 not roads, base/paint textures, scenery, scripted traffic or a drivable map.
+
+## Optional drive-input experiment (still **not** the full openOMSI game)
+
+The Windows viewer can now accept a real `.bus` vehicle definition
+alongside a **single** O3D body part and a **small terrain-only map region**.
+It reuses `omsi_vehicle::Vehicle::load` and
+`omsi_sim::VehiclePhysics::from_definition`; the same openOMSI CPU
+physics code advances the body pose over sampled heightfield terrain.
+
+```powershell
+cargo run --manifest-path experiments/bgfx-port/Cargo.toml --bin bgfx-window -- `
+  --backend dx11 `
+  --map "D:/Games/OMSI 2/maps/Grundorf/global.cfg" `
+  --mesh "D:/Games/OMSI 2/Vehicles/YOUR_BUS/model/YOUR_BODY.o3d" `
+  --bus-definition "D:/Games/OMSI 2/Vehicles/YOUR_BUS/YOUR_BUS.bus" `
+  --vs experiments/bgfx-port/compiled/dx11/vs_mesh.bin `
+  --fs experiments/bgfx-port/compiled/dx11/fs_mesh.bin
+```
+
+Paths are placeholders except for the standard `maps/Grundorf/global.cfg`
+layout; replace them with files from an actual licensed installation.
+**W** accelerates; **S** brakes; **A/D** steer. A follow camera shows
+the model moving over generated terrain. The current preview uses
+provisional torque/brake magnitudes, not the bus's engine/gearbox
+script outputs, and does not implement a route, traffic, wheel collision,
+passenger interaction, vehicle dashboards, synchronized animation or
+correct ride height. No native GPU screenshot of the driven bus has
+yet been validated. This is an **isolated mechanics integration test**
+and must never be distributed as a playable openOMSI release.
