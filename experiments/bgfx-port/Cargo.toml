@@ -17,5 +17,7 @@ omsi-o3d = { path = "../../crates/omsi-o3d" }
 omsi-geometry = { path = "../../crates/omsi-geometry" }
 omsi-map = { path = "../../crates/omsi-map" }
 omsi-texture = { path = "../../crates/omsi-texture" }
+omsi-sim = { path = "../../crates/omsi-sim" }
+omsi-vehicle = { path = "../../crates/omsi-vehicle" }
 winit = "0.30"
 glam = "0.30"
