@@ -159,6 +159,18 @@ impl FrameCommands {
     }
 }
 
+/// Metadata for one source scene texture slot. The generation changes when
+/// the slot is recycled, so BGFX can invalidate the corresponding C++ handle.
+/// This deliberately contains no pixels: those must come from the original
+/// texture decode/upload path, not a blocking GPU readback from wgpu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextureSlot {
+    pub resource: ResourceId,
+    pub width: u32,
+    pub height: u32,
+    pub generation: u64,
+}
+
 /// Native RGBA8 image upload. Other formats (BC, HDR, depth and mip chains)
 /// will have distinct descriptors rather than being silently reinterpreted.
 /// Resources have stable IDs within a native renderer instance.
