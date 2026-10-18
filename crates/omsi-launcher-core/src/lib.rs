@@ -2188,7 +2188,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "upscaler" => v[&k] = json!(if val.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }),
             "fsr_quality" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
                 "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
-                "custom" => "custom", _ => "quality",
+                "custom" => "custom", "auto" => "auto", _ => "quality",
             }),
             "fsr_sharpness" => v[&k] = json!(val.parse::<f64>().ok()
                 .filter(|x| x.is_finite()).unwrap_or(0.3).clamp(0.0, 1.0)),
@@ -2644,7 +2644,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         if v.get("upscaler").and_then(|x| x.as_str()) == Some("fsr1") { "fsr1" } else { "default" },
         match v.get("fsr_quality").and_then(|x| x.as_str()).unwrap_or("quality") {
             "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
-            "custom" => "custom", _ => "quality",
+            "custom" => "custom", "auto" => "auto", _ => "quality",
         },
         f("fsr_sharpness", 0.3).clamp(0.0, 1.0),
     ));

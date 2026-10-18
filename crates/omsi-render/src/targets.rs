@@ -532,7 +532,11 @@ pub(crate) struct Upscale {
     pub(crate) upscale_pipeline: wgpu::RenderPipeline,
     pub(crate) fsr_easu_pipeline: Option<wgpu::RenderPipeline>,
     pub(crate) fsr_rcas_pipeline: Option<wgpu::RenderPipeline>,
-    pub(crate) fsr_target: std::cell::RefCell<Option<FsrTarget>>,
+    /// FSR 1's full-sized intermediate pictures by size (the window's, a VR eye's, a
+    /// triple-screen panel's: a few, kept, not made anew each frame).
+    pub(crate) fsr_target: std::cell::RefCell<Vec<FsrTarget>>,
+    /// FSR 1's passes were refused by the driver once (`set_upscaler`): not tried again.
+    pub(crate) fsr_refused: bool,
     pub(crate) copy_pipeline: wgpu::RenderPipeline,
     /// Triple screen: a panel's picture copied 1:1 to its place in the window.
     pub(crate) panel_pipeline: wgpu::RenderPipeline,

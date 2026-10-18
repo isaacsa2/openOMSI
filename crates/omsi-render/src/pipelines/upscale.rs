@@ -38,17 +38,39 @@ pub(crate) fn build(device: &wgpu::Device, format: wgpu::TextureFormat, use_fsr1
     let copy_pipeline = upscale_pipeline_for("fs_copy");
     // Keep the experimental shader off the default code path: some mobile/GL drivers
     // fail during shader compilation, even if a compiled pipeline is never drawn.
-    let (fsr_easu_pipeline, fsr_rcas_pipeline) = if use_fsr1 {
-        let fsr_shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
-            label: Some("fsr1 EASU/RCAS"),
-            source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source(format).into()),
-        });
-        let build_fsr = |entry| no_vertex_pipeline("fsr1", &upscale_pl, &fsr_shader, entry, &targets).create(device);
-        (Some(build_fsr("fs_easu")), Some(build_fsr("fs_rcas")))
-    } else {
-        (None, None)
+    let (fsr_easu_pipeline, fsr_rcas_pipeline) = match use_fsr1.then(|| build_fsr(device, format, &upscale_layout)).flatten() {
+        Some((easu, rcas)) => (Some(easu), Some(rcas)),
+        None => (None, None),
     };
     let panel_pipeline = upscale_pipeline_for("fs_panel");
     let upscale_buf = uniform_buffer(device, "upscale params", 16);
     Upscale { upscale_pipeline, fsr_easu_pipeline, fsr_rcas_pipeline, copy_pipeline, panel_pipeline, layout: upscale_layout, buf: upscale_buf }
+}
+
+/// FSR 1's two passes (EASU, RCAS) for pictures of `format`, built when the player first
+/// asks for them - at the start, or later from the menu. None when the driver refuses
+/// them (a validation error, caught here rather than losing the device): the standard
+/// upscaler stays, and the log says why.
+pub(crate) fn build_fsr(device: &wgpu::Device, format: wgpu::TextureFormat, layout: &wgpu::BindGroupLayout) -> Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)> {
+    log::info!("renderer: compiling the FSR 1 shaders");
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("fsr1"),
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
+    });
+    let shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
+        label: Some("fsr1 EASU/RCAS"),
+        source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source(format).into()),
+    });
+    let targets = [target(format, None)];
+    let pass = |entry| no_vertex_pipeline("fsr1", &pl, &shader, entry, &targets).create(device);
+    let (easu, rcas) = (pass("fs_easu"), pass("fs_rcas"));
+    match pollster::block_on(scope.pop()) {
+        None => Some((easu, rcas)),
+        Some(e) => {
+            log::warn!("renderer: FSR 1 is not available on this driver, the standard upscaler stays: {e}");
+            None
+        }
+    }
 }

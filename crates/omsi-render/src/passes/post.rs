@@ -188,13 +188,13 @@ impl Renderer {
             // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
             let fsr1_enabled = self.options.fsr1 || crate::fsr1_enabled();
             let full_h = f.target.texture().height();
-            if fsr1_enabled && f.with_overlays && !f.vanilla_fxaa
+            if fsr1_enabled && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
                 && width < full_w && height < full_h
                 && self.scale.fsr_easu_pipeline.is_some() && self.scale.fsr_rcas_pipeline.is_some()
             {
                 let size = (full_w, full_h);
                 let mut cached = self.scale.fsr_target.borrow_mut();
-                if cached.as_ref().is_none_or(|t| t.size != size) {
+                if !cached.iter().any(|t| t.size == size) {
                     let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("FSR1 EASU full-resolution intermediate"),
                         size: wgpu::Extent3d {
@@ -209,9 +209,13 @@ impl Renderer {
                     });
                     let view = texture.create_view(&Default::default());
                     let bind_group = self.picture_group(&view);
-                    *cached = Some(FsrTarget { size, _texture: texture, view, bind_group });
+                    // (three sizes at most: the window, a VR eye, a panel)
+                    if cached.len() >= 3 {
+                        cached.remove(0);
+                    }
+                    cached.push(FsrTarget { size, _texture: texture, view, bind_group });
                 }
-                let intermediate = cached.as_ref().expect("FSR1 intermediate initialized");
+                let intermediate = cached.iter().find(|t| t.size == size).expect("FSR1 intermediate initialized");
                 // EASU reconstructs edges from the low-resolution, tone-mapped image.
                 {
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

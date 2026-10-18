@@ -634,7 +634,7 @@ impl Settings {
                 "upscaler" => s.upscaler = if v.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }.into(),
                 "fsr_quality" => s.fsr_quality = match v.to_ascii_lowercase().as_str() {
                     "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
-                    "custom" => "custom", _ => "quality",
+                    "custom" => "custom", "auto" => "auto", _ => "quality",
                 }.into(),
                 "fsr_sharpness" => s.fsr_sharpness = v.parse::<f32>().ok()
                     .filter(|n| n.is_finite()).map(|n| n.clamp(0.0, 1.0)).unwrap_or(0.3),
@@ -957,18 +957,27 @@ impl Settings {
         log::warn!("safer graphics after a lost graphics device ({n}): msaa 1, SSAO off, shadows {} ({}), video memory {} of its limit, render scale {}", self.shadows, self.shadow_size, if n >= 2 { "half" } else { "two thirds" }, self.render_scale_text());
     }
 
+    /// The render scale the picture is drawn at: FSR 1's quality's, or the render scale's (0:
+    /// automatic, the frame-rate governor's).
+    pub fn scene_render_scale(&self) -> f32 {
+        if self.upscaler != "fsr1" {
+            return self.render_scale;
+        }
+        match self.fsr_quality.as_str() {
+            "ultra" => 0.77,
+            "balanced" => 0.59,
+            "performance" => 0.5,
+            "custom" => self.render_scale,
+            // (the frame-rate governor picks the size, FSR 1 scales it up)
+            "auto" => 0.0,
+            _ => 0.67,
+        }
+    }
+
     pub fn render_options(&self) -> omsi_render::RenderOptions {
         let fsr1 = self.upscaler == "fsr1";
-        let render_scale = if fsr1 {
-            match self.fsr_quality.as_str() {
-                "ultra" => 0.77,
-                "balanced" => 0.59,
-                "performance" => 0.5,
-                "custom" => self.render_scale,
-                _ => 0.67,
-            }
-        } else { self.render_scale };
-        omsi_render::RenderOptions { msaa: self.msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr_sharpness: self.fsr_sharpness, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), max_scene: None }
+        let render_scale = self.scene_render_scale();
+        omsi_render::RenderOptions { msaa: self.msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr_sharpness: self.fsr_sharpness, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), max_scene: None }
     }
 }
 

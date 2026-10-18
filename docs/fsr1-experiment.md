@@ -4,16 +4,29 @@ This branch adds AMD FidelityFX Super Resolution **1.x spatial upscaling** using
 
 ## Enable and compare
 
-FSR1 is **disabled by default**. Open **Settings > Graphics > Upscaling** in the launcher (or **Esc > Options > Graphics** inside the game) and choose **AMD FSR 1 (experimental)**. Choose an **FSR quality** preset (Ultra Quality 77%, Quality 67%, Balanced 59%, Performance 50%, or Custom) and **FSR sharpening** (0-100%). Settings are persisted in `settings.cfg`, included in graphics profiles and take effect the next time the game starts.
+FSR1 is **disabled by default**. Open **Settings > Graphics > Upscaling** in the launcher (or **Esc > Options > Graphics** inside the game) and choose **AMD FSR 1 (experimental)**. Choose an **FSR quality** preset (Ultra Quality 77%, Quality 67%, Balanced 59%, Performance 50%, Automatic, or Custom) and **FSR sharpening** (0-100%). Settings are persisted in `settings.cfg` and included in graphics profiles.
 
-The previous `OMSI_FSR1=1` environment override also still works for developer testing. With the override, the existing **Render scale** setting controls the internal resolution.
+**In the game the change shows at once**: FSR 1's passes are compiled the first time it is chosen (nothing for whoever never does). If the graphics driver refuses them, the game says so once and keeps the standard upscaler for the rest of the run. The FSR quality row shows the size the 3D picture is drawn at and the window's (`1286×723 … 1920×1080`).
 
+- **Automatic** leaves the size to the frame-rate governor (render scale *Auto*): the picture is drawn smaller while the card cannot keep the frame rate (85, 70, 55 %) and FSR 1 scales it up; at full size nothing is upscaled.
 - For a quick 1080p test, select **Quality**; the game will use a 0.67 internal scale.
 - Ultra Quality: 0.77; Balanced: ~0.59; Performance: 0.50 (the renderer clamps fixed scales to 0.5).
-- FSR is only used for scaled **window** rendering. The unchanged Catmull-Rom upscaler is used elsewhere and whenever FSR is disabled or no scaling is required.
+- FSR is used for the window, for each panel of a triple screen, and in VR (below). The unchanged Catmull-Rom upscaler is used elsewhere (mirrors, offscreen pictures) and whenever FSR is off or nothing is scaled.
+- **VR:** without FSR the headset's image itself is made at the eye resolution (`vr_scale`, 65 % by default) and the runtime scales it. With FSR on when VR starts, the image is full-sized and each eye is drawn at the eye resolution and scaled up to it by FSR 1 - sharper at the same drawing cost, plus the two FSR passes per eye and a larger image for the runtime to show. Turned off during the VR session, the eyes stay at that size and the standard upscaler takes over. **Not tried on a headset yet**: the renderer's part is tested offscreen (`a_vr_eye_with_fsr1_is_drawn_smaller_and_scaled_up`).
+- **Mirrors** keep their own size: they are small (256 by default) and FSR would add two passes per mirror picture for little; their GPU time shows as `mirrors: mirror` in the measurements below, which decides whether that is worth trying.
 - RCAS sharpening is controlled by the FSR sharpening slider (defaults to 30%).
-- On Windows PowerShell: `$env:OMSI_FSR1='1'; .\\openomsi.exe` (adjust executable path). Restart after changing the variable.
-- To disable for comparison: `Remove-Item Env:OMSI_FSR1`, then relaunch.
+- The `OMSI_FSR1=1` environment override still works for developer testing; with it the existing **Render scale** setting controls the internal resolution.
+
+## Measuring it (send numbers, not impressions)
+
+Compare the **same internal resolution** with and without FSR, at the same place, with MSAA, backend and window size held fixed:
+
+1. Start the game with `OMSI_PROFILE=1` and `OMSI_GPU_TIMERS=1` (PowerShell: `$env:OMSI_PROFILE='1'; $env:OMSI_GPU_TIMERS='1'; .\openomsi.exe`).
+2. Stand still at one spot for a minute. Every 15 s the log (`game.log`) has
+   - `profile gpu pass FSR1 EASU` and `profile gpu pass FSR1 RCAS` (or `upscale` with the standard upscaler): the GPU milliseconds of each pass;
+   - `profile: window 1920x1080, scene drawn at 1286x723`: the sizes compared.
+3. Switch the upscaler in Esc > Options > Graphics (no restart needed), wait 30 s, and read the next lines.
+4. For a file to compare two runs: `OMSI_PROFILE_JSON=fsr.json` with `--exit-after <seconds>`, then `scripts/compare-performance.py` on the two files.
 
 ## Technical design
 
@@ -32,6 +45,6 @@ This is an experimental implementation and should **not** be merged until:
 2. WGSL pipeline construction is exercised on DX12, Vulkan, ANGLE and OpenGL, including an older GPU.
 3. Visual A/B comparisons cover routes, distant text, wires, foliage, bus destination displays and nighttime lighting.
 4. GPU timings and memory usage are compared at the **same internal resolution** against the old scaler, with MSAA and backend held fixed.
-5. Verify resize, minimized/restored windows, and a runtime fallback when shader compilation or device capabilities reject FSR.
+5. Verify resize, minimized/restored windows, and the runtime fallback when a driver rejects FSR (covered on the software adapter by `fsr1_turned_on_while_running_upscales_the_picture`).
 
 No performance gain is claimed until tests are measured. FSR is spatial only; there is **no temporal upscaling or frame generation** here.
