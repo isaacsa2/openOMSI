@@ -23,6 +23,7 @@ mod win {
         backend: Backend,
         path: Option<PathBuf>,
         terrain_path: Option<PathBuf>,
+        exit_after_frames: Option<u32>,
         vertex_shader: Option<PathBuf>,
         fragment_shader: Option<PathBuf>,
     }
@@ -31,19 +32,25 @@ mod win {
         let mut backend = Backend::Auto;
         let mut path = None;
         let mut terrain_path = None;
+        let mut exit_after_frames = None;
         let mut vertex_shader = None;
         let mut fragment_shader = None;
         let mut args = std::env::args().skip(1);
         while let Some(flag) = args.next() {
             let val = match flag.as_str() {
-                "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d | --terrain PATH.map.terrain] [--vs PATH.bin --fs PATH.bin]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
-                "--backend" | "--mesh" | "--terrain" | "--vs" | "--fs" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
+                "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d | --terrain PATH.map.terrain] [--vs PATH.bin --fs PATH.bin] [--frames N]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
+                "--backend" | "--mesh" | "--terrain" | "--vs" | "--fs" | "--frames" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
                 _ => return Err(format!("unrecognized flag: {flag}")),
             };
             match flag.as_str() {
                 "--backend" => backend = Backend::parse(&val).ok_or_else(|| format!("invalid graphics backend: {val}"))?,
                 "--mesh" => path = Some(PathBuf::from(val)),
                 "--terrain" => terrain_path = Some(PathBuf::from(val)),
+                "--frames" => {
+                    let n = val.parse::<u32>().map_err(|_| "--frames must be a positive integer")?;
+                    if !(1..=10_000).contains(&n) { return Err("--frames must be in 1..=10000".into()); }
+                    exit_after_frames = Some(n);
+                },
                 "--vs" => vertex_shader = Some(PathBuf::from(val)),
                 "--fs" => fragment_shader = Some(PathBuf::from(val)),
                 _ => unreachable!(),
@@ -55,7 +62,7 @@ mod win {
         if (path.is_some() || terrain_path.is_some()) && (vertex_shader.is_none() || fragment_shader.is_none()) {
             return Err("--mesh/--terrain need both --vs and --fs compiled for the selected BGFX backend".into());
         }
-        Ok(Settings { backend, path, terrain_path, vertex_shader, fragment_shader })
+        Ok(Settings { backend, path, terrain_path, exit_after_frames, vertex_shader, fragment_shader })
     }
 
     struct Viewer {
@@ -67,6 +74,7 @@ mod win {
         center: Vec3,
         distance: f32,
         yaw: f32,
+        drawn_frames: u32,
     }
 
     impl Viewer {
@@ -74,7 +82,7 @@ mod win {
             Self {
                 config, window: None, initialized: false,
                 mesh: None, program: None, center: Vec3::ZERO,
-                distance: 24., yaw: 0.,
+                distance: 24., yaw: 0., drawn_frames: 0,
             }
         }
 
@@ -134,6 +142,7 @@ mod win {
                 }
                 bgfx_sys::bgfx_frame(false);
             }
+            self.drawn_frames += 1;
         }
     }
 
@@ -225,7 +234,10 @@ mod win {
                 }
                 WindowEvent::RedrawRequested => {
                     self.draw();
-                    if let Some(w) = self.window.as_ref() { w.request_redraw(); }
+                    if self.config.exit_after_frames.is_some_and(|n| self.drawn_frames >= n) {
+                        println!("BGFX_NATIVE_FRAME_SMOKE_OK rendered_frames={}", self.drawn_frames);
+                        event_loop.exit();
+                    } else if let Some(w) = self.window.as_ref() { w.request_redraw(); }
                 }
                 _ => {}
             }
