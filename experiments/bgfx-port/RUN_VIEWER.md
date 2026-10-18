@@ -64,3 +64,19 @@ matching maps, bus, camera, time, traffic, and GPU timings.
   wgpu renderer must remain untouched.
 
 PR #271 MUST REMAIN DRAFT until driving and content parity work in BGFX.
+
+## Display terrain geometry from an original map
+
+With the same vertex/fragment shader binaries compiled above, pass a genuine
+terrain height-field belonging to an installed map. This path reuses the
+actual openOMSI Terrain::load parser, build_terrain_mesh generator, and the
+source-preserving MeshData-to-BGFX buffer adapter.
+
+~~~powershell
+cargo run --manifest-path experiments/bgfx-port/Cargo.toml --bin bgfx-window -- --backend dx11 --terrain "C:/Program Files (x86)/Steam/steamapps/common/OMSI 2/maps/Grundorf/tile_0_0.map.terrain" --vs experiments/bgfx-port/compiled/dx11/vs_mesh.bin --fs experiments/bgfx-port/compiled/dx11/fs_mesh.bin
+~~~
+
+The terrain path above is **illustrative**: replace it with an existing
+*.map.terrain file in the actual installed map. No map or model files are
+bundled into this repository. The viewer shows a single height-field,
+not roads, base/paint textures, scenery, scripted traffic or a drivable map.
