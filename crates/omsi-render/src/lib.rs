@@ -69,6 +69,18 @@ pub type MeshId = usize;
 pub type TextureId = usize;
 pub type MaterialId = usize;
 
+/// Optional FSR1 experiment. Cached for the renderer's lifetime: changing it requires
+/// restarting the process. The standard upscaler and all shader pipelines stay as-is
+/// when the opt-in environment variable is unset.
+pub(crate) fn fsr1_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("OMSI_FSR1")
+            .is_ok_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+    })
+}
+
+
 /// The enhanced path's post pipelines (post.wgsl).
 struct PostPipelines {
     down_first: wgpu::RenderPipeline,
