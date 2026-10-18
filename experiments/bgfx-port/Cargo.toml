@@ -1,0 +1,14 @@
+[package]
+name = "openomsi-bgfx-port"
+version = "0.0.1"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Isolated native bgfx backend startup and frame-pacing experiment"
+
+# Deliberately independent of the main workspace and lockfile.
+# Nothing in the shipping game links or selects this incomplete backend.
+[workspace]
+
+[dependencies]
+bgfx-sys = "=0.15.0"
