@@ -171,7 +171,8 @@ impl NativeRenderer for BgfxNativeBackend {
             model_transform: glam::Mat4::IDENTITY.to_cols_array(),
         };
         // SAFETY: input buffers have passed validation and bgfx copies them.
-        let gpu_mesh = unsafe { GpuMesh::upload(&input)? };
+        let mut gpu_mesh = unsafe { GpuMesh::upload(&input)? };
+        gpu_mesh.one_sided = desc.one_sided;
         self.meshes.insert(id, gpu_mesh);
         self.next_id = next;
         Ok(id)
@@ -240,7 +241,7 @@ mod tests {
 
     #[test]
     fn rejects_corrupted_gpu_mesh_data_before_native_upload() {
-        let d = MeshUpload { vertex_stride: 32, vertex_count: 3, index_count: 3, index_32bit: false };
+        let d = MeshUpload { vertex_stride: 32, vertex_count: 3, index_count: 3, index_32bit: false, one_sided: true };
         let v = vec![0u8; 3 * 32];
         assert!(checked_mesh_buffers(d, &v, &[0, 0, 1, 0, 2, 0]).is_ok());
         assert!(checked_mesh_buffers(d, &v, &[0, 0, 3, 0, 2, 0]).is_err());
