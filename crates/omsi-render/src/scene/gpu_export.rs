@@ -11,7 +11,7 @@ use super::{Camera, Scene};
 use crate::AlphaMode;
 use glam::{Mat4, Vec3};
 use omsi_geometry::gpu_contract::{
-    BlendMode, DepthMode, Draw, FrameCommands, MaterialUpload, ResourceId, View, ViewCamera,
+    BlendMode, DepthMode, Draw, FrameCommands, MaterialUpload, TextureSlot, ResourceId, View, ViewCamera,
 };
 
 /// Logical GPU mesh/material IDs use the source slot index plus one. BGFX's
@@ -25,6 +25,20 @@ impl Scene {
     ///
     /// This is ONLY the diffuse/color subset. Night maps, environment,
     /// lighting, CTC repaint, transmap, etc. have not been ported.
+    /// Report logical source texture identities and generations, allowing a
+    /// future BGFX upload queue to notice repaints, refreshed mirrors and
+    /// other replaced images. This is bookkeeping only: it cannot reconstruct
+    /// pixels from a wgpu::Texture and must be paired with the game's own
+    /// CPU texture decoder / source asset cache.
+    pub fn native_texture_manifest(&self) -> Vec<TextureSlot> {
+        self.textures.iter().enumerate().map(|(index, image)| TextureSlot {
+            resource: ResourceId(index as u64 + 1),
+            width: image.size.0,
+            height: image.size.1,
+            generation: image.gen,
+        }).collect()
+    }
+
     pub fn native_material_snapshot(&self) -> Result<Vec<(ResourceId, MaterialUpload)>, String> {
         let mut out = Vec::with_capacity(self.materials.len());
         for (index, material) in self.materials.iter().enumerate() {
