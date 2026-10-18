@@ -8,7 +8,7 @@
 mod win {
     use std::{collections::HashSet, ffi::c_void, path::PathBuf, ptr, time::Instant};
     use glam::{Mat4, Vec3};
-    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, Selection}};
+    use openomsi_bgfx_port::{Backend, gpu_mesh::{GpuMesh, Program}, o3d_bridge::{load_file, PackedO3d, VERTEX_STRIDE}, geometry_bridge::pack_generated, map_bridge::{load_terrain_preview, Selection}, texture_bridge::{Texture, Sampler}};
     use winit::{
         application::ApplicationHandler,
         dpi::PhysicalSize,
@@ -29,6 +29,7 @@ mod win {
         exit_after_frames: Option<u32>,
         vertex_shader: Option<PathBuf>,
         fragment_shader: Option<PathBuf>,
+        texture_path: Option<PathBuf>,
     }
 
     fn parse() -> Result<Settings, String> {
@@ -42,17 +43,19 @@ mod win {
         let mut exit_after_frames = None;
         let mut vertex_shader = None;
         let mut fragment_shader = None;
+        let mut texture_path = None;
         let mut args = std::env::args().skip(1);
         while let Some(flag) = args.next() {
             let val = match flag.as_str() {
                 "-h" | "--help" => return Err("Usage: bgfx-window [--backend dx11|dx12|vulkan|gl|auto] [--mesh PATH.o3d | --terrain PATH.map.terrain | --map PATH/global.cfg] [--vs PATH.bin --fs PATH.bin] [--frames N]\nKeys: left/right rotate, up/down zoom, Esc exit. Shader binaries must match selected backend.".into()),
-                "--backend" | "--mesh" | "--terrain" | "--map" | "--tile-x" | "--tile-y" | "--radius" | "--vs" | "--fs" | "--frames" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
+                "--backend" | "--mesh" | "--terrain" | "--map" | "--tile-x" | "--tile-y" | "--radius" | "--vs" | "--fs" | "--frames" | "--texture" => args.next().ok_or_else(|| format!("{flag} requires a value"))?,
                 _ => return Err(format!("unrecognized flag: {flag}")),
             };
             match flag.as_str() {
                 "--backend" => backend = Backend::parse(&val).ok_or_else(|| format!("invalid graphics backend: {val}"))?,
                 "--mesh" => path = Some(PathBuf::from(val)),
                 "--terrain" => terrain_path = Some(PathBuf::from(val)),
+                "--texture" => texture_path = Some(PathBuf::from(val)),
                 "--map" => map_path = Some(PathBuf::from(val)),
                 "--tile-x" => tile_x = Some(val.parse::<i32>().map_err(|_| "invalid tile X coordinate")?),
                 "--tile-y" => tile_y = Some(val.parse::<i32>().map_err(|_| "invalid tile Y coordinate")?),
@@ -85,7 +88,7 @@ mod win {
         }
         let map_center = tile_x.zip(tile_y);
         Ok(Settings { backend, path, terrain_path, map_path, map_center, map_radius,
-            exit_after_frames, vertex_shader, fragment_shader })
+            exit_after_frames, vertex_shader, fragment_shader, texture_path })
     }
 
     struct Viewer {
@@ -95,6 +98,8 @@ mod win {
         mesh: Option<GpuMesh>,
         map_meshes: Vec<GpuMesh>,
         program: Option<Program>,
+        texture: Option<Texture>,
+        sampler: Option<Sampler>,
         center: Vec3,
         distance: f32,
         yaw: f32,
@@ -109,14 +114,30 @@ mod win {
         fn new(config: Settings) -> Self {
             Self {
                 config, window: None, initialized: false,
-                mesh: None, map_meshes: Vec::new(), program: None, center: Vec3::ZERO,
+                mesh: None, map_meshes: Vec::new(), program: None, texture: None, sampler: None, center: Vec3::ZERO,
                 distance: 24., yaw: 0., drawn_frames: 0,
                 map_camera: Vec3::new(150., 150., 120.), map_mode: false,
                 held_keys: HashSet::new(), last_frame: Instant::now(),
             }
         }
 
+        fn create_material_preview(&mut self) -> Result<(), String> {
+            if self.texture.is_none() {
+                let tex = if let Some(ref path) = self.config.texture_path {
+                    Texture::from_file(path)?
+                } else {
+                    Texture::white()?
+                };
+                self.texture = Some(tex);
+            }
+            if self.sampler.is_none() {
+                self.sampler = Some(Sampler::new()?);
+            }
+            Ok(())
+        }
+
         fn set_mesh(&mut self, model: PackedO3d, one_sided: bool) -> Result<(), String> {
+            self.create_material_preview()?;
             let mut min = Vec3::splat(f32::INFINITY);
             let mut max = Vec3::splat(f32::NEG_INFINITY);
             let transform = Mat4::from_cols_array(&model.model_transform);
@@ -143,6 +164,7 @@ mod win {
         }
 
         fn load_preview_map(&mut self, path: &std::path::Path) -> Result<(), String> {
+            self.create_material_preview()?;
             let preview = load_terrain_preview(path, Selection {
                 center: self.config.map_center,
                 radius: self.config.map_radius,
@@ -223,12 +245,13 @@ mod win {
                 // sorted as opaque draw calls. Preserve order in this experiment.
                 bgfx_sys::bgfx_set_view_mode(0, bgfx_sys::BGFX_VIEW_MODE_SEQUENTIAL);
                 bgfx_sys::bgfx_touch(0);
-                if let Some(program) = self.program.as_ref() {
+                if let (Some(program), Some(tex), Some(sampler)) =
+                    (self.program.as_ref(), self.texture.as_ref(), self.sampler.as_ref()) {
                     for mesh in &self.map_meshes {
-                        mesh.draw(program.handle());
+                        mesh.draw(program.handle(), tex, sampler);
                     }
                     if let Some(mesh) = self.mesh.as_ref() {
-                        mesh.draw(program.handle());
+                        mesh.draw(program.handle(), tex, sampler);
                     }
                 }
                 bgfx_sys::bgfx_frame(false);
@@ -357,6 +380,8 @@ mod win {
             self.mesh.take();
             self.map_meshes.clear();
             self.program.take();
+            self.texture.take();
+            self.sampler.take();
             if self.initialized { unsafe { bgfx_sys::bgfx_shutdown() }; }
         }
     }
