@@ -15,6 +15,10 @@
 //!
 //! Items of these modules are re-exported here, so the crate's paths are flat.
 
+/// GPU command types that do not expose wgpu handles and can be consumed by BGFX.
+/// The existing wgpu Renderer remains active until gameplay parity is proven.
+pub use omsi_geometry::gpu_contract as backend_contract;
+
 pub mod angle;
 pub mod atmosphere;
 pub mod clouds;
