@@ -89,9 +89,30 @@ impl Draw {
     }
 }
 
+/// Backend-neutral camera for each view: the scene supplies GPU-ready
+/// matrices after world-origin rebasing. The projection must use the target
+/// BGFX backend's clip-depth convention (see bgfx caps homogeneousDepth).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewCamera {
+    pub view: View,
+    pub world_to_camera: [f32; 16],
+    pub camera_to_clip: [f32; 16],
+}
+
+impl ViewCamera {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !self.world_to_camera.iter().chain(&self.camera_to_clip)
+            .all(|x| x.is_finite()) {
+            return Err("BGFX camera matrices must contain only finite values");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameCommands {
     pub viewport: (u32, u32),
+    pub cameras: Vec<ViewCamera>,
     pub draws: Vec<Draw>,
 }
 
@@ -100,8 +121,19 @@ impl FrameCommands {
         if self.viewport.0 == 0 || self.viewport.1 == 0 {
             return Err("viewport must have nonzero dimensions");
         }
+        for camera in &self.cameras {
+            camera.validate()?;
+        }
+        for i in 0..self.cameras.len() {
+            if self.cameras[..i].iter().any(|a| a.view == self.cameras[i].view) {
+                return Err("duplicate BGFX view camera");
+            }
+        }
         for draw in &self.draws {
             draw.validate()?;
+            if !self.cameras.iter().any(|a| a.view == draw.view) {
+                return Err("draw has no view/projection camera");
+            }
         }
         Ok(())
     }
@@ -151,6 +183,9 @@ mod tests {
     fn keep_transparent_objects_in_authored_order() {
         let frame = FrameCommands {
             viewport: (1366, 768),
+            cameras: vec![ViewCamera { view: View::Main,
+                world_to_camera: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.],
+                camera_to_clip: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.] }],
             draws: vec![
                 example(300, BlendMode::AlphaBlend),
                 example(100, BlendMode::AlphaBlend),
@@ -167,6 +202,9 @@ mod tests {
     fn reject_invalid_model_matrix() {
         let mut frame = FrameCommands {
             viewport: (800, 600),
+            cameras: vec![ViewCamera { view: View::Main,
+                world_to_camera: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.],
+                camera_to_clip: [1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.] }],
             draws: vec![example(0, BlendMode::Opaque)],
         };
         frame.draws[0].transform[4] = f32::NAN;
