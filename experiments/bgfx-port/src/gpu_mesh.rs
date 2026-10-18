@@ -77,9 +77,22 @@ impl GpuMesh {
         sampler: &crate::texture_bridge::Sampler,
         material_textures: &[Option<crate::texture_bridge::Texture>],
     ) {
+        self.draw_with_transform(program, texture, sampler, material_textures, &self.model_transform);
+    }
+
+    /// Same GPU resources with a different live world pose. This is needed for
+    /// a moving player's bus without rewriting static vertex buffers.
+    pub unsafe fn draw_with_transform(
+        &self,
+        program: bgfx_sys::bgfx_program_handle_t,
+        texture: &crate::texture_bridge::Texture,
+        sampler: &crate::texture_bridge::Sampler,
+        material_textures: &[Option<crate::texture_bridge::Texture>],
+        model: &[f32; 16],
+    ) {
         use bgfx_sys::*;
         for range in &self.ranges {
-            bgfx_set_transform(self.model_transform.as_ptr() as *const c_void, 1);
+            bgfx_set_transform(model.as_ptr() as *const c_void, 1);
             bgfx_set_vertex_buffer(0, self.vertex, 0, u32::MAX);
             bgfx_set_index_buffer(self.index, range.first_index, range.index_count);
             let state = if self.one_sided {
