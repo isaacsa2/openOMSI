@@ -1,5 +1,34 @@
 # Experimental bgfx renderer port (NOT READY TO MERGE)
 
+## Migration progress — current branch
+
+**Target: replace wgpu entirely**, not merely run a separate renderer demo.
+The shipping `omsi-app` is **still wgpu-powered**, and this draft must not be
+treated as playable or merged until the full rendering matrix works.
+
+Validated in the previous native CI milestone: **Windows/Linux builds, 17 CPU
+tests, real DX11 initialization and a frame smoke**; a separate matching-shaderc
+workflow has since successfully submitted a compiled-shader triangle on a Win32
+DX11 device. These checks validate the GPU API path, **not** gameplay.
+
+Additional implemented seams, awaiting the final checks for this revision:
+- A CPU-only source `FrameCommands` and stable resource contract shared by
+  the real `omsi-render` scene snapshot and the isolated BGFX implementation
+- Export of real scene material IDs, diffuse colors/texture references, and
+  texture-slot generations so image replacements can be synchronized later
+- BGFX-owned texture/material stores with source-ID replacement, reference
+  validation and explicit mesh/texture/material release
+- A per-draw diffuse color uniform, matching the source material's RGBA
+- Experimental terrain neighbourhood, mesh loading, and limited bus-physics
+  preview using the actual OMSI parsers and `VehiclePhysics`
+
+**Not ported:** native scene texture data production/streaming, complete OMSI
+material effects and shaders, buses' all-part animation and scripts, full-map
+scenery and traffic, mirrors, capture, UI/navigation, audio/game lifecycle,
+Android/macOS/iOS device management and OpenXR. Real-device FPS and image
+parity have not been measured. Existing wgpu-only modules cannot yet be
+deleted. Do not confuse shader/triangle test success with playable game state.
+
 ## Current state
 
 This branch is a **migration workspace**, not a completed openOMSI renderer.
