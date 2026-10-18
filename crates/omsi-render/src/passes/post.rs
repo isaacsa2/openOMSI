@@ -178,20 +178,28 @@ impl Renderer {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
         if let Some((_, bg)) = &f.scene_target {
-            let sharpen = if self.options.fsr1 || crate::fsr1_enabled() { self.options.fsr_sharpness.clamp(0.0, 1.0) } else { (1.0 - width as f32 / full_w as f32) * 2.0 };
-            self.queue.write_buffer(
-                &self.scale.upscale_buf,
-                0,
-                bytemuck::cast_slice(&[width as f32, height as f32, sharpen.clamp(0.0, 0.8), if f.vanilla_fxaa { 1.0 } else { 0.0 }]),
-            );
             // Opt-in FSR1 experiment. Use the existing scene scale setting for quality.
             // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
             let fsr1_enabled = self.options.fsr1 || crate::fsr1_enabled();
             let full_h = f.target.texture().height();
-            if fsr1_enabled && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
+            let fsr = fsr1_enabled && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
                 && width < full_w && height < full_h
-                && self.scale.fsr_easu_pipeline.is_some() && self.scale.fsr_rcas_pipeline.is_some()
-            {
+                && self.scale.fsr_easu_pipeline.is_some() && self.scale.fsr_rcas_pipeline.is_some();
+            // RCAS takes the slider's whole range (100 %: AMD's strongest, its own limit
+            // keeps it from ringing); the standard upscaler's sharpening stops at 0.8
+            let sharpen = if fsr {
+                self.options.fsr_sharpness.clamp(0.0, 1.0)
+            } else if fsr1_enabled {
+                self.options.fsr_sharpness.clamp(0.0, 0.8)
+            } else {
+                ((1.0 - width as f32 / full_w as f32) * 2.0).clamp(0.0, 0.8)
+            };
+            self.queue.write_buffer(
+                &self.scale.upscale_buf,
+                0,
+                bytemuck::cast_slice(&[width as f32, height as f32, sharpen, if f.vanilla_fxaa { 1.0 } else { 0.0 }]),
+            );
+            if fsr {
                 // At sharpness 0 RCAS gives its input back (its lobe is 0): EASU then draws
                 // the window's picture itself - a full-screen pass and its intermediate saved.
                 let sharpened = sharpen > 0.0;

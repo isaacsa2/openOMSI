@@ -175,3 +175,21 @@ fn fsr1_without_sharpening_skips_rcas() {
     let sharp = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
     assert!(difference(&unsharpened, &sharp) > d, "sharpening still changes it");
 }
+
+/// The FSR sharpening slider's whole range reaches RCAS: 100 % sharpens more than 80 %
+/// (the standard upscaler's limit, which RCAS used to be held at too).
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn fsr1_sharpening_uses_the_whole_slider() {
+    let (w, h) = (192, 128);
+    let mut r = renderer(0.5, true);
+    let mut scene = rails_scene(&mut r);
+    let lighting = Lighting { shadows: false, fog_density: 0.0, ..Default::default() };
+    let shot = |r: &mut Renderer, scene: &mut Scene, sharpness: f32| {
+        assert!(r.set_upscaler(true, sharpness, 0.5));
+        r.render_to_image(scene, w, h, &camera(), &lighting).unwrap()
+    };
+    let (at80, at100, again80) = (shot(&mut r, &mut scene, 0.8), shot(&mut r, &mut scene, 1.0), shot(&mut r, &mut scene, 0.8));
+    assert!(difference(&at80, &again80) < 0.01, "the same picture for the same setting");
+    assert!(difference(&at80, &at100) > 0.01, "100 % is not held at 80 %: {}", difference(&at80, &at100));
+}
