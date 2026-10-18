@@ -61520,7 +61520,7 @@ _version: 2
   hu: "[smoke] megjelenítése minden busznál, csak a saját busznál vagy egyiknél sem. A környezet füstje és a járművek világító részecskéi láthatók maradnak."
   id: "Tampilkan [smoke] dari semua bus, hanya bus Anda, atau matikan semuanya. Asap lingkungan dan partikel kendaraan yang bercahaya tetap terlihat."
   it: "Mostra [smoke] di tutti gli autobus, solo del tuo o di nessuno. Il fumo dello scenario e le particelle luminose dei veicoli restano visibili."
-  ja: "すべてのバス、自分のバスのみ、またはどのバスにも [smoke] を表示しない設定です。背景の煙や車両の発光パーティクルは引き続き表示されます。"
+  ja: "すべてのバスの [smoke] を表示するか、自分のバスのみにするか、非表示にするかを選びます。背景の煙や車両の発光パーティクルは引き続き表示されます。"
   kk: "[smoke] әсерін барлық автобуста, тек өз автобусыңызда көрсетіңіз немесе өшіріңіз. Қоршаған орта түтіні мен көліктердің жарқыраған бөлшектері көрініп тұрады."
   ko: "모든 버스 또는 자신의 버스에만 [smoke]를 표시하거나 모두 끕니다. 배경의 연기와 차량의 발광 입자는 계속 표시됩니다."
   ms: "Paparkan [smoke] daripada semua bas, hanya bas anda, atau matikan semuanya. Asap persekitaran dan zarah kenderaan yang bercahaya kekal kelihatan."
