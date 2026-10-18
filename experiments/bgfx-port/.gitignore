@@ -1,0 +1,7 @@
+/target/
+/compiled/
+/Cargo.lock
+*.png
+*.bmp
+*.dds
+*.o3d
