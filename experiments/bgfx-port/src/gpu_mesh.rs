@@ -20,6 +20,9 @@ pub struct GpuMesh {
 }
 
 impl GpuMesh {
+    pub(crate) fn vertex_handle(&self) -> bgfx_sys::bgfx_vertex_buffer_handle_t { self.vertex }
+    pub(crate) fn index_handle(&self) -> bgfx_sys::bgfx_index_buffer_handle_t { self.index }
+
     /// Upload source file data to the initialized bgfx backend.
     /// All CPU buffers are copied by bgfx_copy before this call returns.
     pub unsafe fn upload(mesh: &PackedO3d) -> Result<Self, String> {
