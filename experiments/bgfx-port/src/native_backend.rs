@@ -99,6 +99,25 @@ impl NativeResourceRenderer for BgfxNativeBackend {
         Ok(id)
     }
 
+    fn upsert_texture_rgba8(
+        &mut self, id: ResourceId, desc: TextureUpload, rgba: &[u8],
+    ) -> Result<(), String> {
+        if id.0 == 0 { return Err("BGFX texture 0 is reserved".into()); }
+        desc.validate(rgba).map_err(str::to_owned)?;
+        let picture = Texture::from_rgba(desc.width, desc.height, rgba)?;
+        // Replace atomically after a successful native allocation. Materials
+        // store stable logical IDs, not handles from the old GPU image.
+        self.textures.insert(id, picture);
+        self.next_texture_id = self.next_texture_id.max(
+            id.0.checked_add(1).ok_or("BGFX texture ID space exhausted")?
+        );
+        Ok(())
+    }
+
+    fn release_mesh(&mut self, id: ResourceId) -> Result<(), String> {
+        self.free_mesh(id)
+    }
+
     fn upsert_material(&mut self, id: ResourceId, material: MaterialUpload) -> Result<(), String> {
         if id.0 == 0 { return Err("BGFX material 0 is reserved for the white fallback".into()); }
         material.validate().map_err(str::to_owned)?;
