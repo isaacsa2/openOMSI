@@ -15,6 +15,8 @@ pub(super) fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "volume" => s.volume,
         "led_glow" => s.led_glow as f32,
         "night_brightness" => s.night_brightness,
+        "fsr_sharpness" => s.fsr_sharpness,
+
         "reflections" => s.reflections,
         "led_mips" => s.led_mips,
         "ctrl_deadzone" => s.ctrl_deadzone,
