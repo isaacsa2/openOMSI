@@ -17,6 +17,7 @@ use crate::{geometry_bridge::pack_generated, o3d_bridge::PackedO3d};
 pub struct PreviewTile {
     pub coordinates: (i32, i32),
     pub geometry: PackedO3d,
+    pub terrain: omsi_map::Terrain,
     pub was_missing_heightfield: bool,
 }
 
@@ -26,6 +27,25 @@ pub struct MapPreview {
     pub center: (i32, i32),
     pub tile_size: f32,
     pub tiles: Vec<PreviewTile>,
+}
+
+impl MapPreview {
+    /// Sample the same source terrain as the renderer using coordinates
+    /// rebased to the centre tile. None indicates an unloaded neighbouring
+    /// tile; do not pretend its height is zero during driving.
+    pub fn ground_height(&self, position: Vec3) -> Option<f32> {
+        if !position.is_finite() || self.tile_size <= 0.0 {
+            return None;
+        }
+        let tx = (position.x / self.tile_size).floor() as i32;
+        let ty = (position.y / self.tile_size).floor() as i32;
+        let x = position.x - tx as f32 * self.tile_size;
+        let y = position.y - ty as f32 * self.tile_size;
+        let tile = self.tiles.iter().find(|t| {
+            t.coordinates == (self.center.0.saturating_add(tx), self.center.1.saturating_add(ty))
+        })?;
+        Some(tile.terrain.sample(x, y))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,6 +114,7 @@ pub fn load_terrain_preview(global_cfg: &Path, selection: Selection) -> Result<M
         tiles.push(PreviewTile {
             coordinates: (tile.x, tile.y),
             geometry,
+            terrain: heightfield,
             was_missing_heightfield: missing,
         });
     }
