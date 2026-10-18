@@ -250,7 +250,6 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
     match key {
         "cloud_quality" => vec![("high", "High"), ("low", "Low")],
         "rain_quality" => vec![("high", "High"), ("medium", "Medium"), ("low", "Low")],
-        "ai_sound_limit" => vec![("8", "Performance (8 vehicles)"), ("16", "Balanced (16 vehicles)"), ("24", "High (24 vehicles)"), ("32", "Very high (32 vehicles)"), ("0", "Unlimited (original)")],
         "vehicle_smoke" => vec![("all", "All vehicles"), ("player", "Player only"), ("off", "Off")],
         "puddles" => vec![("high", "High"), ("low", "Low"), ("off", "Off")],
         "graphics" => vec![("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")],
