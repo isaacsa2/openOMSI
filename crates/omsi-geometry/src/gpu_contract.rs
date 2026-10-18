@@ -217,6 +217,11 @@ impl MaterialUpload {
 /// repaint and meshes stream independently of the view's frame cadence.
 /// IDs are in separate domains for meshes, materials and textures.
 pub trait NativeResourceRenderer: NativeRenderer {
+    /// Stream or replace geometry at the stable source mesh slot + 1.
+    /// This is needed for live skinned/animated meshes and recycled slots.
+    fn upsert_mesh(
+        &mut self, id: ResourceId, desc: MeshUpload, vertices: &[u8], indices: &[u8],
+    ) -> Result<(), Self::Error>;
     fn upload_texture_rgba8(
         &mut self, desc: TextureUpload, rgba: &[u8],
     ) -> Result<ResourceId, Self::Error>;
