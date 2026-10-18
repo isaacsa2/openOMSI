@@ -21,6 +21,7 @@ unsafe extern "system" {}
 unsafe extern "system" {}
 
 pub mod frame_contract;
+pub mod native_backend;
 pub mod o3d_bridge;
 pub mod gpu_mesh;
 pub mod geometry_bridge;
