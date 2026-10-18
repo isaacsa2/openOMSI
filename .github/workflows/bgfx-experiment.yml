@@ -1,12 +1,22 @@
 name: Experimental bgfx compile check
 
-# Manual only: the production PR CI must not build a very large native
-# graphics experiment on every unrelated commit.
+# Scope native C++ builds to the BGFX experiment. No full production release
+# should be built by this workflow and no release artifacts are published.
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "experiments/bgfx-port/**"
+      - "scripts/audit-bgfx-port.py"
+      - ".github/workflows/bgfx-experiment.yml"
 
 permissions:
   contents: read
+
+concurrency:
+  group: bgfx-experiment-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   inventory:
@@ -29,7 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Compile isolated bgfx prototype and run its CPU-only tests
+      - name: Install Linux native window headers and C++ toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev libwayland-dev
+      - name: Compile isolated BGFX experiment and run CPU-only tests
         run: cargo test --manifest-path experiments/bgfx-port/Cargo.toml
-      # Do not execute the headless graphics smoke on a CI machine with no GPU.
-      # If binding compilation fails, record it rather than affecting releases.
+      # Do not run GPU window/headless tests on GitHub hosted runners.
