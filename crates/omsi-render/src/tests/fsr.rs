@@ -152,3 +152,26 @@ fn a_vr_eye_with_fsr1_is_drawn_smaller_and_scaled_up() {
     let standard = eye(&mut fsr);
     assert!(difference(&scaled, &standard) > 0.05);
 }
+
+/// At sharpness 0 RCAS would give its input back: EASU draws the picture itself, without
+/// the intermediate, and the picture is the one RCAS barely sharpening gives.
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn fsr1_without_sharpening_skips_rcas() {
+    let (w, h) = (192, 128);
+    let mut r = renderer(0.5, true);
+    let mut scene = rails_scene(&mut r);
+    let lighting = Lighting { shadows: false, fog_density: 0.0, ..Default::default() };
+    assert!(r.set_upscaler(true, 0.0, 0.5));
+    let unsharpened = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
+    assert!(r.scale.fsr_target.borrow().is_empty(), "no intermediate without RCAS");
+    assert!(unsharpened.chunks(4).filter(|p| p[0] > 120 && p[1] < 60).count() > 50, "the rails upscaled");
+    assert!(r.set_upscaler(true, 1e-6, 0.5));
+    let barely = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
+    assert_eq!(r.scale.fsr_target.borrow().len(), 1, "RCAS ran through the intermediate");
+    let d = difference(&unsharpened, &barely);
+    assert!(d < 0.5, "the same picture, one 8-bit step aside: {d}");
+    assert!(r.set_upscaler(true, 1.0, 0.5));
+    let sharp = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
+    assert!(difference(&unsharpened, &sharp) > d, "sharpening still changes it");
+}
