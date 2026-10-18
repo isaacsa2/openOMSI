@@ -116,6 +116,10 @@ pub(super) fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option
             app.settings.night_brightness = v.clamp(0.0, 3.0);
             Some(("night_brightness", app.settings.night_brightness.to_string()))
         }
+        "fsr_sharpness" => {
+            app.settings.fsr_sharpness = v.clamp(0.0, 1.0);
+            Some(("fsr_sharpness", app.settings.fsr_sharpness.to_string()))
+        }
         "reflections" => {
             app.settings.reflections = v.clamp(0.0, 1.0);
             Some(("reflections", app.settings.reflections.to_string()))
