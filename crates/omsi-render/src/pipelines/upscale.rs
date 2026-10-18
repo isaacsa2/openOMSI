@@ -4,6 +4,8 @@ use super::common::*;
 
 pub(crate) struct Upscale {
     pub upscale_pipeline: wgpu::RenderPipeline,
+    pub fsr_easu_pipeline: wgpu::RenderPipeline,
+    pub fsr_rcas_pipeline: wgpu::RenderPipeline,
     pub copy_pipeline: wgpu::RenderPipeline,
     pub panel_pipeline: wgpu::RenderPipeline,
     pub layout: wgpu::BindGroupLayout,
@@ -34,7 +36,15 @@ pub(crate) fn build(device: &wgpu::Device, format: wgpu::TextureFormat) -> Upsca
     let upscale_pipeline_for = |entry| no_vertex_pipeline("upscale", &upscale_pl, &upscale_shader, entry, &targets).create(device);
     let upscale_pipeline = upscale_pipeline_for("fs_main");
     let copy_pipeline = upscale_pipeline_for("fs_copy");
+    // FSR1 is a separate, optional WGSL module: no changes to the existing paths.
+    let fsr_shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
+        label: Some("fsr1 EASU/RCAS"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../fsr1.wgsl").into()),
+    });
+    let fsr_pipeline_for = |entry| no_vertex_pipeline("fsr1", &upscale_pl, &fsr_shader, entry, &targets).create(device);
+    let fsr_easu_pipeline = fsr_pipeline_for("fs_easu");
+    let fsr_rcas_pipeline = fsr_pipeline_for("fs_rcas");
     let panel_pipeline = upscale_pipeline_for("fs_panel");
     let upscale_buf = uniform_buffer(device, "upscale params", 16);
-    Upscale { upscale_pipeline, copy_pipeline, panel_pipeline, layout: upscale_layout, buf: upscale_buf }
+    Upscale { upscale_pipeline, fsr_easu_pipeline, fsr_rcas_pipeline, copy_pipeline, panel_pipeline, layout: upscale_layout, buf: upscale_buf }
 }
