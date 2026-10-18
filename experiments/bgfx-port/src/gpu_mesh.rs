@@ -75,6 +75,7 @@ impl GpuMesh {
         program: bgfx_sys::bgfx_program_handle_t,
         texture: &crate::texture_bridge::Texture,
         sampler: &crate::texture_bridge::Sampler,
+        material_textures: &[Option<crate::texture_bridge::Texture>],
     ) {
         use bgfx_sys::*;
         for range in &self.ranges {
@@ -87,7 +88,9 @@ impl GpuMesh {
                 BGFX_STATE_DEFAULT & !(BGFX_STATE_CULL_MASK as u64)
             };
             bgfx_set_state(state, 0);
-            bgfx_set_texture(0, sampler.handle(), texture.handle(), u32::MAX);
+            let picture = material_textures.get(usize::from(range.material))
+                .and_then(Option::as_ref).unwrap_or(texture);
+            bgfx_set_texture(0, sampler.handle(), picture.handle(), u32::MAX);
             bgfx_submit(0, program, 0, BGFX_DISCARD_ALL as u8);
         }
     }
