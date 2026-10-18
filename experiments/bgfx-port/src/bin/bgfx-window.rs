@@ -377,14 +377,14 @@ mod win {
                 if let (Some(program), Some(tex), Some(sampler)) =
                     (self.program.as_ref(), self.texture.as_ref(), self.sampler.as_ref()) {
                     for mesh in &self.map_meshes {
-                        mesh.draw(program.handle(), tex, sampler, &self.material_textures);
+                        mesh.draw(program, tex, sampler, &self.material_textures);
                     }
                     if let Some(mesh) = self.mesh.as_ref() {
                         if let Some(bus) = self.driving.as_ref() {
                             let model = bus.model_transform();
-                            mesh.draw_with_transform(program.handle(), tex, sampler, &self.material_textures, &model);
+                            mesh.draw_with_transform(program, tex, sampler, &self.material_textures, &model);
                         } else {
-                            mesh.draw(program.handle(), tex, sampler, &self.material_textures);
+                            mesh.draw(program, tex, sampler, &self.material_textures);
                         }
                     }
                 }
