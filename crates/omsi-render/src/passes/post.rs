@@ -186,7 +186,7 @@ impl Renderer {
             );
             // Opt-in FSR1 experiment. Use the existing scene scale setting for quality.
             // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
-            let fsr1_enabled = crate::fsr1_enabled();
+            let fsr1_enabled = self.options.fsr1 || crate::fsr1_enabled();
             let full_h = f.target.texture().height();
             if fsr1_enabled && f.with_overlays && !f.vanilla_fxaa
                 && width < full_w && height < full_h
