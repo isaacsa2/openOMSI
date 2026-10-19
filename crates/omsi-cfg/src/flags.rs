@@ -154,7 +154,10 @@ flags! {
     OMSI_BASIC_PIPELINES: Bool, Switch, Once, "off", "Use the reduced (basic) render pipelines, as after a driver failed to build the full ones.";
     OMSI_BATCH: Num, Test, Use, "-", "Offscreen: prepare the map tiles this many at a time, as the window's streaming does.";
     OMSI_BENCH: Num, Test, Use, "-", "Offscreen: draw the final picture this many more times and log the median CPU and GPU-wait time.";
+    OMSI_BENCH_AUDIT: Bool, Debug, Frame, "off", "Emit the perf A/B matrix capabilities once, to detect binaries that lack benchmark switches.";
     OMSI_BENCH_FRAMES: Bool, Debug, Use, "off", "With OMSI_BENCH: log every bench frame's times, not only the medians.";
+    OMSI_BENCH_FRAME_LATENCY: Num, Switch, Use, "2", "Experimental A/B surface frame queue depth: 1, 2 or 3 (2 is the default).";
+    OMSI_BENCH_SKY_HALF_RATE: Bool, Switch, Frame, "off", "Experimental A/B: advance the Enhanced sky cube scheduler at half rate.";
     OMSI_BLEND_AB: Bool, Test, Use, "off", "Offscreen: a second picture with the blended draws in the old order, for a before/after of the draw order.";
     OMSI_BRIDGE_ONLY: Bool, Test, Use, "off", "LAN: forget our own addresses so that only what the rendezvous bridge reports is tried.";
     OMSI_BUDGET_FROM: Text, Test, Use, "-", "Offscreen with OMSI_TEXTURE_MEMORY: x,y[,MB] - the texture budget is met as seen from that point.";
