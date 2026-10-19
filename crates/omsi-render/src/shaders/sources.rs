@@ -207,6 +207,7 @@ pub(crate) fn precip_shader_source(own: &str) -> String {
         include_str!("../lamp_air.wgsl"),
     ]
     .join("\n");
+    let src = if GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed) { roofless_precip(src) } else { src };
     if array_path().no_storage() {
         let src = src
             .replace("@group(0) @binding(3) var<storage, read> lights: array<PointLight>;", "fn lights_at(i: u32) -> PointLight { return PointLight(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0)); }")
@@ -214,6 +215,25 @@ pub(crate) fn precip_shader_source(own: &str) -> String {
         return indexing_as_calls(&indexing_as_calls(&src, "lights", "lights_at"), "grid", "grid_at");
     }
     src
+}
+
+/// The rain and the snow without the roof map, for OpenGL: GLSL cannot read a depth texture
+/// in a vertex shader, and the module failed there with it (GTS 450, #2987) - `roof_on`
+/// switched off at run time leaves the read in the shader. Nothing is under a roof, and the
+/// splashes, which stand on the map's heights, are not drawn; `in_own_vehicle` stays.
+pub(crate) fn roofless_precip(src: String) -> String {
+    const UNDER_ROOF: &str = "fn under_roof(p: vec3<f32>, m: mat4x4<f32>, on: f32) -> bool {";
+    let start = src.find(UNDER_ROOF).expect("precip_common.wgsl under_roof");
+    let end = start + src[start..].find("\n}\n").expect("under_roof's end") + 3;
+    let mut out = format!("{}{UNDER_ROOF}\n    return false;\n}}\n{}", &src[..start], &src[end..]);
+    const SPLASH_MAP: &str = "    let side = f32(textureDimensions(roof_map).x);
+    let top = textureLoad(roof_map, vec2<i32>(clamp(uv, vec2<f32>(0.0), vec2<f32>(0.9999)) * side), 0);";
+    if out.contains(SPLASH_MAP) {
+        // (`top` at the map's far end: no splash, as where the map has nothing)
+        out = out.replace(SPLASH_MAP, "    let top = 1.0;");
+    }
+    debug_assert_eq!(out.matches("roof_map").count(), 1, "only the binding's declaration is left");
+    out
 }
 
 #[repr(C)]

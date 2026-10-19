@@ -772,6 +772,48 @@ fn the_scene_shader_translates_to_glsl() {
     assert_eq!(const_array_in_const_array("const int A[2] = int[2](0, 1);\nfloat x = b[A[i]];"), None);
 }
 
+/// The rain's and the snow's vertex shaders read the roof map (a depth texture) on every
+/// backend but OpenGL, where GLSL cannot take that (naga: "`textureLoad` from depth
+/// textures is not supported in GLSL", the GTS 450's log in #2987): the OpenGL variant has
+/// no read of it left and makes GLSL, the full one still validates.
+#[test]
+fn the_precipitation_leaves_the_roof_map_out_on_opengl() {
+    use wgpu::naga;
+    use wgpu::naga::back::glsl;
+    let own = [("snow", include_str!("../snow.wgsl")), ("rain", include_str!("../rain.wgsl"))];
+    for (what, own) in own {
+        let full = precip_shader_source(own);
+        let roofless = roofless_precip(full.clone());
+        assert!(full.matches("textureLoad(roof_map").count() >= 1, "{what}");
+        assert!(!roofless.contains("textureLoad(roof_map") && !roofless.contains("textureDimensions(roof_map"), "{what}");
+        assert!(roofless.contains("in_own_vehicle(p)"), "{what}");
+        for (roof, src) in [(true, full), (false, roofless)] {
+            let module = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{what}: {}", e.emit_to_string(&src)));
+            let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{what} roof {roof}: {e:?}"));
+            let mut failed = 0;
+            for version in [glsl::Version::Desktop(330), glsl::Version::Embedded { version: 300, is_webgl: false }] {
+                let options = glsl::Options { version, ..Default::default() };
+                for entry in module.entry_points.iter().filter(|e| e.stage == naga::ShaderStage::Vertex) {
+                    let (module, info) = naga::back::pipeline_constants::process_overrides(
+                        &module, &info, Some((entry.stage, &entry.name)), &Default::default(),
+                    )
+                    .expect("overrides");
+                    let pipeline = glsl::PipelineOptions { shader_stage: entry.stage, entry_point: entry.name.clone(), multiview: None };
+                    let mut out = String::new();
+                    match glsl::Writer::new(&mut out, &module, &info, &options, &pipeline, Default::default()).and_then(|mut w| w.write()) {
+                        Ok(_) => assert!(!out.contains("roof_map"), "{what} {version:?} {}", entry.name),
+                        Err(e) if roof && format!("{e:?}").contains("depth textures is not supported in GLSL") => failed += 1,
+                        Err(e) => panic!("{what} roof {roof} {version:?} {}: {e:?}", entry.name),
+                    }
+                }
+            }
+            assert_eq!(failed > 0, roof, "{what}: the full variant is the one GLSL refuses");
+        }
+    }
+}
+
 /// A GLSL constant array indexed by an element of another (`A[B[i]]`, both declared
 /// `const`), if any. Adreno's GLES compiler (Adreno 710 among them) takes the inner lookup
 /// for a constant it cannot fold and rejects the shader ("array field selection out of
