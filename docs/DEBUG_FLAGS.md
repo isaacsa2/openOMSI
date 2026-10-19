@@ -20,6 +20,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 |---|---|---|---|---|---|
 | `OMSI_AMBIENCE_DENSITY` | text | 1 | once | app | The ambience's one-shots (birds, the far life, thunder, the objects' calls) this many times as often (a number), or only some of them (slot=factor,…: bird.geese=40) - what fits the place, season and hour stays the same (for demos and checks). |
 | `OMSI_AUDIO_TRACE` | text | - | once | audio | Write what the game asks of the mixer (every sound started, changed, stopped, the listener each frame) into this file, rounded and deterministic for offscreen recordings (see scripts/audio-trace.sh). |
+| `OMSI_BENCH_AUDIT` | bool | off | frame | render | Emit the perf A/B matrix capabilities once, to detect binaries that lack benchmark switches. |
 | `OMSI_BENCH_FRAMES` | bool | off | use | app | With OMSI_BENCH: log every bench frame's times, not only the medians. |
 | `OMSI_DEBUG_AI_WIDE` | bool | off | use | sim | Log every tenth of a second an AI car standing over 1.5 m beside its way. |
 | `OMSI_DEBUG_ANIM` | text | - | once | sim | Log the animations of the meshes whose file name contains this text. |
@@ -240,6 +241,8 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_AI_MODEL_LOCK` | bool | off | use | sim | AI cars steer no further than their model's own steering lock (no 60 degree allowance for tight turns). |
 | `OMSI_AI_WAY_ONLY` | bool | off | use | app | AI vehicles stand on their way with the plain ground sampler, as before (A/B). |
 | `OMSI_BASIC_PIPELINES` | bool | off | once | guard, render | Use the reduced (basic) render pipelines, as after a driver failed to build the full ones. |
+| `OMSI_BENCH_FRAME_LATENCY` | num | 2 | use | render | Experimental A/B surface frame queue depth: 1, 2 or 3 (2 is the default). |
+| `OMSI_BENCH_SKY_HALF_RATE` | bool | off | frame | render | Experimental A/B: advance the Enhanced sky cube scheduler at half rate. |
 | `OMSI_CROSSING_DEFORM` | bool | off | use | scene | Apply the crossings' ground deformation again (A/B; Omsi.exe does not). |
 | `OMSI_CUT_PLAIN` | bool | off | use | scene | Road-cut textures uploaded without GPU-made mipmaps. |
 | `OMSI_FIXED_SCALE` | bool | off | use | app | Keep the render scale fixed (no dynamic resolution). |
