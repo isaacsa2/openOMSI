@@ -23,12 +23,15 @@ impl World {
         let check_roads = omsi_cfg::flags::OMSI_CHECK_ROADS.is_set();
         let debug = omsi_cfg::flags::OMSI_DEBUG_SPLINES.is_set();
         let debug_physics = omsi_cfg::flags::OMSI_DEBUG_PHYSICS.is_set();
+        let diag_t0 = omsi_cfg::flags::OMSI_PROFILE.is_set().then(std::time::Instant::now);
         let results: Vec<(Arc<TileSurface>, Option<Image>, Check, usize)> = prepared
             .par_iter_mut()
             .map(|p| {
                 self.cut_tile(p, staged, layout, debug_raster, check_roads, debug)
             })
             .collect();
+        let diag_raster_ms = diag_t0.map(|t| t.elapsed().as_secs_f64() * 1000.0);
+        let diag_t1 = diag_t0.map(|_| std::time::Instant::now());
         let (mut holes, mut cells) = (0usize, 0usize);
         let mut where_: Vec<(f64, f64, f32)> = Vec::new();
         let (mut tris, mut wheel_meshes) = (0usize, 0usize);
@@ -65,7 +68,12 @@ impl World {
                 log::info!("   {d:.1} m of nothing under the ground at ({x:.0}, {y:.0})");
             }
         }
+        let diag_mask_ms = diag_t1.map(|t| t.elapsed().as_secs_f64() * 1000.0);
+        let diag_t2 = diag_t0.map(|_| std::time::Instant::now());
         self.decode_wanted_textures(prepared);
+        if let (Some(raster), Some(mask), Some(after)) = (diag_raster_ms, diag_mask_ms, diag_t2) {
+            log::info!("profile tile preparation split: tiles={} raster_ms={raster:.2} masks_compression_ms={mask:.2} texture_scan_decode_ms={:.2}", prepared.len(), after.elapsed().as_secs_f64() * 1000.0);
+        }
     }
 
     /// One tile's surface raster and the ground cut and paint that follow from it.
@@ -350,15 +358,27 @@ impl World {
                 known.iter().filter_map(|(p, t)| Some((p.clone(), t.upgrade()?))).collect()
             };
             let in_flight: HashMap<PathBuf, Arc<TextureData>> = in_flight.into_iter().collect();
+            // CPU wall times from the loader rayon pool: path search and decode/cache,
+            // not GPU upload. Aggregated per batch to avoid per-texture logging.
+            let lookup_ns = std::sync::atomic::AtomicU64::new(0);
+            let decoding_ns = std::sync::atomic::AtomicU64::new(0);
+            let hits = std::sync::atomic::AtomicU64::new(0);
+            let loads = std::sync::atomic::AtomicU64::new(0);
             let decoded: Vec<(PathBuf, Arc<TextureData>, bool)> = wanted
                 .par_iter()
                 .filter_map(|(name, dirs)| {
                     let dirs_ref: Vec<&Path> = dirs.iter().map(|d| d.as_path()).collect();
+                    let lookup_t = std::time::Instant::now();
                     let path = omsi_texture::find_texture(name, &dirs_ref)?;
+                    lookup_ns.fetch_add(lookup_t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
                     if let Some(t) = in_flight.get(&path) {
+                        hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         return Some((path, t.clone(), false));
                     }
+                    let load_t = std::time::Instant::now();
                     let (img, _) = omsi_texture::gpu::load_gpu(&path).ok()?;
+                    decoding_ns.fetch_add(load_t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+                    loads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Some((path, Arc::new(img), true))
                 })
                 .collect();
@@ -367,6 +387,14 @@ impl World {
                 for (p, t, _) in decoded.iter().filter(|d| d.2) {
                     known.insert(p.clone(), Arc::downgrade(t));
                 }
+            }
+            if omsi_cfg::flags::OMSI_PROFILE.is_set() {
+                let ns_to_ms = |n: u64| n as f64 / 1_000_000.0;
+                log::info!(
+                    "profile tile textures: searched={} unique_resolved={} decoded={} reused_inflight={} path_lookup_worker_ms={:.2} disk_cache_decode_worker_ms={:.2}",
+                    wanted.len(), decoded.len(), loads.load(std::sync::atomic::Ordering::Relaxed), hits.load(std::sync::atomic::Ordering::Relaxed),
+                    ns_to_ms(lookup_ns.load(std::sync::atomic::Ordering::Relaxed)), ns_to_ms(decoding_ns.load(std::sync::atomic::Ordering::Relaxed))
+                );
             }
             let decoded: Arc<HashMap<PathBuf, Arc<TextureData>>> =
                 Arc::new(decoded.into_iter().map(|(p, t, _)| (p, t)).collect());
