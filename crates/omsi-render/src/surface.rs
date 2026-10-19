@@ -2,6 +2,17 @@
 
 use crate::*;
 
+/// A/B only. 2 is the default used by every production build; 1 and 3 test
+/// the swapchain queue depth, with possible smoothness/input-latency tradeoffs.
+fn bench_frame_latency() -> u32 {
+    std::env::var("OMSI_BENCH_FRAME_LATENCY")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|v| (1..=3).contains(v))
+        .unwrap_or(2)
+}
+
+
 /// Helper for windowed rendering.
 pub struct SurfaceState<'w> {
     /// (let go of in `drop`, unless the device was lost - see there)
@@ -66,7 +77,7 @@ impl<'w> SurfaceState<'w> {
             // on Apple silicon a frame cost GPU + CPU instead of the larger of the two,
             // 50 ms where 24 of them were GPU. The price is one more frame of input
             // delay, 33 ms at 60 Hz.)
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: bench_frame_latency(),
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
         };
@@ -88,7 +99,7 @@ impl<'w> SurfaceState<'w> {
             height: height.max(1),
             present_mode: if vsync { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync },
             // (two frames in flight: see `new_with`)
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: bench_frame_latency(),
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
         };
@@ -153,7 +164,7 @@ impl<'w> SurfaceState<'w> {
         }
         self.config.present_mode = mode;
         // (two frames in flight: see `new_with`)
-        self.config.desired_maximum_frame_latency = 2;
+        self.config.desired_maximum_frame_latency = bench_frame_latency();
         self.surface.configure(&renderer.device, &self.config);
     }
 }
