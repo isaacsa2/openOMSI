@@ -146,6 +146,20 @@ impl Renderer {
                 .collect();
             probe.sched.staging = Some((tex, faces));
         }
+        if omsi_cfg::flags::OMSI_PROFILE.is_set() {
+            static SKY_SAMPLES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+            let sample = SKY_SAMPLES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            // Frequency and work of the cube pass; GPU timestamp queries alone do not
+            // show whether a full six-face rebuild or a small slice was requested.
+            if sample % 120 == 0 {
+                let rows: u64 = draws.iter().map(|d| d.3.1 as u64).sum();
+                let full_faces = draws.iter().filter(|d| d.3.1 == SKY_CUBE_SIZE).count();
+                log::info!(
+                    "profile sky cube scheduler: sample={sample} full_rebuild={full} draws={} full_faces={full_faces} rendered_rows={rows} probe_redraw={probe_redraw} lead_view={lead_view}",
+                    draws.len()
+                );
+            }
+        }
         let single = draws.len() == 1;
         for (f, round, history, (y0, rows), staging) in draws {
             let whole = rows == SKY_CUBE_SIZE;
@@ -184,6 +198,17 @@ impl Renderer {
     // --- the reflection probe of the enhanced path: the sky into the six faces, then
     // each blurrier level from the sharper ones (three faces a pass)
     pub(crate) fn encode_probe(&self, prepass_encoder: &mut wgpu::CommandEncoder, scene: &Scene, probe_redraw: bool, timers: &mut PassTimers) {
+        if omsi_cfg::flags::OMSI_PROFILE.is_set() {
+            static PROBE_FRAMES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+            static PROBE_REBUILDS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+            let frame = PROBE_FRAMES.fetch_add(1, core::sync::atomic::Ordering::Relaxed) + 1;
+            if probe_redraw {
+                PROBE_REBUILDS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            }
+            if frame % 120 == 0 {
+                log::info!("profile reflection probe scheduler: windows={frame} redraws={}", PROBE_REBUILDS.load(core::sync::atomic::Ordering::Relaxed));
+            }
+        }
         if probe_redraw {
             if let (Some(probe), Some(sky_bg)) =
                 (self.tone.probe.as_ref(), scene.sky_bind_group.as_ref())
