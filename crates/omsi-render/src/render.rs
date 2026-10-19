@@ -645,7 +645,7 @@ impl Renderer {
     ) {
         // A one-time capability marker prevents old binaries from silently ignoring
         // experiment flags and producing false A/B performance claims.
-        if std::env::var_os("OMSI_BENCH_AUDIT").is_some() {
+        if omsi_cfg::flags::OMSI_BENCH_AUDIT.is_set() {
             static AB_AUDIT_ONCE: std::sync::Once = std::sync::Once::new();
             AB_AUDIT_ONCE.call_once(|| {
                 let on = |name: &str| std::env::var_os(name).is_some();
