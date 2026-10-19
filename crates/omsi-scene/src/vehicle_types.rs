@@ -10,6 +10,9 @@ pub struct VehicleRender {
     pub own_materials: Vec<MaterialId>,
     /// The shared set it is drawn with (None for the player's own).
     pub set: Option<VehicleKey>,
+    /// The set an unshared render (the player's vehicle and its coupled parts) was made
+    /// from: no other vehicle draws it, and it goes with the render (#2903).
+    pub(super) own_set: Option<VehicleSet>,
     /// `[matl_change]` / `[texchanges]` slots whose material a variable switches.
     pub variants: Vec<VariantSlot>,
     /// GPU texture per `[texttexture]` index.
