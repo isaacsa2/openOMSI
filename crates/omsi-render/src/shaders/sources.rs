@@ -117,6 +117,38 @@ pub(crate) fn indexing_as_calls(src: &str, name: &str, call: &str) -> String {
     out
 }
 
+/// A/B workaround for Naga's lowering of constant-bound WGSL loops.
+//// The two four-tap sun-shadow filters have no early exit or loop-carried state except
+//// the sums. Separate scopes preserve the original local bindings while giving
+//// backend shader compilers constant indices instead of Naga's generic loop.
+//// This is opt-in and intentionally does NOT alter shipped WGSL sources.
+pub(crate) fn unroll_shadow_tent_loops(src: &str) -> Option<String> {
+    const HEADER: &str = "for (var q = 0; q < 4; q = q + 1) {";
+    if src.matches(HEADER).count() != 2 {
+        return None;
+    }
+    let mut remaining = src;
+    let mut out = String::with_capacity(src.len() + 3000);
+    for _ in 0..2 {
+        let start = remaining.find(HEADER)?;
+        out.push_str(&remaining[..start]);
+        let rest = &remaining[start + HEADER.len()..];
+        const END: &str = "\n    }";
+        let close = rest.find(END)?;
+        let body = &rest[..close];
+        for q in 0..4 {
+            out.push_str("    {\n        let q: i32 = ");
+            out.push_str(&q.to_string());
+            out.push_str(";\n");
+            out.push_str(body);
+            out.push_str("\n    }");
+        }
+        remaining = &rest[close + END.len()..];
+    }
+    out.push_str(remaining);
+    Some(out)
+}
+
 pub(crate) fn scene_shader_text(gl: bool) -> String {
     let src = [
         include_str!("../colour.wgsl"),
@@ -130,6 +162,17 @@ pub(crate) fn scene_shader_text(gl: bool) -> String {
     // Enhanced+: the enhanced pass writes the reflections' surfaces as well (`GBUF_FORMAT`)
     let src = if rt_gbuf() { src.replace("//RT ", "") } else { src };
     let src = if basic_pipelines() { lean_scene(src) } else { src };
+    let src = if omsi_cfg::flags::OMSI_NAGA_LOOP_AB.is_set() {
+        match unroll_shadow_tent_loops(&src) {
+            Some(rewritten) => rewritten,
+            None => {
+                log::warn!("Naga loop A/B: expected two sun-shadow loops; using unchanged shader");
+                src
+            }
+        }
+    } else {
+        src
+    };
     if !gl {
         return src;
     }
@@ -306,4 +349,23 @@ pub(crate) fn corona_shader_source() -> String {
         return indexing_as_calls(&indexing_as_calls(&src, "lights", "lights_at"), "grid", "grid_at");
     }
     src
+}
+
+// Verify the experimental source still parses as WGSL and only the intended
+// two fixed-length sun-shadow loops are expanded.
+#[cfg(test)]
+mod naga_loop_ab_tests {
+    #[test]
+    fn sun_shadow_unrolls_two_four_tap_loops() {
+        let original = super::scene_shader_text(false);
+        let before = "for (var q = 0; q < 4; q = q + 1) {";
+        assert_eq!(original.matches(before).count(), 2);
+        let rewritten = super::unroll_shadow_tent_loops(&original).expect("sun-shadow loops");
+        assert!(!rewritten.contains(before));
+        for q in 0..4 {
+            assert_eq!(rewritten.matches(&format!("let q: i32 = {q};")).count(), 2);
+        }
+        let result = naga::front::wgsl::parse_str(&rewritten);
+        assert!(result.is_ok(), "unrolled scene WGSL: {:?}", result.err());
+    }
 }
