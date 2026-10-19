@@ -163,13 +163,17 @@ jobs:
           New-Item -ItemType File -Force dist/server/.openomsi-content | Out-Null
           Compress-Archive -Path dist/server/* -DestinationPath "out/openOMSI-$env:OPENOMSI_VERSION-server-windows-${{ matrix.arch }}.zip"
       - name: Installer
+        id: installer
+        # Keep the portable ZIP available for PR testing when Chocolatey/NSIS is down.
+        # Official release builds still require a successful installer.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         shell: bash
         run: |
           export PATH="/c/Program Files (x86)/NSIS:$PATH"
           command -v makensis >/dev/null || choco install nsis -y --no-progress
           sh scripts/windows/make-installer.sh dist/windows "out/openOMSI-$OPENOMSI_VERSION-windows-${{ matrix.arch }}-setup.exe"
       - name: Installer install and uninstall
-        if: matrix.arch == 'x64'
+        if: matrix.arch == 'x64' && (github.event_name != 'pull_request' || steps.installer.outcome == 'success')
         shell: pwsh
         run: |
           $dir = "$env:RUNNER_TEMP\openOMSI"

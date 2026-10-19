@@ -643,6 +643,22 @@ impl Renderer {
         projection: Option<Mat4>,
         second_eye: bool,
     ) {
+        // A one-time capability marker prevents old binaries from silently ignoring
+        // experiment flags and producing false A/B performance claims.
+        if omsi_cfg::flags::OMSI_BENCH_AUDIT.is_set() {
+            static AB_AUDIT_ONCE: std::sync::Once = std::sync::Once::new();
+            AB_AUDIT_ONCE.call_once(|| {
+                let on = |name: &str| std::env::var_os(name).is_some();
+                log::info!(
+                    "perf ab matrix capabilities: version=1 naga_loop={} win_fence_off={} frame_latency={} sky_half_rate={} poll_thread_off={}",
+                    on("OMSI_NAGA_LOOP_AB"),
+                    on("OPENOMSI_WGPU_NO_WIN_ACQUIRE_FENCE"),
+                    std::env::var("OMSI_BENCH_FRAME_LATENCY").unwrap_or_else(|_| "2".to_owned()),
+                    on("OMSI_BENCH_SKY_HALF_RATE"),
+                    on("OMSI_NO_POLL_THREAD")
+                );
+            });
+        }
         // the frame's switches from the environment, each read once
         let env = FrameEnv::read();
         if !self.frame_hooks(scene, &env, with_overlays) {
