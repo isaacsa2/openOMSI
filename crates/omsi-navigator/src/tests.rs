@@ -550,3 +550,52 @@ fn the_compass_keeps_clear_of_the_open_lines_panel() {
     assert!(beside.x + r <= left, "the disc ends before the panel begins: {} vs {left}", beside.x + r);
     assert_eq!(beside.y, free.y, "only moved sideways");
 }
+
+/// A partial route (its tiles still loading) grows to the whole while the bus is not on it
+/// yet, or off it: the way the bus is led stays, the whole route is not asked for again, and
+/// it is taken over once the bus is back on a lane of it (#2826: it was dropped, and the
+/// route ended where the partial one had).
+#[test]
+fn a_route_that_grew_while_the_bus_was_off_it_is_taken_over_when_it_is_back() {
+    let mut n = Navigator::new(true, 0.85, "bottom-left");
+    n.set_route("t", vec![0, 1], false, 1);
+    assert!(!n.route.on_route);
+    assert!(n.wants_route("t", 2));
+    n.set_route("t", vec![0, 1, 2, 7], true, 2);
+    assert_eq!(n.route.lanes, [0, 1]);
+    assert!(!n.wants_route("t", 2) && !n.wants_route("t", 3), "not built again every frame");
+    // on a way back's own lane (3, round the block): kept for later
+    n.route.lanes = vec![3, 4, 5, 6, 1];
+    n.route.progress = 0;
+    n.route.take_pending();
+    assert_eq!(n.route.lanes, [3, 4, 5, 6, 1]);
+    // back on the route's lane 1: the whole route, from there
+    let v = n.route.version;
+    n.route.progress = 4;
+    n.route.take_pending();
+    assert_eq!(n.route.lanes, [0, 1, 2, 7]);
+    assert_eq!(n.route.progress, 1);
+    assert!(n.route.version > v && n.route.pending.is_none());
+    // (a new trip forgets it)
+    n.set_route("t", vec![0], false, 4);
+    n.route.on_route = false;
+    n.set_route("t", vec![0, 1], true, 5);
+    n.set_route("u", vec![9], true, 0);
+    assert!(n.route.pending.is_none() && n.route.lanes == [9]);
+}
+
+/// A route that passes a lane twice is taken over at the passing the lanes after it agree
+/// with, the first of them when they agree as far.
+#[test]
+fn a_route_crossing_itself_is_taken_over_where_the_lanes_after_agree() {
+    let mut n = Navigator::new(true, 0.85, "bottom-left");
+    n.route.lanes = vec![0, 2];
+    n.route.pending = Some(vec![0, 1, 0, 2]);
+    n.route.take_pending();
+    assert_eq!(n.route.progress, 2);
+    n.route.lanes = vec![5];
+    n.route.progress = 0;
+    n.route.pending = Some(vec![5, 1, 5, 2]);
+    n.route.take_pending();
+    assert_eq!(n.route.progress, 0);
+}
