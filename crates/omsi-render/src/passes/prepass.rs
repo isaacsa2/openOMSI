@@ -107,7 +107,7 @@ impl Renderer {
             if lead_view {
                 let round = (probe.cube_round / 6) % SKY_CUBE_ROUNDS;
                 let (mut next, mut rounds) = (probe.cube_next, probe.cube_round);
-                for s in probe.sched.plan(&mut next, &mut rounds, if f.env.sky_cube_every_frame { SLICE_EVERY } else if std::env::var_os("OMSI_BENCH_SKY_HALF_RATE").is_some() { f.dt * 0.5 } else { f.dt }).into_iter().flatten() {
+                for s in probe.sched.plan(&mut next, &mut rounds, if f.env.sky_cube_every_frame { SLICE_EVERY } else if omsi_cfg::flags::OMSI_BENCH_SKY_HALF_RATE.is_set() { f.dt * 0.5 } else { f.dt }).into_iter().flatten() {
                     let history = if s.staging { 0.0 } else { SKY_CUBE_HISTORY };
                     draws.push((s.face, round, history, slice_rows(s.first, s.count), s.staging));
                 }
