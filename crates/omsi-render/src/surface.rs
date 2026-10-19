@@ -5,9 +5,7 @@ use crate::*;
 /// A/B only. 2 is the default used by every production build; 1 and 3 test
 /// the swapchain queue depth, with possible smoothness/input-latency tradeoffs.
 fn bench_frame_latency() -> u32 {
-    std::env::var("OMSI_BENCH_FRAME_LATENCY")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
+    omsi_cfg::flags::OMSI_BENCH_FRAME_LATENCY.parse::<u32>()
         .filter(|v| (1..=3).contains(v))
         .unwrap_or(2)
 }
