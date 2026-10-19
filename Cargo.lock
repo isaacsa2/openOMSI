@@ -2920,7 +2920,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 [[package]]
 name = "naga"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -6477,7 +6477,7 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 [[package]]
 name = "wgpu"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.2",
@@ -6505,7 +6505,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -6537,7 +6537,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-apple"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "wgpu-hal",
 ]
@@ -6545,7 +6545,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-emscripten"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "wgpu-hal",
 ]
@@ -6553,7 +6553,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-windows-linux-android"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "wgpu-hal",
 ]
@@ -6561,7 +6561,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -6614,7 +6614,7 @@ dependencies = [
 [[package]]
 name = "wgpu-naga-bridge"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "naga",
  "wgpu-types",
@@ -6623,7 +6623,7 @@ dependencies = [
 [[package]]
 name = "wgpu-types"
 version = "29.0.4"
-source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386#6e48f32abcf21002f9fce1eb3f8fe2e27ab5f386"
+source = "git+https://github.com/isaacsa2/wgpu-openomsi?rev=b30c558271c0bdef619d9497011cd85830464f7c#b30c558271c0bdef619d9497011cd85830464f7c"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
