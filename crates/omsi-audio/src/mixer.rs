@@ -793,6 +793,24 @@ mod tests {
         assert!(AudioEngine::new_for_test_device_less().render_capture(10).is_empty());
     }
 
+    /// The in-game Volume slider reaches the listener and changes voices already playing.
+    #[test]
+    fn master_volume_changes_affect_existing_voice() {
+        let e = AudioEngine::capture(48_000);
+        let clip = Arc::new(Clip { sample_rate: 48_000, channels: 1, samples: vec![8_192; 4_800] });
+        e.play(clip, VoiceParams { looping: true, ..Default::default() });
+
+        let heard = |master: f32| {
+            e.set_listener(Listener { master, ..Default::default() });
+            let samples = e.render_capture(4_800);
+            let tail = &samples[samples.len() - 2_000..];
+            tail.iter().map(|x| x.abs()).sum::<f32>() / tail.len() as f32
+        };
+        assert!((heard(1.0) - 0.25).abs() < 0.01);
+        assert!(heard(0.0) < 0.001, "muting must silence active voices");
+        assert!((heard(0.5) - 0.125).abs() < 0.01);
+    }
+
     /// What the game asks and tells a voice never waits for a block being mixed (the mixer
     /// holds the voices a whole block); a voice that ended by itself is gone once mixed, one
     /// stopped at once.

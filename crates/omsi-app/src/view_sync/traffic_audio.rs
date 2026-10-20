@@ -115,6 +115,9 @@ impl Traffic {
                 }
             }
             if let Some(ss) = self.sounds.get_mut(&c.id) {
+                // The traffic slider changes during the session; do not keep the
+                // value from when this car first entered audible range.
+                ss.master = volume;
                 ss.set_muffled(muffled);
                 let xf = c.world;
                 let vars = frame.vars(c);
@@ -213,6 +216,9 @@ impl Traffic {
             self.riding_sounds = Some((id, ss));
         }
         if let Some((_, ss)) = self.riding_sounds.as_mut() {
+            // Riding an AI bus keeps its full sound set; its volume must still
+            // follow the live traffic slider.
+            ss.master = volume;
             let fired = std::mem::take(&mut c.vehicle.host.fired_triggers);
             let fired_vars = std::mem::take(&mut c.vehicle.host.fired_trigger_vars);
             let fired_files = std::mem::take(&mut c.vehicle.host.fired_file_triggers);

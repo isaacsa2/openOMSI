@@ -345,6 +345,8 @@ impl SoundSet {
         part.muffled = self.muffled;
         part.ai = self.ai;
         part.listener_vehicle = self.listener_vehicle;
+        // A coupled part belongs to the same bus and follows its volume setting.
+        part.master = self.master;
         self.parts.push((index, part));
     }
 
@@ -360,6 +362,9 @@ impl SoundSet {
         at_fire: &dyn Fn(&str, &str) -> Option<f32>,
     ) {
         for (i, p) in &mut self.parts {
+            // Propagate live mixer changes to articulated sections, not only to the
+            // front vehicle (the part is a separate SoundSet).
+            p.master = self.master;
             match part_to_world(*i) {
                 Some(xf) => p.update_fired(engine, var, &xf, triggers, at_fire),
                 None => p.stop_all(engine),
@@ -1003,6 +1008,25 @@ mod tests {
 
     fn globals() -> std::sync::MutexGuard<'static, ()> {
         GLOBALS.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn coupled_part_follows_live_volume_changes() {
+        let engine = AudioEngine::silent();
+        let cfg = SoundCfg::default();
+        let mut bus = SoundSet::new(&engine, &cfg, Path::new("."));
+        bus.master = 0.75;
+        let part = SoundSet::new(&engine, &cfg, Path::new("."));
+        bus.add_part(0, part);
+        assert_eq!(bus.parts[0].1.master, 0.75);
+
+        bus.master = 0.2;
+        bus.update_parts(&engine, &|_| None, &|_| None, &[], &|_, _| None);
+        assert_eq!(bus.parts[0].1.master, 0.2);
+
+        bus.master = 0.0;
+        bus.update_parts(&engine, &|_| None, &|_| None, &[], &|_, _| None);
+        assert_eq!(bus.parts[0].1.master, 0.0);
     }
 
     fn ctx(view: i32, cab: bool) -> Ctx {
