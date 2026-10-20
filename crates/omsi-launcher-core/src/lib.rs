@@ -18,7 +18,7 @@ mod hof_sync;
 mod file_dialog;
 
 pub use file_dialog::{pick_file, pick_folder, pick_hofs, pick_mod};
-pub use hof_sync::add_shared_hofs;
+pub use hof_sync::{add_shared_hofs, share_map_hofs, MapHofOffer};
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -316,6 +316,10 @@ pub fn default_hof(map: Option<&MapInfo>, bus: Option<&VehicleInfo>, date: &str,
         (Some(line), false) => depot_has_line(&want, line) == Some(true),
         _ => false,
     };
+    let with_line = match (line, map, root()) {
+        (Some(line), Some(m), Ok(r)) if with_line.is_empty() && !map_depot_has_line => depot_names_with_line(&r, &m.file, line),
+        _ => with_line,
+    };
     if !with_line.is_empty() && !map_depot_has_line && !with_line.iter().any(|h| h.eq_ignore_ascii_case(&want)) {
         let names: Vec<&str> = with_line.iter().map(|h| h.as_str()).collect();
         let hints: Vec<&str> = std::iter::once(want.as_str()).chain(map_hints.iter().copied()).collect();
@@ -537,6 +541,7 @@ pub struct ModsStatus {
     pub cleaned: Vec<String>,
     pub jobs: Vec<install::Progress>,
     pub hof_warnings: Vec<String>,
+    pub hof_offers: Vec<MapHofOffer>,
     /// Every mod, one by one (see `mods`).
     pub installed: Vec<mods::Mod>,
 }
@@ -686,8 +691,7 @@ pub fn install_inbox_blocking() -> Vec<install::Progress> {
 pub fn mods_status() -> Result<ModsStatus> {
     let content = content_dir().ok_or_else(|| anyhow!("no game binary configured, so no content folder"))?;
     let cleaned = install::cleanup_stale(&data_dir(), Some(&content));
-    hof_sync::sync_map_hofs();
-    let hof_warnings = hof_sync::warnings();
+    let (hof_offers, hof_warnings) = hof_sync::offers();
     let folders = omsi_cfg::CONTENT_FOLDERS
         .iter()
         .map(|f| {
@@ -712,6 +716,7 @@ pub fn mods_status() -> Result<ModsStatus> {
         cleaned,
         jobs: install::jobs(),
         hof_warnings,
+        hof_offers,
         installed: mods::list(&content),
     })
 }
@@ -735,6 +740,9 @@ pub struct Poll {
     pub stamp: String,
     pub jobs: Vec<install::Progress>,
     pub instances: Vec<instances::Instance>,
+    /// The games that ended within the last half hour (as long as the registry keeps them):
+    /// how each ended (its exit code, or killed by Stop) and its log, apart from the running ones.
+    pub ended: Vec<instances::Instance>,
     /// Inbox items whose install started with this poll.
     pub started: Vec<String>,
 }
@@ -743,9 +751,10 @@ pub fn poll() -> Result<Poll> {
     let content = content_dir();
     let started = content.as_deref().map(watch_inbox).unwrap_or_default();
     let stamp = index::content_stamp(&bases(), content.as_ref().map(|c| c.join("Mods")).as_deref());
-    // (only the games still running: an ended one stays listed a while for its log, not as running)
-    let running = instances::list().into_iter().filter(|i| i.running).collect();
-    Ok(Poll { stamp, jobs: install::jobs(), instances: running, started })
+    // (only the games still running in `instances`: an ended one stays listed a while for its
+    // log, in `ended`, not as running)
+    let (running, ended) = instances::list().into_iter().partition(|i| i.running);
+    Ok(Poll { stamp, jobs: install::jobs(), instances: running, ended, started })
 }
 
 // ---------------------------------------------------------------------------------------
@@ -822,7 +831,6 @@ pub struct EntryInfo {
 
 pub fn list_maps() -> Result<Vec<MapInfo>> {
     root()?;
-    hof_sync::sync_map_hofs();
     let lang = content_language();
     let mut out = Vec::new();
     let mut keys = Vec::new();
@@ -1052,8 +1060,8 @@ pub fn list_vehicles() -> Result<Vec<VehicleInfo>> {
     list_vehicles_progress(|_, _, _| {})
 }
 
-/// The depot files (by `[name]`) beside bus `bus` (relative to `root`) whose IBIS trips carry
-/// line `line`, the fullest first, read once per bus and line.
+/// The depot files (by `[name]`) beside bus or map file `bus` (relative to `root`) whose IBIS
+/// trips carry line `line`, the fullest first, read once per file and line.
 pub fn depot_names_with_line(root: &Path, bus: &str, line: &str) -> Vec<String> {
     type Cache = std::collections::HashMap<(PathBuf, String, String), Vec<String>>;
     static CACHE: std::sync::LazyLock<std::sync::Mutex<Cache>> = std::sync::LazyLock::new(Default::default);
@@ -2025,6 +2033,15 @@ pub fn graphics_presets_for(mode: &str) -> [(&'static str, Value); 4] {
     })
 }
 
+/// Normalize vehicle smoke visibility for the game, launcher and saved profiles.
+pub fn vehicle_smoke(x: &str) -> &'static str {
+    match x.trim().to_ascii_lowercase().as_str() {
+        "player" | "player_only" => "player",
+        "off" | "none" => "off",
+        _ => "all",
+    }
+}
+
 /// The wet roads' reflections: `off` or `low`, else `high` (as the game reads its `puddles`).
 pub fn puddles(x: &str) -> &'static str {
     match x.trim().to_ascii_lowercase().as_str() { "off" | "0" | "none" => "off", "low" => "low", _ => "high" }
@@ -2084,6 +2101,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     v["fsr_quality"] = json!("quality");
     v["fsr_sharpness"] = json!(0.8);
     v["puddles"] = json!("high"); // (apart: the literal above is at the json! macro's recursion limit)
+    v["vehicle_smoke"] = json!("all");
     if phone {
         for (k, d) in [("msaa", json!(2)), ("anisotropy", json!(4)), ("ssao", json!(false)), ("shadow_size", json!(1024)), ("mirror_size", json!(128)), ("max_fps", json!(60)), ("max_obj_dist", json!("900")), ("pax_density", json!(0.7)), ("navigator_corner", json!("top-center"))] {
             v[k] = d;
@@ -2125,6 +2143,9 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     // the game's information bar along the top, as the last session left it (#1164)
     v["info_bar"] = json!(false);
     v["perf_overlay"] = json!("off");
+    for key in ["info_size", "timetable_size", "perf_size"] {
+        v[key] = json!(1.0);
+    }
     // Human posing; the original OMSI behavior remains the default.
     v["passenger_animation"] = json!("original");
     v["photo_mode"] = json!("simple");
@@ -2135,6 +2156,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     v["windy_trees"] = json!(true);
     v["sim_thread"] = json!(false); // (switched in the game's Display menu, saved through this writer)
     v["mirror_hud_every_frame"] = json!(false);
+    v["mirror_hud"] = json!(0);
     // an early timetable bus waits only at the stops the timetable times (off: at every
     // stop, as in OMSI; #1773)
     v["ai_wait_timed_stops_only"] = json!(false);
@@ -2198,6 +2220,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "mirror_quality" => v[&k] = json!(mirror_quality(val)),
             "cloud_quality" => v[&k] = json!(cloud_quality(val)),
             "rain_quality" => v[&k] = json!(rain_quality(val)),
+            "vehicle_smoke" => v[&k] = json!(vehicle_smoke(val)),
             "puddles" => v[&k] = json!(puddles(val)),
             "upscaler" => v[&k] = json!(if val.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }),
             "fsr_quality" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
@@ -2272,8 +2295,10 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "full_tank" | "trip_summary" => v[&k] = json!(b(val)),
             "nav_arrows" | "nav_ai" | "nav_surface" | "nav_light" | "nav_3d" | "nav_widget" | "get_up" | "time_sync" | "metar_sync" | "ui_scale_window" | "notes" | "machine_translation" | "update_check" | "update_auto" | "update_notify" | "presence" | "steering_linear" | "old_steering" | "red_steer_spd" | "ff_invert" | "ff_enabled" | "brake_hold" | "auto_clutch" | "momentary_gears" | "auto_shift" | "mouse_steering" | "mouse_right_off" | "mouse_smooth" | "mouse_hold" | "mouse_pedals" | "blinker_cancel" => v[&k] = json!(b(val)),
             "info_bar" => v[&k] = json!(b(val)),
+            "info_size" | "timetable_size" | "perf_size" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).unwrap_or(1.0).clamp(0.6, 2.0)),
             "perf_overlay" => v[&k] = json!(perf_overlay_mode(val)),
             "sim_thread" => v[&k] = json!(b(val)),
+            "mirror_hud" => v[&k] = json!(val.trim().parse::<u8>().map(|x| x.min(7)).unwrap_or(0)),
             "windy_trees" | "mirror_hud_every_frame" | "ai_wait_timed_stops_only" | "pax_bad_driving" | "ambient" => v[&k] = json!(b(val)),
             "time_speed" => v[&k] = json!(val.trim_start_matches(['x', 'X']).parse::<f64>().map(|x| x.clamp(1.0, 30.0)).map(|x| if x.fract() == 0.0 { format!("{}", x as i64) } else { x.to_string() }).unwrap_or_else(|_| "1".into())),
             "language" => v[&k] = json!(language_code(val)),
@@ -2385,8 +2410,8 @@ pub fn save_settings(v: &Value) -> Result<()> {
 
 /// The settings a graphics profile holds: what the Graphics tab shows, except the machine's
 /// own (fullscreen, graphics API).
-pub const GRAPHICS_PROFILE_KEYS: [&str; 34] = [
-    "graphics", "msaa", "render_scale", "upscaler", "fsr_quality", "fsr_sharpness", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "reflections", "clouds", "cloud_quality", "rain_quality", "puddles", "windy_trees",
+pub const GRAPHICS_PROFILE_KEYS: [&str; 35] = [
+    "graphics", "msaa", "render_scale", "upscaler", "fsr_quality", "fsr_sharpness", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "reflections", "clouds", "cloud_quality", "rain_quality", "vehicle_smoke", "puddles", "windy_trees",
     "vsync", "max_fps", "view_distance", "max_obj_dist", "min_obj_size", "mirror_size", "mirror_refresh", "mirror_quality", "mirror_hud_every_frame", "video_memory", "texture_compression", "gpu_texture_compression",
 ];
 
@@ -2630,6 +2655,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!("gpu_texture_compression={}\n", b("gpu_texture_compression", true)));
     text.push_str(&format!("cloud_quality={}\n", cloud_quality(v.get("cloud_quality").and_then(|x| x.as_str()).unwrap_or("high"))));
     text.push_str(&format!("rain_quality={}\n", rain_quality(v.get("rain_quality").and_then(|x| x.as_str()).unwrap_or("high"))));
+    text.push_str(&format!("vehicle_smoke={}\n", vehicle_smoke(v.get("vehicle_smoke").and_then(|x| x.as_str()).unwrap_or("all"))));
     text.push_str(&format!("puddles={}\n", puddles(v.get("puddles").and_then(|x| x.as_str()).unwrap_or("high"))));
     text.push_str(&format!("mirror_refresh={}\n", mirror_refresh(v.get("mirror_refresh").and_then(|x| x.as_str()).unwrap_or("full"))));
     text.push_str(&format!("mirror_quality={}\n", mirror_quality(v.get("mirror_quality").and_then(|x| x.as_str()).unwrap_or("standard"))));
@@ -2640,9 +2666,11 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!("triple_screen={}\ntriple_span={}\n", b("triple_screen", false), b("triple_span", true)));
     text.push_str(&format!("triple_width_mm={}\ntriple_distance_mm={}\ntriple_bezel_mm={}\n", f("triple_width_mm", 600.0).clamp(200.0, 2000.0), f("triple_distance_mm", 650.0).clamp(200.0, 3000.0), f("triple_bezel_mm", 0.0).clamp(0.0, 100.0)));
     text.push_str(&format!("info_bar={}\nperf_overlay={}\n", b("info_bar", false), perf_overlay_mode(&v.get("perf_overlay").map(|x| x.as_str().map_or_else(|| x.to_string(), str::to_string)).unwrap_or_default())));
+    text.push_str(&format!("info_size={}\ntimetable_size={}\nperf_size={}\n", f("info_size", 1.0).clamp(0.6, 2.0), f("timetable_size", 1.0).clamp(0.6, 2.0), f("perf_size", 1.0).clamp(0.6, 2.0)));
     text.push_str(&format!("windy_trees={}\n", b("windy_trees", true)));
     text.push_str(&format!("sim_thread={}\n", b("sim_thread", false)));
     text.push_str(&format!("mirror_hud_every_frame={}\n", b("mirror_hud_every_frame", false)));
+    text.push_str(&format!("mirror_hud={}\n", n("mirror_hud", 0).clamp(0, 7)));
     text.push_str(&format!("standing_chance={}\n", n("standing_chance", 5).clamp(0, 100)));
     text.push_str(&format!("ambient={}\nvol_ambient={}\n", b("ambient", true), f("vol_ambient", 0.8).clamp(0.0, 1.0)));
     text.push_str(&format!("radio_speaker={}\nradio_hiss={}\nradio_dropouts={}\n", f("radio_speaker", 0.0).clamp(0.0, 1.0), f("radio_hiss", 0.0).clamp(0.0, 1.0), f("radio_dropouts", 0.0).clamp(0.0, 1.0)));
