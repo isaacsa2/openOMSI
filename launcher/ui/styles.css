@@ -91,7 +91,7 @@ img { -webkit-user-drag: none; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 /* The active palette changes semantic UI colours, not in-game textures. Shape and
    text still carry the meaning of every warning, selection and success state. */
-:root[data-vision="protan"], :root[data-vision="deutan"] {
+:root[data-vision="protan"] {
   --accent: #ffd54f;
   --accent-hover: #ffe082;
   --accent-text: #1a1206;
@@ -100,6 +100,16 @@ img { -webkit-user-drag: none; }
   --warn: #ffd54f;
   --danger: #ce84d5;
   --focus: #ffd54f;
+}
+:root[data-vision="deutan"] {
+  --accent: #7dd3fc;
+  --accent-hover: #bae6fd;
+  --accent-text: #082f49;
+  --accent-soft: rgba(125, 211, 252, 0.18);
+  --ok: #facc15;
+  --warn: #fbbf24;
+  --danger: #d8a0df;
+  --focus: #7dd3fc;
 }
 :root[data-vision="tritan"] {
   --accent: #ffb870;
