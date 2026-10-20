@@ -62,6 +62,11 @@ export function applyTheme() {
   const light = pick === 'light' || (pick === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
   document.documentElement.dataset.theme = light ? 'light' : 'dark';
   document.documentElement.dataset.layout = launcherLayout();
+  // Launcher-only accessibility settings; never recolour the 3D game or mod textures.
+  const vision = localStorage.getItem('accessibility_vision') || 'default';
+  document.documentElement.dataset.vision = ['default', 'protan', 'deutan', 'tritan', 'mono'].includes(vision) ? vision : 'default';
+  document.documentElement.dataset.highContrast = localStorage.getItem('accessibility_contrast') === 'true' ? 'true' : 'false';
+  document.documentElement.dataset.reducedMotion = localStorage.getItem('accessibility_motion') === 'true' ? 'true' : 'false';
 }
 
 export async function loadContent() {
