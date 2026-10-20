@@ -91,6 +91,12 @@ function useFocused() {
 function App() {
   const s = useStore();
   const focused = useFocused();
+  // When a keyboard user switches pages, focus the new heading, not a vanished sidebar target.
+  useEffect(() => {
+    if (!s.ready || PHONE) return;
+    const heading = document.querySelector('.page:not([hidden]) h1');
+    heading?.focus();
+  }, [s.page, s.ready]);
   if (!s.ready) {
     return html`<div class="splash">${s.errors.boot ? html`<div class="notice danger" style="max-width:520px">${s.errors.boot}</div>` : html`<${Spinner} />`}</div>`;
   }
