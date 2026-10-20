@@ -83,7 +83,7 @@ struct SettingsPage: View {
             SettingSelect(label: "Upscaling", key: "upscaler", options: [("default", "Standard (Catmull-Rom)"), ("fsr1", "AMD FSR 1 (experimental)")])
             if store.setting("upscaler")?.string == "fsr1" {
                 SettingSelect(label: "FSR quality", key: "fsr_quality", options: [("ultra", "Ultra Quality (77%)"), ("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("auto", "Automatic (keeps the frame rate)"), ("custom", "Use render scale")])
-                SettingSlider(label: "FSR sharpening", key: "fsr_sharpness", range: 0 ... 1, step: 0.05, fallback: 0.3) { "\(Int($0 * 100))%" }
+                SettingSlider(label: "FSR sharpening", key: "fsr_sharpness", range: 0 ... 1, step: 0.05, fallback: 0.8) { "\(Int($0 * 100))%" }
             }
             SettingSelect(label: "Render scale", key: "render_scale", options: [("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")])
             SettingSelect(label: "Anisotropic", key: "anisotropy", options: [("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")])

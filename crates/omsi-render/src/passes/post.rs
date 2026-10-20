@@ -184,13 +184,13 @@ impl Renderer {
             let full_h = f.target.texture().height();
             let fsr = fsr1_enabled && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
                 && width < full_w && height < full_h
-                && self.scale.fsr_easu_pipeline.is_some() && self.scale.fsr_rcas_pipeline.is_some();
-            // RCAS takes the slider's whole range (100 %: AMD's strongest, its own limit
-            // keeps it from ringing); the standard upscaler's sharpening stops at 0.8
+                && self.scale.fsr.is_some();
+            // (RCAS: the slider's whole range onto 0..0.8 of AMD's lobe, `fsr1_rcas_strength`;
+            // a picture FSR does not draw - a mirror, vanilla FXAA - keeps the standard
+            // upscaler's own sharpening: the slider is RCAS's, and at its default the
+            // standard one's CAS ringed round the trees)
             let sharpen = if fsr {
-                self.options.fsr_sharpness.clamp(0.0, 1.0)
-            } else if fsr1_enabled {
-                self.options.fsr_sharpness.clamp(0.0, 0.8)
+                crate::fsr1_rcas_strength(self.options.fsr_sharpness)
             } else {
                 ((1.0 - width as f32 / full_w as f32) * 2.0).clamp(0.0, 0.8)
             };
@@ -214,7 +214,7 @@ impl Renderer {
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: self.format,
+                        format: self.scale.fsr.as_ref().map_or(self.format, |p| p.mid_format),
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                         view_formats: &[],
                     });
@@ -257,7 +257,8 @@ impl Renderer {
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
-                    pass.set_pipeline(self.scale.fsr_easu_pipeline.as_ref().expect("FSR1 EASU pipeline"));
+                    let p = self.scale.fsr.as_ref().expect("FSR1 pipelines");
+                    pass.set_pipeline(if intermediate.is_some() { &p.easu_mid } else { &p.easu });
                     pass.set_bind_group(0, bg, &[]);
                     pass.draw(0..3, 0..1);
                     if intermediate.is_none() {
@@ -282,7 +283,7 @@ impl Renderer {
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
-                    pass.set_pipeline(self.scale.fsr_rcas_pipeline.as_ref().expect("FSR1 RCAS pipeline"));
+                    pass.set_pipeline(&self.scale.fsr.as_ref().expect("FSR1 pipelines").rcas);
                     pass.set_bind_group(0, &intermediate.bind_group, &[]);
                     pass.draw(0..3, 0..1);
                     draw_overlays(&mut pass);

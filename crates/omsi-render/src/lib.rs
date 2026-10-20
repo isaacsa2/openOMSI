@@ -69,6 +69,13 @@ pub type MeshId = usize;
 pub type TextureId = usize;
 pub type MaterialId = usize;
 
+/// RCAS's strength for the FSR sharpening slider (0..1): its whole range onto 0..0.8 of AMD's
+/// lobe. Measured on a GCN card, AMD's strongest (1.0) grained the gauges and outlined the
+/// bus and the trees, 0.8 was as sharp as the standard upscaler and clean - so that is 100 %.
+pub(crate) fn fsr1_rcas_strength(slider: f32) -> f32 {
+    0.8 * slider.clamp(0.0, 1.0)
+}
+
 /// Optional FSR1 experiment from the environment (`OMSI_FSR1`), read once for the run (the
 /// setting itself can change while the game runs: `Renderer::set_upscaler`). The standard
 /// upscaler and all shader pipelines stay as-is when neither asks for it.
@@ -325,7 +332,7 @@ impl Default for RenderOptions {
             render_scale: 0.0,
             fsr1: false,
             xr_scale: 1.0,
-            fsr_sharpness: 0.3,
+            fsr_sharpness: 0.8,
             compress_textures: true,
             gpu_texture_compression: true,
             fxaa: true,
@@ -468,16 +475,13 @@ impl Renderer {
         self.options.fsr_sharpness = sharpness;
         self.options.render_scale = render_scale;
         let mut refused_now = false;
-        if fsr1 && self.scale.fsr_easu_pipeline.is_none() && !self.scale.fsr_refused {
+        if fsr1 && self.scale.fsr.is_none() && !self.scale.fsr_refused {
             match pipelines::upscale::build_fsr(&self.device, self.format, &self.scale.upscale_layout) {
-                Some((easu, rcas)) => {
-                    self.scale.fsr_easu_pipeline = Some(easu);
-                    self.scale.fsr_rcas_pipeline = Some(rcas);
-                }
+                Some(p) => self.scale.fsr = Some(p),
                 None => (self.scale.fsr_refused, refused_now) = (true, true),
             }
         }
-        self.options.fsr1 = fsr1 && self.scale.fsr_easu_pipeline.is_some();
+        self.options.fsr1 = fsr1 && self.scale.fsr.is_some();
         !refused_now
     }
 
@@ -488,7 +492,7 @@ impl Renderer {
     /// small and the runtime scales it, as before.
     pub fn start_xr(&mut self, eye_scale: f32) -> f32 {
         let eye_scale = eye_scale.clamp(0.5, 1.0);
-        let fsr = self.options.fsr1 && self.scale.fsr_easu_pipeline.is_some() && eye_scale < 0.999;
+        let fsr = self.options.fsr1 && self.scale.fsr.is_some() && eye_scale < 0.999;
         self.options.xr_scale = if fsr { eye_scale } else { 1.0 };
         if fsr { 1.0 } else { eye_scale }
     }
@@ -502,7 +506,7 @@ impl Renderer {
     /// FSR 1 upscales the window's picture now (asked for, built, and the picture drawn
     /// smaller than the window).
     pub fn fsr_active(&self, width: u32, height: u32) -> bool {
-        (self.options.fsr1 || fsr1_enabled()) && self.scale.fsr_easu_pipeline.is_some() && self.scene_size(width, height) != (width, height)
+        (self.options.fsr1 || fsr1_enabled()) && self.scale.fsr.is_some() && self.scene_size(width, height) != (width, height)
     }
 
     /// The size the 3D scene is drawn at for a window of this size.

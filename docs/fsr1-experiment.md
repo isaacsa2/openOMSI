@@ -14,7 +14,8 @@ FSR1 is **disabled by default**. Open **Settings > Graphics > Upscaling** in the
 - FSR is used for the window, for each panel of a triple screen, and in VR (below). The unchanged Catmull-Rom upscaler is used elsewhere (mirrors, offscreen pictures) and whenever FSR is off or nothing is scaled.
 - **VR:** without FSR the headset's image itself is made at the eye resolution (`vr_scale`, 65 % by default) and the runtime scales it. With FSR on when VR starts, the image is full-sized and each eye is drawn at the eye resolution and scaled up to it by FSR 1 - sharper at the same drawing cost, plus the two FSR passes per eye and a larger image for the runtime to show. Turned off during the VR session, the eyes stay at that size and the standard upscaler takes over. **Not tried on a headset yet**: the renderer's part is tested offscreen (`a_vr_eye_with_fsr1_is_drawn_smaller_and_scaled_up`).
 - **Mirrors** keep their own size: they are small (256 by default) and FSR would add two passes per mirror picture for little; their GPU time shows as `mirrors: mirror` in the measurements below, which decides whether that is worth trying.
-- RCAS sharpening is controlled by the FSR sharpening slider (defaults to 30%), over its whole range: 100% is AMD's strongest. It used to stop at 80%, the standard upscaler's limit (`fsr1_sharpening_uses_the_whole_slider`). Measured below, 100% is overdone (grain, dark outlines) and 30% too soft: see **Open questions**. At 0% RCAS would give its input back, so it is skipped: EASU draws the window's picture itself, one full-screen pass and its full-size intermediate fewer (`fsr1_without_sharpening_skips_rcas`). Only `FSR1 EASU` then shows in the pass times.
+- RCAS sharpening is controlled by the FSR sharpening slider (defaults to **80%**). Its whole range maps onto 0-0.8 of AMD's RCAS strength (`fsr1_rcas_strength`): measured below, AMD's strongest (1.0) was overdone - grain on the gauges, dark outlines - and 0.8 was as sharp as the standard upscaler and clean, so that is the slider's 100%; 30% of the old scale was too soft. *A `settings.cfg` saved with the old scale keeps its number, now 80% as strong: 0.3 there was too soft already, so raise it.* At 0% RCAS would give its input back, so it is skipped: EASU draws the window's picture itself, one full-screen pass and its full-size intermediate fewer (`fsr1_without_sharpening_skips_rcas`). Only `FSR1 EASU` then shows in the pass times.
+- A picture FSR does not draw (a mirror, vanilla FXAA, an offscreen view) keeps the standard upscaler's own sharpening; the slider is RCAS's only.
 - The `OMSI_FSR1=1` environment override still works for developer testing; with it the existing **Render scale** setting controls the internal resolution.
 
 ## Measuring it (send numbers, not impressions)
@@ -65,19 +66,30 @@ compare it between rows, not with the frame time.)
 - **Sharpening scale.** RCAS's strength grows steeply near the top (it divides by `1 + 4 * lobe`):
   on the strongest edges the centre is weighted ~1.3x at 30 %, ~2.5x at 80 %, ~4x at 100 %.
 
+### Since these measurements (to be measured again)
+
+- **Flat areas:** where the four texels round an output pixel differ by less than 1/1024 in every
+  channel (sky, road, walls), EASU's result - clamped to their range - can only be within that of
+  their bilinear mix, so that is drawn and the other eight taps (24 square roots) and the edge
+  analysis are skipped. On the test scene the picture is identical to the byte with and without it.
+- **RCAS's input:** EASU writes the intermediate in perceptual values, in `Rgb10a2Unorm` (32 bits a
+  pixel, as before), and RCAS reads it back without its 15 square roots a pixel. Against the old
+  sRGB intermediate, 99.8 % of the test picture's bytes are the same and the rest one step apart
+  (in eight bits the values were rounded twice, a step off on a third of the pixels).
+- The slider's new scale and its 80 % default (above).
+
 ### Open questions
 
-- The slider: map 0-100 % linearly onto today's 0-80 % (100 % = the strongest that looked
-  right), and pick the default by a test at 50 / 70 / 90 % on that scale - 30 % is too soft.
-- A cheaper EASU: read the scene through a non-sRGB view (no 36 square roots a pixel), size of
-  the texture read once; an early out to a bilinear tap on flat areas (sky, road) - leaves AMD's
-  reference, needs its own visual test.
+- The default: 80 % on the new scale - to be confirmed by a test at 60 / 80 / 100 %.
+- A non-sRGB view of the scene for EASU's twelve taps (no square roots at all) needs the scaled
+  scene made with that view allowed, which OpenGL cannot do: left for a measurement that says the
+  remaining square roots matter.
 - Measurements on a newer card: FSR's cost is fixed per output pixel, the scene's grows with
   resolution; the trade may differ there.
 
 ## Technical design
 
-- Source picture is tone mapped, then **EASU** writes into a cached full-sized color target.
+- Source picture is tone mapped, then **EASU** writes into a cached full-sized target (`Rgb10a2Unorm`, perceptual values), or straight into the window when RCAS is skipped.
 - Both passes work on a perceptual picture, as FSR 1 is made for: on an sRGB window format the texels read back linear, so they are taken to gamma 2.0 on the way in and back to linear on the way out (as AMD's sample does); on a format that is not sRGB the stored values are used as they are. Without it, EASU's edge test and RCAS's limits ran on linear light (more halos in the darks, uneven sharpening).
 - **RCAS** reads the cached target and writes the final window image.
 - HUD/overlay quads are drawn after RCAS at native resolution.

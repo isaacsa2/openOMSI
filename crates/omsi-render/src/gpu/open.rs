@@ -550,7 +550,7 @@ impl Renderer {
         let (overlay_pipeline_1x, xr_ui_pipeline) = overlays.single_sampled(&device, format);
         let upscale = upscale::build(&device, format, options.fsr1 || crate::fsr1_enabled());
         // (asked for at the start and refused: not tried again from the menu)
-        let fsr_refused = (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr_easu_pipeline.is_none();
+        let fsr_refused = (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr.is_none();
         let gpu_timers = [GpuTimers::new(&device), GpuTimers::new(&device)];
         // GLES cannot reliably read the depth buffer (the same limitation as SSAO).
         let puddles = (!gl && !passes.leave_out_enhanced).then(|| {
@@ -572,8 +572,7 @@ impl Renderer {
             },
             scale: Upscale {
                 upscale_pipeline: upscale.upscale_pipeline,
-                fsr_easu_pipeline: upscale.fsr_easu_pipeline,
-                fsr_rcas_pipeline: upscale.fsr_rcas_pipeline,
+                fsr: upscale.fsr,
                 fsr_target: std::cell::RefCell::new(Vec::new()),
                 fsr_refused,
                 copy_pipeline: upscale.copy_pipeline,

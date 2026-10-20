@@ -4,8 +4,7 @@ use super::common::*;
 
 pub(crate) struct Upscale {
     pub upscale_pipeline: wgpu::RenderPipeline,
-    pub fsr_easu_pipeline: Option<wgpu::RenderPipeline>,
-    pub fsr_rcas_pipeline: Option<wgpu::RenderPipeline>,
+    pub fsr: Option<Fsr1>,
     pub copy_pipeline: wgpu::RenderPipeline,
     pub panel_pipeline: wgpu::RenderPipeline,
     pub layout: wgpu::BindGroupLayout,
@@ -38,20 +37,30 @@ pub(crate) fn build(device: &wgpu::Device, format: wgpu::TextureFormat, use_fsr1
     let copy_pipeline = upscale_pipeline_for("fs_copy");
     // Keep the experimental shader off the default code path: some mobile/GL drivers
     // fail during shader compilation, even if a compiled pipeline is never drawn.
-    let (fsr_easu_pipeline, fsr_rcas_pipeline) = match use_fsr1.then(|| build_fsr(device, format, &upscale_layout)).flatten() {
-        Some((easu, rcas)) => (Some(easu), Some(rcas)),
-        None => (None, None),
-    };
+    let fsr = use_fsr1.then(|| build_fsr(device, format, &upscale_layout)).flatten();
     let panel_pipeline = upscale_pipeline_for("fs_panel");
     let upscale_buf = uniform_buffer(device, "upscale params", 16);
-    Upscale { upscale_pipeline, fsr_easu_pipeline, fsr_rcas_pipeline, copy_pipeline, panel_pipeline, layout: upscale_layout, buf: upscale_buf }
+    Upscale { upscale_pipeline, fsr, copy_pipeline, panel_pipeline, layout: upscale_layout, buf: upscale_buf }
 }
 
-/// FSR 1's two passes (EASU, RCAS) for pictures of `format`, built when the player first
-/// asks for them - at the start, or later from the menu. None when the driver refuses
-/// them (a validation error, caught here rather than losing the device): the standard
-/// upscaler stays, and the log says why.
-pub(crate) fn build_fsr(device: &wgpu::Device, format: wgpu::TextureFormat, layout: &wgpu::BindGroupLayout) -> Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)> {
+/// FSR 1's passes for pictures of `format`: EASU to the window (no sharpening), EASU into
+/// RCAS's intermediate, and RCAS.
+pub(crate) struct Fsr1 {
+    pub easu: wgpu::RenderPipeline,
+    pub easu_mid: wgpu::RenderPipeline,
+    pub rcas: wgpu::RenderPipeline,
+    /// The intermediate's format: EASU's perceptual values as they are (RCAS reads them back
+    /// without the square roots), in ten bits a channel - in eight they were rounded once
+    /// there and again into the window's sRGB, a step off on a third of the pixels; the same
+    /// 32 bits a pixel as the window's.
+    pub mid_format: wgpu::TextureFormat,
+}
+
+/// FSR 1's passes (`Fsr1`) for pictures of `format`, built when the player first asks for
+/// them - at the start, or later from the menu. None when the driver refuses them (a
+/// validation error, caught here rather than losing the device): the standard upscaler
+/// stays, and the log says why.
+pub(crate) fn build_fsr(device: &wgpu::Device, format: wgpu::TextureFormat, layout: &wgpu::BindGroupLayout) -> Option<Fsr1> {
     log::info!("renderer: compiling the FSR 1 shaders");
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -63,11 +72,11 @@ pub(crate) fn build_fsr(device: &wgpu::Device, format: wgpu::TextureFormat, layo
         label: Some("fsr1 EASU/RCAS"),
         source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source(format).into()),
     });
-    let targets = [target(format, None)];
-    let pass = |entry| no_vertex_pipeline("fsr1", &pl, &shader, entry, &targets).create(device);
-    let (easu, rcas) = (pass("fs_easu"), pass("fs_rcas"));
+    let mid_format = wgpu::TextureFormat::Rgb10a2Unorm;
+    let pass = |entry, f| no_vertex_pipeline("fsr1", &pl, &shader, entry, &[target(f, None)]).create(device);
+    let (easu, easu_mid, rcas) = (pass("fs_easu", format), pass("fs_easu_mid", mid_format), pass("fs_rcas", format));
     match pollster::block_on(scope.pop()) {
-        None => Some((easu, rcas)),
+        None => Some(Fsr1 { easu, easu_mid, rcas, mid_format }),
         Some(e) => {
             log::warn!("renderer: FSR 1 is not available on this driver, the standard upscaler stays: {e}");
             None

@@ -21,7 +21,7 @@ fn fsr1_menu_settings_round_trip_into_renderer() {
 
     // A corrupt or future setting must not enable experimental shaders.
     assert_eq!(Settings::from_text("upscaler=anything_else\\n").upscaler, "default");
-    assert_eq!(Settings::from_text("fsr_sharpness=nan\\n").fsr_sharpness, 0.3);
+    assert_eq!(Settings::from_text("fsr_sharpness=nan\\n").fsr_sharpness, 0.8);
 }
 
 #[test]

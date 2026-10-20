@@ -193,3 +193,46 @@ fn fsr1_sharpening_uses_the_whole_slider() {
     assert!(difference(&at80, &again80) < 0.01, "the same picture for the same setting");
     assert!(difference(&at80, &at100) > 0.01, "100 % is not held at 80 %: {}", difference(&at80, &at100));
 }
+
+
+/// The sharpening slider's whole range onto 0..0.8 of RCAS's lobe: 100 % is the strongest that
+/// looked clean (AMD's 1.0 grained the gauges), the ends hold and nothing goes past them.
+#[test]
+fn fsr1_sharpening_slider_maps_onto_the_clean_range() {
+    assert_eq!(crate::fsr1_rcas_strength(0.0), 0.0);
+    assert!((crate::fsr1_rcas_strength(1.0) - 0.8).abs() < 1e-6);
+    assert!((crate::fsr1_rcas_strength(0.5) - 0.4).abs() < 1e-6);
+    assert_eq!(crate::fsr1_rcas_strength(2.0), crate::fsr1_rcas_strength(1.0));
+    assert_eq!(crate::fsr1_rcas_strength(-1.0), 0.0);
+}
+
+/// FSR 1's three passes make GLSL (OpenGL 3.3, OpenGL ES 3.0) on both window formats: it is
+/// kept to `textureLoad` and plain arithmetic for the old GL drivers it is meant for.
+#[test]
+fn fsr1_translates_to_glsl() {
+    use wgpu::naga;
+    use wgpu::naga::back::glsl;
+    for format in [wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::TextureFormat::Rgba8Unorm] {
+        let src = crate::shaders::fsr1_source(format);
+        let module = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .expect("validate");
+        let names: Vec<&str> = module.entry_points.iter().map(|e| e.name.as_str()).collect();
+        for entry in ["vs_main", "fs_easu", "fs_easu_mid", "fs_rcas"] {
+            assert!(names.contains(&entry), "{entry} in {names:?}");
+        }
+        for version in [glsl::Version::Desktop(330), glsl::Version::Embedded { version: 300, is_webgl: false }] {
+            let options = glsl::Options { version, ..Default::default() };
+            for entry in &module.entry_points {
+                let (module, info) = naga::back::pipeline_constants::process_overrides(&module, &info, Some((entry.stage, &entry.name)), &Default::default())
+                    .expect("overrides");
+                let pipeline = glsl::PipelineOptions { shader_stage: entry.stage, entry_point: entry.name.clone(), multiview: None };
+                let mut out = String::new();
+                glsl::Writer::new(&mut out, &module, &info, &options, &pipeline, Default::default())
+                    .and_then(|mut w| w.write())
+                    .unwrap_or_else(|e| panic!("{format:?} {version:?} {}: {e:?}", entry.name));
+            }
+        }
+    }
+}
