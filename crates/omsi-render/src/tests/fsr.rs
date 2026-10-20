@@ -71,6 +71,7 @@ fn fsr1_turned_on_while_running_upscales_the_picture() {
     assert!(reds > 50, "{reds} red pixels");
     assert!(r.set_upscaler(false, 0.3, 0.5));
     assert!(!r.fsr_active(w, h));
+    assert!(r.scale.fsr_target.borrow().is_empty(), "turning FSR off releases its intermediate");
     let again = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
     assert!(difference(&standard, &again) < 0.01, "the standard picture back");
 }
@@ -174,6 +175,14 @@ fn fsr1_without_sharpening_skips_rcas() {
     assert!(r.set_upscaler(true, 1.0, 0.5));
     let sharp = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
     assert!(difference(&unsharpened, &sharp) > d, "sharpening still changes it");
+    assert!(r.set_upscaler(true, 0.0, 0.5));
+    assert!(r.scale.fsr_target.borrow().is_empty(), "zero sharpness releases the old intermediate");
+    let zero_again = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
+    assert!(difference(&unsharpened, &zero_again) < 0.01, "EASU still draws after releasing RCAS");
+    assert!(r.set_upscaler(true, 1.0, 0.5));
+    let sharp_again = r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap();
+    assert_eq!(r.scale.fsr_target.borrow().len(), 1, "RCAS recreates its intermediate");
+    assert!(difference(&sharp, &sharp_again) < 0.01, "sharpening survives recreation");
 }
 
 /// The FSR sharpening slider's whole range reaches RCAS: 100 % sharpens more than 80 %
