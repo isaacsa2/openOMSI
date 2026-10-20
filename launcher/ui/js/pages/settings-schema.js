@@ -433,7 +433,25 @@ const general = {
 /** Content test: no settings - the page draws the test itself (content-test.js). */
 const contentTest = { id: 'content', label: 'Content test', page: 'content', cols: [], when: (s, p) => !mobile(s, p) };
 
-export const SETTINGS_TABS = [graphics, driving, camera, sound, gameplay, general, contentTest];
+// Launcher accessibility is deliberately separate from graphics presets and settings.cfg.
+const accessibility = {
+  id: 'accessibility',
+  label: 'Accessibility',
+  cols: [
+    { title: 'Vision', rows: [
+      { type: 'note', text: 'These colours affect the launcher only, not bus textures or the 3D world.' },
+      { type: 'custom', id: 'vision' },
+      { type: 'custom', id: 'launcher_size' },
+      { type: 'note', text: 'The game interface has a separate size control under General.' },
+    ] },
+    { title: 'Keyboard & motion', rows: [
+      { type: 'custom', id: 'accessibility_motion' },
+      { type: 'note', text: 'Tab and Shift+Tab move between controls; Enter or Space activates buttons; Escape closes dialogs. Arrow keys navigate drop-downs.' },
+    ] },
+  ],
+};
+
+export const SETTINGS_TABS = [graphics, driving, camera, sound, gameplay, general, accessibility, contentTest];
 
 /** The settings a saved graphics profile holds (`GRAPHICS_PROFILE_KEYS`). */
 export const GRAPHICS_PROFILE_KEYS = [
