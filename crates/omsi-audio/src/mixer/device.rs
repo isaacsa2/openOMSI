@@ -87,8 +87,7 @@ fn run(open: mpsc::Receiver<()>, opened: mpsc::Sender<Option<String>>, shared: &
     drop(stream);
 }
 
-/// A stream on the system's default output device, mixing from `mixer`, with the device's
-/// name.
+/// A stream on the system's default output device, mixing from `mixer`, with the device's name.
 fn open_default(shared: &Arc<Shared>, mixer: &Arc<MixerCell>, reopen: &Arc<AtomicBool>) -> Option<(cpal::Stream, String)> {
     let host = cpal::default_host();
     let Some(dev) = host.default_output_device() else {
@@ -106,42 +105,124 @@ fn open_default(shared: &Arc<Shared>, mixer: &Arc<MixerCell>, reopen: &Arc<Atomi
     let (rate, ch) = (cfg.sample_rate().0, cfg.channels().max(1) as usize);
     shared.sample_rate.store(rate, Ordering::Relaxed);
     shared.channels.store(ch, Ordering::Relaxed);
+
+    // The callback must use the format selected by the output device. Some Windows and
+    // mobile devices default to 16-bit integer samples rather than floating point.
+    // Integer callbacks use a fixed stack buffer: no allocations or locks in the callback.
+    let config = cfg.config();
     let cell = mixer.clone();
     let lost = reopen.clone();
-    // (the echo's delay lines for this device's format, made here: the callback allocates
-    // nothing; the mixer's old ones are let go of with the stream)
     let mut spare = Reverb::ready(rate, ch);
-    let stream = dev.build_output_stream(
-        &cfg.config(),
-        move |data: &mut [f32], _| {
-            let mixed = cell.try_with(|m| {
-                m.adopt_reverb(&mut spare);
-                m.render(data)
-            });
-            if mixed.is_none() {
-                data.fill(0.0);
-            }
-        },
-        move |e| {
-            // (a lost device only: a driver's hiccups are not worth a new stream)
-            if matches!(e, cpal::StreamError::DeviceNotAvailable) {
-                lost.store(true, Ordering::Relaxed);
-            }
-            log::warn!("audio stream error: {e}");
-        },
-        None,
-    );
+    let stream = match cfg.sample_format() {
+        cpal::SampleFormat::F32 => dev.build_output_stream(
+            &config,
+            move |data: &mut [f32], _| {
+                if cell.try_with(|m| {
+                    m.adopt_reverb(&mut spare);
+                    m.render(data);
+                }).is_none() {
+                    data.fill(0.0);
+                }
+            },
+            move |e| report_device_error(&lost, e),
+            None,
+        ),
+        cpal::SampleFormat::I16 => dev.build_output_stream(
+            &config,
+            move |data: &mut [i16], _| {
+                render_converted(&cell, &mut spare, data, ch, 0, to_i16);
+            },
+            move |e| report_device_error(&lost, e),
+            None,
+        ),
+        cpal::SampleFormat::U16 => dev.build_output_stream(
+            &config,
+            move |data: &mut [u16], _| {
+                render_converted(&cell, &mut spare, data, ch, 32_768, to_u16);
+            },
+            move |e| report_device_error(&lost, e),
+            None,
+        ),
+        other => {
+            log::warn!("audio: unsupported output sample format on {name}: {other:?}");
+            return None;
+        }
+    };
     match stream {
         Ok(s) => {
             if let Err(e) = s.play() {
-                log::warn!("audio: cannot start stream: {e}");
+                log::warn!("audio: cannot start stream on {name}: {e}");
+                return None;
             }
-            log::info!("audio: playing on {name} ({} Hz, {} channels)", rate, cfg.channels());
+            log::info!(
+                "audio: playing on {name} ({} Hz, {} channels, {:?})",
+                rate, cfg.channels(), cfg.sample_format()
+            );
             Some((s, name))
         }
         Err(e) => {
             log::warn!("audio: cannot open stream on {name}: {e}");
             None
         }
+    }
+}
+
+fn report_device_error(reopen: &AtomicBool, e: cpal::StreamError) {
+    if matches!(e, cpal::StreamError::DeviceNotAvailable) {
+        reopen.store(true, Ordering::Relaxed);
+    }
+    log::warn!("audio stream error: {e}");
+}
+
+fn to_i16(x: f32) -> i16 {
+    (x.clamp(-1.0, 1.0) * 32768.0) as i16
+}
+
+fn to_u16(x: f32) -> u16 {
+    ((x.clamp(-1.0, 1.0) + 1.0) * 32767.5).round() as u16
+}
+
+/// Convert the mix into the device's integer format without allocating in the callback.
+fn render_converted<T: Copy>(
+    cell: &MixerCell,
+    spare: &mut Reverb,
+    data: &mut [T],
+    channels: usize,
+    silence: T,
+    convert: fn(f32) -> T,
+) {
+    const SCRATCH: usize = 4096;
+    // Keep every chunk aligned to complete frames, including devices with >2 channels.
+    let chunk_size = SCRATCH / channels.max(1) * channels.max(1);
+    if chunk_size == 0 {
+        data.fill(silence);
+        return;
+    }
+    if cell.try_with(|m| {
+        m.adopt_reverb(spare);
+        let mut scratch = [0.0f32; SCRATCH];
+        for chunk in data.chunks_mut(chunk_size) {
+            m.render(&mut scratch[..chunk.len()]);
+            for (out, sample) in chunk.iter_mut().zip(&scratch) {
+                *out = convert(*sample);
+            }
+        }
+    }).is_none() {
+        data.fill(silence);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{to_i16, to_u16};
+
+    #[test]
+    fn integer_formats_preserve_silence_and_extremes() {
+        assert_eq!(to_i16(-1.0), i16::MIN);
+        assert_eq!(to_i16(0.0), 0);
+        assert_eq!(to_i16(1.0), i16::MAX);
+        assert_eq!(to_u16(-1.0), 0);
+        assert_eq!(to_u16(0.0), 32_768);
+        assert_eq!(to_u16(1.0), u16::MAX);
     }
 }
