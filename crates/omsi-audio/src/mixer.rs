@@ -380,7 +380,9 @@ impl AudioEngine {
         let mut engine = AudioEngine::with_mixer(48_000, 2, muted(), false, false);
         let thread = device::DeviceThread::start(engine.shared.clone(), engine.mixer.clone(), engine.reopen.clone());
         let name = thread.as_ref().and_then(|t| t.open());
-        engine.enabled = name.is_some();
+        // Keep the mixer available if the device is missing at startup: follow_device
+        // can then retry after headphones, Bluetooth or the default output appear.
+        engine.enabled = thread.is_some();
         *engine.device.get_mut() = DeviceState {
             thread,
             playing: name.is_some(),
@@ -399,9 +401,17 @@ impl AudioEngine {
             return;
         }
         let mut d = self.device.lock();
-        if d.opened.elapsed().as_secs_f32() < 1.0 || !self.reopen.swap(false, Ordering::Relaxed) {
+        let elapsed = d.opened.elapsed();
+        if elapsed < std::time::Duration::from_secs(1) {
             return;
         }
+        // A device missing at launch (or one whose play() failed) must be retried.
+        // The watcher cannot detect a change when there was no first output device.
+        let changed = self.reopen.load(Ordering::Relaxed);
+        if !changed && (d.playing || elapsed < std::time::Duration::from_secs(2)) {
+            return;
+        }
+        self.reopen.store(false, Ordering::Relaxed);
         d.opened = std::time::Instant::now();
         let before = d.name.clone();
         match d.thread.as_ref().and_then(|t| t.open()) {
@@ -758,7 +768,7 @@ mod tests {
     #[test]
     fn follows_the_output_device() {
         let e = AudioEngine::new();
-        if !e.enabled {
+        if !e.device.lock().playing {
             return;
         }
         let before = e.device.lock().name.clone();
