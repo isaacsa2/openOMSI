@@ -310,9 +310,9 @@ function ThemeRow() {
 /** Colour-only launcher settings: do not touch game settings or vehicle assets. */
 const VISION_MODES = [
   ['default', 'Default colours'],
-  ['protan', 'Red-vision friendly'],
-  ['deutan', 'Green-vision friendly'],
-  ['tritan', 'Blue-yellow friendly'],
+  ['protan', 'Protanopia (red colour deficiency)'],
+  ['deutan', 'Deuteranopia (green colour deficiency)'],
+  ['tritan', 'Tritanopia (blue-yellow colour deficiency)'],
   ['mono', 'Monochrome'],
 ];
 
