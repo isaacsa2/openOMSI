@@ -88,7 +88,76 @@ a:hover { text-decoration: underline; }
 h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 p { margin: 0; }
 img { -webkit-user-drag: none; }
-:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* The active palette changes semantic UI colours, not in-game textures. Shape and
+   text still carry the meaning of every warning, selection and success state. */
+:root[data-vision="protan"] {
+  --accent: #ffd54f;
+  --accent-hover: #ffe082;
+  --accent-text: #1a1206;
+  --accent-soft: rgba(255, 213, 79, 0.18);
+  --ok: #4fc3f7;
+  --warn: #ffd54f;
+  --danger: #ce84d5;
+  --focus: #ffd54f;
+}
+:root[data-vision="deutan"] {
+  --accent: #7dd3fc;
+  --accent-hover: #bae6fd;
+  --accent-text: #082f49;
+  --accent-soft: rgba(125, 211, 252, 0.18);
+  --ok: #facc15;
+  --warn: #fbbf24;
+  --danger: #d8a0df;
+  --focus: #7dd3fc;
+}
+:root[data-vision="tritan"] {
+  --accent: #ffb870;
+  --accent-hover: #ffd1a0;
+  --accent-text: #201105;
+  --accent-soft: rgba(255, 184, 112, 0.18);
+  --ok: #7bd5c2;
+  --warn: #ffb870;
+  --danger: #ea8fb6;
+  --focus: #ffb870;
+}
+:root[data-vision="mono"] {
+  --accent: #eeeeee;
+  --accent-hover: #ffffff;
+  --accent-text: #101010;
+  --accent-soft: rgba(255, 255, 255, 0.2);
+  --ok: #eeeeee;
+  --warn: #bbbbbb;
+  --danger: #ffffff;
+  --focus: #ffffff;
+}
+/* High contrast is intentionally independent of the selected colour palette. */
+:root[data-high-contrast="true"] {
+  --bg: #000000;
+  --sidebar: #080808;
+  --surface: #101010;
+  --surface-2: #181818;
+  --surface-3: #262626;
+  --control-bg: #292929;
+  --line: #888888;
+  --line-strong: #dddddd;
+  --text: #ffffff;
+  --text-2: #f0f0f0;
+  --muted: #d4d4d4;
+  color-scheme: dark;
+}
+:root[data-high-contrast="true"] :focus-visible {
+  outline-width: 3px;
+  outline-style: solid;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+:root[data-reduced-motion="true"] *, :root[data-reduced-motion="true"] *::before, :root[data-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
 
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }

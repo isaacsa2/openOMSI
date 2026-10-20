@@ -181,6 +181,8 @@ const CUSTOM = {
   optimise: () => html`<${OptimiseBlock} />`,
   profiles: () => html`<${ProfilesBlock} />`,
   theme: () => html`<${ThemeRow} />`,
+  vision: () => html`<${VisionAccessibilityRow} />`,
+  accessibility_motion: () => html`<${MotionAccessibilityRow} />`,
   launcher_layout: () => !onPhone && html`<${LauncherLayoutRow} />`,
   launcher_size: () => inTauri && html`<${LauncherSizeRow} />`,
   corner: () => html`<${CornerRow} />`,
@@ -303,6 +305,49 @@ function ThemeRow() {
       }
     }} />
   </div>`;
+}
+
+/** Colour-only launcher settings: do not touch game settings or vehicle assets. */
+const VISION_MODES = [
+  ['default', 'Default colours'],
+  ['protan', 'Protanopia (red colour deficiency)'],
+  ['deutan', 'Deuteranopia (green colour deficiency)'],
+  ['tritan', 'Tritanopia (blue-yellow colour deficiency)'],
+  ['mono', 'Monochrome'],
+];
+
+function VisionAccessibilityRow() {
+  const [vision, setVision] = useState(() => remembered('accessibility_vision', 'default'));
+  const [contrast, setContrast] = useState(() => remembered('accessibility_contrast', 'false') === 'true');
+  const chooseVision = (next) => {
+    setVision(next);
+    remember('accessibility_vision', next);
+    applyTheme();
+  };
+  const chooseContrast = (next) => {
+    setContrast(next);
+    remember('accessibility_contrast', String(next));
+    applyTheme();
+  };
+  return html`<div class="stack">
+    <div class="setting-row"><${Name} label="Colour palette" />
+      <${Select} value=${vision} options=${VISION_MODES} onChange=${chooseVision} />
+    </div>
+    <div class="setting-row full"><${Toggle} checked=${contrast} onChange=${chooseContrast}
+      label="High contrast" help="Use stronger text, borders and focus indicators" /></div>
+    <p class="muted small">Icons and labels remain visible: status must not depend on colour alone.</p>
+  </div>`;
+}
+
+function MotionAccessibilityRow() {
+  const [reduced, setReduced] = useState(() => remembered('accessibility_motion', 'false') === 'true');
+  return html`<div class="setting-row full"><${Toggle} checked=${reduced}
+    label="Reduce launcher animations" help="Disable nonessential transitions and animations"
+    onChange=${(next) => {
+      setReduced(next);
+      remember('accessibility_motion', String(next));
+      applyTheme();
+    }} /></div>`;
 }
 
 function LauncherLayoutRow() {
