@@ -10,7 +10,8 @@ export { html };
 
 export function Button({ kind = '', icon, children, label, onClick, disabled, title, type = 'button', big, wide, small }) {
   const cls = ['btn', kind, big && 'big', wide && 'wide', small && 'small', icon && !children && !label && 'icon'].filter(Boolean).join(' ');
-  return html`<button type=${type} class=${cls} onClick=${onClick} disabled=${disabled} title=${title ? t(title) : undefined}>
+  return html`<button type=${type} class=${cls} onClick=${onClick} disabled=${disabled} title=${title ? t(title) : undefined}
+    aria-label=${!label && !children ? t(title || icon || 'Button') : undefined}>
     ${icon && html`<${Icon} name=${icon} />`}${label ? t(label) : children}
   </button>`;
 }
@@ -143,7 +144,19 @@ export function Segmented({ value, options, onChange, full }) {
 }
 
 export function Tabs({ value, options, onChange }) {
-  return html`<div class="tabs">${options.map(([v, l]) => html`<button class=${v === value ? 'on' : ''} onClick=${() => onChange(v)}>${t(l)}</button>`)}</div>`;
+  const key = (event, index) => {
+    const k = event.key;
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(k)) return;
+    event.preventDefault();
+    const next = k === 'Home' ? 0 : k === 'End' ? options.length - 1
+      : (index + (k === 'ArrowRight' ? 1 : -1) + options.length) % options.length;
+    onChange(options[next][0]);
+    event.currentTarget.parentElement?.querySelectorAll('[role="tab"]')[next]?.focus();
+  };
+  return html`<div class="tabs" role="tablist">${options.map(([v, l], i) => html`<button type="button" role="tab"
+    aria-selected=${v === value} tabIndex=${v === value ? 0 : -1}
+    class=${v === value ? 'on' : ''} onClick=${() => onChange(v)}
+    onKeyDown=${(e) => key(e, i)}>${t(l)}</button>`)}</div>`;
 }
 
 /** A slider; `format` turns the value into what is shown beside the label. */
@@ -175,16 +188,49 @@ export function Tag({ kind = '', children }) {
   return html`<span class=${'tag ' + kind}>${children}</span>`;
 }
 
-/** A dialog over the page; Escape and a click beside it close it. */
+/** Modal focus stays inside; Escape closes the topmost dialog and restores prior focus. */
 export function Dialog({ title, onClose, children, footer, wide, class: cls = '' }) {
   const box = useRef();
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const k = (e) => e.key === 'Escape' && [...document.querySelectorAll('.overlay')].pop() === box.current && onClose?.();
+    const previous = document.activeElement;
+    const root = box.current;
+    const available = () => [...(root?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+      .filter((el) => el.getClientRects().length > 0);
+    // A child with an autofocus search field should keep it; otherwise focus the first control.
+    if (!root.contains(document.activeElement)) (available()[0] || root.querySelector('.dialog'))?.focus();
+    const k = (e) => {
+      if ([...document.querySelectorAll('.overlay')].at(-1) !== root) return;
+      if (e.key === 'Escape' && close.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        close.current();
+      } else if (e.key === 'Tab') {
+        const focus = available();
+        if (!focus.length) {
+          e.preventDefault();
+          root.querySelector('.dialog')?.focus();
+        } else {
+          const first = focus[0], last = focus[focus.length - 1];
+          if (e.shiftKey && (document.activeElement === first || !root.contains(document.activeElement))) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && (document.activeElement === last || !root.contains(document.activeElement))) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
     window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener('keydown', k);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
   return html`<div class="overlay" ref=${box} onMouseDown=${(e) => e.target === e.currentTarget && onClose?.()}>
-    <div class=${'dialog' + (wide ? ' wide' : '') + (cls ? ' ' + cls : '')} role="dialog">
+    <div class=${'dialog' + (wide ? ' wide' : '') + (cls ? ' ' + cls : '')} role="dialog" aria-modal="true" aria-label=${t(title)} tabIndex="-1">
       <div class="dialog-head"><h2>${t(title)}</h2>${onClose && html`<${Button} kind="ghost" icon="x" title="Close" onClick=${onClose} />`}</div>
       <div class="dialog-body">${children}</div>
       ${footer && html`<div class="dialog-foot">${footer}</div>`}
@@ -215,5 +261,5 @@ export function Picture({ src, icon = 'map', class: cls = '', children, style = 
 }
 
 export function PageHead({ title, text, actions }) {
-  return html`<header class="page-head"><div><h1>${t(title)}</h1>${text && html`<p>${t(text)}</p>`}</div>${actions && html`<div class="actions">${actions}</div>`}</header>`;
+  return html`<header class="page-head"><div><h1 tabIndex="-1">${t(title)}</h1>${text && html`<p>${t(text)}</p>`}</div>${actions && html`<div class="actions">${actions}</div>`}</header>`;
 }
