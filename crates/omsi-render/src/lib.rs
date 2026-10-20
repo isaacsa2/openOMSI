@@ -482,6 +482,11 @@ impl Renderer {
             }
         }
         self.options.fsr1 = fsr1 && self.scale.fsr.is_some();
+        // Keep compiled pipelines for quick toggles, but release full-resolution images
+        // while neither RCAS nor FSR needs them. They are recreated on the next draw.
+        if (!self.options.fsr1 && !fsr1_enabled()) || fsr1_rcas_strength(sharpness) == 0.0 {
+            self.scale.fsr_target.get_mut().clear();
+        }
         !refused_now
     }
 
