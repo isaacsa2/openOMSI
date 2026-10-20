@@ -48,14 +48,17 @@ fn with_vehicle(w: vec3<f32>) -> vec3<f32> {
     let d = w - p.vehicle_now.xyz;
     let c = cos(p.vehicle_now.w);
     let s = sin(p.vehicle_now.w);
-    // into the vehicle's frame
-    let local = vec3<f32>(d.x * c + d.y * s, -d.x * s + d.y * c, d.z);
+    // into the vehicle's frame - as `point_in_vehicle_box` and the rain's `in_box` turn it (the
+    // ray tracer's old history turned it the other way: right at a heading of 0 only, and a
+    // bus's front, metres from its origin, fell outside its box at most others)
+    let local = vec3<f32>(d.x * c - d.y * s, d.x * s + d.y * c, d.z);
     if (any(abs(local - p.vehicle_centre.xyz) > p.vehicle_box.xyz + vec3<f32>(0.3))) {
         return w;
     }
+    // ... and back out of it where the vehicle was
     let c2 = cos(p.vehicle_prev.w);
     let s2 = sin(p.vehicle_prev.w);
-    return p.vehicle_prev.xyz + vec3<f32>(local.x * c2 - local.y * s2, local.x * s2 + local.y * c2, local.z);
+    return p.vehicle_prev.xyz + vec3<f32>(local.x * c2 + local.y * s2, -local.x * s2 + local.y * c2, local.z);
 }
 
 // The motion of the pixel at `px`: last frame's UV minus this frame's (FSR 2's convention).

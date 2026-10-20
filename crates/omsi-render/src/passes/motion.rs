@@ -46,6 +46,8 @@ pub(crate) struct MotionVectors {
     pub(crate) target: Option<MotionTarget>,
     /// Last frame's view-projection, render origin and player vehicle (origin, heading deg).
     prev: Option<(Mat4, DVec3, Option<(DVec3, f64)>)>,
+    /// Why the last frame had none (logged when it changes): "" while they are drawn.
+    skipped: &'static str,
 }
 
 impl MotionVectors {
@@ -78,7 +80,7 @@ impl MotionVectors {
             no_vertex_pipeline("motion vectors debug", &pl("motion vectors debug", &debug_layout), &shader, "fs_debug", &[target(format, Some(wgpu::BlendState::ALPHA_BLENDING))]).create(device)
         });
         let params = uniform_buffer(device, "motion vectors", std::mem::size_of::<MotionParams>() as u64);
-        MotionVectors { pipeline, layout, debug_pipeline, debug_layout, params, target: None, prev: None }
+        MotionVectors { pipeline, layout, debug_pipeline, debug_layout, params, target: None, prev: None, skipped: "" }
     }
 
     /// The vectors' texture for pictures of `size` (made again when the size changes).
@@ -124,10 +126,28 @@ impl Renderer {
         }
         let depth = self.targets.ao.as_ref().filter(|a| a.size == (f.width, f.height)).map(|a| a.depth_view.clone());
         let Some(depth) = depth.filter(|_| self.shares_prepass_depth(f, plan)) else {
-            // (no readable depth this frame: the next one starts afresh)
-            self.motion.as_mut().expect("motion vectors").reset();
+            // (no readable depth this frame: the next one starts afresh; and the log says why)
+            let why = if self.options.msaa > 1 {
+                "MSAA is on (turn it off)"
+            } else if f.puddles_wanted {
+                "puddles are in the picture"
+            } else if plan.has_presurface {
+                "a presurface (an excavation) is in the picture"
+            } else {
+                "there is no depth prepass"
+            };
+            let m = self.motion.as_mut().expect("motion vectors");
+            if m.skipped != why {
+                log::info!("motion vectors: none while {why}");
+                m.skipped = why;
+            }
+            m.reset();
             return;
         };
+        if let Some(m) = self.motion.as_mut().filter(|m| !m.skipped.is_empty() || m.prev.is_none() && m.target.is_none()) {
+            log::info!("motion vectors: drawn ({}x{})", f.width, f.height);
+            m.skipped = "";
+        }
         let (w, h) = (f.width, f.height);
         let ro = f.ro;
         let m = self.motion.as_mut().expect("motion vectors");

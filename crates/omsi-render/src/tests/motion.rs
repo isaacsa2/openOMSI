@@ -178,6 +178,46 @@ fn the_cab_moves_with_the_vehicle() {
 }
 
 
+/// The same at a heading the bus box turns with (133 deg, as in the game where the cab came out
+/// moving): the eye and the dashboard at the bus's front, 5 m from its origin, the bus driving
+/// on. Turned the wrong way, the box left the front outside it and the cab came out moving.
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn the_cab_moves_with_a_turned_vehicle() {
+    let (w, h) = (192, 128);
+    let mut r = renderer();
+    let mut scene = r.new_scene();
+    road(&mut r, &mut scene);
+    let heading = 133.0f64;
+    let forward = DVec3::new(heading.to_radians().sin(), heading.to_radians().cos(), 0.0);
+    let (eye, step) = (forward * 5.0, forward * 1.5);
+    // (the bus's own frame takes local +y to `forward`: the eye is 5 m ahead of its origin)
+    assert!(point_in_vehicle_box(eye + DVec3::new(0.0, 0.0, 2.5), &(DVec3::ZERO, heading, [2.5, 12.0, 3.5, 0.0, 0.0, 1.75])));
+    let panel = r.add_mesh(&mut scene, &quad([Vec3::new(-0.4, 1.2, 1.9), Vec3::new(0.4, 1.2, 1.9), Vec3::new(0.4, 1.2, 2.2), Vec3::new(-0.4, 1.2, 2.2)], -Vec3::Y));
+    let yellow = r.add_material(&mut scene, None, AlphaMode::Opaque, [1.0, 1.0, 0.0, 1.0], true);
+    let dash = r.add_instance(&mut scene, panel, eye, Mat4::IDENTITY, vec![yellow]);
+    let bus = |o: DVec3| Lighting { inside: Some((o, heading, [2.5, 12.0, 3.5, 0.0, 0.0, 1.75])), ..light() };
+    r.render_to_image(&mut scene, w, h, &camera(eye.x, eye.y, 0.0), &bus(DVec3::ZERO)).unwrap();
+    r.set_transform(&mut scene, dash, eye + step, Mat4::IDENTITY);
+    let after = r.render_to_image(&mut scene, w, h, &camera(eye.x + step.x, eye.y + step.y, 0.0), &bus(step)).unwrap();
+    let (_, _, mv) = r.read_motion().expect("motion vectors drawn");
+    let (mut cab, mut still) = (0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            let p = &after[((y * w + x) * 4) as usize..];
+            if p[0] > 150 && p[1] > 150 && p[2] < 80 {
+                cab += 1;
+                let m = mv[(y * w + x) as usize];
+                if m[0].abs() * (w as f32) < 0.25 && m[1].abs() * (h as f32) < 0.25 {
+                    still += 1;
+                }
+            }
+        }
+    }
+    assert!(cab > 100, "{cab} dashboard pixels");
+    assert_eq!(still, cab, "the dashboard stays where it was on the screen");
+}
+
 /// The motion vectors' shader validates and makes GLSL (OpenGL 3.3, OpenGL ES 3.0): the depth
 /// is read as a plain float texture, which GLSL takes (a depth texture's load it does not).
 #[test]
