@@ -23,12 +23,27 @@ function takeBus(file) {
 }
 
 const press = (fn) => ({
+  role: 'button',
   tabIndex: 0,
   onClick: fn,
   onKeyDown: (e) => {
-    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
-    e.preventDefault();
-    fn();
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fn();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      // Roving keyboard focus in the bus list; do not capture the arrows elsewhere.
+      const root = e.currentTarget.closest('.bus-list');
+      if (!root) return;
+      const rows = [...root.querySelectorAll('.bus-row[role="button"]')]
+        .filter((el) => el.getClientRects().length > 0);
+      const at = rows.indexOf(e.currentTarget);
+      const next = at + (e.key === 'ArrowDown' ? 1 : -1);
+      if (rows[next]) {
+        e.preventDefault();
+        rows[next].focus();
+      }
+    }
   },
 });
 
