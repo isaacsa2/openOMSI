@@ -121,6 +121,10 @@ pub struct Lighting {
     /// The player's vehicle (origin, heading in degrees, `[boundingbox]` w l h cx cy cz):
     /// no rain sheen or snow cover is shaded inside it.
     pub inside: Option<(DVec3, f64, [f32; 6])>,
+    /// The player's vehicle's body as it is drawn: its position and its rotation (model frame
+    /// to the world, its pitch and bank on the springs included). The motion vectors carry its
+    /// cab with it - by the heading alone the cab came out moving at every start and turn.
+    pub inside_body: Option<(DVec3, Mat4)>,
     /// Actual road height beneath the player's vehicle; independent of suspension motion.
     /// The local puddle capture is skipped when no road height is known.
     pub puddle_ground: Option<f64>,
@@ -255,6 +259,7 @@ impl Default for Lighting {
             enhanced: false,
             classic: false,
             inside: None,
+            inside_body: None,
             puddle_ground: None,
             puddle_normal: Vec3::Z,
             puddle_parts: Vec::new(),

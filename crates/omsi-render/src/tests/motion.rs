@@ -53,6 +53,13 @@ fn light() -> Lighting {
     Lighting { shadows: false, fog_density: 0.0, ..Default::default() }
 }
 
+/// The player's bus (2.5 x 12 x 3.5 m) with its origin at `o` turned to `heading` (deg), its
+/// body turned as `omsi-sim`'s `body_rotation` does (and pitched and banked by `tilt`, rad).
+fn bus_at(o: DVec3, heading: f64, tilt: (f32, f32)) -> Lighting {
+    let rot = Mat4::from_rotation_z((-heading).to_radians() as f32) * Mat4::from_rotation_x(tilt.0) * Mat4::from_rotation_y(tilt.1);
+    Lighting { inside: Some((o, heading, [2.5, 12.0, 3.5, 0.0, 0.0, 1.75])), inside_body: Some((o, rot)), ..light() }
+}
+
 fn red(img: &[u8], w: u32, x: u32, y: u32) -> bool {
     let p = &img[((y * w + x) * 4) as usize..];
     p[0] > 120 && p[1] < 70 && p[2] < 70
@@ -143,7 +150,7 @@ fn the_cab_moves_with_the_vehicle() {
     let yellow = r.add_material(&mut scene, None, AlphaMode::Opaque, [1.0, 1.0, 0.0, 1.0], true);
     let dash = r.add_instance(&mut scene, panel, DVec3::ZERO, Mat4::IDENTITY, vec![yellow]);
     // a bus 2.5 x 12 x 3.5 m, its origin under the eye
-    let bus = |y: f64| Lighting { inside: Some((DVec3::new(0.0, y, 0.0), 0.0, [2.5, 12.0, 3.5, 0.0, 0.0, 1.75])), ..light() };
+    let bus = |y: f64| bus_at(DVec3::new(0.0, y, 0.0), 0.0, (0.0, 0.0));
     r.render_to_image(&mut scene, w, h, &camera(0.0, 0.0, 0.0), &bus(0.0)).unwrap();
     r.set_transform(&mut scene, dash, DVec3::new(0.0, 1.5, 0.0), Mat4::IDENTITY);
     let after = r.render_to_image(&mut scene, w, h, &camera(0.0, 1.5, 0.0), &bus(1.5)).unwrap();
@@ -196,7 +203,7 @@ fn the_cab_moves_with_a_turned_vehicle() {
     let panel = r.add_mesh(&mut scene, &quad([Vec3::new(-0.4, 1.2, 1.9), Vec3::new(0.4, 1.2, 1.9), Vec3::new(0.4, 1.2, 2.2), Vec3::new(-0.4, 1.2, 2.2)], -Vec3::Y));
     let yellow = r.add_material(&mut scene, None, AlphaMode::Opaque, [1.0, 1.0, 0.0, 1.0], true);
     let dash = r.add_instance(&mut scene, panel, eye, Mat4::IDENTITY, vec![yellow]);
-    let bus = |o: DVec3| Lighting { inside: Some((o, heading, [2.5, 12.0, 3.5, 0.0, 0.0, 1.75])), ..light() };
+    let bus = |o: DVec3| bus_at(o, heading, (0.0, 0.0));
     r.render_to_image(&mut scene, w, h, &camera(eye.x, eye.y, 0.0), &bus(DVec3::ZERO)).unwrap();
     r.set_transform(&mut scene, dash, eye + step, Mat4::IDENTITY);
     let after = r.render_to_image(&mut scene, w, h, &camera(eye.x + step.x, eye.y + step.y, 0.0), &bus(step)).unwrap();
@@ -216,6 +223,52 @@ fn the_cab_moves_with_a_turned_vehicle() {
     }
     assert!(cab > 100, "{cab} dashboard pixels");
     assert_eq!(still, cab, "the dashboard stays where it was on the screen");
+}
+
+/// The body pitching back on its springs as the bus pulls away and banking in a turn, the
+/// camera held still: a thin bar on the dashboard, followed back along its vectors, lands on
+/// the bar where the pitched body had it before (within a pixel) - carried by the heading
+/// alone, the cab came out moving at every start and turn - and staying put would miss.
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn the_cab_pitches_and_banks_with_the_body() {
+    let (w, h) = (192, 128);
+    let mut r = renderer();
+    let mut scene = r.new_scene();
+    road(&mut r, &mut scene);
+    let bar = r.add_mesh(&mut scene, &quad([Vec3::new(-0.5, 1.2, 2.0), Vec3::new(0.5, 1.2, 2.0), Vec3::new(0.5, 1.2, 2.03), Vec3::new(-0.5, 1.2, 2.03)], -Vec3::Y));
+    let yellow = r.add_material(&mut scene, None, AlphaMode::Opaque, [1.0, 1.0, 0.0, 1.0], true);
+    let dash = r.add_instance(&mut scene, bar, DVec3::ZERO, Mat4::IDENTITY, vec![yellow]);
+    let before = r.render_to_image(&mut scene, w, h, &camera(0.0, 0.0, 0.0), &bus_at(DVec3::ZERO, 0.0, (0.0, 0.0))).unwrap();
+    let tilt = (6f32.to_radians(), 3f32.to_radians());
+    let rot = Mat4::from_rotation_x(tilt.0) * Mat4::from_rotation_y(tilt.1);
+    r.set_transform(&mut scene, dash, DVec3::ZERO, rot);
+    let after = r.render_to_image(&mut scene, w, h, &camera(0.0, 0.0, 0.0), &bus_at(DVec3::ZERO, 0.0, tilt)).unwrap();
+    let (_, _, mv) = r.read_motion().expect("motion vectors drawn");
+    let yellow_at = |img: &[u8], x: i64, y: i64| x >= 0 && y >= 0 && x < w as i64 && y < h as i64 && {
+        let p = &img[((y as u32 * w + x as u32) * 4) as usize..];
+        p[0] > 150 && p[1] > 150 && p[2] < 80
+    };
+    let near_bar = |x: f32, y: f32| (-1..=1).any(|dy| (-1..=1).any(|dx| yellow_at(&before, x.floor() as i64 + dx, y.floor() as i64 + dy)));
+    let (mut bar_px, mut back, mut stayed) = (0, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if !yellow_at(&after, x as i64, y as i64) {
+                continue;
+            }
+            bar_px += 1;
+            let m = mv[(y * w + x) as usize];
+            if near_bar(x as f32 + 0.5 + m[0] * w as f32, y as f32 + 0.5 + m[1] * h as f32) {
+                back += 1;
+            }
+            if near_bar(x as f32 + 0.5, y as f32 + 0.5) {
+                stayed += 1;
+            }
+        }
+    }
+    assert!(bar_px > 40, "{bar_px} bar pixels");
+    assert!(back * 100 > bar_px * 99, "{back} of {bar_px} bar pixels led back onto the bar");
+    assert!(stayed * 100 < bar_px * 60, "without the vectors {stayed} of {bar_px} would have: the test tells");
 }
 
 /// The motion vectors' shader validates and makes GLSL (OpenGL 3.3, OpenGL ES 3.0): the depth

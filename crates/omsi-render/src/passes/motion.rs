@@ -20,8 +20,8 @@ struct MotionParams {
     inv_view_proj: [[f32; 4]; 4],
     prev_view_proj: [[f32; 4]; 4],
     size: [f32; 4],
-    vehicle_now: [f32; 4],
-    vehicle_prev: [f32; 4],
+    to_body: [[f32; 4]; 4],
+    from_body_prev: [[f32; 4]; 4],
     vehicle_box: [f32; 4],
     vehicle_centre: [f32; 4],
     flags: [f32; 4],
@@ -44,8 +44,9 @@ pub(crate) struct MotionVectors {
     debug_layout: wgpu::BindGroupLayout,
     params: wgpu::Buffer,
     pub(crate) target: Option<MotionTarget>,
-    /// Last frame's view-projection, render origin and player vehicle (origin, heading deg).
-    prev: Option<(Mat4, DVec3, Option<(DVec3, f64)>)>,
+    /// Last frame's view-projection, render origin and player vehicle's body (position,
+    /// rotation).
+    prev: Option<(Mat4, DVec3, Option<(DVec3, Mat4)>)>,
     /// Why the last frame had none (logged when it changes): "" while they are drawn.
     skipped: &'static str,
 }
@@ -151,34 +152,35 @@ impl Renderer {
         let (w, h) = (f.width, f.height);
         let ro = f.ro;
         let m = self.motion.as_mut().expect("motion vectors");
-        // (a long frame or none before: no motion taken from it)
+        // (no frame before: no motion; a slow one still reprojects as well as any other)
         let (prev_vp, known) = match m.prev {
-            Some((vp, prev_ro, _)) if f.dt < 0.5 => (vp * Mat4::from_translation((ro - prev_ro).as_vec3()), true),
+            Some((vp, prev_ro, _)) => (vp * Mat4::from_translation((ro - prev_ro).as_vec3()), true),
             _ => (view_proj, false),
         };
-        let vrel = |o: DVec3| (o - ro).as_vec3();
-        let (vehicle_now, vehicle_prev, vehicle_box, vehicle_centre) = match (f.lighting.inside, m.prev.and_then(|p| p.2)) {
-            (Some((o, hdg, bb)), Some((po, ph))) => (
-                vrel(o).extend((hdg as f32).to_radians()).to_array(),
-                vrel(po).extend((ph as f32).to_radians()).to_array(),
+        // (the body's transforms in this frame's render-origin coordinates)
+        let body = |(o, rot): (DVec3, Mat4)| Mat4::from_translation((o - ro).as_vec3()) * rot;
+        let (to_body, from_body_prev, vehicle_box, vehicle_centre) = match (f.lighting.inside, f.lighting.inside_body, m.prev.and_then(|p| p.2)) {
+            (Some((_, _, bb)), Some(now), Some(before)) => (
+                body(now).inverse(),
+                body(before),
                 [bb[0] * 0.5, bb[1] * 0.5, bb[2] * 0.5, 1.0],
                 [bb[3], bb[4], bb[5], 0.0],
             ),
-            _ => ([0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]),
+            _ => (Mat4::IDENTITY, Mat4::IDENTITY, [0.0; 4], [0.0; 4]),
         };
         let debug_px = omsi_cfg::flags::OMSI_DEBUG_MOTION.parse::<f32>().filter(|v| *v > 0.0).unwrap_or(8.0);
         let params = MotionParams {
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
             prev_view_proj: prev_vp.to_cols_array_2d(),
             size: [w as f32, h as f32, 1.0 / w.max(1) as f32, 1.0 / h.max(1) as f32],
-            vehicle_now,
-            vehicle_prev,
+            to_body: to_body.to_cols_array_2d(),
+            from_body_prev: from_body_prev.to_cols_array_2d(),
             vehicle_box,
             vehicle_centre,
             flags: [known as u8 as f32, debug_px, 0.0, 0.0],
         };
         self.queue.write_buffer(&m.params, 0, bytemuck::bytes_of(&params));
-        m.prev = Some((view_proj, ro, f.lighting.inside.map(|(o, h, _)| (o, h))));
+        m.prev = Some((view_proj, ro, f.lighting.inside_body));
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("motion vectors"),
             layout: &m.layout,
