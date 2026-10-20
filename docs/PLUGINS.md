@@ -1,6 +1,6 @@
 # Plugins
 
-openOMSI runs two kinds of plugins from the `plugins` folder of the game (and of every
+openOMSI runs three kinds of plugins from the `plugins` folder of the game (and of every
 content root):
 
 * **Lua plugins** (`.lua`) - a text file, no compiler, works the same on Windows, macOS,
@@ -14,7 +14,7 @@ content root):
   run in a sandbox with only the permissions it declares (see
   [below](#compiled-plugins-oop)).
 * **OMSI plugins** (`.opl` + DLL) - the original's plugins, unchanged (see
-  [below](#omsi-plugins-plugins-opl-dll)).
+  [below](#omsi-plugins-pluginsopl--dll)).
 
 The plugin API is one registry in the game (`crates/omsi-plugin/src/api`): every function
 and event is described there once, and the [reference](#reference) at the end of this page
@@ -266,7 +266,8 @@ end)
   when none is for their age, the change is refused).
 * A voice line the passenger's voice folder does not have falls back to `Ticket_<n>_<k>`.
 * `omsi.people.get(id)` shows the passenger's ticket now and which plugin changed it
-  (`ticket_by`). Without a plugin listening the passengers do as before, and nobody waits.
+  (`ticket_by`). Without a plugin listening the passengers ask for what the ticket pack
+  gives them, and nobody waits.
 
 [`reduced_tickets.lua`](examples/plugins/reduced_tickets.lua) has every adult ask for the
 reduced fare of the stock Berlin ticket packs; [`passenger_log.lua`](examples/plugins/passenger_log.lua)
@@ -608,7 +609,7 @@ declared to call the function (a plain `.lua` file has them all).
 | `omsi.people.get(id)` | table or nil | One person by id, as `people.list` gives them, and more: `stop_name` (the timetable's name of the stop they wait or waited at), `ticket` (the name of the ticket they ask for), `ticket_kind` (`"none"`, `"stamp"`, `"buy"`), `ticket_index` (the ticket pack's, from 1; 0 none), `ticket_price`, `ticket_voice`, `ticket_by` (the plugin that changed it), `ticket_asked` (asked for at the cash desk already), `tag` (`people.set_ticket`'s), `age`, `model` (the `.hum` file), `voice` (its voice folder). `people.list` gives the same fields. | 0.3 |
 | `omsi.people.list([radius])` | list of tables | The people (within `radius` m of the player's bus, when given): `{id, x, y, z, state, aboard, ai_bus, stop, destination, ticket, complaint}`. `state`: `"strolling"`, `"idle"`, `"standing"`, `"waiting"`, `"to_bus"`, `"boarding"`, `"riding"`, `"seated"`, `"leaving"`, `"to_stop"`; `aboard` in the player's bus; `complaint` 0 to 3 (3: they leave); and the fields `people.get` describes. | 0.2.22 |
 | `omsi.people.set_density(value)` | boolean | Changes the people setting (0 to 3). *Permission: `traffic_write`.* | 0.2.22 |
-| `omsi.people.set_ticket(id, ticket)` | true, or false and the reason | Changes the ticket of a passenger boarding the player's bus (the `passenger_ticket` event names them): `{kind, ticket, name, price, voice, tag}`, each optional. `kind` (`"none"`: a pass, `"stamp"`, `"buy"`) only until they are in the bus; `ticket` another ticket of the pack (from 1, its name and price with it; a buyer always has one: 0 is refused for them, and somebody made a buyer without `ticket` gets the pack's ticket for their age), `name` and `price` what they ask for and pay, `voice` a line of their voice folder said instead of `Ticket_<n>_<k>` (`"Zone_4"`: `Zone_4.wav`; where it is missing the usual line, `""` back to it) - until they have asked at the cash desk. `tag` is a text of the plugin's own kept with the person (`people.get`), at any time. `false` and the reason when nothing changed. *Permission: `traffic_write`.* | 0.3 |
+| `omsi.people.set_ticket(id, ticket)` | true, or false and the reason | Changes the ticket of a passenger boarding the player's bus (the `passenger_ticket` event names them): `{kind, ticket, name, price, payment, voice, tag}`, each optional. `kind` (`"none"`: a pass, `"stamp"`, `"buy"`) can only be changed until they are in the bus; `ticket` selects another ticket from the pack (starting at 1, with its name and price; a buyer must have a ticket: 0 is refused, and a buyer created without `ticket` gets the pack's ticket for their age). `name` and `price` set the ticket name and ticket price, respectively, until the passenger has asked at the cash desk. `payment` specifies the amount of money handed over for a ticket purchase; it does not change the ticket price and is raised to at least the ticket price. It must be set before the passenger reaches the cash desk. If the currency's denominations cannot represent the requested amount exactly, the amount handed over may be higher. `voice` selects a line from the passenger's voice folder to use instead of `Ticket_<n>_<k>` (`"Zone_4"` selects `Zone_4.wav`; if the file is missing, the usual line is used; `""` also falls back to the usual line), until the passenger has asked at the cash desk. `tag` is plugin-defined text kept with the person (`people.get`), and can be set at any time. Returns `false` and the reason when nothing changed. *Permission: `traffic_write`.* | 0.3 |
 | `omsi.people.stops()` | list of tables | The stops near the camera where people wait: `{id, name, x, y, z, waiting}`. | 0.2.22 |
 | `omsi.people.waiting(stop)` | integer | How many people wait at a stop (its map object id). | 0.2.22 |
 
@@ -920,7 +921,7 @@ What the game does with an `.oop`:
 * **Permissions.** An `.oop` declares what it may do (`ui`, `storage`, `vehicle_write`,
   `traffic_write`, `world_write`, `camera`, `audio`, `network_local`, `lan`); a function
   that needs another one fails with an error the plugin can catch. Reading the game needs
-  none. (A plain `.lua` file keeps every permission, as before.)
+  none. (A plain `.lua` file has every permission.)
 * **Signatures.** A signed plugin is logged with its author's key fingerprint
   (`signed by 3097:e2de:e2cb:4a34`); an unsigned one with a warning that its builder is not
   known.
@@ -1068,9 +1069,9 @@ A press on such a texture is the plugin's: a `[mouseevent]` mesh under it does n
 for a page. Events are not kept while the game is paused.
 
 A 64-bit DLL loads in-process in the 64-bit game, without the pipe; a 32-bit one runs in
-the host, which keeps the buffers on its side. A host from before this keeps working for
-every plugin without `AccessScriptTexture` (the textures are on the wire only for a library
-that has it).
+the host, which keeps the buffers on its side. The textures go over the pipe only for a
+library that exports `AccessScriptTexture`; an older `omsi-plugin-host32.exe` without this
+procedure still serves every other plugin.
 
 ### Passengers' tickets (openOMSI only)
 
@@ -1100,8 +1101,8 @@ change what they ask for at the cash desk - they wait in the doorway for that fr
   kind only while the passenger is not in the bus yet. The plugin's name (the DLL's) is
   kept as who changed it.
 
-`omsi-plugin-host32.exe` passes the call through; a host from before it does not report the
-procedure, and the plugin then does not hear of the passengers.
+`omsi-plugin-host32.exe` passes the call through; an older host without it does not, and the
+plugin then does not hear of the passengers.
 
 ### Building the host
 
@@ -1109,8 +1110,8 @@ procedure, and the plugin then does not hear of the passengers.
 scripts/build-plugin-host.sh
 ```
 
-needs `rustup target add i686-pc-windows-gnu` and MinGW (`brew install mingw-w64`);
-Copy `dist/omsi-plugin-host32.exe` next to the game. The 32-bit build uses
+needs `rustup target add i686-pc-windows-gnu` and MinGW (`brew install mingw-w64`, or
+`apt install mingw-w64`); copy `dist/omsi-plugin-host32.exe` next to the game. The 32-bit build uses
 `panic=abort` and a stand-in `_Unwind_Resume` (Homebrew's i686 MinGW links no unwinder the
 prebuilt standard library can use).
 
