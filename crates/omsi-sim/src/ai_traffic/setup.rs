@@ -101,6 +101,7 @@ impl TrafficSim {
             time_scale: 1.0,
             weekday: 0,
             night: false,
+            road_mu: 0.85,
             daylight: None,
             next_id: 1,
             last_overtaker: None,
