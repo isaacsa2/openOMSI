@@ -118,6 +118,15 @@ pub struct TickScene {
     pub walkers: HashMap<usize, Vec<f32>>,
 }
 
+/// Candidate lanes for an off-road player's nearby light/gate request.
+/// Only lane *starts* matter here, so use the network's start grid rather than
+/// walking every lane of the map every simulation tick. 32 m covers the exact
+/// 25 m forward / 6 m sideways check below; `lanes_starting_near` falls
+/// back to a complete scan when the grid has not been built.
+fn off_lane_light_candidates(net: &Network, pos: DVec3) -> Vec<usize> {
+    net.lanes_starting_near(pos, 32.0)
+}
+
 impl TrafficSim {
     /// Advance all cars.
     /// `player`: (centre, heading in degrees, half length, half width, speed) of the
@@ -385,7 +394,7 @@ impl TrafficSim {
             }
             let h = heading.to_radians();
             let fwd = glam::DVec2::new(h.sin(), h.cos());
-            for l in 0..self.net.lanes.len() {
+            for l in off_lane_light_candidates(&self.net, pos) {
                 let lane = &self.net.lanes[l];
                 let Some((ci, li)) = lane.traffic_light else { continue };
                 if lane.kind != LaneKind::Street {
@@ -1483,5 +1492,41 @@ impl TrafficSim {
                 hit(*id, fb, format!("player box {} v {:.1}", u64::MAX - id, fb.speed));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod nearby_light_tests {
+    use super::*;
+    use crate::traffic::{Lane, LaneBuilder};
+
+    fn lit(x: f64, y: f64) -> Lane {
+        let mut lane = LaneBuilder::arc(DVec3::new(x, y, 0.0), 0.0, 6.0, 0.0, 0.0, LaneKind::Street, 3.0);
+        lane.traffic_light = Some((0, 0));
+        lane
+    }
+
+    #[test]
+    fn off_road_gates_are_found_across_grid_edges_but_distant_ones_are_not() {
+        let mut net = Network {
+            lanes: vec![lit(51.0, 10.0), lit(-501.0, 10.0)],
+            ..Default::default()
+        };
+        net.build_grid();
+        // The first gate is across the 50 m grid boundary and 2 m sideways.
+        let candidates = off_lane_light_candidates(&net, DVec3::new(49.0, 0.0, 0.0));
+        assert!(candidates.contains(&0), "{candidates:?}");
+        assert!(!candidates.contains(&1), "{candidates:?}");
+    }
+
+    #[test]
+    fn off_road_gate_candidates_follow_network_growth_and_unindexed_maps() {
+        let mut net = Network { lanes: vec![lit(2.0, 12.0)], ..Default::default() };
+        // Importers/test networks can query before the spatial grid is built.
+        assert_eq!(off_lane_light_candidates(&net, DVec3::ZERO), vec![0]);
+        net.build_grid();
+        net.lanes.push(lit(4.0, 20.0));
+        net.build_grid();
+        assert_eq!(off_lane_light_candidates(&net, DVec3::ZERO), vec![0, 1]);
     }
 }
