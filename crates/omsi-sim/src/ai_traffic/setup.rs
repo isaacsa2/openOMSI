@@ -139,7 +139,7 @@ impl TrafficSim {
             others: Vec::new(),
             other_blinkers: HashMap::new(),
             tick_split: [0.0; 3],
-            ai_stage_profile: tick::AiStageProfile::default(),
+            ai_stage_profile: stats::AiStageProfile::default(),
             frame_split: [0.0; 3],
             others_still: HashMap::new(),
             geo_prev: Vec::new(),
