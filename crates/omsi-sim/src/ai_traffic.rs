@@ -161,6 +161,8 @@ pub struct TrafficSim {
     pub weekday: i32,
     /// Street lights on → AI vehicles switch their lights on.
     pub night: bool,
+    /// Grip from the shared weather, used only with OMSI_AI_WEATHER_GRIP.
+    pub road_mu: f32,
     /// The light of the day, for the cars' `Envir_Brightness` (see `sync`).
     pub daylight: Option<crate::Daylight>,
     pub next_id: u64,

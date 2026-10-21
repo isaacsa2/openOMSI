@@ -97,7 +97,7 @@ pub(crate) fn set_ai_environment(
         host.wind = crate::rain::weather_wind(w);
         host.street_cond = crate::weather_setup::street_condition(w, wetness);
     }
-    t.set_script_environment(host.system_values(), host.wind, host.street_cond);
+    t.set_script_environment(host.system_values(), host.wind, host.street_cond, host.temperature);
 }
 
 /// The AI's lights (and a bus's saloon lamps, which its scripts switch with them): Omsi
