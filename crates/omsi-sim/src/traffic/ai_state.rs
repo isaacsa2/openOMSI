@@ -74,6 +74,8 @@ pub struct AiState {
     /// Sideways acceleration the driver accepts in a bend (m/s²): the speed through a
     /// curve of radius r is at most sqrt(this × r).
     pub lat_accel: f32,
+    /// Road grip of the current weather (mu). Dry driving keeps the original envelope.
+    pub grip_mu: f32,
     /// The driver (`TPathInfo`'s rowdy_factor & co): how fast they like to go relative to
     /// the limit, the time gap they keep to the car ahead (s), the distance they stop
     /// behind it (m), the gap in the cross traffic they accept at a junction (s) and how
@@ -379,7 +381,7 @@ const TRAP_DEPTH: u32 = 3;
 
 impl AiState {
     pub fn new(lane: usize, s: f32, seed: u64) -> AiState {
-        AiState { traffic_pool: None, veh_type: 0, lane, s, speed: 0.0, max_speed_kmh: 50.0, accel: 1.2, decel: 3.0, length: 5.0, rng: seed | 1, blinker: 0, braking: false, brake_lamp: 0.0, odometer: 0.0, planned_next: None, ahead: Vec::new(), change_plan: Vec::new(), prev_lane: None, yield_time: 0.0, route: Vec::new(), route_index: 0, change: None, change_cooldown: 5.0, lateral: 0.0, lateral_target: 0.0, lateral_ramp: (0.0, 0.0, 0.0, 1.0), turn_wish: 0, signal: 0, signal_time: 0.0, lat_accel: 2.8, desire: 1.0, headway: 1.4, min_gap: 2.0, accept_gap: 4.0, reaction: 0.7, front: 2.5, rear: 2.5, held: false, start_timer: 0.0, acc: 0.0, accel_cap: None, ordinary_brake: ORDINARY_BRAKE, emergency_brake: MAX_BRAKE, jerk: JERK, cmd: 0.0, emergency: false, emergency_began: false, body: BodyLink::default(), nudge_ramp: (0.0, 0.0, 0.0, 1.0), priority_drive: false, speed_cap: None, bend: BendCache::default() }
+        AiState { traffic_pool: None, veh_type: 0, lane, s, speed: 0.0, max_speed_kmh: 50.0, accel: 1.2, decel: 3.0, length: 5.0, rng: seed | 1, blinker: 0, braking: false, brake_lamp: 0.0, odometer: 0.0, planned_next: None, ahead: Vec::new(), change_plan: Vec::new(), prev_lane: None, yield_time: 0.0, route: Vec::new(), route_index: 0, change: None, change_cooldown: 5.0, lateral: 0.0, lateral_target: 0.0, lateral_ramp: (0.0, 0.0, 0.0, 1.0), turn_wish: 0, signal: 0, signal_time: 0.0, lat_accel: 2.8, grip_mu: 0.85, desire: 1.0, headway: 1.4, min_gap: 2.0, accept_gap: 4.0, reaction: 0.7, front: 2.5, rear: 2.5, held: false, start_timer: 0.0, acc: 0.0, accel_cap: None, ordinary_brake: ORDINARY_BRAKE, emergency_brake: MAX_BRAKE, jerk: JERK, cmd: 0.0, emergency: false, emergency_began: false, body: BodyLink::default(), nudge_ramp: (0.0, 0.0, 0.0, 1.0), priority_drive: false, speed_cap: None, bend: BendCache::default() }
     }
 
     fn rand(&mut self) -> u64 {
@@ -711,13 +713,20 @@ impl AiState {
         best
     }
 
+    /// Deceleration physically available from this weather's friction coefficient.
+    /// Only relevant to the optional AI weather-grip A/B path; dry defaults exceed
+    /// the existing emergency braking ceiling.
+    pub fn grip_brake_limit(&self) -> f32 {
+        (self.grip_mu.max(0.0) * 9.81).clamp(0.5, MAX_BRAKE)
+    }
+
     fn bend_reach(&self) -> f32 {
-        (self.speed * self.speed / (2.0 * BEND_DECEL) + 12.0).min(130.0)
+        (self.speed * self.speed / (2.0 * BEND_DECEL.min(self.grip_brake_limit())) + 12.0).min(130.0)
     }
 
     fn bend_lat(&self) -> f32 {
-        // (an emergency vehicle on its drive takes the bends harder)
-        self.lat_accel * if self.priority_drive { 1.5 } else { 1.0 }
+        // Even emergency vehicles cannot corner faster than the road can hold.
+        (self.lat_accel * if self.priority_drive { 1.5 } else { 1.0 }).min(self.grip_brake_limit())
     }
 
     fn bend_at(net: &Network, q: &LaneSeq, s: f32, d: f32, lat: f32) -> Option<f32> {
@@ -733,6 +742,7 @@ impl AiState {
         }
         let q = self.seq();
         let (s, lat, reach) = (self.s, self.bend_lat(), self.bend_reach());
+        let bend_decel = BEND_DECEL.min(self.grip_brake_limit());
         let offset = s - self.odometer;
         let c = &mut self.bend;
         if c.cur != q.cur || c.lanes[..] != q.lanes[..q.n] || c.lat != lat || (c.offset - offset).abs() > 0.05 {
@@ -761,7 +771,7 @@ impl AiState {
                 break;
             }
             if let Some(v) = v {
-                best = best.min((v * v + 2.0 * BEND_DECEL * (d - 2.5).max(0.0)).sqrt());
+                best = best.min((v * v + 2.0 * bend_decel * (d - 2.5).max(0.0)).sqrt());
             }
         }
         best
@@ -770,6 +780,7 @@ impl AiState {
     fn curve_speed_on(&self, net: &Network, q: &LaneSeq, s: f32) -> f32 {
         let reach = self.bend_reach();
         let lat = self.bend_lat();
+        let bend_decel = BEND_DECEL.min(self.grip_brake_limit());
         let mut best = f32::MAX;
         // The samples lie at fixed places of the road (every 2.5 m of the odometer), not at
         // fixed distances ahead of the car: moving with the car, the sample that caught a
@@ -783,7 +794,7 @@ impl AiState {
                 // (a bend may begin anywhere up to a sample's spacing before the sample
                 // that finds it: the speed is taken from there, or the car met the start of
                 // a tight turn half a metre after its profile had allowed 1 m/s more)
-                best = best.min((v * v + 2.0 * BEND_DECEL * (d - 2.5).max(0.0)).sqrt());
+                best = best.min((v * v + 2.0 * bend_decel * (d - 2.5).max(0.0)).sqrt());
             }
             d = next;
             next += 2.5;
@@ -876,7 +887,7 @@ impl AiState {
     fn desired_accel_bend(&self, net: &Network, lead: Option<Lead>, stop: Option<f32>, bend: &dyn Fn() -> f32) -> f32 {
         let Some(lane) = net.lanes.get(self.lane) else { return 0.0 };
         // (an emergency vehicle on its drive pulls away hard)
-        let (a, b) = (self.accel.max(0.1) * if self.priority_drive { 1.6 } else { 1.0 }, self.decel.max(0.5));
+        let (a, b) = (self.accel.max(0.1) * if self.priority_drive { 1.6 } else { 1.0 }, self.decel.max(0.5).min(self.grip_brake_limit()));
         let v = self.speed;
         let limit = |l: &Lane| {
             // (the bonus is the driver's whole margin: his own liking for speed on top of it
@@ -960,16 +971,16 @@ impl AiState {
             let a_stop = idm + (constant - idm) * k;
             out = out.min(a_stop);
         }
-        out.clamp(-MAX_BRAKE, a)
+        out.clamp(-self.grip_brake_limit(), a)
     }
 
     /// The driver's envelope (see `Envelope`).
     pub fn envelope(&self) -> Envelope {
         Envelope {
             comfort_accel: self.accel,
-            comfort_brake: self.decel,
-            ordinary_brake: self.ordinary_brake,
-            emergency_brake: self.emergency_brake,
+            comfort_brake: self.decel.min(self.grip_brake_limit()),
+            ordinary_brake: self.ordinary_brake.min(self.grip_brake_limit()),
+            emergency_brake: self.emergency_brake.min(self.grip_brake_limit()),
             jerk: self.jerk,
             headway: self.headway,
             standstill_gap: self.min_gap,
@@ -990,11 +1001,12 @@ impl AiState {
         let bend = if self.lane < net.lanes.len() { self.curve_speed_cached(net) } else { 0.0 };
         let want = self.desired_accel_bend(net, lead, stop, &|| bend);
         let was = self.emergency;
-        let limit = -self.ordinary_brake.max(self.decel);
+        let grip_limit = self.grip_brake_limit();
+        let limit = -self.ordinary_brake.max(self.decel).min(grip_limit);
         self.emergency = want < limit || (was && want < limit + EMERGENCY_HYSTERESIS);
         self.emergency_began = self.emergency && !was;
         if self.emergency {
-            return want.max(-self.emergency_brake.max(self.ordinary_brake));
+            return want.max(-self.emergency_brake.max(self.ordinary_brake).min(grip_limit));
         }
         let mut target = want.max(limit);
         let from = if was { want.max(self.cmd) } else { self.cmd };
@@ -1185,5 +1197,30 @@ impl AiState {
             self.plan_next(net);
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod climate_grip_tests {
+    use super::*;
+
+    #[test]
+    fn dry_weather_keeps_existing_driver_limits() {
+        let st = AiState::new(0, 0.0, 1);
+        assert_eq!(st.grip_brake_limit(), MAX_BRAKE);
+        assert!((st.bend_lat() - st.lat_accel).abs() < 1e-5);
+    }
+
+    #[test]
+    fn snow_limits_emergency_braking_and_cornering_consistently() {
+        let mut st = AiState::new(0, 0.0, 1);
+        st.grip_mu = 0.30;
+        let max = 0.30 * 9.81;
+        assert!((st.grip_brake_limit() - max).abs() < 1e-5);
+        assert!(st.envelope().emergency_brake <= max + 1e-5);
+        st.priority_drive = true;
+        assert!(st.bend_lat() <= max + 1e-5);
+        st.grip_mu = 0.12;
+        assert!(st.envelope().ordinary_brake <= 0.12 * 9.81 + 1e-5);
     }
 }
