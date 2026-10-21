@@ -238,6 +238,7 @@ flags! {
     OMSI_DEBUG_SHADOW: Num, Debug, Frame, "off", "Shadow debug overlay (with a number: its radius, default 3).";
     OMSI_DEBUG_SHADOW_FAR: Bool, Debug, Frame, "off", "Log each redraw of the far shadow map.";
     OMSI_DEBUG_SIGNALS: Bool, Debug, Use, "off", "Log what each railway signal shows.";
+    OMSI_DEBUG_SIGNAL_DECISIONS: Bool, Debug, Use, "off", "Log AI vehicles entering signal lanes on red or waiting at a green light, including blockers (at most every 5 sim seconds per stopped car).";
     OMSI_DEBUG_SKY: Bool, Debug, Frame, "off", "Log the sky and sun values per frame.";
     OMSI_DEBUG_SOUND: Num, Debug, Once, "5", "Log which sounds were heard (number: the interval in seconds).";
     OMSI_DEBUG_SPLINES: Bool, Debug, Use, "off", "Log the splines and lanes built per tile.";
