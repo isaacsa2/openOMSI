@@ -270,6 +270,38 @@ struct Route {
     joined: bool,
     /// `lanes` begins with a way to the route (the bus is looked for on it too).
     approach: bool,
+    /// The trip's route as it came while the bus was off its way (`set_route`): taken over
+    /// where the bus is on it again, or before the next way back is looked for.
+    pending: Option<Vec<usize>>,
+}
+
+impl Route {
+    /// The route that came while the bus was off its way (`pending`), taken over where the
+    /// lane the bus was last on comes in it (with the lanes after it, as far as both go,
+    /// the same: a route crossing itself); kept for later while that lane is not on it (a
+    /// way back's own lanes).
+    fn take_pending(&mut self) {
+        let Some(p) = self.pending.take() else { return };
+        let Some(cur) = self.lanes.get(self.progress) else {
+            self.pending = Some(p);
+            return;
+        };
+        let here = &self.lanes[self.progress..];
+        let at = p
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| *l == cur)
+            .max_by_key(|(i, _)| (p[*i..].iter().zip(here).take_while(|(a, b)| a == b).count(), std::cmp::Reverse(*i)))
+            .map(|(i, _)| i);
+        match at {
+            Some(i) => {
+                self.lanes = p;
+                self.progress = i;
+                self.version += 1;
+            }
+            None => self.pending = Some(p),
+        }
+    }
 }
 
 /// Roads around a centre, built into vertex buffer 0.
@@ -761,9 +793,13 @@ impl Navigator {
         self.route.complete = complete;
         self.route.generation = generation;
         if same_trip && !self.route.lanes.is_empty() && !self.route.on_route && !self.route.provisional {
-            // a partial route grew while the driver was off it: keep the way back
+            // a partial route grew while the driver was off it: the way back stays, and the
+            // grown route is taken over once the bus is on it again (it was dropped, and a
+            // complete route was never asked for again - the end missing for good, #2826)
+            self.route.pending = Some(lanes);
             return;
         }
+        self.route.pending = None;
         if self.route.provisional && lanes.is_empty() {
             return;
         }
@@ -859,6 +895,7 @@ impl Navigator {
                 r.on_route = true;
                 r.joined = true;
                 r.off_for = 0.0;
+                r.take_pending();
             }
             None => {
                 r.on_route = false;
@@ -875,6 +912,8 @@ impl Navigator {
             return;
         }
         r.retry_in = REROUTE_EVERY;
+        // (back onto the whole route, if it came meanwhile)
+        r.take_pending();
         let base = r.progress.min(r.lanes.len() - 1);
         // targets: the route from where the bus left it up to the next stop (joining it
         // later would skip that stop), or on for 120 lanes when no stop is ahead
