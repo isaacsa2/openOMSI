@@ -28,6 +28,7 @@ pub mod foot_grid;
 pub mod parked;
 pub mod planning;
 pub mod scenery;
+mod signal_diagnostics;
 pub mod setup;
 pub mod stats;
 pub mod tick;
@@ -214,6 +215,8 @@ pub struct TrafficSim {
     /// the states they showed last.
     pub light_log: Option<String>,
     pub light_prev: Vec<Vec<i32>>,
+    /// Optional, bounded observations of AI decisions at traffic signals.
+    signal_decisions: signal_diagnostics::SignalDecisions,
     /// `OMSI_DEBUG_POPULATION`: log where cars appear and vanish relative to the view.
     pub debug_population: bool,
     /// Cars placed since the last look inside the view frustum (hidden behind something):

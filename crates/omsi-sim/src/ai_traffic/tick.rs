@@ -183,6 +183,7 @@ impl TrafficSim {
         self.set_visibility();
         let t_par = std::time::Instant::now();
         self.step_bodies(dt, &mut frames);
+        self.trace_signal_decisions();
         self.tick_split = [
             (t_plan - t_start).as_secs_f64(),
             (t_par - t_plan).as_secs_f64(),
