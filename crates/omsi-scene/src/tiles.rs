@@ -103,6 +103,13 @@ pub struct Streamer {
     /// lists), in ms, and how often it took more than 16 ms.
     pub worst_frame_ms: f64,
     pub slow_frames: usize,
+    /// Sampling while OMSI_PROFILE is enabled: tile-list refresh and allocator maintenance.
+    list_refresh_count: u64,
+    list_refresh_total_ms: f64,
+    list_refresh_worst_ms: f64,
+    compact_count: u64,
+    compact_total_ms: f64,
+    compact_worst_ms: f64,
     started: std::time::Instant,
     last_summary: std::time::Instant,
     /// First-area diagnostics are deliberately tiny: one progress line per tile and a
@@ -161,6 +168,12 @@ impl Streamer {
             worst_upload_ms: 0.0,
             worst_frame_ms: 0.0,
             slow_frames: 0,
+            list_refresh_count: 0,
+            list_refresh_total_ms: 0.0,
+            list_refresh_worst_ms: 0.0,
+            compact_count: 0,
+            compact_total_ms: 0.0,
+            compact_worst_ms: 0.0,
             started: std::time::Instant::now(),
             last_summary: std::time::Instant::now(),
             initial_last_done: 0,
@@ -376,7 +389,14 @@ impl Streamer {
         let lists_now = self.lists_due.is_some_and(|t| unloaded > 0 || first_area || t.elapsed() >= LISTS_AFTER_LOADS);
         if lists_now {
             self.lists_due = None;
+            let started = omsi_cfg::flags::OMSI_PROFILE.is_set().then(std::time::Instant::now);
             self.world.refresh_tile_lists();
+            if let Some(t) = started {
+                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                self.list_refresh_count += 1;
+                self.list_refresh_total_ms += ms;
+                self.list_refresh_worst_ms = self.list_refresh_worst_ms.max(ms);
+            }
         }
         // (the caller hands the new lists on - the bus's obstacles - when they change)
         let changed = changed || lists_now;
@@ -385,15 +405,37 @@ impl Streamer {
         // Ahlheim). At most every few seconds, on a thread of its own.
         if (self.loaded_total, self.unloaded_total) != (self.relieved_at.0, self.relieved_at.1) && self.relieved_at.2.elapsed().as_secs_f32() >= 4.0 && self.queue.is_empty() && !self.inflight {
             self.relieved_at = (self.loaded_total, self.unloaded_total, std::time::Instant::now());
+            let started = omsi_cfg::flags::OMSI_PROFILE.is_set().then(std::time::Instant::now);
             self.world.compact_slots(renderer, scene);
             (self.relieve)();
+            if let Some(t) = started {
+                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                self.compact_count += 1;
+                self.compact_total_ms += ms;
+                self.compact_worst_ms = self.compact_worst_ms.max(ms);
+            }
         }
         if self.last_summary.elapsed().as_secs_f32() >= 10.0 && omsi_cfg::flags::OMSI_PROFILE.is_set() {
             self.last_summary = std::time::Instant::now();
             let at: Vec<String> = centers.iter().map(|c| format!("({:.0}, {:.0})", c.x, c.y)).collect();
             log::info!("tile streaming at {}: {} loaded / {} unloaded so far; {}", at.join(" "), self.loaded_total, self.unloaded_total, self.world.gpu_summary(scene));
-            if omsi_cfg::flags::OMSI_PROFILE.is_set() {
-                log::info!("  {}", self.world.cpu_summary());
+            log::info!("  {}", self.world.cpu_summary());
+            if self.list_refresh_count > 0 || self.compact_count > 0 {
+                log::info!(
+                    "  tile maintenance (10s): refresh {} avg {:.2} ms worst {:.2} ms; compact+trim {} avg {:.2} ms worst {:.2} ms",
+                    self.list_refresh_count,
+                    self.list_refresh_total_ms / self.list_refresh_count.max(1) as f64,
+                    self.list_refresh_worst_ms,
+                    self.compact_count,
+                    self.compact_total_ms / self.compact_count.max(1) as f64,
+                    self.compact_worst_ms
+                );
+                self.list_refresh_count = 0;
+                self.list_refresh_total_ms = 0.0;
+                self.list_refresh_worst_ms = 0.0;
+                self.compact_count = 0;
+                self.compact_total_ms = 0.0;
+                self.compact_worst_ms = 0.0;
             }
         }
         let total = t0.elapsed();
