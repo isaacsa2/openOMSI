@@ -142,8 +142,12 @@ impl TrafficSim {
         self.index_of.extend(self.cars.iter().enumerate().map(|(i, c)| (c.id, i)));
         let debug = omsi_cfg::flags::OMSI_DEBUG_TRAFFIC.is_set();
         self.stats_before();
+        let grip_enabled = omsi_cfg::flags::OMSI_AI_WEATHER_GRIP.is_set();
         for c in self.cars.iter_mut() {
             c.tail = body_tail(c);
+            if grip_enabled && self.net.lanes.get(c.state.lane).is_some_and(|l| l.kind == LaneKind::Street) {
+                c.state.grip_mu = self.road_mu;
+            }
         }
         self.berths_begin_step();
         let (by_lane, coming, mut reservations) = self.occupancy();
