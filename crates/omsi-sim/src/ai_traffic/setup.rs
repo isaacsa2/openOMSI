@@ -124,6 +124,7 @@ impl TrafficSim {
             logged_hard: Default::default(),
             light_log,
             light_prev,
+            signal_decisions: Default::default(),
             debug_population: omsi_cfg::flags::OMSI_DEBUG_POPULATION.is_set(),
             framed_spawns: Vec::new(),
             player: None,
