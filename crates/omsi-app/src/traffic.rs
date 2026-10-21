@@ -130,8 +130,9 @@ impl Traffic {
     }
 
     /// Refresh shared script inputs even while paused, and keep them for new vehicles.
-    pub fn set_script_environment(&mut self, values: [f32; 22], wind: glam::Vec3, street: f32) {
+    pub fn set_script_environment(&mut self, values: [f32; 22], wind: glam::Vec3, street: f32, temperature: f32) {
         self.script_environment = Some((values, wind, street));
+        self.sim.road_mu = omsi_sim::vehicle::road_grip(street, temperature);
         if !self.sim.mirror {
             for car in &mut self.sim.cars {
                 car.vehicle.host.apply_ai_globals(&values);
