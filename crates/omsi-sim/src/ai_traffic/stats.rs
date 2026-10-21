@@ -509,3 +509,60 @@ mod tests {
         assert!(waits_for_cycles(&[None, Some(0), Some(1)]).is_empty());
     }
 }
+
+/// Rolling milliseconds spent in the AI tick's sub-stages, sampled only by OMSI_PROFILE.
+#[derive(Default)]
+pub struct AiStageProfile {
+    sums: [f64; 6],
+    count: u32,
+    since: f32,
+}
+
+impl AiStageProfile {
+    fn sample(&mut self, now: f32, stages: [f64; 6]) -> Option<[f64; 6]> {
+        if self.count == 0 {
+            self.since = now;
+        }
+        for (total, value) in self.sums.iter_mut().zip(stages) {
+            *total += value;
+        }
+        self.count += 1;
+        if now - self.since < 5.0 {
+            return None;
+        }
+        let count = self.count as f64;
+        let means = self.sums.map(|sum| sum / count);
+        *self = Self::default();
+        Some(means)
+    }
+}
+
+impl TrafficSim {
+    /// Report stage averages every five simulated seconds; no per-tick logging.
+    pub(super) fn record_tick_stages(&mut self, checkpoints: [std::time::Instant; 7]) {
+        let values = std::array::from_fn(|i| {
+            checkpoints[i + 1].duration_since(checkpoints[i]).as_secs_f64() * 1000.0
+        });
+        if let Some(avg) = self.ai_stage_profile.sample(self.time, values) {
+            log::info!(
+                "AI tick stages: cars={} occupancy={:.3}ms lights={:.3}ms programs_walkers={:.3}ms prep={:.3}ms planning={:.3}ms bodies_scripts={:.3}ms avg/tick (5 sim s)",
+                self.cars.len(), avg[0], avg[1], avg[2], avg[3], avg[4], avg[5]
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod stage_profile_tests {
+    use super::AiStageProfile;
+
+    #[test]
+    fn samples_are_averaged_and_the_window_resets_after_five_seconds() {
+        let mut p = AiStageProfile::default();
+        assert!(p.sample(0.0, [2.0; 6]).is_none());
+        assert!(p.sample(4.9, [4.0; 6]).is_none());
+        assert_eq!(p.sample(5.1, [6.0; 6]), Some([4.0; 6]));
+        assert!(p.sample(5.2, [8.0; 6]).is_none());
+        assert_eq!(p.sample(10.3, [10.0; 6]), Some([9.0; 6]));
+    }
+}

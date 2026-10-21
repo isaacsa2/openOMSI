@@ -146,10 +146,14 @@ impl TrafficSim {
             c.tail = body_tail(c);
         }
         self.berths_begin_step();
+        let t_occupancy_start = std::time::Instant::now();
         let (by_lane, coming, mut reservations) = self.occupancy();
+        let t_occupancy_end = std::time::Instant::now();
         self.request_lights(player);
+        let t_requests_end = std::time::Instant::now();
         let walkers = self.walker_requests();
         self.run_light_programs(dt);
+        let t_programs_end = std::time::Instant::now();
         let (others, player_standing) = self.track_players(dt, player);
         self.others_now = others.iter().map(|o| o.1).collect();
         let t_plan = std::time::Instant::now();
@@ -183,6 +187,12 @@ impl TrafficSim {
         self.set_visibility();
         let t_par = std::time::Instant::now();
         self.step_bodies(dt, &mut frames);
+        if omsi_cfg::flags::OMSI_PROFILE.is_set() {
+            self.record_tick_stages([
+                t_occupancy_start, t_occupancy_end, t_requests_end, t_programs_end,
+                t_plan, t_par, std::time::Instant::now(),
+            ]);
+        }
         self.tick_split = [
             (t_plan - t_start).as_secs_f64(),
             (t_par - t_plan).as_secs_f64(),

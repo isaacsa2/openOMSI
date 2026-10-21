@@ -260,6 +260,8 @@ pub struct TrafficSim {
     /// Where the last `tick` spent its time (s, OMSI_PROFILE): who is on which lane and the
     /// light programs, every car's plan, the bodies and scripts on the workers.
     pub tick_split: [f64; 3],
+    /// Detailed timing of AI tick stages, emitted only under OMSI_PROFILE.
+    pub ai_stage_profile: stats::AiStageProfile,
     /// `tick_split` summed over the steps of the last frame (`advance`).
     pub frame_split: [f64; 3],
     /// Seconds each of them has stood still.
