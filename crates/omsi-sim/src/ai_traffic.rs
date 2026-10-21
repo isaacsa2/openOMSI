@@ -28,6 +28,7 @@ pub mod foot_grid;
 pub mod parked;
 pub mod planning;
 pub mod scenery;
+mod signal_diagnostics;
 pub mod setup;
 pub mod stats;
 pub mod tick;
