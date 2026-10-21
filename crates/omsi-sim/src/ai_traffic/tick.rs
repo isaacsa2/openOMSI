@@ -118,6 +118,34 @@ pub struct TickScene {
     pub walkers: HashMap<usize, Vec<f32>>,
 }
 
+/// Rolling stage costs (milliseconds per AI tick) while OMSI_PROFILE is active.
+/// Aggregate over five simulation seconds, rather than logging fifty times a second.
+#[derive(Default)]
+pub struct AiStageProfile {
+    sums: [f64; 6],
+    count: u32,
+    since: f32,
+}
+
+impl AiStageProfile {
+    fn sample(&mut self, now: f32, values: [f64; 6]) -> Option<[f64; 6]> {
+        if self.count == 0 {
+            self.since = now;
+        }
+        for (total, value) in self.sums.iter_mut().zip(values) {
+            *total += value;
+        }
+        self.count += 1;
+        if now - self.since < 5.0 {
+            return None;
+        }
+        let count = self.count as f64;
+        let avg = self.sums.map(|n| n / count);
+        *self = Self::default();
+        Some(avg)
+    }
+}
+
 impl TrafficSim {
     /// Advance all cars.
     /// `player`: (centre, heading in degrees, half length, half width, speed) of the
@@ -146,10 +174,14 @@ impl TrafficSim {
             c.tail = body_tail(c);
         }
         self.berths_begin_step();
+        let t_occupancy_start = std::time::Instant::now();
         let (by_lane, coming, mut reservations) = self.occupancy();
+        let t_occupancy_end = std::time::Instant::now();
         self.request_lights(player);
+        let t_requests_end = std::time::Instant::now();
         let walkers = self.walker_requests();
         self.run_light_programs(dt);
+        let t_programs_end = std::time::Instant::now();
         let (others, player_standing) = self.track_players(dt, player);
         self.others_now = others.iter().map(|o| o.1).collect();
         let t_plan = std::time::Instant::now();
@@ -183,6 +215,23 @@ impl TrafficSim {
         self.set_visibility();
         let t_par = std::time::Instant::now();
         self.step_bodies(dt, &mut frames);
+        if omsi_cfg::flags::OMSI_PROFILE.is_set() {
+            let t_done = std::time::Instant::now();
+            let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1000.0;
+            if let Some(avg) = self.ai_stage_profile.sample(self.time, [
+                ms(t_occupancy_start, t_occupancy_end),
+                ms(t_occupancy_end, t_requests_end),
+                ms(t_requests_end, t_programs_end),
+                ms(t_programs_end, t_plan),
+                ms(t_plan, t_par),
+                ms(t_par, t_done),
+            ]) {
+                log::info!(
+                    "AI tick stages: cars={} occupancy={:.3}ms lights={:.3}ms programs_walkers={:.3}ms prep={:.3}ms planning={:.3}ms bodies_scripts={:.3}ms avg/tick (5 sim s)",
+                    self.cars.len(), avg[0], avg[1], avg[2], avg[3], avg[4], avg[5]
+                );
+            }
+        }
         self.tick_split = [
             (t_plan - t_start).as_secs_f64(),
             (t_par - t_plan).as_secs_f64(),
@@ -1483,5 +1532,20 @@ impl TrafficSim {
                 hit(*id, fb, format!("player box {} v {:.1}", u64::MAX - id, fb.speed));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod stage_profile_tests {
+    use super::AiStageProfile;
+
+    #[test]
+    fn samples_are_averaged_and_the_window_resets_after_five_seconds() {
+        let mut p = AiStageProfile::default();
+        assert!(p.sample(0.0, [2.0; 6]).is_none());
+        assert!(p.sample(4.9, [4.0; 6]).is_none());
+        assert_eq!(p.sample(5.1, [6.0; 6]), Some([4.0; 6]));
+        assert!(p.sample(5.2, [8.0; 6]).is_none());
+        assert_eq!(p.sample(10.3, [10.0; 6]), Some([9.0; 6]));
     }
 }
