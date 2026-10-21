@@ -8,6 +8,14 @@
 
 use super::*;
 
+/// Candidate lanes for an off-road player's light or depot gate request.
+/// Only lane starts matter, so use the network's start grid rather than scan
+/// every lane at every tick. The exact directional and height tests still run
+/// in `request_lights`. The network falls back to all lanes without a grid.
+pub(super) fn off_lane_light_candidates(net: &Network, pos: DVec3) -> Vec<usize> {
+    net.lanes_starting_near(pos, 32.0)
+}
+
 /// The box of a vehicle body (`[boundingbox]` of the part at `position`, facing `heading`)
 /// as the traffic sees the player's: centre, heading, half length, half width, speed.
 pub fn box_outline(position: DVec3, heading: f64, bb: [f32; 6], speed: f32) -> PlayerBox {
@@ -252,5 +260,36 @@ mod tests {
         assert_eq!(run(bus(0.0, 22.1), 2, 40), 0);
         assert_eq!(run(bus(0.0, 13.0), 2, 40), 6);
         assert_eq!(run(bus(0.0, 13.0), 0, 40), 0);
+    }
+}
+
+#[cfg(test)]
+mod nearby_gate_tests {
+    use super::*;
+    use crate::traffic::{Lane, LaneBuilder};
+
+    fn lit(x: f64, y: f64) -> Lane {
+        let mut lane = LaneBuilder::arc(DVec3::new(x, y, 0.0), 0.0, 6.0, 0.0, 0.0, LaneKind::Street, 3.0);
+        lane.traffic_light = Some((0, 0));
+        lane
+    }
+
+    #[test]
+    fn off_road_gates_are_found_across_grid_boundaries() {
+        let mut net = Network { lanes: vec![lit(51.0, 10.0), lit(-501.0, 10.0)], ..Default::default() };
+        net.build_grid();
+        let candidates = off_lane_light_candidates(&net, DVec3::new(49.0, 0.0, 0.0));
+        assert!(candidates.contains(&0), "{candidates:?}");
+        assert!(!candidates.contains(&1), "{candidates:?}");
+    }
+
+    #[test]
+    fn unindexed_and_growing_networks_do_not_lose_depot_gates() {
+        let mut net = Network { lanes: vec![lit(2.0, 12.0)], ..Default::default() };
+        assert_eq!(off_lane_light_candidates(&net, DVec3::ZERO), vec![0]);
+        net.build_grid();
+        net.lanes.push(lit(4.0, 20.0));
+        net.build_grid();
+        assert_eq!(off_lane_light_candidates(&net, DVec3::ZERO), vec![0, 1]);
     }
 }

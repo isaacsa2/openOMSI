@@ -385,7 +385,7 @@ impl TrafficSim {
             }
             let h = heading.to_radians();
             let fwd = glam::DVec2::new(h.sin(), h.cos());
-            for l in 0..self.net.lanes.len() {
+            for l in light_paths::off_lane_light_candidates(&self.net, pos) {
                 let lane = &self.net.lanes[l];
                 let Some((ci, li)) = lane.traffic_light else { continue };
                 if lane.kind != LaneKind::Street {
