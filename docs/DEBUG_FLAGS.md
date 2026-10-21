@@ -75,6 +75,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_DEBUG_SHADOW` | num | off | frame | render | Shadow debug overlay (with a number: its radius, default 3). |
 | `OMSI_DEBUG_SHADOW_FAR` | bool | off | frame | render | Log each redraw of the far shadow map. |
 | `OMSI_DEBUG_SIGNALS` | bool | off | use | sim | Log what each railway signal shows. |
+| `OMSI_DEBUG_SIGNAL_DECISIONS` | bool | off | use | sim | Log AI vehicles entering signal lanes on red or waiting at a green light, including blockers (at most every 5 sim seconds per stopped car). |
 | `OMSI_DEBUG_SKY` | bool | off | frame | render | Log the sky and sun values per frame. |
 | `OMSI_DEBUG_SOUND` | num | 5 | once | app | Log which sounds were heard (number: the interval in seconds). |
 | `OMSI_DEBUG_SPLINES` | bool | off | use | scene | Log the splines and lanes built per tile. |
