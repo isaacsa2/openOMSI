@@ -516,11 +516,26 @@ pub(crate) struct Targets {
     pub(crate) evicted_at: std::time::Instant,
 }
 
+/// Full-sized EASU output kept between frames, recreated when the window size changes.
+/// Reuse matters on low-memory cards: allocating this each frame causes VRAM churn.
+pub(crate) struct FsrTarget {
+    pub(crate) size: (u32, u32),
+    pub(crate) _texture: wgpu::Texture,
+    pub(crate) view: wgpu::TextureView,
+    pub(crate) bind_group: wgpu::BindGroup,
+}
+
 /// The render scale: the pipelines that scale the 3D picture up to the window or copy a panel, and the governor's factor.
 pub(crate) struct Upscale {
     /// Render scale: the pipeline that scales the 3D picture up to the window, its
     /// parameters, and the smaller targets per size (with their bind groups).
     pub(crate) upscale_pipeline: wgpu::RenderPipeline,
+    pub(crate) fsr: Option<crate::pipelines::upscale::Fsr1>,
+    /// FSR 1's full-sized intermediate pictures by size (the window's, a VR eye's, a
+    /// triple-screen panel's: a few, kept, not made anew each frame).
+    pub(crate) fsr_target: std::cell::RefCell<Vec<FsrTarget>>,
+    /// FSR 1's passes were refused by the driver once (`set_upscaler`): not tried again.
+    pub(crate) fsr_refused: bool,
     pub(crate) copy_pipeline: wgpu::RenderPipeline,
     /// Triple screen: a panel's picture copied 1:1 to its place in the window.
     pub(crate) panel_pipeline: wgpu::RenderPipeline,

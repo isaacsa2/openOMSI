@@ -178,12 +178,118 @@ impl Renderer {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
         if let Some((_, bg)) = &f.scene_target {
-            let sharpen = (1.0 - width as f32 / full_w as f32) * 2.0;
+            // Opt-in FSR1 experiment. Use the existing scene scale setting for quality.
+            // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
+            let fsr1_enabled = self.options.fsr1 || crate::fsr1_enabled();
+            let full_h = f.target.texture().height();
+            let fsr = fsr1_enabled && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
+                && width < full_w && height < full_h
+                && self.scale.fsr.is_some();
+            // (RCAS: the slider's whole range onto 0..0.8 of AMD's lobe, `fsr1_rcas_strength`;
+            // a picture FSR does not draw - a mirror, vanilla FXAA - keeps the standard
+            // upscaler's own sharpening: the slider is RCAS's, and at its default the
+            // standard one's CAS ringed round the trees)
+            let sharpen = if fsr {
+                crate::fsr1_rcas_strength(self.options.fsr_sharpness)
+            } else {
+                ((1.0 - width as f32 / full_w as f32) * 2.0).clamp(0.0, 0.8)
+            };
             self.queue.write_buffer(
                 &self.scale.upscale_buf,
                 0,
-                bytemuck::cast_slice(&[width as f32, height as f32, sharpen.clamp(0.0, 0.8), if f.vanilla_fxaa { 1.0 } else { 0.0 }]),
+                bytemuck::cast_slice(&[width as f32, height as f32, sharpen, if f.vanilla_fxaa { 1.0 } else { 0.0 }]),
             );
+            if fsr {
+                // At sharpness 0 RCAS gives its input back (its lobe is 0): EASU then draws
+                // the window's picture itself - a full-screen pass and its intermediate saved.
+                let sharpened = sharpen > 0.0;
+                let size = (full_w, full_h);
+                let mut cached = self.scale.fsr_target.borrow_mut();
+                if sharpened && !cached.iter().any(|t| t.size == size) {
+                    let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("FSR1 EASU full-resolution intermediate"),
+                        size: wgpu::Extent3d {
+                            width: full_w, height: full_h, depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.scale.fsr.as_ref().map_or(self.format, |p| p.mid_format),
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
+                    let view = texture.create_view(&Default::default());
+                    let bind_group = self.picture_group(&view);
+                    // (three sizes at most: the window, a VR eye, a panel)
+                    if cached.len() >= 3 {
+                        cached.remove(0);
+                    }
+                    cached.push(FsrTarget { size, _texture: texture, view, bind_group });
+                }
+                let intermediate = sharpened.then(|| cached.iter().find(|t| t.size == size).expect("FSR1 intermediate initialized"));
+                // The HUD is composed on the finished picture, never upscaled or sharpened.
+                let draw_overlays = |pass: &mut wgpu::RenderPass| {
+                    if !overlays.is_empty() {
+                        pass.set_pipeline(&self.overlay_pipeline_1x);
+                        for (k, _) in overlays.iter().enumerate() {
+                            if let Some((_, _, bg, _)) = scene.overlay_res.get(k) {
+                                pass.set_bind_group(0, bg, &[]);
+                                pass.draw(0..6, 0..1);
+                            }
+                        }
+                    }
+                };
+                // EASU reconstructs edges from the low-resolution, tone-mapped image.
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("FSR1 EASU"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: intermediate.map_or(f.target, |t| &t.view),
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: pass_timer(timers.set.as_ref(), &mut timers.timed, "FSR1 EASU"),
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    let p = self.scale.fsr.as_ref().expect("FSR1 pipelines");
+                    pass.set_pipeline(if intermediate.is_some() { &p.easu_mid } else { &p.easu });
+                    pass.set_bind_group(0, bg, &[]);
+                    pass.draw(0..3, 0..1);
+                    if intermediate.is_none() {
+                        draw_overlays(&mut pass);
+                    }
+                }
+                // RCAS sharpens the reconstructed full-size picture.
+                if let Some(intermediate) = intermediate {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("FSR1 RCAS"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: f.target,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: pass_timer(timers.set.as_ref(), &mut timers.timed, "FSR1 RCAS"),
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    pass.set_pipeline(&self.scale.fsr.as_ref().expect("FSR1 pipelines").rcas);
+                    pass.set_bind_group(0, &intermediate.bind_group, &[]);
+                    pass.draw(0..3, 0..1);
+                    draw_overlays(&mut pass);
+                }
+                return;
+            }
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("upscale"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

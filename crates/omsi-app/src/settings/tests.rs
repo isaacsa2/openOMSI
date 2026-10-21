@@ -1,6 +1,30 @@
 use super::Settings;
 
 #[test]
+fn fsr1_menu_settings_round_trip_into_renderer() {
+    let mut ui = omsi_launcher_lib::settings_from_text(None);
+    assert_eq!(ui["upscaler"], "default");
+    ui["upscaler"] = serde_json::json!("fsr1");
+    ui["fsr_quality"] = serde_json::json!("balanced");
+    ui["fsr_sharpness"] = serde_json::json!(0.45);
+    let saved = omsi_launcher_lib::settings_to_text(&ui, None);
+    let game = Settings::from_text(&saved);
+    assert_eq!(game.upscaler, "fsr1");
+    assert_eq!(game.fsr_quality, "balanced");
+    assert!((game.fsr_sharpness - 0.45).abs() < 0.0001);
+    let graphics = game.render_options();
+    assert!(graphics.fsr1);
+    assert!((graphics.render_scale - 0.59).abs() < 0.0001);
+    assert!((graphics.fsr_sharpness - 0.45).abs() < 0.0001);
+    assert_eq!(Settings::from_text(&game.to_text()), game);
+    assert_eq!(omsi_launcher_lib::settings_from_text(Some(&saved))["fsr_quality"], "balanced");
+
+    // A corrupt or future setting must not enable experimental shaders.
+    assert_eq!(Settings::from_text("upscaler=anything_else\\n").upscaler, "default");
+    assert_eq!(Settings::from_text("fsr_sharpness=nan\\n").fsr_sharpness, 0.8);
+}
+
+#[test]
 fn mobile_door_mode_defaults_and_round_trips() {
     assert_eq!(Settings::from_text("").touch_door_mode, "standard");
     assert_eq!(Settings::from_text("touch_door_mode=Direct\n").touch_door_mode, "direct");

@@ -286,6 +286,7 @@ flags! {
     OMSI_FOOT_WALK: Num, Tuning, Use, "1.4", "On foot: the walking pace in m/s.";
     OMSI_FORCE_OPAQUE: Bool, Switch, Use, "off", "Draw transmap-masked materials opaque.";
     OMSI_FRAME_ORDER: Bool, Debug, Once, "off", "Log the window's frame and the offscreen run's step as their ordered stages (phase, what each reads and writes, its profile key), once at start.";
+    OMSI_FSR1: Text, Switch, Once, "off", "Experimental FSR 1 spatial upscaling (EASU + RCAS) for scaled window views: 1, true or on enables it; off by default; requires restart.";
     OMSI_FULL_GPU: Bool, Switch, Use, "off", "Keep the requested settings on a small or shared graphics chip, and 8x MSAA with Enhanced+.";
     OMSI_GLASS_WIND: Num, Test, Use, "-", "Offscreen: the rain on the glass as met at this speed in m/s.";
     OMSI_GL_TEXTURE_UNITS: Bool, Switch, Use, "off", "Use the texture-unit layout of the OpenGL backend on any device.";

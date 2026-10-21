@@ -48,6 +48,10 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         omsi_launcher_lib::optimise::backup().is_some().then(|| button("Restore my previous settings", "Restore", "The graphics settings as they were before the last optimisation", "optimise_restore")),
         pick("msaa", "Anti-aliasing", later),
         pick("render_scale", "Render scale", later),
+        pick("upscaler", "Upscaling", "Standard Catmull-Rom or experimental FSR 1; changes show at once"),
+        pick("fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| s.upscaler == "fsr1"),
+        slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength", &pct).filter(|_| s.upscaler == "fsr1"),
+
         pick("anisotropy", "Anisotropic", later),
         // (Enhanced+ traces its shadows, occlusion and reflections: always on there)
         switch_row(app, "shadows", "Sun shadows", "Enables/Disables shadows").filter(|_| shown("shadows")),
@@ -555,5 +559,14 @@ mod tests {
         assert_eq!(mode_of_session(&session(false, true, false), "vanilla"), "enhanced");
         assert_eq!(mode_of_session(&session(true, true, false), "vanilla"), "enhanced_plus");
         assert_eq!(mode_of_session(&session(false, false, false), "enhanced"), "vanilla_plus");
+    }
+}
+
+/// What FSR 1's quality means now: the size the 3D picture is drawn at, and the window's.
+fn fsr_size(app: &App) -> String {
+    let sizes = app.gfx.surface.as_ref().zip(app.renderer.as_ref()).map(|(sf, r)| ((sf.config.width, sf.config.height), r.scene_size(sf.config.width, sf.config.height)));
+    match sizes {
+        Some(((ww, wh), (w, h))) => omsi_ui::tr("The 3D picture is drawn at {} and scaled up to {}").replacen("{}", &format!("{w}×{h}"), 1).replacen("{}", &format!("{ww}×{wh}"), 1),
+        None => omsi_ui::tr("Internal render resolution").into_owned(),
     }
 }
