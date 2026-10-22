@@ -348,6 +348,8 @@ pub(crate) fn spawn_player_prepared(
     let objects = crate::settings::Settings::load().collision_objects;
     vehicle.collision = objects.then(|| world.data.peek().lists.collision.clone());
     vehicle.wheel_walls = objects;
+    let wires = if vehicle.trolley.is_some() { crate::trolley_net::load(args, world) } else { None };
+    vehicle.attach_wires(wires.clone());
     // a rail vehicle rides the track (its position comes from the rails, not the tyres)
     let rail_bound = crate::rail_drive::is_rail(&vt.def);
     if rail_bound {
@@ -373,6 +375,14 @@ pub(crate) fn spawn_player_prepared(
         .map(|k| k.with_game_defaults().vehicles)
         .unwrap_or_default();
     let mut p = new_player(vehicle, render, trailer_renders, bindings, rail_bound, &vt);
+    if let Some(net) = wires {
+        p.trolley_view = Some(Box::new(omsi_scene::trolley_view::TrolleyView::new(renderer, scene, net)));
+        if omsi_cfg::flags::OMSI_TROLLEY_UP.is_set() {
+            if let Some(g) = p.vehicle.trolley.as_deref_mut() {
+                g.auto_raise_for = 8.0;
+            }
+        }
+    }
     for _ in 0..3 {
         p.vehicle.update(1.0 / 30.0);
     }
@@ -579,6 +589,7 @@ fn log_rigid_body(vehicle: &omsi_sim::VehicleInstance) {
 /// The player around a vehicle just set up, everything else at its start.
 fn new_player(vehicle: omsi_sim::VehicleInstance, render: scene::VehicleRender, trailer_renders: Vec<scene::VehicleRender>, bindings: Vec<omsi_content::KeyBinding>, rail_bound: bool, vt: &Arc<omsi_sim::VehicleType>) -> Player {
     static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let rail_placed_z = vehicle.position.z;
     Player {
         uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         vehicle,
@@ -605,6 +616,7 @@ fn new_player(vehicle: omsi_sim::VehicleInstance, render: scene::VehicleRender, 
         hand_coupled: 0,
         rail_bound,
         rail: None,
+        rail_placed_z,
         head: Vec3::ZERO,
         head_vel: Vec3::ZERO,
         head_omega: Vec3::ZERO,
@@ -636,6 +648,8 @@ fn new_player(vehicle: omsi_sim::VehicleInstance, render: scene::VehicleRender, 
         arm: Default::default(),
         blinker_key_state: 0,
         blinker_cancel: crate::settings::Settings::load().blinker_cancel,
+        trolley_view: None,
+        trolley_sound: Default::default(),
     }
 }
 

@@ -91,14 +91,14 @@ mod tests {
     /// lacquer, the draw order's depth step of a surface lying on another of its object, and a
     /// livery's tint above the alpha test, the painted lines' pull and the wet paint's water film, and the player's vehicle
     /// standing between other vehicles' lamps and what lies behind it, and clear vehicle
-    /// lamps taking coverage from their active night map, and the textures read with FSR 1's
-    /// mip bias, `camera.lod`).
+    /// lamps taking coverage from their active night map, and #3019's larger rain caps, and the tracked panes' snow laid out in the film mesh's own
+    /// metres, and the textures read with FSR 1's mip bias, `camera.lod`).
     /// (with Unix line ends: a Windows checkout may turn the parts' into CRLF, as it did the
     /// single files', and the 0.2.31 release's Windows test failed on that alone)
     #[test]
     fn assembled_shaders_are_the_old_files() {
         let (scene, enhanced) = (super::SCENE.replace("\r\n", "\n"), super::ENHANCED.replace("\r\n", "\n"));
-        assert_eq!((scene.len(), fnv1a(&scene)), (125_362, 0xe988_f309_fb9b_168c));
+        assert_eq!((scene.len(), fnv1a(&scene)), (127_163, 0x1729_fe8c_6e37_36d5));
         assert_eq!((enhanced.len(), fnv1a(&enhanced)), (88_333, 0x7b93_c520_1cc8_4158));
     }
 }

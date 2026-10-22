@@ -162,6 +162,9 @@ pub struct NavStop {
     pub name: String,
     /// Planned arrival (s of the day).
     pub arrival: f64,
+    /// Closed today (a diversion, roadworks: `duty.set_closed_stops`), with the way round it
+    /// ("" when not said): struck through, and the bus does not call there.
+    pub closed: Option<String>,
 }
 
 /// Another player of the session as the maps show them (the session's, see `lan`).
@@ -229,14 +232,15 @@ struct Words {
     no_duty: &'static str,
     last_stop: &'static str,
     on_time: &'static str,
+    closed: &'static str,
 }
 
 fn words(lang: &str) -> Words {
     match lang.to_ascii_uppercase().as_str() {
-        "DEU" | "DE" | "GER" => Words { kmh: "km/h", days: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], off_route: "Abseits der Route", rerouting: "Route wird neu berechnet", recalculated: "Route neu berechnet", jam: "Stau", slow: "Zähfließend", no_duty: "Freie Fahrt", last_stop: "Endhaltestelle", on_time: "pünktlich" },
-        "FRA" | "FR" => Words { kmh: "km/h", days: ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"], off_route: "Hors itinéraire", rerouting: "Recalcul de l'itinéraire", recalculated: "Itinéraire recalculé", jam: "Bouchon", slow: "Ralentissement", no_duty: "Conduite libre", last_stop: "Terminus", on_time: "à l'heure" },
-        "RUS" | "RU" => Words { kmh: "км/ч", days: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"], off_route: "Вне маршрута", rerouting: "Перестроение маршрута", recalculated: "Маршрут перестроен", jam: "Пробка", slow: "Затруднено", no_duty: "Свободная езда", last_stop: "Конечная", on_time: "по графику" },
-        _ => Words { kmh: "km/h", days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], off_route: "Off route", rerouting: "Recalculating route", recalculated: "Route recalculated", jam: "Traffic jam", slow: "Slow traffic", no_duty: "Free drive", last_stop: "Final stop", on_time: "on time" },
+        "DEU" | "DE" | "GER" => Words { kmh: "km/h", days: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], off_route: "Abseits der Route", rerouting: "Route wird neu berechnet", recalculated: "Route neu berechnet", jam: "Stau", slow: "Zähfließend", no_duty: "Freie Fahrt", last_stop: "Endhaltestelle", on_time: "pünktlich", closed: "Gesperrt" },
+        "FRA" | "FR" => Words { kmh: "km/h", days: ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"], off_route: "Hors itinéraire", rerouting: "Recalcul de l'itinéraire", recalculated: "Itinéraire recalculé", jam: "Bouchon", slow: "Ralentissement", no_duty: "Conduite libre", last_stop: "Terminus", on_time: "à l'heure", closed: "Fermé" },
+        "RUS" | "RU" => Words { kmh: "км/ч", days: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"], off_route: "Вне маршрута", rerouting: "Перестроение маршрута", recalculated: "Маршрут перестроен", jam: "Пробка", slow: "Затруднено", no_duty: "Свободная езда", last_stop: "Конечная", on_time: "по графику", closed: "Закрыта" },
+        _ => Words { kmh: "km/h", days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], off_route: "Off route", rerouting: "Recalculating route", recalculated: "Route recalculated", jam: "Traffic jam", slow: "Slow traffic", no_duty: "Free drive", last_stop: "Final stop", on_time: "on time", closed: "Closed" },
     }
 }
 
@@ -345,6 +349,11 @@ pub struct Navigator {
     pub global_version: u64,
     roads: Option<Roads>,
     route: Route,
+    /// A free-drive destination temporarily owns `route`; timetable updates use `duty_route`.
+    destination: Option<destination::Destination>,
+    waypoints: Vec<destination::Destination>,
+    duty_route: Option<Route>,
+    entries: Vec<destination::EntryMarker>,
     /// The route mesh (buffers 1 and 9): the route and traffic versions, the anchor, its
     /// size, the bus's lane and the look it was built for.
     route_mesh: (u64, u64, DVec2, u32, usize, u64),
@@ -363,7 +372,7 @@ pub struct Navigator {
     cam_heading: f64,
     time: f32,
     /// Distance along the route to the next stop (m), refreshed now and then.
-    next_dist: Option<f64>,
+    next_dist: Option<(i64, f64)>,
     dist_t: f32,
     /// The next turn on the route: direction (-1 left, 1 right, 2 back), how sharp
     /// (degrees), how far (m) and the street it turns into.
@@ -456,7 +465,7 @@ pub fn duty_parts(duty: Option<&omsi_sim::timetable_run::PlayerDuty>) -> (Option
         .iter()
         .skip(d.next_stop)
         .filter(|s| s.stops)
-        .map(|s| NavStop { object_id: s.object_id, position: s.position.unwrap_or(DVec3::ZERO), name: s.name.clone(), arrival: s.arr })
+        .map(|s| NavStop { object_id: s.object_id, position: s.position.unwrap_or(DVec3::ZERO), name: s.name.clone(), arrival: s.arr, closed: s.closed.clone() })
         .collect();
     (Some(line.to_string()), Some(trip.terminus.clone()), stops, Some((format!("{}/{}", d.trip_index, trip.name), trip.name.clone())))
 }
@@ -556,6 +565,10 @@ impl Navigator {
             global_version: 0,
             roads: None,
             route: Route::default(),
+            destination: None,
+            waypoints: Vec::new(),
+            duty_route: None,
+            entries: Vec::new(),
             route_mesh: (u64::MAX, 0, DVec2::ZERO, 0, 0, 0),
             congestion: HashMap::new(),
             route_jam: HashMap::new(),
@@ -617,6 +630,7 @@ impl Navigator {
         if self.building.is_some() || self.global.is_some() {
             return;
         }
+        self.read_entry_markers(&world);
         let (tx, rx) = std::sync::mpsc::channel();
         let wm = world.clone();
         std::thread::Builder::new()
@@ -668,6 +682,7 @@ impl Navigator {
         self.global = Some(global);
         self.stop_pos = std::sync::Arc::new(map.places);
         self.global_version += 1;
+        self.reset_navigation_network();
     }
 
     /// The timetable's stop names (stop object → name) as hints of the streets' names: a stop
@@ -706,6 +721,19 @@ impl Navigator {
         self.global.as_deref()
     }
 
+    /// The route-following distance to its stop, refreshed during navigator frames.
+    pub fn next_stop_distance(&self) -> Option<f64> {
+        self.next_dist.map(|(_, distance)| distance)
+    }
+
+    pub fn next_stop_distance_for(&self, object_id: i64) -> Option<f64> {
+        self.next_dist.filter(|(id, _)| *id == object_id).map(|(_, distance)| distance)
+    }
+
+    fn invalidate_next_stop_distance(&mut self) {
+        self.next_dist = None;
+    }
+
     /// The map's lanes, for a session without a traffic system (added as tiles stream in).
     pub fn add_lanes(&mut self, lanes: Vec<omsi_sim::traffic::Lane>) {
         if lanes.is_empty() {
@@ -731,39 +759,42 @@ impl Navigator {
     /// Does the route of trip `key` need (re)building? (a new trip, or tiles brought the
     /// lanes a partial route was missing)
     pub fn wants_route(&self, key: &str, generation: u64) -> bool {
+        let r = self.duty_route_ref();
         if self.global.is_some() {
-            return self.route.key != key || self.route.generation != self.global_version + (1 << 40);
+            return r.key != key || r.generation != self.global_version + (1 << 40);
         }
-        self.route.key != key || (!self.route.complete && self.route.generation != generation)
+        r.key != key || (!r.complete && r.generation != generation)
     }
 
     /// The route of trip `key`: its lanes as the timetable drives them.
     pub fn set_route(&mut self, key: &str, lanes: Vec<usize>, complete: bool, generation: u64) {
-        let same_trip = self.route.key == key;
-        self.route.key = key.to_string();
-        self.route.complete = complete;
-        self.route.generation = generation;
-        if same_trip && !self.route.lanes.is_empty() && !self.route.on_route && !self.route.provisional {
+        let r = self.duty_route_mut();
+        let same_trip = r.key == key;
+        r.key = key.to_string();
+        r.complete = complete;
+        r.generation = generation;
+        if same_trip && !r.lanes.is_empty() && !r.on_route && !r.provisional {
             // a partial route grew while the driver was off it: keep the way back
             return;
         }
-        if self.route.provisional && lanes.is_empty() {
+        if r.provisional && lanes.is_empty() {
             return;
         }
-        self.route.provisional = false;
-        self.route.lanes = lanes;
+        r.provisional = false;
+        r.lanes = lanes;
         if !same_trip {
-            self.route.progress = 0;
-            self.route.on_route = false;
-            self.route.off_for = 0.0;
+            r.progress = 0;
+            r.on_route = false;
+            r.off_for = 0.0;
         }
-        self.route.version += 1;
+        r.version += 1;
     }
 
     /// No duty: nothing to follow.
     pub fn clear_route(&mut self) {
-        if !self.route.key.is_empty() || !self.route.lanes.is_empty() {
-            self.route = Route { version: self.route.version + 1, ..Route::default() };
+        let r = self.duty_route_mut();
+        if !r.key.is_empty() || !r.lanes.is_empty() {
+            *r = Route { version: r.version + 1, ..Route::default() };
         }
     }
 
@@ -1067,11 +1098,11 @@ impl Navigator {
         let mut prev_end: Option<f32> = None;
         for (j, &l) in r.lanes.iter().enumerate().skip(r.progress) {
             let lane = net.lanes.get(l)?;
-            let len = lane.length();
+            let len = if j + 1 == r.lanes.len() { self.destination.as_ref().and_then(|d| d.path.as_ref().map(|p| p.end_s)).unwrap_or(lane.length()) } else { lane.length() };
             if acc > 1500.0 {
                 break;
             }
-            let (h0, h1) = (lane.start_heading(), lane.end_heading());
+            let (h0, h1) = (lane.start_heading(), lane.at(len).1);
             let mut d = omsi_sim::traffic::wrap_deg(h1 - h0);
             if let Some(pe) = prev_end {
                 d += omsi_sim::traffic::wrap_deg(h0 - pe);
@@ -1099,6 +1130,7 @@ impl Navigator {
 
     /// Distance along the route to `stop` (m).
     fn route_distance(&self, net: &Network, stop: DVec3) -> Option<f64> {
+        if self.destination.is_some() { return None; }
         let r = &self.route;
         let mut acc = -(r.s as f64);
         for &l in r.lanes.iter().skip(r.progress) {
@@ -1151,6 +1183,7 @@ impl Navigator {
         self.board = None;
         // (with the navigator off the route is still followed for OMSI 2's arrows)
         if !self.enabled && !self.city.open && !self.arrows && self.shown < 0.01 {
+            self.invalidate_next_stop_distance();
             return;
         }
         let target = if self.enabled { 1.0 } else { 0.0 };
@@ -1173,7 +1206,7 @@ impl Navigator {
                 self.building = None;
                 // routes and roads again on the whole map
                 self.roads = None;
-                self.route = Route { version: self.route.version + 1, ..Route::default() };
+                self.reset_navigation_network();
                 self.route_mesh.0 = u64::MAX;
                 self.route_jam.clear();
             }
@@ -1197,9 +1230,9 @@ impl Navigator {
         } else {
             f
         };
-        self.follow(f);
+        if self.destination.is_some() { self.follow_destination(f); } else { self.follow(f); }
         self.bus_at = f.bus;
-        self.stop_spots = f.stops.iter().take(3).map(|st| (st.position, st.name.clone(), f.heading, st.object_id)).collect();
+        self.stop_spots = if self.destination.is_some() { Vec::new() } else { f.stops.iter().take(3).map(|st| (st.position, st.name.clone(), f.heading, st.object_id)).collect() };
         if omsi_cfg::flags::OMSI_DEBUG_NAV.is_set() && (self.time % 1.0) < f.dt {
             log::info!("navigator: route {} lanes (complete {}, provisional {}, at {}, on it {}, off for {:.1} s), {} stops ahead, next {:?}, key {:?}", self.route.lanes.len(), self.route.complete, self.route.provisional, self.route.progress, self.route.on_route, self.route.off_for, f.stops.len(), f.stops.first().map(|s| (s.name.clone(), s.position.x.round(), s.position.y.round())), self.route.key);
         }
@@ -1222,8 +1255,8 @@ impl Navigator {
             let global = self.global.clone();
             let net = global.as_deref().or(f.traffic.map(|t| &t.net));
             self.next_dist = match (f.stops.first(), net) {
-                (Some(s), Some(n)) if !self.route.lanes.is_empty() => self.route_distance(n, s.position).or_else(|| Some((s.position - f.bus).truncate().length())),
-                (Some(s), _) => Some((s.position - f.bus).truncate().length()),
+                (Some(s), Some(n)) if !self.route.lanes.is_empty() => self.route_distance(n, s.position).or_else(|| Some((s.position - f.bus).truncate().length())).map(|d| (s.object_id, d)),
+                (Some(s), _) => Some((s.object_id, (s.position - f.bus).truncate().length())),
                 _ => None,
             };
             self.next_turn = net.and_then(|n| self.turn_ahead(n));
@@ -1364,9 +1397,13 @@ mod build;
 pub use build::{Built, MapGround};
 mod cull;
 mod city_map;
+mod destination;
 pub use city_map::*;
 use lines_panel::*;
 #[cfg(test)]
 mod tests;
 
 
+#[cfg(test)]
+#[path = "destination/tests.rs"]
+mod destination_tests;

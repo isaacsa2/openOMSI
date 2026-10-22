@@ -24,6 +24,7 @@ export async function boot() {
   if (choice.version < 2) Object.assign(choice, { entry: -1, version: 2 });
   Object.assign(choice, clockPatch(choice, b.settings));
   set({ boot: b, settings: b.settings, config: b.config, choice, favourites: b.favourites || [], ready: true, page: b.root ? 'drive' : 'setup' });
+  if (b.crash) set({ crash: b.crash });
   applyTheme();
   if (b.root) {
     loadContent();
@@ -488,7 +489,7 @@ export async function pollNow() {
     const p = await call('poll');
     const changed = S.poll.stamp && p.stamp !== S.poll.stamp;
     const before = S.poll.jobs || [];
-    const same = (x) => JSON.stringify([x.stamp, x.jobs, x.instances]);
+    const same = (x) => JSON.stringify([x.stamp, x.jobs, x.instances, x.ended]);
     if (same(p) !== same(S.poll) || p.started?.length) set({ poll: p });
     for (const s of p.started || []) toast(t('Installing {name}…', { name: s }));
     const finished = S.poll.stamp ? (p.jobs || []).filter((j) => !jobRunning(j) && !before.some((b) => b.id === j.id && !jobRunning(b))) : [];

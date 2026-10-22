@@ -109,7 +109,8 @@ impl Navigator {
             if self.route_mesh.0 != self.route.version || self.route_mesh.1 != self.jam_version || self.route_mesh.2 != anchor || self.route_mesh.4 != bus_lane || self.route_mesh.5 != look_key {
                 let mut p = Painter::new();
                 let style = RouteStyle { extra_m: -0.6, min_px: 5.0, arrows: Some((32.0, 900.0)), max_len: 12_000.0, near: Some((anchor, PANEL_REACH)) };
-                build_route(&mut p, rn, &self.route.lanes[self.route.progress.min(self.route.lanes.len())..], anchor, self.route.s, &self.route_jam, &style, bus_lane, &pal);
+                mapmesh::roads::build_route_to(&mut p, rn, &self.route.lanes[self.route.progress.min(self.route.lanes.len())..], anchor, self.route.s, &self.route_jam, &style, bus_lane, &pal, self.destination.as_ref().and_then(|d| d.path.as_ref().map(|p| p.end_s)));
+                self.draw_waypoint_routes(&mut p, rn, anchor, &style, &pal);
                 self.route_mesh = (self.route.version, self.jam_version, anchor, p.len(), bus_lane, look_key);
                 route_verts = Some(p.verts);
             }
@@ -165,6 +166,7 @@ impl Navigator {
         // the far end of the map: a haze into the land's colour
         ui.gradient(Rect::new(map.x, map.y, map.w, map.h * 0.16), pal.land.alpha(0.7), pal.land.alpha(0.0));
         self.draw_map_marks(&mut ui, f, map, vpm, vp, anchor, s, transit, &pal);
+        self.draw_destination_markers(&mut ui, &|q| project(vpm, vp, Vec3::new((q.x - anchor.x) as f32, (q.y - anchor.y) as f32, 0.0)), map, s, false, &pal);
         // the package's places: its icons on the map, the municipality and the street under it
         let icon_verts = self.minimap_icons(vpm, vp, anchor, f.bus.truncate(), map, s);
         let loc_h = self.place_row_height(s);
@@ -335,6 +337,10 @@ impl Navigator {
             ui.text(&mut self.atlas, &self.fonts, day, 11.0 * s, Weight::Medium, Vec2::new(b.right() - 10.0 * s - self.fonts.width(&time_text, 14.0 * s, Weight::Bold) - 5.0 * s, base), Align::Right, pal.card_dim);
             ui.text(&mut self.atlas, &self.fonts, &temp, 11.0 * s, Weight::Medium, Vec2::new(b.right() - 10.0 * s, b.y + 33.0 * s), Align::Right, pal.card_dim);
         }
+        if self.destination.is_some() {
+            self.draw_destination_card(ui, net, map, s, pal);
+            return;
+        }
         // --- bottom: the next stop
         let bottom_h = 52.0 * s;
         let card = Rect::new(map.x + pad, map.bottom() - pad - bottom_h, map.w - 2.0 * pad, bottom_h);
@@ -371,18 +377,25 @@ impl Navigator {
                     None => 0.0,
                 };
                 let name = self.fonts.fit(&name, 14.5 * s, Weight::Bold, row1.w - line_w);
-                ui.text_in(&mut self.atlas, &self.fonts, &name, 14.5 * s, Weight::Bold, Rect::new(row1.x + line_w, row1.y, row1.w - line_w, row1.h), Align::Left, pal.card_text);
+                let name_r = Rect::new(row1.x + line_w, row1.y, row1.w - line_w, row1.h);
+                let w = ui.text_in(&mut self.atlas, &self.fonts, &name, 14.5 * s, Weight::Bold, name_r, Align::Left, if st.closed.is_some() { pal.card_dim } else { pal.card_text });
+                if st.closed.is_some() {
+                    strike(ui, name_r.x, w, name_r, s, pal.card_dim);
+                }
                 let mut parts = Vec::new();
-                if let Some(d) = self.next_dist {
+                if let Some((_, d)) = self.next_dist {
                     parts.push(units.distance(d));
                     let secs = d / (self.speed_avg.max(5.0) as f64) + if self.jam_cost > 0.0 { self.jam_cost as f64 } else { 0.0 };
                     parts.push(if secs < 60.0 { omsi_ui::tr("<1 min").into_owned() } else { format!("{:.0} {}", (secs / 60.0).round(), omsi_ui::tr("min")) });
                 }
                 parts.push(format!("{:02}:{:02}", (st.arrival / 3600.0) as i32 % 24, ((st.arrival % 3600.0) / 60.0) as i32));
                 let line2 = parts.join(" · ");
-                let (text, col) = match (&note, &jam_note) {
-                    (Some((t, c)), _) => (t.clone(), *c),
-                    (None, Some((t, c))) => (format!("{line2} · {t}"), *c),
+                // (closed: the way round in place of the distance)
+                let closed = st.closed.as_deref().map(|via| if via.is_empty() { wd.closed.to_string() } else { format!("{} · {via}", wd.closed) });
+                let (text, col) = match (&closed, &note, &jam_note) {
+                    (Some(t), _, _) => (t.clone(), WARN),
+                    (None, Some((t, c)), _) => (t.clone(), *c),
+                    (None, None, Some((t, c))) => (format!("{line2} · {t}"), *c),
                     _ => (line2, pal.card_dim),
                 };
                 let mut right = 0.0;
@@ -458,7 +471,12 @@ impl Navigator {
             let planned = format!("{:02}:{:02}", (st.arrival / 3600.0) as i32 % 24, ((st.arrival % 3600.0) / 60.0) as i32);
             ui.text_in(&mut self.atlas, &self.fonts, &planned, 12.0 * s, Weight::Bold, Rect::new(row.x + 16.0 * s, row.y, 40.0 * s, row.h), Align::Left, pal.card_dim);
             let name = self.fonts.fit(st.name.trim(), 13.0 * s, Weight::Medium, row.w - 110.0 * s);
-            ui.text_in(&mut self.atlas, &self.fonts, &name, 13.0 * s, Weight::Medium, Rect::new(row.x + 58.0 * s, row.y, row.w - 110.0 * s, row.h), Align::Left, pal.card_text);
+            let name_r = Rect::new(row.x + 58.0 * s, row.y, row.w - 110.0 * s, row.h);
+            let w = ui.text_in(&mut self.atlas, &self.fonts, &name, 13.0 * s, Weight::Medium, name_r, Align::Left, if st.closed.is_some() { pal.card_dim } else { pal.card_text });
+            // (closed today: struck through, and the bus does not stop there)
+            if st.closed.is_some() {
+                strike(ui, name_r.x, w, name_r, s, pal.card_dim);
+            }
             let exp = st.arrival + late;
             let e = format!("{:02}:{:02}", (exp / 3600.0).rem_euclid(24.0) as i32, ((exp.rem_euclid(3600.0)) / 60.0) as i32);
             ui.text_in(&mut self.atlas, &self.fonts, &e, 12.0 * s, Weight::Medium, row, Align::Right, if late > 59.0 { style::TRAFFIC[2] } else if late < -59.0 { style::TRAFFIC[0] } else { pal.card_dim });
@@ -470,6 +488,11 @@ impl Navigator {
     pub(super) fn look_key(&self) -> u64 {
         (self.light as u64) | (self.show_3d as u64) << 1 | (self.show_surface as u64) << 2 | self.surface_version << 3 | (self.map_version << 20) | (self.roads_version << 36)
     }
+}
+
+/// A line through a stop's name `w` wide from `x`, at the middle of `r` (a stop closed today).
+fn strike(ui: &mut Painter, x: f32, w: f32, r: Rect, s: f32, c: Color) {
+    ui.rect(Rect::new(x, (r.center().y - 0.75 * s).round(), w.max(0.0), (1.5 * s).max(1.0)), c);
 }
 
 /// A stop on the map: a white pin with the bus sign, blue for the next, red with a flag for the

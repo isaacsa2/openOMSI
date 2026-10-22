@@ -7,7 +7,7 @@ import { choose, curMap, curLine, curTour, pickedTrip, mapName, duty, busFile, r
 import { call } from '../api.js';
 import { RouteMap } from '../routemap.js';
 import { MapPicker } from './map-picker.js';
-import { hms, mapPicture, depotRun, tripAt, lineMatches, findTours, tourRoute, chooseLine, chooseTour, pickTrip, Notes, tripLength, TripEnds } from './drive.js';
+import { hms, mapPicture, depotRun, tripAt, lineMatches, findTours, tourRoute, chooseLine, chooseTour, pickTrip, Notes, tripLength, TripEnds, entryName } from './drive.js';
 
 export function MapRow() {
   const s = useStore();
@@ -167,7 +167,7 @@ export function DutyStep() {
   const lines = (s.lines.list || []).filter((l) => l.user_allowed && l.tours.length);
   const line = curLine();
   const tour = curTour();
-  const entries = m ? [[-1, c.free ? 'Automatic (the map\'s first)' : 'Automatic (nearest to the first stop)'], ...m.entry_points.map((e, i) => [i, e.name])] : [];
+  const entries = m ? [[-1, c.free ? 'Automatic (the map\'s first)' : 'Automatic (nearest to the first stop)'], ...m.entry_points.map((e, i) => [i, entryName(e)])] : [];
   let body;
   if (c.free) body = html`<p class="muted">${t('Free driving: the bus starts where you chose, with the traffic and the timetable\'s buses around it, but no line of your own.')}</p>`;
   else if (s.lines.loading && !s.lines.list) body = html`<div class="row muted"><${Spinner} /> ${t('Reading the timetable…')}</div>`;
@@ -232,6 +232,17 @@ function Ibis({ trip }) {
   return html`<div class="ibis-box"><div class="section-title">IBIS</div>${body}</div>`;
 }
 
+/** The stops of the trip a start takes, a timeline with their times under its row (and the
+ *  first one's departure), as the game's own launcher's roadbook had them. */
+function TripStops({ stops }) {
+  const last = stops.length - 1;
+  return html`<ol class="trip-stops">
+    ${stops.map((st, k) => html`<li class=${k === 0 || k === last ? 'end' : ''}>
+      <span class="num">${hms(k === 0 ? st.dep ?? st.arr : st.arr ?? st.dep)}</span><span class="ellipsis grow">${st.name}</span>${k === 0 && st.dep != null && html`<span class="muted">${t('Departs')}</span>`}
+    </li>`)}
+  </ol>`;
+}
+
 export function Roadbook({ tour, trips, current, now }) {
   const ref = useRef();
   const c = useStore().choice;
@@ -250,8 +261,9 @@ export function Roadbook({ tour, trips, current, now }) {
       ${trips.map((x, i) => html`<button type="button" class=${'trip-row' + (i === current ? ' on' : '') + (x.arrival < now - 60 && i !== current ? ' past' : '')} onClick=${() => pickTrip(x)}>
         <span class="num time">${hms(x.departure)}<small>${hms(x.arrival)}</small></span>
         <span class="kind">${depotRun(x) ? html`<span class="depot">${t('Depot run')}</span>` : html`<span class="line-badge">${x.line}</span>`}</span>
-        <span class="grow" title=${`${x.from} → ${x.terminus}`}><${TripEnds} trip=${x} stack /></span>
-      </button>`)}
+        <span class="grow" title=${`${x.from} → ${x.terminus}`}><${TripEnds} trip=${x} stack />${x.km > 0 && html`<small class="muted">${x.km.toFixed(1)} km</small>`}</span>
+      </button>
+      ${i === current && x.stops?.length > 0 && html`<${TripStops} stops=${x.stops} />`}`)}
     </div>
     <${Ibis} trip=${trips[current]} />
   </aside>`;

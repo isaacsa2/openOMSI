@@ -31,7 +31,7 @@ include!("passenger_animation_tests.rs");
 fn the_games_options_survive_a_save() {
     // what the pause menu's Options change, read back as they were set
     let mut v = settings_from_text(None);
-    for (k, x) in [("steer_look", json!(true)), ("discord_status", json!(false)), ("voice_chat", json!(false)), ("launcher_rest", json!(false)), ("camera_collision", json!(false)), ("brake_hold", json!(false)), ("auto_clutch", json!(false)), ("momentary_gears", json!(true)), ("ff_enabled", json!(false)), ("head_tracking", json!(true)), ("collision_objects", json!(false)), ("led_mips", json!(2.5)), ("led_glow", json!(11)), ("look_sens", json!(0.5)), ("look_smoothing_ms", json!(120.0)), ("blinker_cancel", json!(false)), ("pedal_brake", json!(1.5)), ("mouse_pedal_strength", json!(1.75)), ("head_idle", json!(0.35)), ("head_idle_pace", json!(1.5)), ("seat_y", json!(-0.1)), ("seat_pitch_deg", json!(8.0))] {
+    for (k, x) in [("steer_look", json!(true)), ("discord_status", json!(false)), ("voice_enabled", json!(true)), ("voice_mode", json!("open")), ("voice_range", json!(120)), ("voice_mic_gain", json!(2.0)), ("launcher_rest", json!(false)), ("camera_collision", json!(false)), ("brake_hold", json!(false)), ("auto_clutch", json!(false)), ("momentary_gears", json!(true)), ("ff_enabled", json!(false)), ("head_tracking", json!(true)), ("collision_objects", json!(false)), ("led_mips", json!(2.5)), ("led_glow", json!(11)), ("look_sens", json!(0.5)), ("look_smoothing_ms", json!(120.0)), ("blinker_cancel", json!(false)), ("pedal_brake", json!(1.5)), ("mouse_pedal_strength", json!(1.75)), ("head_idle", json!(0.35)), ("head_idle_pace", json!(1.5)), ("seat_y", json!(-0.1)), ("seat_pitch_deg", json!(8.0))] {
         v[k] = x;
     }
     let back = settings_from_text(Some(&settings_to_text(&v, None)));
@@ -43,12 +43,14 @@ fn the_games_options_survive_a_save() {
     assert_eq!(settings_from_text(Some(&settings_to_text(&r, None)))["resolution"], json!("1280x800"));
     assert_eq!(resolution_text("1920 x 1080"), "1920x1080");
     assert_eq!(resolution_text("huge"), "auto");
-    for k in ["steer_look", "discord_status", "voice_chat", "launcher_rest", "camera_collision", "brake_hold", "auto_clutch", "momentary_gears", "ff_enabled", "head_tracking", "collision_objects", "led_mips", "led_glow", "look_sens", "look_smoothing_ms", "blinker_cancel", "pedal_brake", "mouse_pedal_strength", "head_idle", "head_idle_pace", "seat_y", "seat_pitch_deg"] {
+    for k in ["steer_look", "discord_status", "voice_enabled", "voice_mode", "voice_range", "voice_mic_gain", "launcher_rest", "camera_collision", "brake_hold", "auto_clutch", "momentary_gears", "ff_enabled", "head_tracking", "collision_objects", "led_mips", "led_glow", "look_sens", "look_smoothing_ms", "blinker_cancel", "pedal_brake", "mouse_pedal_strength", "head_idle", "head_idle_pace", "seat_y", "seat_pitch_deg"] {
         assert_eq!(back[k], v[k], "{k}");
     }
     assert!(settings_from_text(None)["discord_status"].as_bool().unwrap());
     assert!(settings_from_text(None)["launcher_rest"].as_bool().unwrap());
-    assert!(settings_from_text(None)["voice_chat"].as_bool().unwrap());
+    // voice chat is off until switched on
+    assert!(!settings_from_text(None)["voice_enabled"].as_bool().unwrap());
+    assert_eq!(settings_from_text(Some("voice_chat=1\n"))["voice_enabled"], json!(false));
     let prior = settings_from_text(Some("discord_status=1\ndiscord_status=0\n"));
     assert!(!prior["discord_status"].as_bool().unwrap());
     let mut enabled = prior;
@@ -144,6 +146,17 @@ fn mirror_refresh_survives_the_launcher() {
         assert_eq!(v["mirror_refresh"], mode);
         let text = settings_to_text(&v, None);
         assert!(text.lines().any(|l| l == format!("mirror_refresh={mode}")), "{text}");
+    }
+}
+
+#[test]
+fn mirror_hud_survives_the_launcher() {
+    assert_eq!(settings_from_text(None)["mirror_hud"], 0);
+    for (word, kept) in [("0", 0), ("3", 3), ("7", 7), ("9", 7), ("x", 0)] {
+        let v = settings_from_text(Some(&format!("mirror_hud={word}\n")));
+        assert_eq!(v["mirror_hud"], kept, "{word}");
+        let text = settings_to_text(&v, Some("mirror_hud=1\n"));
+        assert_eq!(text.lines().filter(|l| l.starts_with("mirror_hud=")).collect::<Vec<_>>(), [format!("mirror_hud={kept}")], "{text}");
     }
 }
 
@@ -273,6 +286,12 @@ fn interface_size_round_trip() {
     let text = settings_to_text(&v, None);
     assert_eq!(text.lines().filter(|l| l.starts_with("chat_size=")).collect::<Vec<_>>(), ["chat_size=2.2"], "{text}");
     assert_eq!(settings_from_text(Some(&text))["chat_size"], json!(2.2));
+    v["timetable_size"] = json!(1.4);
+    let text = settings_to_text(&v, None);
+    assert_eq!(text.lines().filter(|l| l.starts_with("timetable_size=")).collect::<Vec<_>>(), ["timetable_size=1.4"], "{text}");
+    assert_eq!(settings_from_text(Some(&text))["timetable_size"], json!(1.4));
+    assert_eq!(settings_from_text(Some("perf_size=9\n"))["perf_size"], json!(2.0));
+    assert_eq!(settings_from_text(None)["info_size"], json!(1.0));
     assert_eq!(settings_from_text(Some("ui_scale=9\n"))["ui_scale"], json!(2.0));
     assert_eq!(settings_from_text(Some("ui_scale=0.1\n"))["ui_scale"], json!(0.5));
     assert_eq!(settings_from_text(Some("ui_scale=big\n"))["ui_scale"], json!(1.0));

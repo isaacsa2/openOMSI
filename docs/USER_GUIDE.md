@@ -259,6 +259,15 @@ and whether the bus came late (over 3 minutes), left early (over 2 minutes, as t
 file counts them) or missed a stop. It is written again at every stop, so a crash loses
 nothing - what virtual bus companies ask their drivers for.
 
+### Trolleybuses
+
+A map with an overhead wire (`trolley.txt`) and a bus with poles (`[trolley_pole]`) make a trolleybus
+that moves only on current. Put the poles on the wire from outside the bus: get out (Ctrl+Shift+G, the
+`get_up` setting) or use the outside camera (F3), go to the back of the bus, hold **R** and look at the
+wire (the pole nearest to you rises and follows your look), let go of R when the boom is under the wire.
+**T** pulls the nearest pole down; Shift with R or T takes both poles. Poles with a motor go up and down
+from the cab with R and T. Details, the formats and the checks: [TROLLEYBUS.md](TROLLEYBUS.md).
+
 ## The launcher
 
 The launcher is a program of its own beside the game, `openomsi-launcher-app` (a Tauri window,
@@ -316,10 +325,10 @@ The menu on the left groups the pages: **Play** (Drive, Multiplayer, Running gam
   **Discord Rich Presence** (Settings → General, on by default) shows the launcher or your
   map, bus, line and multiplayer status in Discord; Discord must be running on the same
   computer.
-  **Voice chat through GreenTeaSpeak** (on by default): in multiplayer, the other players
-  are heard from where they are, when GreenTeaSpeak 2 runs with the openOMSI plugin and the
-  server names a voice server (see [SERVER.md](SERVER.md) and
-  `tools/greenteaspeak-plugin/README.md`).
+  **Voice chat** (Settings → Sound, off by default): in multiplayer, hold *Voice: nearby*
+  (V) to be heard by the players close to you, or *Voice: radio* (B) to be heard by the whole
+  session; the keys are in Controls. Switching it on makes the system ask for the
+  microphone. See [VOICE.md](VOICE.md).
 * **Controls** - `Inputs/keyboard.cfg`: click a key, press the new one; clashes are red. The
   keys and the game controllers are kept in `~/.openomsi/Inputs` (on Windows
   `C:\Users\<you>\.openomsi\Inputs`), so an update or a new program folder keeps them; keys
@@ -560,6 +569,13 @@ glass 15 times a second, keeps only your own bus's spray and draws half the stre
 shows OMSI 2's own texture rain on the glass instead of the drops (from the next bus loaded),
 throws no spray and draws a quarter of the streaks.
 
+Graphics → *Vehicle smoke* (`vehicle_smoke`) chooses **All vehicles** (`all`, the default),
+**Player only** (`player`, your bus and its articulated sections), or **Off** (`off`).
+It hides non-glowing smoke particles from the other vehicles (including AI cars and LAN
+players), or from every vehicle when Off. Scenery smoke, glowing effects and rain spray
+keep their own settings and behaviour. The choice takes effect immediately and changes
+visibility only; particle simulation continues.
+
 The wet roads' reflections - the puddles mirroring the street, in every graphics mode once
 the roads are wet and the reflection maps are on - cost a good share of a weak card's frame
 too: Graphics → *Puddles* (`puddles`) **High** (the default) traces them up to 100 m in rays
@@ -645,12 +661,16 @@ vehicle folder and `HOFs/` contain the same file name, the vehicle's own copy ta
 priority (the launcher's depot list shows the shared ones after the bus's own).
 
 A map names the depot files its buses need in `maps/<map>/ailists.cfg`. When a mod map is
-installed in the openOMSI content folder and one of those files is missing from `HOFs/`, the
-launcher copies it there from the map's folder or from any bus that brought it, so every
-bus, the stock ones included, can use the map's depot without copying `.hof` files by hand.
-The copy belongs to the map's mod: switching the map off or removing it takes the copy with
-it. The original OMSI installation is not changed. A depot file the map needs that no
-installed content provides, or a copy that failed, is shown as a warning on the launcher's
+installed in the openOMSI content folder and some of those files are missing from `HOFs/`, the
+launcher's **Mods** page asks whether to share them with every bus. **Share with every bus**
+copies them there from the map's folder or from any bus that brought them, so every bus, the
+stock ones included, can use the map's depot without copying `.hof` files by hand. **Not for
+this map** leaves them where they are: some maps (Grand Paris Moulon, for example) have one
+depot per company or per bus, and buses with their own IBIS show wrong destinations with
+another one. Without the copy, a bus that lacks a depot still finds it in the map's folder,
+and when you choose a line the launcher picks the bus's or the map's depot that carries it.
+The copy belongs to the map's mod: switching the map off or removing it takes the copy with it. The original OMSI installation is not changed. A depot file the map needs
+that no installed content provides is shown as a warning on the launcher's
 **Mods** page. The **Add HOF files to buses** button on that page (desktop launcher) copies
 `.hof` files you choose into the content folder's `HOFs/`; files already there are left
 untouched.
