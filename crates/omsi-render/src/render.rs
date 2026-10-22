@@ -655,9 +655,8 @@ impl Renderer {
         self.pictures.set(pictures);
         let mut timers = PassTimers {
             set: self.gpu_timers[with_overlays as usize]
-                .as_ref()
-                .filter(|t| !t.waiting && !t.unresolved)
-                .map(|t| t.set.clone()),
+                .as_mut()
+                .and_then(|t| t.sample_start()),
             timed: Vec::new(),
         };
         // OMSI_PROFILE: time per stage, the mirrors apart from the window's picture

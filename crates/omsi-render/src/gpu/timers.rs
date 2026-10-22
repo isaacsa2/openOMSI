@@ -2,66 +2,103 @@
 
 use crate::*;
 
-/// GPU time per render pass from timestamp queries (OMSI_GPU_TIMERS). One frame is timed
-/// at a time: its readback has to arrive before the next one is measured. The passes
-/// partition the frame: each counts from the end of the one the GPU finished before it, so
-/// untimed passes are in the next timed one's figure and the figures add up to
-/// "(all passes)".
-pub(crate) struct GpuTimers {
+/// Each picture has three independently mapped timestamp sets so a slow readback
+/// does not stall (or monopolize) the rendering pipeline.
+pub(crate) const GPU_TIMER_PASSES: u32 = 16;
+pub(crate) const GPU_TIMER_SLOTS: usize = 3;
+
+pub(crate) struct GpuTimerSlot {
     pub(crate) set: wgpu::QuerySet,
     pub(crate) resolve: wgpu::Buffer,
     pub(crate) read: wgpu::Buffer,
-    /// The passes of the frame being read back, in query order.
     pub(crate) pending: Vec<&'static str>,
-    /// The frame's passes are timed, their stamps not yet resolved (see `collect_gpu_timers`).
     pub(crate) unresolved: bool,
     pub(crate) waiting: bool,
     pub(crate) ready: Arc<std::sync::atomic::AtomicBool>,
-    /// The readback's mapping failed: the timers start over rather than wait for it forever.
     pub(crate) failed: Arc<std::sync::atomic::AtomicBool>,
-    /// pass → (seconds, frames)
-    pub(crate) totals: std::collections::BTreeMap<&'static str, (f64, u32)>,
 }
 
-pub(crate) const GPU_TIMER_PASSES: u32 = 16;
-
-impl GpuTimers {
-    pub(crate) fn new(device: &wgpu::Device) -> Option<GpuTimers> {
-        if !omsi_cfg::flags::OMSI_GPU_TIMERS.is_set()
-            || !device.features().contains(wgpu::Features::TIMESTAMP_QUERY)
-        {
-            return None;
-        }
+impl GpuTimerSlot {
+    fn new(device: &wgpu::Device) -> Self {
         let set = device.create_query_set(&wgpu::QuerySetDescriptor {
-            label: Some("pass timers"),
-            ty: wgpu::QueryType::Timestamp,
-            count: GPU_TIMER_PASSES * 2,
+            label: Some("pass timers"), ty: wgpu::QueryType::Timestamp, count: GPU_TIMER_PASSES * 2,
         });
         let size = (GPU_TIMER_PASSES as u64 * 16).div_ceil(wgpu::QUERY_RESOLVE_BUFFER_ALIGNMENT)
             * wgpu::QUERY_RESOLVE_BUFFER_ALIGNMENT;
         let resolve = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("pass timers"),
-            size,
+            label: Some("pass timers"), size,
             usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let read = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("pass timers read"),
-            size,
+            label: Some("pass timers read"), size,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        Some(GpuTimers {
-            set,
-            resolve,
-            read,
-            pending: Vec::new(),
-            unresolved: false,
-            waiting: false,
+        Self {
+            set, resolve, read, pending: Vec::new(), unresolved: false, waiting: false,
             ready: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            totals: Default::default(),
+        }
+    }
+}
+
+pub(crate) struct GpuTimers {
+    pub(crate) slots: [GpuTimerSlot; GPU_TIMER_SLOTS],
+    active: Option<usize>,
+    next: usize,
+    submitted: u64,
+    resolved: u64,
+    skipped: u64,
+    readback_failed: u64,
+    /// pass -> (seconds, sampled frames)
+    pub(crate) totals: std::collections::BTreeMap<&'static str, (f64, u32)>,
+}
+
+fn free_timer_slot(busy: &[bool], start: usize) -> Option<usize> {
+    if busy.is_empty() { return None; }
+    (0..busy.len()).map(|i| (start + i) % busy.len()).find(|&i| !busy[i])
+}
+
+impl GpuTimers {
+    pub(crate) fn new(device: &wgpu::Device) -> Option<Self> {
+        if !omsi_cfg::flags::OMSI_GPU_TIMERS.is_set()
+            || !device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            return None;
+        }
+        Some(Self {
+            slots: std::array::from_fn(|_| GpuTimerSlot::new(device)),
+            active: None, next: 0, submitted: 0, resolved: 0, skipped: 0,
+            readback_failed: 0, totals: Default::default(),
         })
+    }
+
+    pub(crate) fn sample_start(&mut self) -> Option<wgpu::QuerySet> {
+        debug_assert!(self.active.is_none(), "unfinished GPU timer sample");
+        let busy: [bool; GPU_TIMER_SLOTS] =
+            std::array::from_fn(|i| self.slots[i].waiting || self.slots[i].unresolved);
+        let Some(index) = free_timer_slot(&busy, self.next) else {
+            self.skipped += 1;
+            return None;
+        };
+        self.active = Some(index);
+        self.next = (index + 1) % GPU_TIMER_SLOTS;
+        Some(self.slots[index].set.clone())
+    }
+
+    pub(crate) fn sample_submitted(&mut self, labels: Vec<&'static str>) {
+        if let Some(index) = self.active.take() {
+            if !labels.is_empty() {
+                self.slots[index].pending = labels;
+                self.slots[index].unresolved = true;
+                self.submitted += 1;
+            }
+        }
+    }
+
+    /// Submitted, resolved, busy-slot skips and failed readbacks (since start).
+    pub(crate) fn coverage(&self) -> (u64, u64, u64, u64) {
+        (self.submitted, self.resolved, self.skipped, self.readback_failed)
     }
 }
 
@@ -170,51 +207,43 @@ pub(crate) fn run_parts<T: Send>(pool: Option<&rayon::ThreadPool>, parts: usize,
 }
 
 impl GpuTimers {
-    /// Take in the pass times of the last timed frame once its readback has arrived.
+    /// Consume only completed maps, never forcing GPU completion.
     pub(crate) fn collect(&mut self, period: f64) {
-        let t = self;
-        if t.waiting && t.failed.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            // (nothing mapped to read: the next timed frame asks again)
-            t.waiting = false;
-            return;
-        }
-        if !t.waiting || !t.ready.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-        let n = t.pending.len() * 2;
-        {
-            let view = t.read.slice(0..n as u64 * 8).get_mapped_range();
-            let stamps: &[u64] = bytemuck::cast_slice(&view[..n * 8]);
-            // The passes in the order the GPU finished them, each counted from where the one
-            // before it ended (the untimed passes in between go to the next timed one). A
-            // tile-based GPU takes a pass's first stamp when its vertex stage starts, well
-            // before the pass in front of it has finished its fragments: measured from their
-            // own first stamps the post passes of the enhanced path overlapped and added up
-            // to 25 ms of a 10 ms frame.
-            if omsi_cfg::flags::OMSI_GPU_TIMERS_RAW.is_set() {
-                log::info!(
-                    "gpu stamps: {:?}",
-                    t.pending
-                        .iter()
-                        .enumerate()
-                        .map(|(k, label)| (*label, stamps[k * 2], stamps[k * 2 + 1]))
-                        .collect::<Vec<_>>()
-                );
+        for slot in &mut self.slots {
+            if slot.waiting && slot.failed.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                slot.waiting = false;
+                self.readback_failed += 1;
+                continue;
             }
-            let (passes, all) = partition(&t.pending, stamps);
-            for (label, ticks) in passes {
-                let e = t.totals.entry(label).or_default();
-                e.0 += ticks as f64 * period * 1e-9;
-                e.1 += 1;
+            if !slot.waiting || !slot.ready.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                continue;
             }
-            if let Some(ticks) = all {
-                let e = t.totals.entry("(all passes)").or_default();
-                e.0 += ticks as f64 * period * 1e-9;
-                e.1 += 1;
+            let n = slot.pending.len() * 2;
+            {
+                let view = slot.read.slice(0..n as u64 * 8).get_mapped_range();
+                let stamps: &[u64] = bytemuck::cast_slice(&view[..n * 8]);
+                if omsi_cfg::flags::OMSI_GPU_TIMERS_RAW.is_set() {
+                    log::info!("gpu stamps: {:?}",
+                        slot.pending.iter().enumerate()
+                            .map(|(k, label)| (*label, stamps[k * 2], stamps[k * 2 + 1]))
+                            .collect::<Vec<_>>());
+                }
+                let (passes, all) = partition(&slot.pending, stamps);
+                for (label, ticks) in passes {
+                    let e = self.totals.entry(label).or_default();
+                    e.0 += ticks as f64 * period * 1e-9;
+                    e.1 += 1;
+                }
+                if let Some(ticks) = all {
+                    let e = self.totals.entry("(all passes)").or_default();
+                    e.0 += ticks as f64 * period * 1e-9;
+                    e.1 += 1;
+                }
             }
+            slot.read.unmap();
+            slot.waiting = false;
+            self.resolved += 1;
         }
-        t.read.unmap();
-        t.waiting = false;
     }
 }
 
@@ -247,33 +276,46 @@ fn per_frame(per_picture_ms: f64, mirrors: u64, windows: u64) -> Option<f64> {
 }
 
 impl Renderer {
-    /// Take in the pass times of the last timed frame once its readback has arrived.
+    /// Resolve past samples with a separate submission and map asynchronously.
     pub(crate) fn collect_gpu_timers(&mut self) {
+        if self.gpu_timers.iter().all(Option::is_none) { return; }
+        let started = self.profiling.then(std::time::Instant::now);
         let period = self.queue.get_timestamp_period() as f64;
-        for t in self.gpu_timers.iter_mut().flatten() {
-            t.collect(period);
-            // The last frame's stamps are read in a command buffer of their own, submitted
-            // after that frame's: resolved in the frame's own buffer, the end stamp of its
-            // last pass was often not written yet (Metal) and read as a stale number.
-            if t.unresolved {
-                t.unresolved = false;
-                let n = t.pending.len() as u32 * 2;
-                let mut enc = self
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        for timer in self.gpu_timers.iter_mut().flatten() {
+            timer.collect(period);
+            for slot in &mut timer.slots {
+                // Resolve after the frame's commands: Metal can otherwise return stale stamps.
+                if slot.unresolved {
+                    slot.unresolved = false;
+                    let n = slot.pending.len() as u32 * 2;
+                    let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("pass timers"),
                     });
-                enc.resolve_query_set(&t.set, 0..n, &t.resolve, 0);
-                enc.copy_buffer_to_buffer(&t.resolve, 0, &t.read, 0, n as u64 * 8);
-                self.queue.submit([enc.finish()]);
-                let (ready, failed) = (t.ready.clone(), t.failed.clone());
-                t.read.map_async(wgpu::MapMode::Read, .., move |r| {
-                    let flag = if r.is_ok() { &ready } else { &failed };
-                    flag.store(true, std::sync::atomic::Ordering::Relaxed)
-                });
-                t.waiting = true;
+                    enc.resolve_query_set(&slot.set, 0..n, &slot.resolve, 0);
+                    enc.copy_buffer_to_buffer(&slot.resolve, 0, &slot.read, 0, n as u64 * 8);
+                    self.queue.submit([enc.finish()]);
+                    let (ready, failed) = (slot.ready.clone(), slot.failed.clone());
+                    slot.read.map_async(wgpu::MapMode::Read, .., move |result| {
+                        let flag = if result.is_ok() { &ready } else { &failed };
+                        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    });
+                    slot.waiting = true;
+                }
             }
         }
+        if let Some(started) = started {
+            *self.stats.borrow_mut().entry("timer_readback").or_default() += started.elapsed().as_secs_f64();
+        }
+    }
+
+    /// Query sampling coverage per picture (includes warm-up).
+    pub fn gpu_timer_coverage(&self) -> Vec<(&'static str, u64, u64, u64, u64)> {
+        self.gpu_timers.iter().enumerate().filter_map(|(i, t)| {
+            t.as_ref().map(|t| {
+                let (submitted, resolved, skipped, failed) = t.coverage();
+                (if i == 0 { "mirrors" } else { "window" }, submitted, resolved, skipped, failed)
+            })
+        }).collect()
     }
 
     /// Average GPU time per pass so far: (pass, milliseconds, frames measured).
@@ -305,11 +347,20 @@ impl Renderer {
 
 #[cfg(test)]
 mod timer_tests {
-    use super::{partition, per_frame};
+    use super::{free_timer_slot, partition, per_frame};
 
     /// The first timed pass counts from its own begin; each other from the end of the one
     /// finished before it (the untimed work between them goes to it); the whole picture from
     /// the first begin. A split main pass timed in both parts: nothing of it is left out.
+    #[test]
+    fn sampling_ring_wraps_and_skips_only_when_busy() {
+        assert_eq!(free_timer_slot(&[false, false, false], 2), Some(2));
+        assert_eq!(free_timer_slot(&[true, false, true], 2), Some(1));
+        assert_eq!(free_timer_slot(&[false, true, true], 1), Some(0));
+        assert_eq!(free_timer_slot(&[true, true, true], 1), None);
+        assert_eq!(free_timer_slot(&[], 0), None);
+    }
+
     #[test]
     fn the_passes_partition_the_picture() {
         // main part 100..400, (untimed gap 400..450), main 450..900, upscale 900..1000
