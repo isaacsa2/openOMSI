@@ -84,13 +84,8 @@ impl Renderer {
         self.queue
             .submit([shadow_commands, prepass_commands].into_iter().chain(part_commands).chain([commands]));
         clock.stage(self, "submit", "mirror.submit");
-        let timed = timers.timed;
-        if let (Some(t), false) = (
-            self.gpu_timers[with_overlays as usize].as_mut(),
-            timed.is_empty(),
-        ) {
-            t.pending = timed;
-            t.unresolved = true;
+        if let Some(timer) = self.gpu_timers[with_overlays as usize].as_mut() {
+            timer.sample_submitted(timers.timed);
         }
     }
 }

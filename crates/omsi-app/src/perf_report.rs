@@ -178,6 +178,12 @@ pub(crate) fn report(run: Run, r: &omsi_render::Renderer, window: (u32, u32), sc
     let mut summary = summary;
     summary["stage_average_ms"] = json!(stages);
     summary["gpu_pass_ms"] = json!(gpu);
+    // Coverage includes the warm-up; asynchronous GPU stamps may arrive later.
+    summary["gpu_timer_coverage"] = json!(r.gpu_timer_coverage().into_iter()
+        .map(|(picture, submitted, resolved, skipped, failed)| json!({
+            "picture": picture, "submitted": submitted, "resolved": resolved,
+            "skipped_busy": skipped, "readback_failed": failed,
+        })).collect::<Vec<_>>());
     summary["stages_by_frame_time"] = stages_by_frame_time(&perf.frame_times, &perf.frame_stages);
     if let (Some((c0, t0, f0)), Some(c1)) = (perf.cpu_mark, crate::startup::process_cpu_seconds()) {
         let frames = perf.total_frames.saturating_sub(f0).max(1) as f64;
