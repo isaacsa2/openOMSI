@@ -78,6 +78,24 @@ compare it between rows, not with the frame time.)
   (in eight bits the values were rounded twice, a step off on a third of the pixels).
 - The slider's new scale and its 80 % default (above).
 
+- **Textures at the window's detail (mip bias):** drawn smaller, the scene took its textures'
+  mips for the smaller picture - letters, gauges and signs blurred before FSR saw them. With
+  FSR 1 scaling the picture up, the scene's textures are now read with a mip bias of log2 of
+  the scale (-0.58 at 67 %, -1 at 50 %), AMD's advice: as detailed as the window's size wants,
+  never more. On a striped wall facing the camera at 50 % the stripes' contrast is 129 498
+  against 127 978 drawn at full size, and 20 888 without the bias
+  (`fsr1_textures_keep_their_detail_with_the_mip_bias`). `OMSI_NO_FSR_MIP_BIAS=1` leaves it out,
+  to compare in the game. The standard upscaler is unchanged.
+- **`OMSI_FSR_RAW_INPUT=1`** (to measure, off by default; not on OpenGL): EASU reads the scene
+  through a view that is not sRGB, its values as stored - no square roots for its twelve taps -
+  and the way out takes the exact sRGB curve once a pixel. Not tried on a GPU yet (the test
+  adapter here is OpenGL): if `FSR1 EASU`'s time falls and the picture is the same, it becomes
+  the default.
+- **No anti-aliasing before FSR in Vanilla:** Vanilla's FXAA runs only at full size, so at a
+  render scale FSR is handed an aliased picture and enlarges its stair-steps. Until a pass for
+  it exists, use MSAA 2x with FSR (the measurements above did); Enhanced runs its FXAA on the
+  smaller picture already.
+
 ### Open questions
 
 - The default: 80 % on the new scale - to be confirmed by a test at 60 / 80 / 100 %.

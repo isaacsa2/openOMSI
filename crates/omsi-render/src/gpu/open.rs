@@ -575,6 +575,7 @@ impl Renderer {
                 fsr: upscale.fsr,
                 fsr_target: std::cell::RefCell::new(Vec::new()),
                 fsr_refused,
+                fsr_mip_bias_off: Default::default(),
                 copy_pipeline: upscale.copy_pipeline,
                 panel_pipeline: upscale.panel_pipeline,
                 upscale_layout: upscale.layout,

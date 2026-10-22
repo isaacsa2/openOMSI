@@ -37,6 +37,8 @@ struct Camera {
     inside2_b: vec4<f32>,
     inside2_c: vec4<f32>,
     cookies: array<vec4<f32>, 8>,
+    // x: the textures' mip bias (FSR 1: negative, see `CameraUniform::lod`)
+    lod: vec4<f32>,
 };
 
 // A hash of a lattice point, from its integer bits.

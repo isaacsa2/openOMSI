@@ -94,6 +94,7 @@ impl Renderer {
             return t.clone();
         }
         self.evict_targets();
+        let raw_formats = [self.format.remove_srgb_suffix()];
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scaled scene"),
             size: wgpu::Extent3d {
@@ -106,7 +107,8 @@ impl Renderer {
             dimension: wgpu::TextureDimension::D2,
             format: self.format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
+            // (FSR 1 may read it as stored, `shaders::fsr1_raw_input`)
+            view_formats: if crate::shaders::fsr1_raw_input(self.format) { &raw_formats } else { &[] },
         });
         let view = tex.create_view(&Default::default());
         let bg = self.picture_group(&view);
@@ -536,6 +538,8 @@ pub(crate) struct Upscale {
     pub(crate) fsr_target: std::cell::RefCell<Vec<FsrTarget>>,
     /// FSR 1's passes were refused by the driver once (`set_upscaler`): not tried again.
     pub(crate) fsr_refused: bool,
+    /// FSR 1 without its mip bias (OMSI_NO_FSR_MIP_BIAS; the tests compare with it).
+    pub(crate) fsr_mip_bias_off: std::cell::Cell<bool>,
     pub(crate) copy_pipeline: wgpu::RenderPipeline,
     /// Triple screen: a panel's picture copied 1:1 to its place in the window.
     pub(crate) panel_pipeline: wgpu::RenderPipeline,

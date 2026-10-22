@@ -194,16 +194,16 @@ struct MaterialParams {
 // agree. The diffuse/detail textures still repeat through s_diffuse.
 fn sample_transmap(uv: vec2<f32>) -> vec4<f32> {
     if (material.extra.x > 0.5 || material.wipe_bounds.z != 0.0) {
-        return textureSample(t_trans, s_tile, uv);
+        return textureSampleBias(t_trans, s_tile, uv, camera.lod.x);
     }
-    return textureSample(t_trans, s_diffuse, uv);
+    return textureSampleBias(t_trans, s_diffuse, uv, camera.lod.x);
 }
 
 fn sample_nightmap(uv: vec2<f32>) -> vec4<f32> {
     if (material.extra.x > 0.5) {
-        return textureSample(t_night, s_tile, uv);
+        return textureSampleBias(t_night, s_tile, uv, camera.lod.x);
     }
-    return textureSample(t_night, s_diffuse, uv);
+    return textureSampleBias(t_night, s_diffuse, uv, camera.lod.x);
 }
 
 // Some vehicle lamps use a clear diffuse placeholder and put the entire lit
@@ -248,7 +248,7 @@ fn tex_address(uv: vec2<f32>) -> vec2<f32> {
 }
 
 fn reflection_mask(uv: vec2<f32>, diffuse_a: f32) -> f32 {
-    let mask = textureSample(t_envmask, s_diffuse, uv).a;
+    let mask = textureSampleBias(t_envmask, s_diffuse, uv, camera.lod.x).a;
     return select(diffuse_a, mask, has_env_mask());
 }
 
@@ -274,9 +274,9 @@ fn omsi_texture_factor(factor: f32, light: vec3<f32>) -> vec3<f32> {
 // reflection at every seam.
 fn bump_offset(uv: vec2<f32>) -> vec2<f32> {
     let texel = 1.0 / vec2<f32>(textureDimensions(t_bump));
-    let h = textureSample(t_bump, s_diffuse, uv).a;
-    let hx = textureSample(t_bump, s_diffuse, uv + vec2<f32>(texel.x, 0.0)).a;
-    let hy = textureSample(t_bump, s_diffuse, uv + vec2<f32>(0.0, texel.y)).a;
+    let h = textureSampleBias(t_bump, s_diffuse, uv, camera.lod.x).a;
+    let hx = textureSampleBias(t_bump, s_diffuse, uv + vec2<f32>(texel.x, 0.0), camera.lod.x).a;
+    let hy = textureSampleBias(t_bump, s_diffuse, uv + vec2<f32>(0.0, texel.y), camera.lod.x).a;
     return clamp(vec2<f32>(h - hx, h - hy) * 2.0, vec2<f32>(-1.0), vec2<f32>(1.0)) * material.bump.x;
 }
 

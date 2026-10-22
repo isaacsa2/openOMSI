@@ -212,8 +212,11 @@ fn fsr1_sharpening_slider_maps_onto_the_clean_range() {
 fn fsr1_translates_to_glsl() {
     use wgpu::naga;
     use wgpu::naga::back::glsl;
-    for format in [wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::TextureFormat::Rgba8Unorm] {
-        let src = crate::shaders::fsr1_source(format);
+    // (and the raw-input variant, OMSI_FSR_RAW_INPUT: not used on OpenGL, but it must make
+    // the other backends' code, which the same translation checks)
+    for (format, raw) in [(wgpu::TextureFormat::Bgra8UnormSrgb, false), (wgpu::TextureFormat::Rgba8Unorm, false), (wgpu::TextureFormat::Bgra8UnormSrgb, true)] {
+        let src = crate::shaders::fsr1_source_for(format, raw);
+        assert_eq!(src.contains("const RAW_INPUT: bool = true;"), raw);
         let module = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
         let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
             .validate(&module)
@@ -235,4 +238,52 @@ fn fsr1_translates_to_glsl() {
             }
         }
     }
+}
+
+/// FSR 1 draws the scene smaller, and the textures with a mip bias of log2 of the scale (AMD's
+/// advice): a striped wall facing the camera then shows about as much of its stripes as the
+/// picture drawn at the window's own size does - not the grey of the smaller picture's mip,
+/// and not more than the full-size picture either (the bias stops at the window's size).
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn fsr1_textures_keep_their_detail_with_the_mip_bias() {
+    let (w, h) = (384, 256);
+    let side = 64u32;
+    let rgba: Vec<u8> = (0..side * side).flat_map(|i| if (i % side) % 2 == 0 { [20u8, 20, 20, 255] } else { [235, 235, 235, 255] }).collect();
+    let data = omsi_texture::TextureData { width: side, height: side, format: omsi_texture::PixelFormat::Rgba8, levels: vec![rgba], has_alpha: false, gpu_mips: true };
+    let wall = MeshData {
+        positions: vec![Vec3::new(-10.0, 20.0, -2.0), Vec3::new(10.0, 20.0, -2.0), Vec3::new(10.0, 20.0, 12.0), Vec3::new(-10.0, 20.0, 12.0)],
+        normals: vec![-Vec3::Y; 4],
+        // (many texels to the pixel: well into the mip chain)
+        uvs: vec![glam::Vec2::new(0.0, 0.0), glam::Vec2::new(28.0, 0.0), glam::Vec2::new(28.0, 1.0), glam::Vec2::new(0.0, 1.0)],
+        ranges: vec![(0, 6, 0)],
+        indices: vec![0, 1, 2, 0, 2, 3],
+        one_sided: false,
+    };
+    let lighting = Lighting { shadows: false, fog_density: 0.0, ..Default::default() };
+    let shot = |scale: f32, fsr: bool, bias: bool| {
+        let mut r = renderer(scale, fsr);
+        let mut scene = r.new_scene();
+        let tex = r.add_texture_data(&mut scene, &data);
+        let mesh = r.add_mesh(&mut scene, &wall);
+        let mat = r.add_material(&mut scene, Some(tex), AlphaMode::Opaque, [1.0; 4], true);
+        r.add_instance(&mut scene, mesh, DVec3::ZERO, Mat4::IDENTITY, vec![mat]);
+        if fsr {
+            assert!(r.set_upscaler(true, 0.0, scale));
+        }
+        r.scale.fsr_mip_bias_off.set(!bias);
+        r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap()
+    };
+    // how much the picture changes from one pixel to the next across: the stripes' contrast
+    let detail = |img: &[u8]| -> f64 {
+        (0..h as usize).flat_map(|y| (1..w as usize).map(move |x| (x, y)))
+            .map(|(x, y)| (img[(y * w as usize + x) * 4 + 1] as f64 - img[(y * w as usize + x - 1) * 4 + 1] as f64).abs())
+            .sum()
+    };
+    let native = detail(&shot(1.0, false, false));
+    let with = detail(&shot(0.5, true, true));
+    let without = detail(&shot(0.5, true, false));
+    eprintln!("detail: native {native}, FSR 50 % with the bias {with}, without {without}");
+    assert!((with - native).abs() < (without - native).abs() * 0.5, "with the bias closer to the full-size picture: native {native}, with {with}, without {without}");
+    assert!(with < native * 1.3, "not sharper than the full-size picture: native {native}, with {with}");
 }

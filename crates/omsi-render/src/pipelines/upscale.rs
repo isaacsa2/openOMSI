@@ -49,6 +49,8 @@ pub(crate) struct Fsr1 {
     pub easu: wgpu::RenderPipeline,
     pub easu_mid: wgpu::RenderPipeline,
     pub rcas: wgpu::RenderPipeline,
+    /// The scene is read through a view that is not sRGB (`shaders::fsr1_raw_input`).
+    pub raw_input: bool,
     /// The intermediate's format: EASU's perceptual values as they are (RCAS reads them back
     /// without the square roots), in ten bits a channel - in eight they were rounded once
     /// there and again into the window's sRGB, a step off on a third of the pixels; the same
@@ -61,7 +63,8 @@ pub(crate) struct Fsr1 {
 /// validation error, caught here rather than losing the device): the standard upscaler
 /// stays, and the log says why.
 pub(crate) fn build_fsr(device: &wgpu::Device, format: wgpu::TextureFormat, layout: &wgpu::BindGroupLayout) -> Option<Fsr1> {
-    log::info!("renderer: compiling the FSR 1 shaders");
+    let raw_input = crate::shaders::fsr1_raw_input(format);
+    log::info!("renderer: compiling the FSR 1 shaders{}", if raw_input { " (the scene read raw)" } else { "" });
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("fsr1"),
@@ -70,13 +73,13 @@ pub(crate) fn build_fsr(device: &wgpu::Device, format: wgpu::TextureFormat, layo
     });
     let shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
         label: Some("fsr1 EASU/RCAS"),
-        source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source(format).into()),
+        source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source_for(format, raw_input).into()),
     });
     let mid_format = wgpu::TextureFormat::Rgb10a2Unorm;
     let pass = |entry, f| no_vertex_pipeline("fsr1", &pl, &shader, entry, &[target(f, None)]).create(device);
     let (easu, easu_mid, rcas) = (pass("fs_easu", format), pass("fs_easu_mid", mid_format), pass("fs_rcas", format));
     match pollster::block_on(scope.pop()) {
-        None => Some(Fsr1 { easu, easu_mid, rcas, mid_format }),
+        None => Some(Fsr1 { easu, easu_mid, rcas, raw_input, mid_format }),
         Some(e) => {
             log::warn!("renderer: FSR 1 is not available on this driver, the standard upscaler stays: {e}");
             None

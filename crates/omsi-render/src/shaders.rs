@@ -38,13 +38,25 @@ pub(crate) const ENHANCED: &str = concat!(
 
 /// FSR 1's passes for a picture of `format`: on an sRGB one they take its texels to gamma
 /// and back (`SRGB_TARGET` in `fsr1.wgsl`), on another they read its values as they are.
-pub(crate) fn fsr1_source(format: wgpu::TextureFormat) -> String {
+/// With `raw_input` (`fsr1_raw_input`) they read an sRGB scene's stored values as they are.
+pub(crate) fn fsr1_source_for(format: wgpu::TextureFormat, raw_input: bool) -> String {
     let source = include_str!("fsr1.wgsl");
-    if format.is_srgb() {
+    let source = if format.is_srgb() {
         source.to_string()
     } else {
         source.replace("const SRGB_TARGET: bool = true;", "const SRGB_TARGET: bool = false;")
+    };
+    if raw_input && format.is_srgb() {
+        source.replace("const RAW_INPUT: bool = false;", "const RAW_INPUT: bool = true;")
+    } else {
+        source
     }
+}
+
+/// OMSI_FSR_RAW_INPUT on a device that can read a texture through a view of another format
+/// (not OpenGL): FSR 1 reads the scene's sRGB values without decoding them.
+pub(crate) fn fsr1_raw_input(format: wgpu::TextureFormat) -> bool {
+    format.is_srgb() && !crate::gl_backend() && omsi_cfg::flags::OMSI_FSR_RAW_INPUT.is_set()
 }
 
 #[cfg(test)]
@@ -54,7 +66,7 @@ mod tests {
         // No GPU or OMSI installation required. Run even though FSR is off by default.
         // Both variants: an sRGB window (gamma 2.0 in and out) and one that is not.
         for format in [wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::TextureFormat::Rgba8Unorm] {
-            let source = super::fsr1_source(format);
+            let source = super::fsr1_source_for(format, false);
             assert_eq!(source.contains("const SRGB_TARGET: bool = true;"), format.is_srgb(), "{format:?}");
             let module = naga::front::wgsl::parse_str(&source).expect("FSR1 WGSL must parse");
             naga::valid::Validator::new(
@@ -79,13 +91,14 @@ mod tests {
     /// lacquer, the draw order's depth step of a surface lying on another of its object, and a
     /// livery's tint above the alpha test, the painted lines' pull and the wet paint's water film, and the player's vehicle
     /// standing between other vehicles' lamps and what lies behind it, and clear vehicle
-    /// lamps taking coverage from their active night map).
+    /// lamps taking coverage from their active night map, and the textures read with FSR 1's
+    /// mip bias, `camera.lod`).
     /// (with Unix line ends: a Windows checkout may turn the parts' into CRLF, as it did the
     /// single files', and the 0.2.31 release's Windows test failed on that alone)
     #[test]
     fn assembled_shaders_are_the_old_files() {
         let (scene, enhanced) = (super::SCENE.replace("\r\n", "\n"), super::ENHANCED.replace("\r\n", "\n"));
-        assert_eq!((scene.len(), fnv1a(&scene)), (125_013, 0x285e_be68_6cb8_f146));
-        assert_eq!((enhanced.len(), fnv1a(&enhanced)), (88_225, 0x1839_e9f6_7957_791c));
+        assert_eq!((scene.len(), fnv1a(&scene)), (125_362, 0xe988_f309_fb9b_168c));
+        assert_eq!((enhanced.len(), fnv1a(&enhanced)), (88_333, 0x7b93_c520_1cc8_4158));
     }
 }

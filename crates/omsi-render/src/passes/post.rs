@@ -172,6 +172,23 @@ impl Renderer {
         }
     }
 
+    /// FSR 1 scales this view's picture up: asked for and built, the window's picture or an
+    /// eye's (not a mirror's, nor with vanilla FXAA), drawn smaller than its target.
+    pub(crate) fn fsr_draws(&self, f: &FrameCtx) -> bool {
+        (self.options.fsr1 || crate::fsr1_enabled()) && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
+            && f.scene_target.is_some() && f.width < f.full_w && f.height < f.target.texture().height()
+            && self.scale.fsr.is_some()
+    }
+
+    /// The textures' mip bias for this view (`CameraUniform::lod`): log2 of the scale while
+    /// FSR 1 scales its picture up (-0.58 at 67 %, -1 at 50 %), as AMD advises for FSR 1;
+    /// else 0. (The standard upscaler keeps the textures as they were: its sharpening does
+    /// its part, and the picture it gives is unchanged.)
+    pub(crate) fn fsr_mip_bias(&self, f: &FrameCtx) -> f32 {
+        let off = omsi_cfg::flags::OMSI_NO_FSR_MIP_BIAS.is_set() || self.scale.fsr_mip_bias_off.get();
+        if !off && self.fsr_draws(f) { (f.width as f32 / f.full_w.max(1) as f32).log2().clamp(-1.0, 0.0) } else { 0.0 }
+    }
+
     // --- the smaller picture scaled up to the window, the HUD on top at full size;
     // the smaller the picture, the more it is sharpened
     pub(crate) fn encode_upscale(&self, encoder: &mut wgpu::CommandEncoder, scene: &Scene, f: &FrameCtx, timers: &mut PassTimers) {
@@ -180,11 +197,8 @@ impl Renderer {
         if let Some((_, bg)) = &f.scene_target {
             // Opt-in FSR1 experiment. Use the existing scene scale setting for quality.
             // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
-            let fsr1_enabled = self.options.fsr1 || crate::fsr1_enabled();
             let full_h = f.target.texture().height();
-            let fsr = fsr1_enabled && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
-                && width < full_w && height < full_h
-                && self.scale.fsr.is_some();
+            let fsr = self.fsr_draws(f);
             // (RCAS: the slider's whole range onto 0..0.8 of AMD's lobe, `fsr1_rcas_strength`;
             // a picture FSR does not draw - a mirror, vanilla FXAA - keeps the standard
             // upscaler's own sharpening: the slider is RCAS's, and at its default the
@@ -227,6 +241,11 @@ impl Renderer {
                     cached.push(FsrTarget { size, _texture: texture, view, bind_group });
                 }
                 let intermediate = sharpened.then(|| cached.iter().find(|t| t.size == size).expect("FSR1 intermediate initialized"));
+                // (OMSI_FSR_RAW_INPUT: the scene through a view that is not sRGB)
+                let raw_bg = self.scale.fsr.as_ref().filter(|p| p.raw_input).and_then(|_| f.scene_target.as_ref()).map(|(view, _)| {
+                    let raw = view.texture().create_view(&wgpu::TextureViewDescriptor { format: Some(self.format.remove_srgb_suffix()), ..Default::default() });
+                    self.picture_group(&raw)
+                });
                 // The HUD is composed on the finished picture, never upscaled or sharpened.
                 let draw_overlays = |pass: &mut wgpu::RenderPass| {
                     if !overlays.is_empty() {
@@ -259,7 +278,7 @@ impl Renderer {
                     });
                     let p = self.scale.fsr.as_ref().expect("FSR1 pipelines");
                     pass.set_pipeline(if intermediate.is_some() { &p.easu_mid } else { &p.easu });
-                    pass.set_bind_group(0, bg, &[]);
+                    pass.set_bind_group(0, raw_bg.as_ref().unwrap_or(bg), &[]);
                     pass.draw(0..3, 0..1);
                     if intermediate.is_none() {
                         draw_overlays(&mut pass);

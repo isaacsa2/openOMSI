@@ -378,6 +378,7 @@ impl Renderer {
                 _ => [0.0; 4],
             },
             cookies: self.lights.cookies.fields(),
+            lod: [self.fsr_mip_bias(f), 0.0, 0.0, 0.0],
         };
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));

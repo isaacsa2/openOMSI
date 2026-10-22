@@ -35,8 +35,15 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
 // gamma 2.0 here and the result back to linear on the way out (as AMD's sample does). A
 // target that is not sRGB already holds encoded values. (`build` sets this per format.)
 const SRGB_TARGET: bool = true;
+// OMSI_FSR_RAW_INPUT: the scene is read through a view that is not sRGB, its texels coming as
+// they are stored - sRGB-encoded, perceptual already: no square roots for EASU's twelve taps,
+// and the way out is the exact sRGB curve (once a pixel) instead of the square.
+const RAW_INPUT: bool = false;
 
 fn to_perceptual(c: vec3<f32>) -> vec3<f32> {
+    if RAW_INPUT {
+        return c;
+    }
     if SRGB_TARGET {
         return sqrt(max(c, vec3<f32>(0.0)));
     }
@@ -44,6 +51,10 @@ fn to_perceptual(c: vec3<f32>) -> vec3<f32> {
 }
 
 fn from_perceptual(c: vec3<f32>) -> vec3<f32> {
+    if RAW_INPUT {
+        let x = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+        return select(pow((x + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)), x / 12.92, x <= vec3<f32>(0.04045));
+    }
     if SRGB_TARGET {
         return c * c;
     }
