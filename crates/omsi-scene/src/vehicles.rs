@@ -303,6 +303,21 @@ impl World {
             })
             .map(|(k, _)| k.clone())
             .collect();
+        // No GPU wait/readback: only inspect the existing set registry when profiling.
+        // A cache entry with no users can still be pinned by the upcoming timetable or
+        // random traffic set list, so a despawn does not always release its GPU memory.
+        if omsi_cfg::flags::OMSI_PROFILE.is_set() {
+            let active = sets.values().filter(|s| s.users > 0).count();
+            let pinned_idle = sets
+                .iter()
+                .filter(|(key, s)| s.users == 0 && keep.contains(*key))
+                .count();
+            let idle_unpinned = sets.len().saturating_sub(active + pinned_idle);
+            log::info!(
+                "vehicle cache: {active} active sets, {pinned_idle} idle pinned sets, {idle_unpinned} idle unpinned sets, {} due for eviction",
+                gone.len()
+            );
+        }
         if gone.is_empty() {
             return 0;
         }
