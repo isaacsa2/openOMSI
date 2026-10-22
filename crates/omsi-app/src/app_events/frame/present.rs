@@ -693,7 +693,22 @@ impl App {
                     let frames = crate::perf_report::frame_summary(&self.perf.frame_times);
                     log::info!("{}", crate::perf_report::log_line(&frames));
                     if let Some(path) = omsi_cfg::flags::OMSI_PROFILE_JSON.var() {
-                        let report = crate::perf_report::report(crate::perf_report::Run { perf: &self.perf, settings: &self.settings, args: &self.args, lan: self.net.lan.is_some() }, r, (s.config.width, s.config.height), (sw, sh), frames);
+                        let report = crate::perf_report::report(crate::perf_report::Run { perf: &self.perf, settings: &self.settings, args: &self.args, lan: self.net.lan.is_some(), resources: serde_json::json!({
+                            "streaming": self.gfx.streamer.as_ref().map(|st| serde_json::json!({
+                                "tiles_loaded_total": st.loaded_total,
+                                "tiles_unloaded_total": st.unloaded_total,
+                                "worker_prepare_seconds": st.prepare_secs,
+                                "worst_upload_ms": st.worst_upload_ms,
+                                "slow_frames": st.slow_frames,
+                                "worst_streaming_frame_ms": st.worst_frame_ms,
+                            })),
+                            "world": self.world.as_ref().map(|w| serde_json::json!({
+                                "loaded_tiles": w.loaded_tiles().len(),
+                                "texture_budget_bytes": w.texture_budget_bytes(),
+                            })),
+                            "gpu_allocator_summary": r.allocator_summary(),
+                            "lan_connected": self.net.lan.is_some(),
+                        }) }, r, (s.config.width, s.config.height), (sw, sh), frames);
                         match serde_json::to_vec_pretty(&report).map_err(anyhow::Error::from).and_then(|b| Ok(std::fs::write(path, b)?)) {
                             Ok(()) => log::info!("profile: the summary is in {path}"),
                             Err(e) => log::warn!("profile: the summary could not be written to {path}: {e}"),
