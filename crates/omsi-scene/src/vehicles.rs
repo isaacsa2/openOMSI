@@ -19,6 +19,7 @@ impl World {
         self.mirror_glass.lock().clear();
         let set = self.upload_vehicle(renderer, scene, vt, scheme, true);
         let mut render = self.instantiate_vehicle(renderer, scene, vt, &set, None, None);
+        render.own_set = Some(set);
         own_skinned_meshes(renderer, scene, vt, &mut render);
         render
     }
@@ -42,6 +43,7 @@ impl World {
             None
         };
         let mut render = self.instantiate_vehicle(renderer, scene, vt, &set, None, shared);
+        render.own_set = Some(set);
         own_skinned_meshes(renderer, scene, vt, &mut render);
         render
     }
@@ -270,6 +272,13 @@ impl World {
         if let Some((first, n)) = render.interior_lamps.get() {
             renderer.free_interior_lights(scene, first, n);
         }
+        // (the player's set is its alone: given back as a trimmed set is - its textures and
+        // meshes only when no other set holds them)
+        if let Some(s) = render.own_set {
+            let mut tex_ids = self.vehicle_textures.lock();
+            let mut mesh_ids = self.vehicle_meshes.lock();
+            give_back_set(renderer, scene, &mut tex_ids, &mut mesh_ids, &mut self.gpu.lock(), s);
+        }
         if let Some(key) = render.set {
             if let Some(s) = self.vehicle_gpu.lock().get_mut(&key) {
                 s.users = s.users.saturating_sub(1);
@@ -312,35 +321,9 @@ impl World {
         let (mut textures, mut meshes) = (0usize, 0usize);
         for k in &gone {
             let s = sets.remove(k).unwrap();
-            for m in s.materials {
-                gpu.free_material(renderer, scene, m);
-            }
-            for p in s.textures {
-                let Some(e) = tex_ids.get_mut(&p) else {
-                    continue;
-                };
-                e.1 = e.1.saturating_sub(1);
-                if e.1 == 0 {
-                    let id = e.0;
-                    tex_ids.remove(&p);
-                    renderer.free_texture(scene, id);
-                    gpu.free_textures.push(id);
-                    textures += 1;
-                }
-            }
-            for mk in s.mesh_keys {
-                let Some(e) = mesh_ids.get_mut(&mk) else {
-                    continue;
-                };
-                e.1 = e.1.saturating_sub(1);
-                if e.1 == 0 {
-                    let id = e.0;
-                    mesh_ids.remove(&mk);
-                    renderer.free_mesh(scene, id);
-                    gpu.free_meshes.push(id);
-                    meshes += 1;
-                }
-            }
+            let (t, m) = give_back_set(renderer, scene, &mut tex_ids, &mut mesh_ids, &mut gpu, s);
+            textures += t;
+            meshes += m;
         }
         if omsi_cfg::flags::OMSI_PROFILE.is_set() {
             log::info!(
@@ -829,6 +812,7 @@ impl World {
             variants,
             own_materials,
             set: key,
+            own_set: None,
             displays_far: false,
             display_tick: 0,
             skinned: Vec::new(),
@@ -1520,4 +1504,108 @@ struct VehicleUpload<'a> {
     only: Option<String>,
     variants: Vec<VariantSlot>,
     dyn_slots: Vec<DynSlot>,
+}
+
+/// A vehicle set given back: its materials, and the textures and meshes it held that no
+/// other holder has left (`trim_vehicle_sets`, and the player's own set in
+/// `release_vehicle`). Returns how many textures and meshes went.
+fn give_back_set(
+    renderer: &Renderer,
+    scene: &mut Scene,
+    tex_ids: &mut HashMap<PathBuf, (TextureId, usize)>,
+    mesh_ids: &mut HashMap<(PathBuf, usize), (MeshId, usize)>,
+    gpu: &mut GpuCache,
+    s: VehicleSet,
+) -> (usize, usize) {
+    for m in s.materials {
+        gpu.free_material(renderer, scene, m);
+    }
+    let textures = let_go(tex_ids, s.textures);
+    let meshes = let_go(mesh_ids, s.mesh_keys);
+    for &id in &textures {
+        renderer.free_texture(scene, id);
+        gpu.free_textures.push(id);
+    }
+    for &id in &meshes {
+        renderer.free_mesh(scene, id);
+        gpu.free_meshes.push(id);
+    }
+    (textures.len(), meshes.len())
+}
+
+/// One holder fewer for each of `held` (a set holds each once): the ids whose last holder
+/// that was, taken out of `ids`.
+fn let_go<K: std::hash::Hash + Eq, Id: Copy>(ids: &mut HashMap<K, (Id, usize)>, held: Vec<K>) -> Vec<Id> {
+    let mut gone = Vec::new();
+    for k in held {
+        let Some(e) = ids.get_mut(&k) else {
+            continue;
+        };
+        e.1 = e.1.saturating_sub(1);
+        if e.1 == 0 {
+            gone.push(e.0);
+            ids.remove(&k);
+        }
+    }
+    gone
+}
+
+#[cfg(test)]
+mod give_back_tests {
+    use super::let_go;
+    use std::path::PathBuf;
+
+    type Ids = super::HashMap<PathBuf, (u32, usize)>;
+
+    /// What `vehicle_texture` does for a set being built: one more holder, once per set.
+    fn hold(ids: &mut Ids, held: &mut Vec<PathBuf>, next: &mut u32, p: &str) {
+        let p = PathBuf::from(p);
+        if held.contains(&p) {
+            return;
+        }
+        let e = ids.entry(p.clone()).or_insert_with(|| {
+            *next += 1;
+            (*next, 0)
+        });
+        e.1 += 1;
+        held.push(p);
+    }
+
+    /// The player's bus taken again and again (#2903): every set it was made from gives its
+    /// textures back, and none is left over however often.
+    #[test]
+    fn a_vehicle_made_again_and_again_leaves_nothing_held() {
+        let (mut ids, mut next) = (Ids::default(), 0);
+        for _ in 0..50 {
+            let mut held = Vec::new();
+            for p in ["bus/body.dds", "bus/glass.dds", "bus/body.dds"] {
+                hold(&mut ids, &mut held, &mut next, p);
+            }
+            assert_eq!(let_go(&mut ids, held).len(), 2);
+            assert!(ids.is_empty());
+        }
+    }
+
+    /// Two paints of one bus share the model's textures: the first let go keeps them for the
+    /// other, the last frees them; an articulated bus's two parts likewise.
+    #[test]
+    fn shared_textures_stay_while_another_set_holds_them() {
+        let (mut ids, mut next) = (Ids::default(), 0);
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        for p in ["bus/common.dds", "bus/paint_a.dds"] {
+            hold(&mut ids, &mut a, &mut next, p);
+        }
+        for p in ["bus/common.dds", "bus/paint_b.dds"] {
+            hold(&mut ids, &mut b, &mut next, p);
+        }
+        let common = ids[&PathBuf::from("bus/common.dds")].0;
+        let gone = let_go(&mut ids, a);
+        assert_eq!(gone.len(), 1, "only paint a's own picture");
+        assert!(!gone.contains(&common));
+        assert_eq!(ids[&PathBuf::from("bus/common.dds")].1, 1);
+        let gone = let_go(&mut ids, b);
+        assert!(gone.contains(&common) && ids.is_empty());
+        // (a key nobody holds any more is passed over, not counted below zero)
+        assert!(let_go(&mut ids, vec![PathBuf::from("bus/common.dds")]).is_empty());
+    }
 }
