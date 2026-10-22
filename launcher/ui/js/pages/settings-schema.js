@@ -84,9 +84,9 @@ const graphics = {
         { type: 'custom', id: 'preset' },
         { type: 'custom', id: 'optimise' },
         { type: 'select', key: 'msaa', label: 'Anti-aliasing', options: [['1', 'Off'], ['2', '2x MSAA'], ['4', '4x MSAA'], ['8', '8x MSAA']], heavy: (v, s) => v === '8' && s.graphics !== 'enhanced_plus' },
-        { type: 'select', key: 'upscaler', label: 'Upscaling', options: [['default', 'Default (Catmull-Rom)'], ['fsr1', 'AMD FSR 1 (experimental)']], help: 'Changes take effect after restarting the game. FSR uses a lower internal resolution.' },
-        { type: 'select', key: 'fsr_quality', label: 'FSR quality', options: [['ultra', 'Ultra Quality (77%)'], ['quality', 'Quality (67%)'], ['balanced', 'Balanced (59%)'], ['performance', 'Performance (50%)'], ['auto', 'Automatic (keeps the frame rate)'], ['custom', 'Use render scale below']], when: (s) => s.upscaler === 'fsr1' },
-        { type: 'slider', key: 'fsr_sharpness', label: 'FSR sharpening (RCAS)', min: 0, max: 1, step: 0.05, def: 0.8, store: snap(0.05), format: pct, when: (s) => s.upscaler === 'fsr1' },
+        { type: 'select', key: 'upscaler', label: 'Upscaling', options: [['default', 'Standard (Catmull-Rom)'], ['fsr1', 'AMD FSR 1 (experimental)']], help: 'Standard Catmull-Rom or experimental FSR 1; changes show at once' },
+        { type: 'select', key: 'fsr_quality', label: 'FSR quality', options: [['ultra', 'Ultra Quality (77%)'], ['quality', 'Quality (67%)'], ['balanced', 'Balanced (59%)'], ['performance', 'Performance (50%)'], ['auto', 'Automatic (keeps the frame rate)'], ['custom', 'Use render scale']], when: (s) => s.upscaler === 'fsr1' },
+        { type: 'slider', key: 'fsr_sharpness', label: 'FSR sharpness', help: 'RCAS sharpening strength', min: 0, max: 1, step: 0.05, def: 0.8, store: snap(0.05), format: pct, when: (s) => s.upscaler === 'fsr1' },
         { type: 'select', key: 'render_scale', label: 'Render scale', options: [['auto', 'Auto'], ['1', '100%'], ['0.85', '85%'], ['0.75', '75%'], ['0.67', '67%'], ['0.5', '50%']] },
         { type: 'select', key: 'anisotropy', label: 'Anisotropic', options: [['1', 'Off'], ['2', '2x'], ['4', '4x'], ['8', '8x'], ['16', '16x']] },
         // Vanilla draws what OMSI 2 draws: no sun shadows, ambient occlusion or detail grain

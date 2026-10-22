@@ -60,29 +60,25 @@ pub(crate) struct Fsr1 {
 
 /// FSR 1's passes (`Fsr1`) for pictures of `format`, built when the player first asks for
 /// them - at the start, or later from the menu. None when the driver refuses them (a
-/// validation error, caught here rather than losing the device): the standard upscaler
-/// stays, and the log says why.
+/// validation, internal or out-of-memory error, caught here (`optional_pipeline`) rather
+/// than by the device's handler, which would take it for the full renderer failing and turn
+/// MSAA off): the standard upscaler stays, and the log says why.
 pub(crate) fn build_fsr(device: &wgpu::Device, format: wgpu::TextureFormat, layout: &wgpu::BindGroupLayout) -> Option<Fsr1> {
     let raw_input = crate::shaders::fsr1_raw_input(format);
     log::info!("renderer: compiling the FSR 1 shaders{}", if raw_input { " (the scene read raw)" } else { "" });
-    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("fsr1"),
-        bind_group_layouts: &[Some(layout)],
-        immediate_size: 0,
-    });
-    let shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
-        label: Some("fsr1 EASU/RCAS"),
-        source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source_for(format, raw_input).into()),
-    });
-    let mid_format = wgpu::TextureFormat::Rgb10a2Unorm;
-    let pass = |entry, f| no_vertex_pipeline("fsr1", &pl, &shader, entry, &[target(f, None)]).create(device);
-    let (easu, easu_mid, rcas) = (pass("fs_easu", format), pass("fs_easu_mid", mid_format), pass("fs_rcas", format));
-    match pollster::block_on(scope.pop()) {
-        None => Some(Fsr1 { easu, easu_mid, rcas, raw_input, mid_format }),
-        Some(e) => {
-            log::warn!("renderer: FSR 1 is not available on this driver, the standard upscaler stays: {e}");
-            None
-        }
-    }
+    crate::gpu::optional_pipeline(device, "FSR 1 (the standard upscaler stays)", || {
+        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fsr1"),
+            bind_group_layouts: &[Some(layout)],
+            immediate_size: 0,
+        });
+        let shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
+            label: Some("fsr1 EASU/RCAS"),
+            source: wgpu::ShaderSource::Wgsl(crate::shaders::fsr1_source_for(format, raw_input).into()),
+        });
+        let mid_format = wgpu::TextureFormat::Rgb10a2Unorm;
+        let pass = |entry, f| no_vertex_pipeline("fsr1", &pl, &shader, entry, &[target(f, None)]).create(device);
+        let (easu, easu_mid, rcas) = (pass("fs_easu", format), pass("fs_easu_mid", mid_format), pass("fs_rcas", format));
+        Fsr1 { easu, easu_mid, rcas, raw_input, mid_format }
+    })
 }

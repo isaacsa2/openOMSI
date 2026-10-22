@@ -219,6 +219,10 @@ impl Renderer {
                 let sharpened = sharpen > 0.0;
                 let size = (full_w, full_h);
                 let mut cached = self.scale.fsr_target.borrow_mut();
+                // (the sizes no view drew at for two seconds go: a resized window's old one,
+                // 33 MB at 4K, stayed for as long as two other sizes did not take its place)
+                let now = std::time::Instant::now();
+                cached.retain(|t| t.size == size || now.duration_since(t.used.get()).as_secs_f32() < 2.0);
                 if sharpened && !cached.iter().any(|t| t.size == size) {
                     let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("FSR1 EASU full-resolution intermediate"),
@@ -238,9 +242,12 @@ impl Renderer {
                     if cached.len() >= 3 {
                         cached.remove(0);
                     }
-                    cached.push(FsrTarget { size, _texture: texture, view, bind_group });
+                    cached.push(FsrTarget { size, used: std::cell::Cell::new(now), _texture: texture, view, bind_group });
                 }
                 let intermediate = sharpened.then(|| cached.iter().find(|t| t.size == size).expect("FSR1 intermediate initialized"));
+                if let Some(t) = intermediate {
+                    t.used.set(now);
+                }
                 // (OMSI_FSR_RAW_INPUT: the scene through a view that is not sRGB)
                 let raw_bg = self.scale.fsr.as_ref().filter(|p| p.raw_input).and_then(|_| f.scene_target.as_ref()).map(|(view, _)| {
                     let raw = view.texture().create_view(&wgpu::TextureViewDescriptor { format: Some(self.format.remove_srgb_suffix()), ..Default::default() });

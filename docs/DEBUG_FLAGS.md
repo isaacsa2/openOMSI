@@ -364,7 +364,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_MIRROR_HUD` | num | settings | use | app | Mirror HUD mode (number). |
 | `OMSI_OPENXR` | bool | off | use | app | Start in OpenXR (VR) mode. |
 | `OMSI_OPENXR_MIRROR_RATE` | num | settings | use | app, xr | VR: mirror redraw rate (negative: every mirror each frame). |
-| `OMSI_OPENXR_SCALE` | num | settings | use | xr | VR: render scale of the eyes. |
+| `OMSI_OPENXR_SCALE` | num | settings | use | render | VR: render scale of the eyes. |
 | `OMSI_PARKED_PULL_OUT` | num | 0.035 | use | app | Chance per step a parked car pulls out. |
 | `OMSI_PARK_IN` | num | 0.04 | use | app | Chance per step a car parks. |
 | `OMSI_PAX_ANIMATION` | text | settings | use | app | Override the passenger animation for a game session: original (OMSI) or enhanced (procedural IK). |

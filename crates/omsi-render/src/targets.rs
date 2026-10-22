@@ -522,6 +522,9 @@ pub(crate) struct Targets {
 /// Reuse matters on low-memory cards: allocating this each frame causes VRAM churn.
 pub(crate) struct FsrTarget {
     pub(crate) size: (u32, u32),
+    /// When a picture of this size last went through it (a size not seen for a while - the
+    /// window's before a resize - is let go).
+    pub(crate) used: std::cell::Cell<std::time::Instant>,
     pub(crate) _texture: wgpu::Texture,
     pub(crate) view: wgpu::TextureView,
     pub(crate) bind_group: wgpu::BindGroup,

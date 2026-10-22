@@ -250,21 +250,27 @@ fn fsr1_translates_to_glsl() {
 }
 
 /// FSR 1 draws the scene smaller, and the textures with a mip bias of log2 of the scale (AMD's
-/// advice): a striped wall facing the camera then shows about as much of its stripes as the
-/// picture drawn at the window's own size does - not the grey of the smaller picture's mip,
-/// and not more than the full-size picture either (the bias stops at the window's size).
+/// advice): a checkered wall facing the camera then keeps its checks - not the grey of the
+/// smaller picture's mip - and shows no more of them than the picture drawn at the window's
+/// own size (the bias stops at the window's size). (Not as much as it: the half-size picture
+/// scaled up cannot hold checks of a pixel or so.)
+/// The wall is square on to the camera and its texels as wide as they are high, a little
+/// over one to the pixel at the window's size: with texels much longer one way than the
+/// other, anisotropic filtering (Metal's) chose its mip from the short side, the top one with
+/// the bias or without it, and the test saw no difference.
 #[test]
 #[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
 fn fsr1_textures_keep_their_detail_with_the_mip_bias() {
     let (w, h) = (384, 256);
     let side = 64u32;
-    let rgba: Vec<u8> = (0..side * side).flat_map(|i| if (i % side) % 2 == 0 { [20u8, 20, 20, 255] } else { [235, 235, 235, 255] }).collect();
+    let rgba: Vec<u8> = (0..side * side).flat_map(|i| if (i % side + i / side) % 2 == 0 { [20u8, 20, 20, 255] } else { [235, 235, 235, 255] }).collect();
     let data = omsi_texture::TextureData { width: side, height: side, format: omsi_texture::PixelFormat::Rgba8, levels: vec![rgba], has_alpha: false, gpu_mips: true };
     let wall = MeshData {
         positions: vec![Vec3::new(-10.0, 20.0, -2.0), Vec3::new(10.0, 20.0, -2.0), Vec3::new(10.0, 20.0, 12.0), Vec3::new(-10.0, 20.0, 12.0)],
         normals: vec![-Vec3::Y; 4],
-        // (many texels to the pixel: well into the mip chain)
-        uvs: vec![glam::Vec2::new(0.0, 0.0), glam::Vec2::new(28.0, 0.0), glam::Vec2::new(28.0, 1.0), glam::Vec2::new(0.0, 1.0)],
+        // (20 x 14 m, 11 pixels to the metre at 20 m: 1.3 texels to the pixel at the window's
+        // size, 2.6 in the half-size picture - its mips' grey without the bias)
+        uvs: vec![glam::Vec2::new(0.0, 0.0), glam::Vec2::new(4.5, 0.0), glam::Vec2::new(4.5, 3.15), glam::Vec2::new(0.0, 3.15)],
         ranges: vec![(0, 6, 0)],
         indices: vec![0, 1, 2, 0, 2, 3],
         one_sided: false,
@@ -281,9 +287,10 @@ fn fsr1_textures_keep_their_detail_with_the_mip_bias() {
             assert!(r.set_upscaler(true, 0.0, scale));
         }
         r.scale.fsr_mip_bias_off.set(!bias);
-        r.render_to_image(&mut scene, w, h, &camera(), &lighting).unwrap()
+        let square_on = Camera { pitch: 0.0, ..camera() };
+        r.render_to_image(&mut scene, w, h, &square_on, &lighting).unwrap()
     };
-    // how much the picture changes from one pixel to the next across: the stripes' contrast
+    // how much the picture changes from one pixel to the next across: the checks' contrast
     let detail = |img: &[u8]| -> f64 {
         (0..h as usize).flat_map(|y| (1..w as usize).map(move |x| (x, y)))
             .map(|(x, y)| (img[(y * w as usize + x) * 4 + 1] as f64 - img[(y * w as usize + x - 1) * 4 + 1] as f64).abs())
@@ -293,6 +300,6 @@ fn fsr1_textures_keep_their_detail_with_the_mip_bias() {
     let with = detail(&shot(0.5, true, true));
     let without = detail(&shot(0.5, true, false));
     eprintln!("detail: native {native}, FSR 50 % with the bias {with}, without {without}");
-    assert!((with - native).abs() < (without - native).abs() * 0.5, "with the bias closer to the full-size picture: native {native}, with {with}, without {without}");
+    assert!(with > without * 4.0, "the checks kept with the bias, grey without: native {native}, with {with}, without {without}");
     assert!(with < native * 1.3, "not sharper than the full-size picture: native {native}, with {with}");
 }

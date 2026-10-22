@@ -4,12 +4,17 @@ This branch adds AMD FidelityFX Super Resolution **1.x spatial upscaling** using
 
 ## Enable and compare
 
-FSR1 is **disabled by default**. Open **Settings > Graphics > Upscaling** in the launcher (or **Esc > Options > Graphics** inside the game) and choose **AMD FSR 1 (experimental)**. Choose an **FSR quality** preset (Ultra Quality 77%, Quality 67%, Balanced 59%, Performance 50%, Automatic, or Custom) and **FSR sharpening** (0-100%). Settings are persisted in `settings.cfg` and included in graphics profiles.
+FSR1 is **disabled by default**. Open **Settings > Graphics > Upscaling** in the launcher (or **Esc > Options > Graphics** inside the game) and choose **AMD FSR 1 (experimental)**. Choose an **FSR quality** preset (Ultra Quality 77%, Quality 67%, Balanced 59%, Performance 50%, Automatic, or Custom) and **FSR sharpness** (0-100%). Settings are persisted in `settings.cfg` and included in graphics profiles.
 
 **In the game the change shows at once**: FSR 1's passes are compiled the first time it is chosen (nothing for whoever never does). If the graphics driver refuses them, the game says so once and keeps the standard upscaler for the rest of the run. The FSR quality row shows the size the 3D picture is drawn at and the window's (`1286×723 … 1920×1080`).
 
 - **Automatic** leaves the size to the frame-rate governor (render scale *Auto*): the picture is drawn smaller while the card cannot keep the frame rate (85, 70, 55 %) and FSR 1 scales it up; at full size nothing is upscaled.
 - For a quick 1080p test, select **Quality**; the game will use a 0.67 internal scale.
+- A **Render scale** below the preset's still caps it: the optimiser's steps down and the
+  lighter graphics after a lost graphics device (75 %) lower the render scale, and the
+  picture is drawn at the smaller of the two (`fsr1_presets_keep_the_render_scale_caps`).
+- In VR, `OMSI_OPENXR_SCALE` takes the place of the eye resolution once: with FSR 1 the
+  headset image stays full-sized and the eyes are drawn at that share of it.
 - Ultra Quality: 0.77; Balanced: ~0.59; Performance: 0.50 (the renderer clamps fixed scales to 0.5).
 - FSR is used for the window, for each panel of a triple screen, and in VR (below). The unchanged Catmull-Rom upscaler is used elsewhere (mirrors, offscreen pictures) and whenever FSR is off or nothing is scaled.
 - **VR:** without FSR the headset's image itself is made at the eye resolution (`vr_scale`, 65 % by default) and the runtime scales it. With FSR on when VR starts, the image is full-sized and each eye is drawn at the eye resolution and scaled up to it by FSR 1 - sharper at the same drawing cost, plus the two FSR passes per eye and a larger image for the runtime to show. Turned off during the VR session, the eyes stay at that size and the standard upscaler takes over. **Not tried on a headset yet**: the renderer's part is tested offscreen (`a_vr_eye_with_fsr1_is_drawn_smaller_and_scaled_up`).
@@ -82,10 +87,13 @@ compare it between rows, not with the frame time.)
   mips for the smaller picture - letters, gauges and signs blurred before FSR saw them. With
   FSR 1 scaling the picture up, the scene's textures are now read with a mip bias of log2 of
   the scale (-0.58 at 67 %, -1 at 50 %), AMD's advice: as detailed as the window's size wants,
-  never more. On a striped wall facing the camera at 50 % the stripes' contrast is 129 498
-  against 127 978 drawn at full size, and 20 888 without the bias
-  (`fsr1_textures_keep_their_detail_with_the_mip_bias`). `OMSI_NO_FSR_MIP_BIAS=1` leaves it out,
-  to compare in the game. The standard upscaler is unchanged.
+  never more. On a checkered wall square on to the camera at 50 % the checks' contrast is
+  147 986 with the bias and 14 064 without (the mips' grey), against 708 212 drawn at full size
+  (`fsr1_textures_keep_their_detail_with_the_mip_bias`; its texels as wide as high: on a wall
+  striped one way only, Metal's anisotropic filtering took the top mip with the bias or
+  without it, and the test saw no difference). The shadow and rain maps, drawn at their own
+  size, keep their textures' mips. `OMSI_NO_FSR_MIP_BIAS=1` leaves the bias out, to compare
+  in the game. The standard upscaler is unchanged.
 - **`OMSI_FSR_RAW_INPUT=1`** (to measure, off by default; not on OpenGL): EASU reads the scene
   through a view that is not sRGB, its values as stored - no square roots for its twelve taps -
   and the way out takes the exact sRGB curve once a pixel. Not tried on a GPU yet (the test

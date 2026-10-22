@@ -555,6 +555,19 @@ impl Settings {
     }
 
     /// The settings a `settings.cfg` text describes (anything missing keeps its default).
+    /// The upscaler's lines of settings.cfg (`from_text`): unknown values fall back to the
+    /// standard upscaler, the Quality preset and 80 % sharpening.
+    fn read_upscaler(&mut self, k: &str, v: &str) {
+        match k {
+            "upscaler" => self.upscaler = if v.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }.into(),
+            "fsr_quality" => self.fsr_quality = match v.to_ascii_lowercase().as_str() {
+                "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
+                "custom" => "custom", "auto" => "auto", _ => "quality",
+            }.into(),
+            _ => self.fsr_sharpness = v.parse::<f32>().ok().filter(|n| n.is_finite()).map(|n| n.clamp(0.0, 1.0)).unwrap_or(0.8),
+        }
+    }
+
     pub fn from_text(text: &str) -> Settings {
         let mut s = Settings::default();
         let mut version = 0u32;
@@ -655,14 +668,8 @@ impl Settings {
                 "fullscreen" => s.fullscreen = b(v),
                 "vsync" => s.vsync = b(v),
                 "volume" => s.volume = v.parse().unwrap_or(s.volume),
+                "upscaler" | "fsr_quality" | "fsr_sharpness" => s.read_upscaler(&k, v),
                 // "auto", a fraction (0.75) or a percentage (75)
-                "upscaler" => s.upscaler = if v.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }.into(),
-                "fsr_quality" => s.fsr_quality = match v.to_ascii_lowercase().as_str() {
-                    "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
-                    "custom" => "custom", "auto" => "auto", _ => "quality",
-                }.into(),
-                "fsr_sharpness" => s.fsr_sharpness = v.parse::<f32>().ok()
-                    .filter(|n| n.is_finite()).map(|n| n.clamp(0.0, 1.0)).unwrap_or(0.8),
                 "render_scale" => {
                     s.render_scale = if v.eq_ignore_ascii_case("auto") {
                         0.0
@@ -1005,15 +1012,18 @@ impl Settings {
         if self.upscaler != "fsr1" {
             return self.render_scale;
         }
-        match self.fsr_quality.as_str() {
+        let preset: f32 = match self.fsr_quality.as_str() {
             "ultra" => 0.77,
             "balanced" => 0.59,
             "performance" => 0.5,
-            "custom" => self.render_scale,
+            "custom" => return self.render_scale,
             // (the frame-rate governor picks the size, FSR 1 scales it up)
-            "auto" => 0.0,
+            "auto" => return 0.0,
             _ => 0.67,
-        }
+        };
+        // (a render scale set below the preset's - by the optimiser, or the safer graphics
+        // after a lost device - still caps it)
+        if self.render_scale > 0.0 { preset.min(self.render_scale) } else { preset }
     }
 
     pub fn render_options(&self) -> omsi_render::RenderOptions {

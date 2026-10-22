@@ -131,7 +131,7 @@ fn fs_puddle_glass_depth(in: FsIn) {
     }
     var a = diffuse_border(textureSample(t_diffuse, s_diffuse, tex_address(in.uv)), in.uv).a;
     if (material.params.z > 0.5) {
-        let tm = sample_transmap(tex_address(in.uv - in.params.zw));
+        let tm = sample_transmap_bias(tex_address(in.uv - in.params.zw), 0.0);
         a = select(1.0, tm.a, material.params.w > 0.5);
     }
     if (a * material.color.a * in.params.x < 0.002) {
@@ -199,7 +199,7 @@ fn cutout_coverage(uv: vec2<f32>, params: vec4<f32>) {
     var a = select(diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv).a, 1.0, material.params.x > 1.5 && material.params.z < 0.5);
     if (material.params.z > 0.5) {
         // (the transmap stays where it is: [texcoordtransX/Y] only moves the diffuse stage)
-        let tm = sample_transmap(tex_address(uv - params.zw));
+        let tm = sample_transmap_bias(tex_address(uv - params.zw), 0.0);
         a = select(1.0, tm.a, material.params.w > 0.5);
     }
     if (a < ALPHA_REF) {
@@ -231,7 +231,7 @@ fn transmap_coverage(uv: vec2<f32>, params: vec4<f32>) {
     if (material.params.z < 0.5) {
         discard;
     }
-    let tm = sample_transmap(tex_address(uv - params.zw));
+    let tm = sample_transmap_bias(tex_address(uv - params.zw), 0.0);
     let a = select(1.0, tm.a, material.params.w > 0.5) * params.x;
     // Only what the colour pass will cover completely may hide what lies behind it: a
     // texel that is merely more opaque than not (the dimmer and anti-aliased dots of a

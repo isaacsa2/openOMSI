@@ -134,10 +134,10 @@ pub(crate) fn scene_shader_text(gl: bool) -> String {
     if !gl {
         return src;
     }
-    let clamped = |t: &str| {
+    let clamped = |t: &str, bias: &str| {
         format!(
             "textureSampleBias({t}, s_diffuse, clamp(uv, 0.5 / vec2<f32>(textureDimensions({t})), \
-             vec2<f32>(1.0) - 0.5 / vec2<f32>(textureDimensions({t}))), camera.lod.x)"
+             vec2<f32>(1.0) - 0.5 / vec2<f32>(textureDimensions({t}))), {bias})"
         )
     };
     // No SSAO and no ray tracing on OpenGL (camera.clouds.w stays 0, see `lighter_picture`):
@@ -145,8 +145,8 @@ pub(crate) fn scene_shader_text(gl: bool) -> String {
     // D3D compiler under ANGLE (fxc) recursed without end in CProgram::CheckAssertion_Group
     // and the game closed before its first frame (#197).
     let out = src
-        .replace("textureSampleBias(t_trans, s_tile, uv, camera.lod.x)", &clamped("t_trans"))
-        .replace("textureSampleBias(t_night, s_tile, uv, camera.lod.x)", &clamped("t_night"))
+        .replace("textureSampleBias(t_trans, s_tile, uv, bias)", &clamped("t_trans", "bias"))
+        .replace("textureSampleBias(t_night, s_tile, uv, camera.lod.x)", &clamped("t_night", "camera.lod.x"))
         .replace("ao = ao_at(in.clip.xy, in.world);", "ao = 1.0;")
         .replace("rt_at(in.clip.xy, in.world)", "vec4<f32>(1.0, 0.0, -1.0, 0.0)");
     debug_assert!(!out.contains("s_tile, uv"));

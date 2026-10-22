@@ -25,6 +25,22 @@ fn fsr1_menu_settings_round_trip_into_renderer() {
 }
 
 #[test]
+fn fsr1_presets_keep_the_render_scale_caps() {
+    let mut s = Settings::from_text("upscaler=fsr1\nfsr_quality=ultra\n");
+    assert!((s.scene_render_scale() - 0.77).abs() < 0.0001);
+    // (the optimiser's step down, or the safer graphics after a second lost device)
+    s.apply_safe_gpu(2);
+    assert!((s.scene_render_scale() - 0.75).abs() < 0.0001);
+    s.render_scale = 0.5;
+    assert!((s.render_options().render_scale - 0.5).abs() < 0.0001);
+    // (a cap above the preset leaves it as it is; auto stays with the frame-rate governor)
+    s.render_scale = 1.0;
+    assert!((s.scene_render_scale() - 0.77).abs() < 0.0001);
+    s.fsr_quality = "auto".into();
+    assert_eq!(s.scene_render_scale(), 0.0);
+}
+
+#[test]
 fn mobile_door_mode_defaults_and_round_trips() {
     assert_eq!(Settings::from_text("").touch_door_mode, "standard");
     assert_eq!(Settings::from_text("touch_door_mode=Direct\n").touch_door_mode, "direct");

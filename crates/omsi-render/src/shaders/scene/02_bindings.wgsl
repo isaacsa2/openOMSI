@@ -193,10 +193,16 @@ struct MaterialParams {
 // the opposite edge of the SAME tile, opening grass seams even when adjacent masks
 // agree. The diffuse/detail textures still repeat through s_diffuse.
 fn sample_transmap(uv: vec2<f32>) -> vec4<f32> {
+    return sample_transmap_bias(uv, camera.lod.x);
+}
+
+// (`bias`: FSR 1's mip bias for the picture, `camera.lod`; 0 for the shadow and rain maps,
+// drawn at their own size)
+fn sample_transmap_bias(uv: vec2<f32>, bias: f32) -> vec4<f32> {
     if (material.extra.x > 0.5 || material.wipe_bounds.z != 0.0) {
-        return textureSampleBias(t_trans, s_tile, uv, camera.lod.x);
+        return textureSampleBias(t_trans, s_tile, uv, bias);
     }
-    return textureSampleBias(t_trans, s_diffuse, uv, camera.lod.x);
+    return textureSampleBias(t_trans, s_diffuse, uv, bias);
 }
 
 fn sample_nightmap(uv: vec2<f32>) -> vec4<f32> {

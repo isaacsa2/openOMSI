@@ -502,9 +502,11 @@ impl Renderer {
     /// a share of the runtime's recommendation. With FSR 1 on and built, the image is
     /// full-sized and each eye is drawn at `eye_scale` of it and scaled up by FSR 1 (by
     /// the standard upscaler if FSR 1 is turned off later); else the image itself is that
-    /// small and the runtime scales it, as before.
+    /// small and the runtime scales it, as before. `OMSI_OPENXR_SCALE` takes the place of
+    /// `eye_scale` here, and only here (read again for the headset image as well, it shrank
+    /// the image and FSR 1 shrank the eyes within it a second time).
     pub fn start_xr(&mut self, eye_scale: f32) -> f32 {
-        let eye_scale = eye_scale.clamp(0.5, 1.0);
+        let eye_scale = omsi_cfg::flags::OMSI_OPENXR_SCALE.parse::<f32>().filter(|s| s.is_finite()).unwrap_or(eye_scale).clamp(0.5, 1.0);
         let fsr = self.options.fsr1 && self.scale.fsr.is_some() && eye_scale < 0.999;
         self.options.xr_scale = if fsr { eye_scale } else { 1.0 };
         if fsr { 1.0 } else { eye_scale }
