@@ -34,6 +34,8 @@ pub struct Counts {
     /// Sums over the samples: cars on the road, their speeds (m/s), cars that stood more
     /// than 30, 60 and 120 s, cars in waits-for cycles, the cycles.
     pub cars: u64,
+    /// Sum of active timetable buses across the same one-second samples.
+    pub buses: u64,
     /// ... of them given up (`AiCar::gone`) and still on the road.
     pub gone: u64,
     pub speed_sum: f64,
@@ -80,6 +82,7 @@ impl Counts {
     fn add(&mut self, o: &Counts) {
         self.samples += o.samples;
         self.cars += o.cars;
+        self.buses += o.buses;
         self.gone += o.gone;
         self.speed_sum += o.speed_sum;
         self.moving_speed_sum += o.moving_speed_sum;
@@ -144,6 +147,8 @@ pub struct TrafficStats {
     /// Pairs of cars (ids) inside each other / close at the last sample.
     touching: hashbrown::HashSet<(u64, u64)>,
     close: hashbrown::HashSet<(u64, u64)>,
+    /// Cumulative removals at the previous CSV window boundary.
+    last_removals: [u64; Removal::COUNT],
 }
 
 impl TrafficStats {
@@ -155,7 +160,7 @@ impl TrafficStats {
                 .map_err(|e| log::warn!("OMSI_TRAFFIC_STATS: {e}"))
                 .ok()?,
         );
-        writeln!(f, "t,cars,gone,dormant,mean_kmh,moving_kmh,stood30,stood60,stood120,max_stood60,in_cycles,max_in_cycles,cycles,junction_entries,km,red_runs,hard_brakes,gave_up,overlaps,close_calls,heads").ok()?;
+        writeln!(f, "t,cars,gone,dormant,mean_kmh,moving_kmh,stood30,stood60,stood120,max_stood60,in_cycles,max_in_cycles,cycles,junction_entries,km,red_runs,hard_brakes,gave_up,overlaps,close_calls,heads,buses,removed_dormant,removed_unloaded,removed_finished,removed_taken_over,removed_invalid_route").ok()?;
         Some(Box::new(TrafficStats::new(Some(f))))
     }
 
@@ -170,6 +175,7 @@ impl TrafficStats {
             before: HashMap::new(),
             touching: Default::default(),
             close: Default::default(),
+            last_removals: [0; Removal::COUNT],
         }
     }
 
@@ -327,10 +333,15 @@ impl TrafficSim {
         if s.t >= s.next_line {
             s.next_line += WINDOW;
             let w = std::mem::take(&mut s.window);
+            // Measure departures from the active registry per window, not cumulative totals.
+            // This catches a population that churns even when its active count stays flat.
+            let removed: [u64; Removal::COUNT] =
+                std::array::from_fn(|i| self.removals[i].saturating_sub(s.last_removals[i]));
+            s.last_removals = self.removals;
             if let Some(f) = s.out.as_mut() {
                 let _ = writeln!(
                     f,
-                    "{:.0},{:.1},{:.1},{},{:.1},{:.1},{:.2},{:.2},{:.2},{},{:.2},{},{},{},{:.2},{},{},{},{},{},{}",
+                    "{:.0},{:.1},{:.1},{},{:.1},{:.1},{:.2},{:.2},{:.2},{},{:.2},{},{},{},{:.2},{},{},{},{},{},{},{:.1},{},{},{},{},{}",
                     s.t,
                     w.mean_cars(),
                     w.mean(w.gone),
@@ -352,6 +363,12 @@ impl TrafficSim {
                     w.overlaps,
                     w.close_calls,
                     w.head_list(),
+                    w.mean(w.buses),
+                    removed[Removal::Dormant as usize],
+                    removed[Removal::Unloaded as usize],
+                    removed[Removal::Finished as usize],
+                    removed[Removal::TakenOver as usize],
+                    removed[Removal::InvalidRoute as usize],
                 );
                 let _ = f.flush();
             }
@@ -366,6 +383,7 @@ impl TrafficSim {
         w.samples += 1;
         let n = self.cars.len();
         w.cars += n as u64;
+        w.buses += self.cars.iter().filter(|c| c.is_bus()).count() as u64;
         w.gone += self.cars.iter().filter(|c| c.gone).count() as u64;
         let mut stood60 = 0;
         for c in &self.cars {
