@@ -1,5 +1,7 @@
 # Dedicated server
 
+Quick references: [server startup, game CLI and a safe server.cfg example](COMMAND_REFERENCE.md), [environment variables](ENVIRONMENT_REFERENCE.md), and [windowed performance profiling](PROFILING.md).
+
 ```
 openomsi --root /path/to/OMSI2 --server /opt/openomsi-server/server.cfg
 ```
