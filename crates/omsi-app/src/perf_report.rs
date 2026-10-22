@@ -122,6 +122,97 @@ pub(crate) fn stages_by_frame_time(frame_times: &[f32], stages: &[f32]) -> Value
     json!({ "frames_counted": n, "stage_limit_reached": frame_times.len() > n, "slowest_5pct": average(&order[n - slowest..]), "fastest_half": average(&order[..n / 2]) })
 }
 
+/// Already-profiled CPU stages for the low-overhead, one-second A/B timeline.
+/// Dotted sub-stages overlap with their parent and must not be added to it.
+const TIMELINE_KEYS: &[crate::profile_keys::ProfKey] = &[
+    crate::profile_keys::ProfKey::Acquire,
+    crate::profile_keys::ProfKey::Present,
+    crate::profile_keys::ProfKey::Render,
+    crate::profile_keys::ProfKey::Mirrors,
+    crate::profile_keys::ProfKey::Limiter,
+    crate::profile_keys::ProfKey::Streaming,
+    crate::profile_keys::ProfKey::Lan,
+    crate::profile_keys::ProfKey::Traffic,
+    crate::profile_keys::ProfKey::TrafficTickAi,
+    crate::profile_keys::ProfKey::Scripted,
+    crate::profile_keys::ProfKey::ScriptedScripts,
+    crate::profile_keys::ProfKey::Humans,
+    crate::profile_keys::ProfKey::SimThreadWait,
+];
+
+fn timeline_bucket(times: &[f32], stages: &[f32], start: usize, end: usize, elapsed: f64) -> (Value, Option<Value>) {
+    let count = end - start;
+    let stride = crate::profile_keys::ProfKey::ALL.len();
+    let duration: f64 = times[start..end].iter().map(|&t| t as f64).sum();
+    let mut ms: Vec<f64> = times[start..end].iter().map(|&t| t as f64 * 1000.0).collect();
+    ms.sort_by(f64::total_cmp);
+    let mut averages = BTreeMap::new();
+    for key in TIMELINE_KEYS {
+        let total: f64 = (start..end).map(|i| stages[i * stride + *key as usize] as f64).sum();
+        if total > 0.0 {
+            averages.insert(key.name(), total * 1000.0 / count as f64);
+        }
+    }
+    let point = json!({
+        "start_seconds": elapsed, "duration_seconds": duration, "frames": count,
+        "fps": count as f64 / duration.max(f64::EPSILON),
+        "p95_ms": percentile(&ms, 0.95), "worst_ms": ms.last().copied().unwrap_or_default(),
+        "stage_ms_per_frame": averages,
+    });
+    let worst = (start..end).max_by(|&a, &b| times[a].total_cmp(&times[b])).unwrap_or(start);
+    let event = (times[worst] >= 0.050).then(|| {
+        let row = &stages[worst * stride..(worst + 1) * stride];
+        let mut prominent: Vec<(&str, f64)> = TIMELINE_KEYS.iter()
+            .filter_map(|key| {
+                let ms = row[*key as usize] as f64 * 1000.0;
+                (ms >= 0.5).then_some((key.name(), ms))
+            })
+            .collect();
+        prominent.sort_by(|a, b| b.1.total_cmp(&a.1));
+        prominent.truncate(4);
+        json!({
+            "frame_index": worst,
+            "since_warmup_seconds": elapsed + times[start..worst].iter().map(|&t| t as f64).sum::<f64>(),
+            "frame_ms": times[worst] as f64 * 1000.0,
+            "largest_measured_stages_ms": prominent.into_iter().collect::<BTreeMap<_, _>>(),
+        })
+    });
+    (point, event)
+}
+
+/// Derived only when the JSON report is written: no extra per-frame logging or waits.
+/// The existing STAGE_FRAMES retention cap applies and is reported explicitly.
+pub(crate) fn profile_timeline(frame_times: &[f32], stage_times: &[f32]) -> Value {
+    let stride = crate::profile_keys::ProfKey::ALL.len();
+    let available = frame_times.len().min(stage_times.len() / stride);
+    let (mut points, mut events) = (Vec::new(), Vec::new());
+    let (mut start, mut elapsed, mut second) = (0usize, 0.0f64, 0.0f64);
+    for i in 0..available {
+        second += frame_times[i] as f64;
+        if second >= 1.0 {
+            let (point, event) = timeline_bucket(frame_times, stage_times, start, i + 1, elapsed);
+            points.push(point);
+            if let Some(event) = event { events.push(event); }
+            elapsed += second;
+            start = i + 1;
+            second = 0.0;
+        }
+    }
+    if start < available {
+        let (point, event) = timeline_bucket(frame_times, stage_times, start, available, elapsed);
+        points.push(point);
+        if let Some(event) = event { events.push(event); }
+    }
+    events.sort_by(|a, b| b["frame_ms"].as_f64().unwrap_or_default()
+        .total_cmp(&a["frame_ms"].as_f64().unwrap_or_default()));
+    events.truncate(32);
+    json!({
+        "sampled_frames": available, "stage_sample_limit_reached": available < frame_times.len(),
+        "intervals": points, "worst_per_second": events,
+        "tracked_stages": TIMELINE_KEYS.iter().map(|k| k.name()).collect::<Vec<_>>(),
+    })
+}
+
 /// The log line of [`frame_summary`].
 pub(crate) fn log_line(s: &Value) -> String {
     let f = |k: &str| s[k].as_f64().unwrap_or(0.0);
@@ -169,6 +260,8 @@ pub(crate) struct Run<'a> {
     pub settings: &'a crate::settings::Settings,
     pub args: &'a crate::cli::Args,
     pub lan: bool,
+    /// Non-sensitive end-of-run resource totals (not a memory-use time series).
+    pub resources: Value,
 }
 
 pub(crate) fn report(run: Run, r: &omsi_render::Renderer, window: (u32, u32), scene: (u32, u32), summary: Value) -> Value {
@@ -185,6 +278,8 @@ pub(crate) fn report(run: Run, r: &omsi_render::Renderer, window: (u32, u32), sc
             "skipped_busy": skipped, "readback_failed": failed,
         })).collect::<Vec<_>>());
     summary["stages_by_frame_time"] = stages_by_frame_time(&perf.frame_times, &perf.frame_stages);
+    summary["timeline"] = profile_timeline(&perf.frame_times, &perf.frame_stages);
+    summary["resources_at_exit"] = run.resources;
     if let (Some((c0, t0, f0)), Some(c1)) = (perf.cpu_mark, crate::startup::process_cpu_seconds()) {
         let frames = perf.total_frames.saturating_sub(f0).max(1) as f64;
         summary["cpu_ms_per_frame"] = json!((c1 - c0) / frames * 1000.0);
@@ -259,6 +354,22 @@ mod tests {
         assert_eq!(s["fastest_half"]["frames_over_50_us_pct"]["render"], 100.0);
         assert!(s["fastest_half"]["frames_over_50_us_pct"]["traffic"].is_null());
         assert_eq!(stages_by_frame_time(&[], &[])["slowest_5pct"]["frames"], 0);
+    }
+
+    #[test]
+    fn timeline_aligns_stutters_with_existing_cpu_stages() {
+        use crate::profile_keys::ProfKey;
+        let stride = ProfKey::ALL.len();
+        let mut stages = vec![0.0f32; 6 * stride];
+        stages[3 * stride + ProfKey::Scripted as usize] = 0.052;
+        stages[3 * stride + ProfKey::ScriptedScripts as usize] = 0.045;
+        let report = profile_timeline(&[0.20, 0.20, 0.20, 0.35, 0.20, 0.20], &stages);
+        assert_eq!(report["sampled_frames"], 6);
+        assert_eq!(report["intervals"].as_array().unwrap().len(), 2);
+        assert_eq!(report["worst_per_second"][0]["frame_index"], 3);
+        assert!(report["worst_per_second"][0]["largest_measured_stages_ms"]["scripted"].as_f64().unwrap() > 50.0);
+        assert_eq!(profile_timeline(&[], &[])["sampled_frames"], 0);
+        assert_eq!(profile_timeline(&[0.1, 0.2], &stages[..stride])["stage_sample_limit_reached"], true);
     }
 
     #[test]

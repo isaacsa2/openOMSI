@@ -81,3 +81,24 @@ commands see COMMAND_REFERENCE.md.
 
 A dedicated server has no windowed rendering device; use its normal
 server logs and world counts rather than GPU timestamp queries.
+
+
+## Phase 2: correlated CPU timeline and resource summary
+
+The same PROFILE JSON capture now exports:
+
+- **summary.timeline.intervals:** roughly one-second FPS, p95/worst frame times
+  and mean measured CPU stage times for rendering, streaming, AI, scripts,
+  LAN, mirrors, acquire, present, and frame limiting.
+- **summary.timeline.worst_per_second:** up to 32 representative slow
+  frames, at most one per time interval, with their largest measured stages.
+  These numbers are evidence, not proof of the cause.
+- **summary.resources_at_exit:** existing streaming totals, tile count,
+  texture *budget* (not actual used VRAM), optional GPU allocator summary,
+  and whether multiplayer was connected at exit.
+
+The timeline is computed **only at report generation** from frames/stages
+already captured by OMSI_PROFILE. This adds no per-frame queries, disk writes
+or waits. Stage samples are capped at STAGE_FRAMES (65,536); truncation is
+reported in the JSON. Memory/resource fields are end-of-run snapshots, **not**
+a history of physical memory usage or proof of a leak.
