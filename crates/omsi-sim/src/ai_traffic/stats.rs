@@ -151,6 +151,17 @@ pub struct TrafficStats {
     last_removals: [u64; Removal::COUNT],
 }
 
+/// Count departures since the preceding CSV window, including when a counter was
+/// reset by a new session. Never double count removals across windows.
+fn removal_window_delta(
+    current: [u64; Removal::COUNT],
+    previous: &mut [u64; Removal::COUNT],
+) -> [u64; Removal::COUNT] {
+    let delta = std::array::from_fn(|i| current[i].saturating_sub(previous[i]));
+    *previous = current;
+    delta
+}
+
 impl TrafficStats {
     /// The statistics into the file `OMSI_TRAFFIC_STATS` names (None without it).
     pub fn from_env() -> Option<Box<TrafficStats>> {
@@ -335,9 +346,7 @@ impl TrafficSim {
             let w = std::mem::take(&mut s.window);
             // Measure departures from the active registry per window, not cumulative totals.
             // This catches a population that churns even when its active count stays flat.
-            let removed: [u64; Removal::COUNT] =
-                std::array::from_fn(|i| self.removals[i].saturating_sub(s.last_removals[i]));
-            s.last_removals = self.removals;
+            let removed = removal_window_delta(self.removals, &mut s.last_removals);
             if let Some(f) = s.out.as_mut() {
                 let _ = writeln!(
                     f,
@@ -504,6 +513,19 @@ impl TrafficSim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removal_counters_are_window_deltas() {
+        let mut previous = [0; Removal::COUNT];
+        let first = [2, 1, 3, 0, 1];
+        assert_eq!(removal_window_delta(first, &mut previous), first);
+        assert_eq!(removal_window_delta(first, &mut previous), [0; Removal::COUNT]);
+        let next = [5, 1, 4, 2, 1];
+        assert_eq!(removal_window_delta(next, &mut previous), [3, 0, 1, 2, 0]);
+        assert_eq!(previous, next);
+        // Defensive against a fresh/reset source of counters.
+        assert_eq!(removal_window_delta([0; Removal::COUNT], &mut previous), [0; Removal::COUNT]);
+    }
 
     #[test]
     fn a_ring_of_waiting_cars_is_one_cycle() {
