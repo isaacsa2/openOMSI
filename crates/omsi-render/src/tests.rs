@@ -1457,6 +1457,7 @@ mod light_grid;
 mod light_maps;
 mod long_road;
 mod more;
+mod motion;
 mod night_coverage;
 mod prepass_reach;
 mod transparency;
