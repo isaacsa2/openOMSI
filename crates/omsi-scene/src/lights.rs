@@ -841,6 +841,34 @@ impl VehicleSmoke {
     }
 }
 
+/// Test-only visual compromise: never apply the AI projected-light budget
+/// outside bright, clear daytime. A missing limit means original behaviour.
+fn daytime_spot_limit(limit: Option<usize>, brightness: f32, lamps_on: bool, visibility_m: f32) -> Option<usize> {
+    limit.filter(|_| brightness >= 0.9 && !lamps_on && visibility_m >= 2000.0)
+}
+
+#[cfg(test)]
+mod daytime_spot_tests {
+    use super::daytime_spot_limit;
+
+    #[test]
+    fn preserves_all_projected_lights_when_not_opted_in() {
+        assert_eq!(daytime_spot_limit(None, 1.0, false, 50000.0), None);
+    }
+
+    #[test]
+    fn never_limits_night_dusk_or_fog() {
+        for (brightness, lamps, visibility) in [
+            (0.8, false, 50000.0),
+            (1.0, true, 50000.0),
+            (1.0, false, 1999.0),
+        ] {
+            assert_eq!(daytime_spot_limit(Some(8), brightness, lamps, visibility), None);
+        }
+        assert_eq!(daytime_spot_limit(Some(8), 1.0, false, 50000.0), Some(8));
+    }
+}
+
 /// Fill the scene's lights for this frame, the lamps' cones in the weather `cone`.
 pub fn collect(
     world: &World,
@@ -946,8 +974,12 @@ pub fn collect(
     // AI vehicle's scripts, this leaves its visible glow, indicators, materials,
     // AI state and networking untouched. Only explicitly opting in changes it.
     // At night, at dawn/dusk, or in fog, every vehicle keeps its full lights.
-    let day_spot_budget = omsi_cfg::flags::OMSI_AI_DAY_SPOTS.parse::<usize>()
-        .filter(|_| daylight.brightness >= 0.9 && !daylight.lamps_on && cone.get().0 >= 2000.0);
+    let day_spot_budget = daytime_spot_limit(
+        omsi_cfg::flags::OMSI_AI_DAY_SPOTS.parse::<usize>(),
+        daylight.brightness,
+        daylight.lamps_on,
+        cone.get().0,
+    );
     let ai_start = usize::from(player_first);
     let ai_end = ai_start.saturating_add(ai_count).min(vehicles.len());
     let mut selected_ai = Vec::new();
