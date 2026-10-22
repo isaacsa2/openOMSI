@@ -139,6 +139,7 @@ macro_rules! flags {
 
 // name: type, kind, read, default, doc - sorted by name
 flags! {
+    OMSI_AI_DAY_SPOTS: Num, Switch, Use, "off", "Experimental A/B: in bright, clear daylight render projected beams only from this many nearest AI vehicles; keep coronas, the player's vehicle and LAN players unchanged. Unset restores all beams.";
     OMSI_AI_MODEL_LOCK: Bool, Switch, Use, "off", "AI cars steer no further than their model's own steering lock (no 60 degree allowance for tight turns).";
     OMSI_AI_WAY_ONLY: Bool, Switch, Use, "off", "AI vehicles stand on their way with the plain ground sampler, as before (A/B).";
     OMSI_AMBIENCE_DENSITY: Text, Debug, Once, "1", "The ambience's one-shots (birds, the far life, thunder, the objects' calls) this many times as often (a number), or only some of them (slot=factor,…: bird.geese=40) - what fits the place, season and hour stays the same (for demos and checks).";
@@ -360,6 +361,7 @@ flags! {
     OMSI_NO_ENHANCED: Bool, Switch, Frame, "off", "Enhanced settings drawn with the plain path.";
     OMSI_NO_ENVMAP: Bool, Switch, Use, "off", "No environment maps.";
     OMSI_NO_FXAA: Bool, Switch, Frame, "off", "No FXAA.";
+    OMSI_NO_HEADLAMP_CELL_CULL: Bool, Switch, Frame, "off", "A/B: keep road headlamps in light-grid cells wholly behind their forward axis (disables conservative cell culling).";
     OMSI_NO_GLARE: Bool, Switch, Frame, "off", "No sun glare.";
     OMSI_NO_GLASS_PICTURE: Bool, Switch, Frame, "off", "No picture behind the glass (rain films).";
     OMSI_NO_GROUND_PAINT: Bool, Switch, Use, "off", "No painted ground layers.";
