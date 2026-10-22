@@ -1,8 +1,8 @@
-use glam::Vec2;
 //! Point lights, coronas and smoke: what the frame's lights are, their grid on the GPU,
 //! the lamps that cast shadows, and the light map tiles.
 
 use crate::*;
+use glam::Vec2;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
