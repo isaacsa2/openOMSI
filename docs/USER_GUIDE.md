@@ -1,5 +1,7 @@
 # User guide
 
+Related references: [game and dedicated-server commands](COMMAND_REFERENCE.md), [safe environment variables](ENVIRONMENT_REFERENCE.md), and [non-blocking performance profiling](PROFILING.md).
+
 How to run openOMSI, drive, use the launcher, install mods and play over LAN. For building
 from source see [BUILDING.md](BUILDING.md).
 For OpenXR headset setup and controls on Windows, see [VR.md](VR.md).
