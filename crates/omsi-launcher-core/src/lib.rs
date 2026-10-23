@@ -1986,6 +1986,23 @@ pub fn graphics_mode(v: &str) -> &'static str {
     }
 }
 
+/// The mode a settings page draws in: its `graphics`, and `enhanced_plus` for Enhanced with
+/// the `ray_tracing` switch on (or a page still holding the old Enhanced+ mode). Presets,
+/// the optimiser and which rows show go by it; the file keeps `graphics` and the switch.
+pub fn effective_graphics_mode(v: &Value) -> &'static str {
+    let g = graphics_mode(v.get("graphics").and_then(|x| x.as_str()).unwrap_or("vanilla_plus"));
+    let traced = v.get("ray_tracing").and_then(|x| x.as_bool()).unwrap_or(false);
+    if g == "enhanced" && traced { "enhanced_plus" } else { g }
+}
+
+/// `graphics` as a file holds it: Enhanced+ is Enhanced (with the `ray_tracing` switch).
+pub fn base_graphics_mode(mode: &str) -> &'static str {
+    match graphics_mode(mode) {
+        "enhanced_plus" => "enhanced",
+        g => g,
+    }
+}
+
 /// The Graphics settings' quality presets - Low, Medium, High and Ultra - for the graphics
 /// mode chosen (`graphics_mode`), shared by the launcher and the game's options. A preset
 /// tunes that mode and keeps it: it never switches Enhanced or ray tracing on or off.
@@ -2014,13 +2031,17 @@ pub fn graphics_presets_for(mode: &str) -> [(&'static str, Value); 4] {
     std::array::from_fn(|i| {
         let low = i == 0;
         let mut preset = json!({
-            "graphics": mode, "msaa": msaa[i], "anisotropy": anisotropy[i], "shadow_size": shadow[i],
+            "graphics": base_graphics_mode(mode), "msaa": msaa[i], "anisotropy": anisotropy[i], "shadow_size": shadow[i],
             "clouds": !(enhanced && low), "rain_quality": rain[i], "windy_trees": !low,
             "view_distance": view[i], "min_obj_size": obj_size[i], "max_obj_dist": obj_dist[i],
             "mirror_size": mirror[i], "mirror_refresh": refresh[i], "render_scale": scale[i],
         });
         if !classic {
             preset["detail_textures"] = json!(!low);
+        }
+        // (the switch as it is: a preset never turns the ray tracing on or off)
+        if enhanced {
+            preset["ray_tracing"] = json!(traced);
         }
         if !classic && !traced {
             preset["ssao"] = json!(i >= 2);
@@ -2173,6 +2194,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     v["pax_bad_driving"] = json!(true);
     // the arrival half of the stops of a depot file that keeps two recordings per stop
     v["auto_announce"] = json!(false);
+    v["ray_tracing"] = json!(false);
     // OMSI's own options
     for (k, d) in [("maintenance", json!(0)), ("ai_unsched_factor", json!(100)), ("standing_chance", json!(5)), ("ai_max_scheduled", json!(0)), ("ai_max_parked", json!(0)), ("ai_max_humans", json!(200)), ("use_real_time", json!(false)), ("use_real_date", json!(false)), ("use_real_year", json!(false)), ("collision_vehicles", json!(true)), ("collision_objects", json!(true)), ("collision_pedestrians", json!(true)), ("head_movement", json!(true)), ("driverview_smooth", json!(true)), ("hands_in_cab", json!(false)), ("alt_view", json!(true)), ("precision_zoom", json!(false))] {
         v[k] = d;
@@ -2311,7 +2333,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "perf_overlay" => v[&k] = json!(perf_overlay_mode(val)),
             "sim_thread" => v[&k] = json!(b(val)),
             "mirror_hud" => v[&k] = json!(val.trim().parse::<u8>().map(|x| x.min(7)).unwrap_or(0)),
-            "windy_trees" | "mirror_hud_every_frame" | "mirror_shadows" | "mirror_particles" | "ai_wait_timed_stops_only" | "pax_bad_driving" | "auto_announce" | "ambient" => v[&k] = json!(b(val)),
+            "windy_trees" | "mirror_hud_every_frame" | "mirror_shadows" | "mirror_particles" | "ai_wait_timed_stops_only" | "pax_bad_driving" | "auto_announce" | "ambient" | "ray_tracing" => v[&k] = json!(b(val)),
             "time_speed" => v[&k] = json!(val.trim_start_matches(['x', 'X']).parse::<f64>().map(|x| x.clamp(1.0, 30.0)).map(|x| if x.fract() == 0.0 { format!("{}", x as i64) } else { x.to_string() }).unwrap_or_else(|_| "1".into())),
             "language" => v[&k] = json!(language_code(val)),
             "graphics" | "renderer" => graphics = Some(graphics_mode(val)),
@@ -2336,8 +2358,15 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     // a file without `graphics` (older builds) says only `enhanced`; its vanilla renderer is
     // what is now Vanilla+
     let g = graphics.unwrap_or(if v["enhanced"] == json!(true) { "enhanced" } else { "vanilla_plus" });
+    // Enhanced+ is no longer a mode of its own: Enhanced with the ray tracing switch on
+    let g = if g == "enhanced_plus" {
+        v["ray_tracing"] = json!(true);
+        "enhanced"
+    } else {
+        g
+    };
     v["graphics"] = json!(g);
-    v["enhanced"] = json!(g == "enhanced" || g == "enhanced_plus");
+    v["enhanced"] = json!(g == "enhanced");
     // before version 2 the launcher wrote its old default `boarding=pay` for everybody
     // (passengers then waited at the cash desk for the driver): the game reads that as auto
     if version < 2 && v["boarding"] == "pay" {
@@ -2422,8 +2451,8 @@ pub fn save_settings(v: &Value) -> Result<()> {
 
 /// The settings a graphics profile holds: what the Graphics tab shows, except the machine's
 /// own (fullscreen, graphics API).
-pub const GRAPHICS_PROFILE_KEYS: [&str; 32] = [
-    "graphics", "msaa", "render_scale", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "reflections", "clouds", "cloud_quality", "rain_quality", "vehicle_smoke", "puddles", "windy_trees",
+pub const GRAPHICS_PROFILE_KEYS: [&str; 33] = [
+    "graphics", "ray_tracing", "msaa", "render_scale", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "reflections", "clouds", "cloud_quality", "rain_quality", "vehicle_smoke", "puddles", "windy_trees",
     "vsync", "max_fps", "view_distance", "max_obj_dist", "min_obj_size", "mirror_size", "mirror_refresh", "mirror_quality", "mirror_hud_every_frame", "video_memory", "texture_compression", "gpu_texture_compression",
 ];
 
@@ -2470,6 +2499,14 @@ pub fn apply_graphics_profile(profile: &Value, settings: &mut Value) {
             settings[k] = x.clone();
         }
     }
+    // (a profile saved before the ray tracing switch says it with its mode alone: Enhanced+
+    // or not)
+    if let (Some(g), None) = (profile.get("graphics").and_then(|x| x.as_str()), profile.get("ray_tracing")) {
+        settings["ray_tracing"] = json!(graphics_mode(g) == "enhanced_plus");
+    }
+    if let Some(g) = settings.get("graphics").and_then(|x| x.as_str()) {
+        settings["graphics"] = json!(base_graphics_mode(g));
+    }
 }
 
 /// The `settings.cfg` text for the page's values `v`; the lines of the `old` file that the
@@ -2502,7 +2539,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         b("detail_textures", true),
         b("exact_fare", true),
         matches!(graphics_mode(v.get("graphics").and_then(|x| x.as_str()).unwrap_or("vanilla_plus")), "enhanced" | "enhanced_plus") as u8,
-        graphics_mode(v.get("graphics").and_then(|x| x.as_str()).unwrap_or("vanilla_plus")),
+        base_graphics_mode(effective_graphics_mode(v)),
         b("fullscreen", false),
         b("vsync", true),
         f("volume", 0.6),
@@ -2709,6 +2746,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!("trip_summary={}\nfull_tank={}\n", b("trip_summary", true), b("full_tank", true)));
     text.push_str(&format!("pax_bad_driving={}\n", b("pax_bad_driving", true)));
     text.push_str(&format!("auto_announce={}\n", b("auto_announce", false)));
+    text.push_str(&format!("ray_tracing={}\n", (effective_graphics_mode(v) == "enhanced_plus") as u8));
     text.push_str(&format!("triple_left_angle_deg={}\ntriple_right_angle_deg={}\ntriple_eye_height_mm={}\n", f("triple_left_angle_deg", 45.0).clamp(0.0, 90.0), f("triple_right_angle_deg", 45.0).clamp(0.0, 90.0), f("triple_eye_height_mm", 0.0).clamp(-500.0, 500.0)));
     text.push_str(&format!("photo_mode={}\n", if v.get("photo_mode").and_then(|x| x.as_str()) == Some("advanced") { "advanced" } else { "simple" }));
     text.push_str(&format!("passenger_animation={}\n", if v.get("passenger_animation").and_then(|x| x.as_str()) == Some("enhanced") { "enhanced" } else { "original" }));

@@ -44,6 +44,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         .collect();
     let graphics: Vec<(String, String)> = vec![
         pick("graphics", "Graphics", later),
+        switch_row(app, "ray_tracing", "Ray tracing", "Enhanced with ray-traced sun shadows, ambient occlusion and reflections, on a graphics card with hardware ray tracing; takes effect when the game starts the next time").filter(|_| shown("ray_tracing")),
         preset_row(&file, "Quality preset", "Sets most of the graphics options at once"),
         app.can_optimise().then(|| button("Optimise for my PC", "Start", "Measures while you drive and adjusts the graphics for a smooth frame rate; your settings are saved first", "optimise")),
         omsi_launcher_lib::optimise::backup().is_some().then(|| button("Restore my previous settings", "Restore", "The graphics settings as they were before the last optimisation", "optimise_restore")),
@@ -485,7 +486,7 @@ fn shown_in_mode(mode: &str, key: &str) -> bool {
         "shadows" | "ssao" => !matches!(mode, "vanilla" | "enhanced_plus"),
         "shadow_size" | "shadow_casters" | "detail_textures" => mode != "vanilla",
         "reflections" => mode != "enhanced_plus",
-        "night_brightness" | "led_glow" | "led_mips" | "mirror_quality" | "cloud_quality" => matches!(mode, "enhanced" | "enhanced_plus"),
+        "night_brightness" | "led_glow" | "led_mips" | "mirror_quality" | "cloud_quality" | "ray_tracing" => matches!(mode, "enhanced" | "enhanced_plus"),
         _ => true,
     }
 }
@@ -526,12 +527,12 @@ mod tests {
 
     #[test]
     fn graphics_rows_follow_the_sessions_mode() {
-        let keys = ["shadows", "shadow_size", "ssao", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "reflections", "mirror_quality", "cloud_quality", "msaa"];
+        let keys = ["ray_tracing", "shadows", "shadow_size", "ssao", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "reflections", "mirror_quality", "cloud_quality", "msaa"];
         let shown = |mode: &str| keys.iter().filter(|k| shown_in_mode(mode, k)).copied().collect::<Vec<_>>();
         assert_eq!(shown("vanilla"), ["reflections", "msaa"]);
         assert_eq!(shown("vanilla_plus"), ["shadows", "shadow_size", "ssao", "shadow_casters", "detail_textures", "reflections", "msaa"]);
         assert_eq!(shown("enhanced"), keys);
-        assert_eq!(shown("Enhanced+"), ["shadow_size", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "mirror_quality", "cloud_quality", "msaa"]);
+        assert_eq!(shown("Enhanced+"), ["ray_tracing", "shadow_size", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "mirror_quality", "cloud_quality", "msaa"]);
     }
     #[test]
     fn the_running_sessions_mode_decides_what_it_forces() {
@@ -544,6 +545,10 @@ mod tests {
         assert!(!s.ray_tracing() && !s.enhanced && !s.shadows && !s.ssao && s.reflections == 0.0);
         let s = text_in_mode("graphics=vanilla\nshadows=0\n", "enhanced_plus");
         assert!(s.ray_tracing() && s.enhanced && s.shadows && s.ssao && s.reflections == 1.0);
+        // (a session started in Enhanced draws without the switch the file has on since)
+        let s = text_in_mode("graphics=enhanced\nray_tracing=1\n", "enhanced");
+        assert!(!s.ray_tracing() && s.mode() == "enhanced");
+        assert_eq!(mode_of_session(&SessionSettings { enhanced: true, ..Default::default() }, s.mode()), "enhanced");
     }
 
     #[test]

@@ -6,8 +6,8 @@ light. OMSI 2 itself knows nothing of this, so these maps are purely an addition
 map object or a spline without them looks exactly as it always did, and content with them
 still works in the original OMSI 2 (which ignores the extra files).
 
-PBR maps are drawn with the **Enhanced** and **Enhanced+** graphics (launcher → Settings →
-Graphics → Graphics), on every platform.
+PBR maps are drawn with the **Enhanced** graphics, with or without its ray tracing switch
+(launcher → Settings → Graphics → Graphics), on every platform.
 
 ## How maps are found
 

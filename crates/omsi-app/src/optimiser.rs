@@ -39,7 +39,9 @@ impl crate::App {
             self.service_msg = Some(("The settings could not be saved: nothing was changed".into(), 5.0));
             return;
         }
-        settings["graphics"] = serde_json::json!(crate::game_lists::session_mode(self));
+        let mode = crate::game_lists::session_mode(self);
+        settings["graphics"] = serde_json::json!(omsi_launcher_lib::base_graphics_mode(mode));
+        settings["ray_tracing"] = serde_json::json!(mode == "enhanced_plus");
         let refresh = self.window.as_ref().and_then(|w| w.current_monitor()).and_then(|m| m.refresh_rate_millihertz()).map(|mhz| (mhz as f64 / 1000.0).round() as u32);
         let target = optimise::target_for(asked, refresh);
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());

@@ -222,6 +222,26 @@ fn graphics_modes() {
     assert_eq!(Settings::from_text(&s.to_text()), s);
 }
 
+/// Enhanced+ is Enhanced with the ray tracing switch: an old file's mode becomes the two, the
+/// switch round-trips, and it traces only in Enhanced (kept, not drawn, in the other modes).
+#[test]
+fn ray_tracing_is_a_switch_of_enhanced() {
+    let old = Settings::from_text("graphics=enhanced_plus\n");
+    assert_eq!((old.graphics.as_str(), old.ray_tracing_on, old.mode()), ("enhanced", true, "enhanced_plus"));
+    let text = old.to_text();
+    assert!(text.contains("\ngraphics=enhanced\n") && text.contains("\nray_tracing=1\n"));
+    assert_eq!(Settings::from_text(&text), old);
+    let on = Settings::from_text("graphics=enhanced\nray_tracing=1\n");
+    assert!(on.ray_tracing() && on.render_options().ray_tracing);
+    let off = Settings::from_text("graphics=enhanced\n");
+    assert!(!off.ray_tracing() && !off.render_options().ray_tracing && off.mode() == "enhanced");
+    let kept = Settings::from_text("graphics=vanilla_plus\nray_tracing=1\n");
+    assert!(kept.ray_tracing_on && !kept.ray_tracing() && !kept.render_options().ray_tracing && kept.mode() == "vanilla_plus");
+    // (the launcher's writer says the same)
+    let page = omsi_launcher_lib::settings_from_text(Some("graphics=Enhanced+\n"));
+    assert_eq!(Settings::from_text(&omsi_launcher_lib::settings_to_text(&page, None)), Settings::from_text("graphics=enhanced\nray_tracing=1\n"));
+}
+
 #[test]
 fn mirror_size_zero_disables_mirror_rendering() {
     assert_eq!(Settings::from_text("mirror_size=0\n").mirror_size, 0);
