@@ -103,6 +103,7 @@ struct Choice: Decodable, Equatable {
     var traffic: Double = 30
     var passengers = true
     var schedule = true
+    var comfortable_cabin_on_start = false
     var autostart = false
     var on_foot = false
     var lan_mode = "off"
@@ -118,6 +119,7 @@ struct Choice: Decodable, Equatable {
         line = v("line", nil as String?); tour = v("tour", nil as String?); free = v("free", false)
         time = v("time", 540); date = v("date", "1989-05-30"); season = v("season", "auto"); phase = v("phase", "mid")
         weather = v("weather", ""); traffic = v("traffic", 30.0); passengers = v("passengers", true)
+        comfortable_cabin_on_start = v("comfortable_cabin_on_start", false)
         schedule = v("schedule", true); autostart = v("autostart", false); on_foot = v("on_foot", false)
         lan_mode = v("lan_mode", "off"); lan_addr = v("lan_addr", "")
     }
@@ -192,6 +194,7 @@ struct LineInfo: Decodable, Identifiable, Hashable {
 }
 
 struct TourInfo: Decodable, Identifiable, Hashable {
+    var id: String
     var number: String
     var ai_group: String
     var first: Double
@@ -200,7 +203,6 @@ struct TourInfo: Decodable, Identifiable, Hashable {
     var runs: Bool
     var next_run: String?
     var trips: [TripInfo]
-    var id: String { number }
 }
 
 struct TripInfo: Decodable, Identifiable, Hashable {

@@ -23,6 +23,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         switch_row(app, "get_up", "Ability to get up (Ctrl+Shift+G)", "Allows you to get out of the car and explore the world"),
         switch_row(app, "coll_objects", "Collisions with objects", "Enables/disables collisions with objects such as buildings, streetlights, etc."),
         switch_row(app, "coll_vehicles", "Collisions with vehicles", "Enables/Disables Collisions with Other Vehicles"),
+        switch_row(app, "realistic_road", "Realistic road physics", "Tyres that slip, grip and roughness by road surface, wind on the bus; off, the buses drive as in OMSI 2"),
         switch_row(app, "collision_pedestrians", "Collisions with people", "Enables/disables knocking down people"),
         switch_row(app, "timetable_win", "Timetable window (Insert)", "Displays a list of all stops (only when a tour is active)"),
         switch_row(app, "trip_summary", "Trip summary", "At the end of each trip: its stops with the times planned and driven, to copy or to save"),
@@ -48,7 +49,6 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         app.can_optimise().then(|| button("Optimise for my PC", "Start", "Measures while you drive and adjusts the graphics for a smooth frame rate; your settings are saved first", "optimise")),
         omsi_launcher_lib::optimise::backup().is_some().then(|| button("Restore my previous settings", "Restore", "The graphics settings as they were before the last optimisation", "optimise_restore")),
         pick("msaa", "Anti-aliasing", later),
-        // (with FSR 1 it shows at once, as its quality does: see `sync_live`)
         pick("render_scale", "Render scale", if s.upscaler == "fsr1" { "With FSR 1 it changes at once" } else { later }),
         pick("upscaler", "Upscaling", "Standard Catmull-Rom or experimental FSR 1; changes show at once"),
         pick("fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| s.upscaler == "fsr1"),
@@ -308,9 +308,18 @@ pub(super) fn vehicle_pages(app: &App) -> Vec<Page> {
     let server = crate::input_script::on_server(&app.args);
     let mut display: Vec<(String, String)> = Vec::new();
     if has {
+        let typed_number = if app.menus.menu_edit_number {
+            app.menus.menu_edit.clone().unwrap_or_default()
+        } else { app.player.as_ref().unwrap().vehicle.number() };
+        let typed_ident = if app.menus.menu_edit_ident {
+            app.menus.menu_edit.clone().unwrap_or_default()
+        } else { app.player.as_ref().unwrap().vehicle.ident() };
+
         display.push(opens("Destination display", "Change the current destination", "dest"));
         display.push(opens("Depot file (HOF)", "Change the current depot file (used for the timetable)", "hof"));
         display.push(opens("Fleet number", "Change the vehicle's current fleet number", "number"));
+        display.push((row("Custom fleet number", if app.menus.menu_edit_number{'E'}else{'e'}, &typed_number, "Enter custom fleet number (not from the list)", None), "custom_number_edit".to_string()));
+        display.push((row("Custom plate", if app.menus.menu_edit_ident{'E'}else{'e'}, &typed_ident, "Enter custom plate (leave free for automatic)", None), "custom_ident_edit".to_string()));
     }
     if !server {
         display.push(opens("Driver", "Change the current driver profile", "driver"));

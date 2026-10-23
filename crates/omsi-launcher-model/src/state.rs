@@ -134,6 +134,7 @@ pub struct Choice {
     /// the duty's first stop by road).
     pub entry: i32,
     pub line: Option<String>,
+    /// The launcher tour ID (legacy choices contain the displayed number).
     pub tour: Option<String>,
     pub free: bool,
     /// Minutes of the day.
@@ -151,6 +152,7 @@ pub struct Choice {
     pub passengers: bool,
     pub schedule: bool,
     pub autostart: bool,
+    pub comfortable_cabin_on_start: bool,
     /// Start on foot (no bus of one's own until one is placed).
     pub on_foot: bool,
     /// off, host, join
@@ -187,6 +189,7 @@ impl Default for Choice {
             passengers: true,
             schedule: true,
             autostart: false,
+            comfortable_cabin_on_start: false,
             on_foot: false,
             lan_mode: "off".into(),
             lan_addr: String::new(),
@@ -698,7 +701,7 @@ impl State {
             hof: Some(if c.hof_manual { c.hof.clone() } else { self.default_hof() }).filter(|p| !p.is_empty()),
             entry: Some(c.entry),
             line: if c.free { None } else { c.line.clone() },
-            tour: if c.free { None } else { c.tour.clone() },
+            tour: if c.free { None } else { self.tour().map(|t| t.number.clone()) },
             trip: if c.free { None } else { self.picked_trip().map(|i| i.to_string()) },
             whole_tour: !c.free && self.picked_trip().is_some(),
             time: format!("{:02}:{:02}", c.time / 60, c.time % 60),
@@ -708,6 +711,7 @@ impl State {
             passengers: Some(c.passengers),
             schedule: Some(c.schedule),
             autostart: Some(c.autostart),
+            comfortable_cabin_on_start: Some(c.comfortable_cabin_on_start),
             on_foot: Some(c.on_foot),
             profile: Some(self.config.profile.clone()).filter(|p| !p.is_empty()),
             lan: Some(lan),
@@ -984,10 +988,14 @@ impl State {
                                 }
                                 Some(l) => {
                                     if let Some(t) = &self.choice.tour {
-                                        match l.tours.iter().find(|x| &x.number == t) {
+                                        match l.tour(t) {
                                             None => self.choice.tour = None,
-                                            Some(t) if !t.runs => note = format!("Timetable of {date}: {n} lines - tour {} of line {line} does not run that day ({})", t.number, t.days),
-                                            _ => {}
+                                            Some(t) => {
+                                                if !t.runs {
+                                                    note = format!("Timetable of {date}: {n} lines - tour {} of line {line} does not run that day ({})", t.number, t.days);
+                                                }
+                                                self.choice.tour = Some(t.id.clone());
+                                            }
                                         }
                                     }
                                 }
@@ -1179,7 +1187,7 @@ impl State {
     }
     pub fn tour(&self) -> Option<&core::TourInfo> {
         let t = self.choice.tour.as_ref()?;
-        self.line()?.tours.iter().find(|x| &x.number == t)
+        self.line()?.tour(t)
     }
 
     pub fn select_bus(&mut self, file: &str) {
@@ -1419,10 +1427,13 @@ mod choice_tests {
     fn an_old_duty_file_loads_and_a_typed_plate_is_kept() {
         let old: super::Choice = serde_json::from_str(r#"{"bus":"Vehicles/x.bus","map":"maps/x/global.cfg"}"#).unwrap();
         assert_eq!(old.plate, "");
+        assert!(!old.comfortable_cabin_on_start);
         let mut c = super::Choice::default();
         c.plate = "B-AB 1234".into();
+        c.comfortable_cabin_on_start = true;
         let back: super::Choice = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!(back.plate, "B-AB 1234");
+        assert!(back.comfortable_cabin_on_start);
     }
 }
 
