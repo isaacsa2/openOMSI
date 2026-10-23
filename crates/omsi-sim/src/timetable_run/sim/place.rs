@@ -178,6 +178,7 @@ impl ScheduleSim {
                 served[si] = true;
                 continue;
             }
+            let on = station_route(station_steps[si], start, &slots[start..end], &index);
             match found {
                 Some((pos, _)) => match project_stop(
                     net,
@@ -186,12 +187,12 @@ impl ScheduleSim {
                     reach,
                     from,
                     world.stop_side(*sid),
-                    station_route(station_steps[si], start, &slots[start..end], &index),
+                    on,
                 ) {
                     Some((ri, ss, lat)) => {
                         from = ri;
                         served[si] = true;
-                        stops.push((ri, ss, bay_offset(lat), leave[si], *sid, world.stop_side(*sid)));
+                        stops.push((ri, ss, bay_offset(lat, on), leave[si], *sid, world.stop_side(*sid)));
                     }
                     None => log::debug!("station {sid}: not near the route"),
                 },

@@ -449,6 +449,7 @@ impl ScheduleSim {
                     let Some((pos, _)) = world.object_positions().get(sid).copied() else {
                         continue;
                     };
+                    let on = station_route(run.station_steps[si], run.next, &slots[..n], &index);
                     if let Some((ri, ss, lat)) = project_stop(
                         &traffic.net,
                         &lanes,
@@ -456,10 +457,10 @@ impl ScheduleSim {
                         Some(STOP_REACH),
                         from,
                         world.stop_side(*sid),
-                        station_route(run.station_steps[si], run.next, &slots[..n], &index),
+                        on,
                     ) {
                         from = ri;
-                        stops.push((base + ri, ss, bay_offset(lat), *t_dep, *sid, world.stop_side(*sid)));
+                        stops.push((base + ri, ss, bay_offset(lat, on), *t_dep, *sid, world.stop_side(*sid)));
                         run.served[si] = true;
                     }
                 }

@@ -107,8 +107,11 @@ fn where_a_bus_is_on_a_partly_loaded_route() {
 
 #[test]
 fn bays() {
-    // the stop's box offset is kept as it is until the vehicle is known
+    // Unbound stop boxes keep their lateral offset. Stops bound to a track must
+    // not shift the bus toward a left-hand BRT platform or a distant pole.
     for lat in [0.0, 2.0, -4.0] {
-        assert_eq!(bay_offset(lat), lat);
+        assert_eq!(bay_offset(lat, StopRoute::Nearest), lat);
+        assert_eq!(bay_offset(lat, StopRoute::Outside), lat);
+        assert!(bay_offset(lat, StopRoute::Track(0)).is_nan());
     }
 }
