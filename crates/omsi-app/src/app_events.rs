@@ -12,6 +12,44 @@ const MIRROR_MAX_HZ_FULL: f32 = 30.0;
 /// it is taken over and once more this many seconds later.
 const MIRROR_FREEZE_REDRAW: f32 = 2.0;
 
+/// Restrict expensive high-resolution mirrors to a bounded amount of GPU work.
+/// A 1024px mirror contains 16x the pixels of a 256px one; old per-mirror
+/// minimum refresh rates could demand two expensive renders on a slow frame.
+/// Applies only to ordinary desktop mirror refresh: explicit Every-frame and
+/// VR headset schedules retain their own controls. OMSI_MIRROR_LEGACY_BUDGET
+/// restores the old schedule for precise before/after testing.
+fn mirror_resolution_budget(size: u32, rate: f32, minimum: f32, legacy: bool) -> (f32, f32, usize) {
+    if legacy || size <= 256 {
+        return (rate, minimum, 2);
+    }
+    let cap = if size >= 1024 { 8.0 } else { 24.0 };
+    (rate.min(cap), minimum.min(cap), 1)
+}
+
+#[cfg(test)]
+mod mirror_resolution_budget_tests {
+    use super::{mirror_resolution_budget, mirror_updates};
+
+    #[test]
+    fn standard_mirrors_keep_the_existing_schedule() {
+        assert_eq!(mirror_resolution_budget(256, 75.0, 40.0, false), (75.0, 40.0, 2));
+        assert_eq!(mirror_resolution_budget(1024, 75.0, 40.0, true), (75.0, 40.0, 2));
+    }
+
+    #[test]
+    fn high_resolution_limits_rate_and_expensive_frames() {
+        assert_eq!(mirror_resolution_budget(512, 75.0, 40.0, false), (24.0, 24.0, 1));
+        assert_eq!(mirror_resolution_budget(1024, 75.0, 40.0, false), (8.0, 8.0, 1));
+        assert_eq!(mirror_resolution_budget(2048, 4.0, 0.0, false), (4.0, 0.0, 1));
+        let (rate, min_rate, max_per_frame) = mirror_resolution_budget(1024, 75.0, 40.0, false);
+        let (mut credit, mut avg) = (0.0, 0.0);
+        let total: usize = (0..600)
+            .map(|_| mirror_updates(&mut credit, &mut avg, 1.0 / 60.0, rate, min_rate, max_per_frame))
+            .sum();
+        assert!((78..=82).contains(&total), "expected about 8 mirrors/s, got {total} in 10s");
+    }
+}
+
 /// Consume the VR redraw budget without updating a mirror twice in one frame.
 /// Negative rates request every mirror each frame; zero freezes immediately.
 fn vr_mirror_updates(budget: &mut f32, dt: f32, rate: f32, mirrors: usize) -> usize {
