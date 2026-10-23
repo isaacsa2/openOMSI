@@ -239,7 +239,12 @@ impl PeopleSim {
             .collect();
         let flags = bn.cabin.entry_flags();
         let open: Vec<bool> = (0..list.len()).map(|k| bn.entry_open.get(k).copied().unwrap_or(false)).collect();
-        let pt = bn.cabin.omsi_nearest(here, &list, p.ticket == TICKET_BUY, false, Some(&flags), Some(&open));
+        // A filtered list can begin with a door on the opposite side (None).
+        // With every matching door still shut, omsi_nearest's rigid-bus fallback
+        // returns the first slot, which might be None. Use the first actual
+        // platform-facing door rather than losing the boarding target.
+        let pt = bn.cabin.omsi_nearest(here, &list, p.ticket == TICKET_BUY, false, Some(&flags), Some(&open))
+            .or_else(|| list.iter().flatten().next().copied());
         let p = self.pax_mut(i).unwrap();
         if let Some(q) = pt.and_then(|k| bn.cabin.graph.points.get(k)) {
             p.target = q.as_dvec3();
