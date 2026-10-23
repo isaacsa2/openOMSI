@@ -504,7 +504,13 @@ impl App {
                 }
             } else {
                 let min_rate = self.gfx.mirrors_seen.max(1) as f32 * MIRROR_MIN_HZ;
-                mirror_updates(&mut self.gfx.mirror_budget, &mut self.gfx.mirror_dt, raw_dt, rate, min_rate, self.gfx.mirrors_seen.clamp(1, 2))
+                let (rate, min_rate, most) = mirror_resolution_budget(
+                    self.settings.mirror_size,
+                    rate,
+                    min_rate,
+                    omsi_cfg::flags::OMSI_MIRROR_LEGACY_BUDGET.is_set(),
+                );
+                mirror_updates(&mut self.gfx.mirror_budget, &mut self.gfx.mirror_dt, raw_dt, rate, min_rate, most)
             };
             let mut drawn = 0;
             if vr_active && draw_limit > 0 && draw_limit == mirrors {
