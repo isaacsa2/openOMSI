@@ -85,6 +85,7 @@ pub(super) fn lights(cx: LightsCx, dt: f32, daylight: omsi_sim::Daylight, behind
             w, scene, &daylight, cam.position, &vehicles, cone,
             lights::VehicleSmoke::from_setting(&cx.common.settings.vehicle_smoke),
             cx.player.player.is_some(),
+            cx.traffic.traffic.as_ref().map_or(0, |t| t.cars.len()),
         );
         drop(vehicles);
         if let Some(p) = cx.player.player.as_ref() {

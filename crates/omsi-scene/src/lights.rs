@@ -841,6 +841,34 @@ impl VehicleSmoke {
     }
 }
 
+/// Test-only visual compromise: never apply the AI projected-light budget
+/// outside bright, clear daytime. A missing limit means original behaviour.
+fn daytime_spot_limit(limit: Option<usize>, brightness: f32, lamps_on: bool, visibility_m: f32) -> Option<usize> {
+    limit.filter(|_| brightness >= 0.9 && !lamps_on && visibility_m >= 2000.0)
+}
+
+#[cfg(test)]
+mod daytime_spot_tests {
+    use super::daytime_spot_limit;
+
+    #[test]
+    fn preserves_all_projected_lights_when_not_opted_in() {
+        assert_eq!(daytime_spot_limit(None, 1.0, false, 50000.0), None);
+    }
+
+    #[test]
+    fn never_limits_night_dusk_or_fog() {
+        for (brightness, lamps, visibility) in [
+            (0.8, false, 50000.0),
+            (1.0, true, 50000.0),
+            (1.0, false, 1999.0),
+        ] {
+            assert_eq!(daytime_spot_limit(Some(8), brightness, lamps, visibility), None);
+        }
+        assert_eq!(daytime_spot_limit(Some(8), 1.0, false, 50000.0), Some(8));
+    }
+}
+
 /// Fill the scene's lights for this frame, the lamps' cones in the weather `cone`.
 pub fn collect(
     world: &World,
@@ -851,6 +879,7 @@ pub fn collect(
     cone: ConeWeather,
     smoke_mode: VehicleSmoke,
     player_first: bool,
+    ai_count: usize,
 ) {
     scene.lights.clear();
     scene.coronas.clear();
@@ -941,8 +970,36 @@ pub fn collect(
     // the headlamps lent to cars without spots of their own: the nearest few alone (see
     // `AI_BEAMS`)
     let beams = cars_with_beams(vehicles, camera_pos);
+    // Experimental daytime budget for *projected* AI lights. Unlike removing an
+    // AI vehicle's scripts, this leaves its visible glow, indicators, materials,
+    // AI state and networking untouched. Only explicitly opting in changes it.
+    // At night, at dawn/dusk, or in fog, every vehicle keeps its full lights.
+    let day_spot_budget = daytime_spot_limit(
+        omsi_cfg::flags::OMSI_AI_DAY_SPOTS.parse::<usize>(),
+        daylight.brightness,
+        daylight.lamps_on,
+        cone.get().0,
+    );
+    let ai_start = usize::from(player_first);
+    let ai_end = ai_start.saturating_add(ai_count).min(vehicles.len());
+    let mut selected_ai = Vec::new();
+    if let Some(budget) = day_spot_budget {
+        let mut nearest: Vec<(f64, usize)> = (ai_start..ai_end)
+            .map(|k| ((vehicles[k].position - camera_pos).length_squared(), k))
+            .collect();
+        nearest.sort_by(|a, b| a.0.total_cmp(&b.0));
+        selected_ai.extend(nearest.into_iter().take(budget).map(|(_, k)| k));
+    }
+    let mut skipped_spots = 0usize;
     for (k, v) in vehicles.iter().enumerate() {
+        let before_spots = scene.lights.len();
         vehicle_lights(v, &mut scene.coronas, &mut scene.lights, night, &world.cookie_fades, beams.contains(&k));
+        if day_spot_budget.is_some() && (ai_start..ai_end).contains(&k) && !selected_ai.contains(&k) {
+            // All PointLights created by vehicle_lights are projected headlamps;
+            // coronas are collected separately and deliberately remain visible.
+            skipped_spots += scene.lights.len() - before_spots;
+            scene.lights.truncate(before_spots);
+        }
         // light_vehicles puts the player's bus first (if any). LAN guests and AI
         // traffic must not be mistaken for it when no bus is driven locally.
         let vehicle_smoke_enabled = match smoke_mode {
@@ -953,6 +1010,17 @@ pub fn collect(
         particle_sprites_filtered(&v.particles, &mut scene.smoke, &mut scene.coronas, vehicle_smoke_enabled);
         for t in &v.trailers {
             particle_sprites_filtered(&t.particles, &mut scene.smoke, &mut scene.coronas, vehicle_smoke_enabled);
+        }
+    }
+    // Do not flood game.log: sample the budget once per ten seconds only while
+    // profiling. This count describes this frame, not a claimed FPS gain.
+    if day_spot_budget.is_some() && omsi_cfg::flags::OMSI_PROFILE.is_set() {
+        static LAST: std::sync::OnceLock<parking_lot::Mutex<std::time::Instant>> = std::sync::OnceLock::new();
+        let now = std::time::Instant::now();
+        let mut last = LAST.get_or_init(|| parking_lot::Mutex::new(now - std::time::Duration::from_secs(11))).lock();
+        if now.duration_since(*last) >= std::time::Duration::from_secs(10) {
+            log::info!("profile: AI daylight projected lights: {} kept vehicles of {}, {} spot lights skipped", selected_ai.len(), ai_end - ai_start, skipped_spots);
+            *last = now;
         }
     }
     crate::puddles::keep_out_of_cab(vehicles, camera_pos, &mut scene.smoke, vehicle_smoke);

@@ -199,7 +199,7 @@ impl Offscreen<'_> {
         } = *self;
         {
             let vehicles = steps::light_vehicles(player_ref.as_ref(), traffic.as_ref(), remotes_off);
-            world_lights(renderer, world, scene, weather, daylight, camera.position, &vehicles, &settings.vehicle_smoke, player_ref.is_some());
+            world_lights(renderer, world, scene, weather, daylight, camera.position, &vehicles, &settings.vehicle_smoke, player_ref.is_some(), traffic.as_ref().map_or(0, |t| t.cars.len()));
             if let Some(p) = player_ref.as_ref() {
                 if let Some(tv) = p.trolley_view.as_ref() {
                     tv.push_effects(scene, &p.vehicle);

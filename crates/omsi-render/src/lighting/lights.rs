@@ -2,6 +2,7 @@
 //! the lamps that cast shadows, and the light map tiles.
 
 use crate::*;
+use glam::Vec2;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -271,6 +272,47 @@ fn cell_strength(intensity: f32, color: [f32; 3], r: f32, d2: f32) -> f32 {
     intensity * (color[0] + color[1] + color[2]) * (r0 * r0 / d2.max(0.01)).min(1.0) * (1.0 - d / r.max(0.01)).max(0.0)
 }
 
+/// A headlamp shader never lights a point behind its horizontal forward axis.
+/// Drop only cells wholly behind that axis, including their full square extent.
+/// This is conservative: corners, road height and the bus pitch cannot turn a
+/// strictly rearward horizontal offset into forward headlamp illumination.
+fn headlamp_cell_can_light(light: &PointLight, p: Vec3, cell_center: Vec2) -> bool {
+    if light.beam == 0.0 {
+        return true;
+    }
+    let forward = light.direction.truncate().normalize_or_zero();
+    if forward.length_squared() <= 1e-8 {
+        return true;
+    }
+    let delta = cell_center - p.truncate();
+    let margin = LIGHT_CELL * 0.5 * (forward.x.abs() + forward.y.abs());
+    delta.dot(forward) + margin > 0.0
+}
+
+#[cfg(test)]
+mod headlamp_cell_tests {
+    use super::*;
+
+    #[test]
+    fn culls_only_wholly_rearward_headlamp_cells() {
+        let lamp = PointLight { beam: 1.0, direction: Vec3::Y, ..Default::default() };
+        let at = Vec3::ZERO;
+        assert!(!headlamp_cell_can_light(&lamp, at, Vec2::new(0.0, -30.0)));
+        assert!(headlamp_cell_can_light(&lamp, at, Vec2::new(0.0, 30.0)));
+        assert!(headlamp_cell_can_light(&lamp, at, Vec2::new(0.0, 0.0)));
+        assert!(headlamp_cell_can_light(&lamp, at, Vec2::new(0.0, -12.0)));
+    }
+
+    #[test]
+    fn handles_diagonal_headlights_and_non_headlamps() {
+        let lamp = PointLight { beam: -1.0, direction: Vec3::new(1.0, 1.0, 0.2), ..Default::default() };
+        assert!(!headlamp_cell_can_light(&lamp, Vec3::ZERO, Vec2::new(-50.0, -50.0)));
+        assert!(headlamp_cell_can_light(&lamp, Vec3::ZERO, Vec2::new(10.0, 10.0)));
+        let omni = PointLight { beam: 0.0, direction: Vec3::Y, ..Default::default() };
+        assert!(headlamp_cell_can_light(&omni, Vec3::ZERO, Vec2::new(0.0, -100.0)));
+    }
+}
+
 /// Does this path draw the light? (See `Renderer::prepare_lights`.)
 pub(crate) fn drawn_by(l: &PointLight, enhanced: bool) -> bool {
     l.radius > 0.0
@@ -365,6 +407,7 @@ impl Renderer {
         strength.resize(cells * LIGHT_CELL_CAP, 0.0);
         let cap = if enhanced { LIGHT_CELL_CAP } else { VANILLA_CELL_CAP };
         let squares = omsi_cfg::flags::OMSI_LIGHT_GRID_SQUARES.is_set();
+        let cull_headlamp_cells = !omsi_cfg::flags::OMSI_NO_HEADLAMP_CELL_CULL.is_set();
         for l in &scene.lights {
             // Every light the grid reaches is in the list, the other path's too (a headlight
             // is three points for the plain shader and one spot for the enhanced): only the
@@ -429,6 +472,20 @@ impl Renderer {
                     let cy = (origin[1] + (y as f32 + 0.5) * LIGHT_CELL - p.y).abs().max(0.0) - LIGHT_CELL * 0.5;
                     let d2 = cx.max(0.0).powi(2) + cy.max(0.0).powi(2);
                     if d2 >= l.radius * l.radius && !squares {
+                        continue;
+                    }
+                    // Enhanced road headlights are strictly forward-only in
+                    // lamp_air.wgsl. Skip the entirely rearward grid cells, not
+                    // the headlamp or its visible corona. Keep this reversible.
+                    if cull_headlamp_cells && l.beam != 0.0
+                        && !headlamp_cell_can_light(
+                            l, p,
+                            Vec2::new(
+                                origin[0] + (x as f32 + 0.5) * LIGHT_CELL,
+                                origin[1] + (y as f32 + 0.5) * LIGHT_CELL,
+                            ),
+                        )
+                    {
                         continue;
                     }
                     // (a spot - a headlight - counts as strong: it is the player's or a car's
