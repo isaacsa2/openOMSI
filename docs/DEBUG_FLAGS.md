@@ -290,8 +290,8 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_GROUND_PAINT` | bool | off | use | scene | No painted ground layers. |
 | `OMSI_NO_GROUND_SPLINE_BATCHING` | bool | off | use | scene | No batching of ground splines. |
 | `OMSI_NO_GUARD` | bool | off | use | guard, launcher-api | No start guard: a start that crashes or hangs is not healed by an update or by going back to the version before. |
-| `OMSI_NO_HEADLAMP_CELL_CULL` | bool | off | frame | render | A/B: keep road headlamps in light-grid cells wholly behind their forward axis (disables conservative cell culling). |
 | `OMSI_NO_HARDWARE_ID` | bool | off | once | lan | LAN: the game sends no hardware identifier (a host can then turn the player away, and cannot ban the machine). |
+| `OMSI_NO_HEADLAMP_CELL_CULL` | bool | off | frame | render | A/B: keep road headlamps in light-grid cells wholly behind their forward axis (disables conservative cell culling). |
 | `OMSI_NO_INTERP` | bool | off | once | lan | The old way without interpolation, for comparing. |
 | `OMSI_NO_LAMP_SIGHT` | bool | off | use | render | Enhanced by night: every lamp near the line of sight dazzles, hidden or not. |
 | `OMSI_NO_LAN_MODS` | bool | off | use | lan | LAN: do not exchange mods. |
