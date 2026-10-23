@@ -255,6 +255,7 @@ pub(super) fn same_value(a: &str, b: &str) -> bool {
 pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
     match key {
         "cloud_quality" => vec![("high", "High"), ("low", "Low")],
+        "street_light" => vec![("auto", "Auto"), ("on", "On"), ("off", "Off")],
         "rain_quality" => vec![("high", "High"), ("medium", "Medium"), ("low", "Low")],
         "vehicle_smoke" => vec![("all", "All vehicles"), ("player", "Player only"), ("off", "Off")],
         "puddles" => vec![("high", "High"), ("low", "Low"), ("off", "Off")],
@@ -401,6 +402,11 @@ pub(super) fn sync_live(app: &mut App) {
         if (o.fsr1 || asked.0) && (o.fsr1, o.fsr_sharpness, o.render_scale) != asked && !r.set_upscaler(o.fsr1, o.fsr_sharpness, o.render_scale) {
             app.service_msg = Some((omsi_ui::tr("FSR 1 does not run on this graphics driver: the standard upscaler stays").into_owned(), 6.0));
         }
+    }
+    // (the street light takes effect at once: the renderer reads it every frame)
+    let street_light = app.settings.render_options().street_light;
+    if let Some(r) = app.renderer.as_mut() {
+        r.options.street_light = street_light;
     }
     let s = &app.settings;
     if let Some(w) = app.world.as_ref() {
