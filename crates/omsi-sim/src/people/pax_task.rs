@@ -223,7 +223,20 @@ impl PeopleSim {
         };
         // (the doors of the sections of the place reserved)
         let group = p.seat.and_then(|k| bn.cabin.seats.get(k)).map(|s| s.group);
-        let list = bn.cabin.in_group(bn.cabin.entry_points(), group);
+        let side = p.stop.and_then(|stop| self.preferred_entry_side(stop, bn));
+        // Never select the opposite doors just because they are closer or open:
+        // on central BRT platforms this sent people straight through the bus.
+        let list: Vec<_> = bn.cabin.in_group(bn.cabin.entry_points(), group)
+            .into_iter()
+            .enumerate()
+            .map(|(k, point)| {
+                if bn.cabin.entries.get(k).is_some_and(|door| super::pax_stops::entry_on_platform(side, door.side)) {
+                    point
+                } else {
+                    None
+                }
+            })
+            .collect();
         let flags = bn.cabin.entry_flags();
         let open: Vec<bool> = (0..list.len()).map(|k| bn.entry_open.get(k).copied().unwrap_or(false)).collect();
         let pt = bn.cabin.omsi_nearest(here, &list, p.ticket == TICKET_BUY, false, Some(&flags), Some(&open));

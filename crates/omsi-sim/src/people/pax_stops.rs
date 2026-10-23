@@ -2,7 +2,22 @@
 
 use super::*;
 
+// The stop object lies on the platform side of the bus. Near the centreline the
+// object's position is not reliable enough to exclude either side's doors.
+pub(super) fn platform_side(local_x: f32) -> Option<f32> {
+    (local_x.is_finite() && local_x.abs() > 0.75).then(|| local_x.signum())
+}
+
+pub(super) fn entry_on_platform(side: Option<f32>, door_side: f32) -> bool {
+    side.is_none_or(|wanted| wanted == door_side)
+}
+
 impl PeopleSim {
+    /// Which side of this bus faces the stop object, in its local coordinates.
+    pub fn preferred_entry_side(&self, stop: i64, bn: &BusNow) -> Option<f32> {
+        self.stops.get(&stop).and_then(|s| platform_side(bn.to_local(s.pos).x))
+    }
+
     /// The passenger of person `i`, if it is one.
     pub fn pax(&self, i: usize) -> Option<&Pax> {
         match &self.people[i].state {
@@ -81,10 +96,15 @@ impl PeopleSim {
                     AtStop::Passes => continue,
                     AtStop::Serves => {}
                 }
-                if same_way {
+                // An AI bus actively boarding this exact timetable stop is at its berth,
+                // even when the pole/stop box is offset across a BRT platform. The old
+                // 2 m box rejected it, leaving passengers waiting forever.
+                let scheduled_here = bn.served == Some(*id);
+                if same_way || scheduled_here {
                     let lateral = d.truncate().dot(s_right);
                     let along = d.truncate().dot(s_fwd);
-                    let in_box = lateral.abs() < 2.0 && along.abs() < (s.length as f64 - 5.0).max(0.0);
+                    let in_box = scheduled_here
+                        || (lateral.abs() < 2.0 && along.abs() < (s.length as f64 - 5.0).max(0.0));
                     self.stops.get_mut(id).unwrap().buses.push((bn.id, in_box));
                 }
             }
@@ -105,10 +125,16 @@ impl PeopleSim {
         let s = self.stops.get(&stop)?;
         let p = self.pax(i)?;
         match p.line.and_then(|k| s.lines.get(k)) {
-            None => s.buses.first().map(|b| (b.0, Fit::Any)),
+            None => s.buses.iter().find_map(|(id, _)| {
+                let bn = bus_ix.get(id).map(|k| &buses[*k])?;
+                let side = self.preferred_entry_side(stop, bn);
+                bn.cabin.entries.iter().any(|door| entry_on_platform(side, door.side))
+                    .then_some((*id, Fit::Any))
+            }),
             Some((_, termini)) => best_bus(s.buses.iter().filter_map(|(id, _)| {
                 let bn = bus_ix.get(id).map(|k| &buses[*k])?;
-                if bn.cabin.entries.is_empty() {
+                let side = self.preferred_entry_side(stop, bn);
+                if !bn.cabin.entries.iter().any(|door| entry_on_platform(side, door.side)) {
                     return None;
                 }
                 // (or the destination of another route of its service ending where its own
@@ -225,5 +251,24 @@ impl PeopleSim {
         let k = free[(self.rand() as usize) % free.len()];
         self.stops.get_mut(&stop).unwrap().taken[k] = true;
         Some(k)
+    }
+}
+
+#[cfg(test)]
+mod brt_door_tests {
+    use super::{entry_on_platform, platform_side};
+
+    #[test]
+    fn passengers_only_use_doors_facing_the_platform() {
+        let left = platform_side(-3.0);
+        let right = platform_side(3.0);
+        assert_eq!(left, Some(-1.0));
+        assert_eq!(right, Some(1.0));
+        assert!(entry_on_platform(left, -1.0));
+        assert!(!entry_on_platform(left, 1.0));
+        assert!(entry_on_platform(right, 1.0));
+        assert!(!entry_on_platform(right, -1.0));
+        assert!(entry_on_platform(platform_side(0.0), -1.0));
+        assert!(entry_on_platform(platform_side(0.0), 1.0));
     }
 }
