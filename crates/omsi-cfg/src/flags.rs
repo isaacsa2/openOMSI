@@ -366,8 +366,8 @@ flags! {
     OMSI_NO_GROUND_PAINT: Bool, Switch, Use, "off", "No painted ground layers.";
     OMSI_NO_GROUND_SPLINE_BATCHING: Bool, Switch, Use, "off", "No batching of ground splines.";
     OMSI_NO_GUARD: Bool, Switch, Use, "off", "No start guard: a start that crashes or hangs is not healed by an update or by going back to the version before.";
-    OMSI_NO_HEADLAMP_CELL_CULL: Bool, Switch, Frame, "off", "A/B: keep road headlamps in light-grid cells wholly behind their forward axis (disables conservative cell culling).";
     OMSI_NO_HARDWARE_ID: Bool, Switch, Once, "off", "LAN: the game sends no hardware identifier (a host can then turn the player away, and cannot ban the machine).";
+    OMSI_NO_HEADLAMP_CELL_CULL: Bool, Switch, Frame, "off", "A/B: keep road headlamps in light-grid cells wholly behind their forward axis (disables conservative cell culling).";
     OMSI_NO_INTERP: Bool, Switch, Once, "off", "The old way without interpolation, for comparing.";
     OMSI_NO_LAMP_SIGHT: Bool, Switch, Use, "off", "Enhanced by night: every lamp near the line of sight dazzles, hidden or not.";
     OMSI_NO_LAN_MODS: Bool, Switch, Use, "off", "LAN: do not exchange mods.";
