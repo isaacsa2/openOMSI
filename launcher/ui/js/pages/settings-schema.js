@@ -39,7 +39,8 @@ const snap = (step) => (v) => Number((Math.round(v / step) * step).toFixed(4));
 
 // --- conditions -------------------------------------------------------------------------
 
-const mode = (s) => s.graphics || 'vanilla_plus';
+// (Enhanced+ is Enhanced with the ray tracing switch on: what the rows shown go by)
+const mode = (s) => (s.graphics === 'enhanced' && s.ray_tracing ? 'enhanced_plus' : s.graphics || 'vanilla_plus');
 const classic = (s) => mode(s) === 'vanilla';
 const traced = (s) => mode(s) === 'enhanced_plus';
 const enhanced = (s) => mode(s) === 'enhanced' || traced(s);
@@ -80,10 +81,11 @@ const graphics = {
       title: 'Graphics',
       rows: [
         // the mode first, then the quality presets for it: they set most of what follows
-        { type: 'select', key: 'graphics', label: 'Graphics', options: [['vanilla', 'Vanilla (as OMSI 2)'], ['vanilla_plus', 'Vanilla+'], ['enhanced', 'Enhanced'], ['enhanced_plus', 'Enhanced+']] },
+        { type: 'select', key: 'graphics', label: 'Graphics', options: [['vanilla', 'Vanilla (as OMSI 2)'], ['vanilla_plus', 'Vanilla+'], ['enhanced', 'Enhanced']] },
+        { type: 'toggle', key: 'ray_tracing', label: 'Ray tracing', help: 'Enhanced with ray-traced sun shadows, ambient occlusion and reflections, on a graphics card with hardware ray tracing; takes effect when the game starts the next time', when: enhanced },
         { type: 'custom', id: 'preset' },
         { type: 'custom', id: 'optimise' },
-        { type: 'select', key: 'msaa', label: 'Anti-aliasing', options: [['1', 'Off'], ['2', '2x MSAA'], ['4', '4x MSAA'], ['8', '8x MSAA']], heavy: (v, s) => v === '8' && s.graphics !== 'enhanced_plus' },
+        { type: 'select', key: 'msaa', label: 'Anti-aliasing', options: [['1', 'Off'], ['2', '2x MSAA'], ['4', '4x MSAA'], ['8', '8x MSAA']], heavy: (v, s) => v === '8' && !traced(s) },
         { type: 'select', key: 'render_scale', label: 'Render scale', options: [['auto', 'Auto'], ['1', '100%'], ['0.85', '85%'], ['0.75', '75%'], ['0.67', '67%'], ['0.5', '50%']] },
         { type: 'select', key: 'anisotropy', label: 'Anisotropic', options: [['1', 'Off'], ['2', '2x'], ['4', '4x'], ['8', '8x'], ['16', '16x']] },
         // Vanilla draws what OMSI 2 draws: no sun shadows, ambient occlusion or detail grain

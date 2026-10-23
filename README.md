@@ -35,8 +35,8 @@ It loads the existing OMSI 2 maps, buses, scenery and mods as they are.
   HOF files, weather and plugins load the way OMSI 2.2.032 loads them. The OMSI 2 folder is
   never written to.
 * **A new engine** - 64-bit (no 2 GB limit), tiles and textures loaded on worker threads,
-  four graphics modes from *Vanilla* (looks like OMSI 2) to *Enhanced+* (physically based
-  lighting with ray-traced shadows and reflections).
+  three graphics modes from *Vanilla* (looks like OMSI 2) to *Enhanced* (physically based
+  lighting, with a switch for ray-traced shadows and reflections).
 * **A launcher** - pick a map, line, tour, bus and livery on one screen with a route map and a
   live bus preview; mods from a folder or a `.zip`/`.7z`/`.rar`; keys and game controllers
   (wheels, pedals, force feedback); updates on a Stable or Beta channel.

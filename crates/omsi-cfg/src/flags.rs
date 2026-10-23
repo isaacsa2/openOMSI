@@ -275,7 +275,7 @@ flags! {
     OMSI_DUMP_SCENERY_TEXT: Text, Debug, Use, "-", "Directory: write the scenery objects' text textures as drawn.";
     OMSI_DUMP_SCRIPTTEX: Text, Debug, Use, "-", "Directory: write the player's bus's script (display) textures.";
     OMSI_ENHANCED: Bool, Tuning, Use, "settings", "Enhanced graphics for this run.";
-    OMSI_ENHANCED_PLUS: Bool, Tuning, Use, "settings", "Enhanced+ (ray traced) graphics for this run.";
+    OMSI_ENHANCED_PLUS: Bool, Tuning, Use, "settings", "Enhanced with ray tracing for this run (the settings' ray tracing switch).";
     OMSI_ENV_PHOTO: Num, Debug, Use, "1", "0 leaves the environment photo out of the debug views.";
     OMSI_FAKE_GPU_ERROR: Text, Test, Frame, "-", "Fault injection: open, open-panic, pipeline, lost-build, build, lost, frame, mesh - the GPU error to simulate. Only in builds with omsi-render's `test-hooks` feature (on by default).";
     OMSI_FIXED_SCALE: Bool, Switch, Use, "off", "Keep the render scale fixed (no dynamic resolution).";

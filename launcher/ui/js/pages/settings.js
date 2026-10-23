@@ -193,7 +193,8 @@ const CUSTOM = {
 /** The quality presets of the graphics mode chosen: the one the settings match, else
  * "Custom". A preset keeps the mode. */
 function PresetRow() {
-  const mode = S.settings.graphics || 'vanilla_plus';
+  // (Enhanced with ray tracing has Enhanced+'s presets)
+  const mode = S.settings.graphics === 'enhanced' && S.settings.ray_tracing ? 'enhanced_plus' : S.settings.graphics || 'vanilla_plus';
   const [presets, setPresets] = useState([]);
   useEffect(() => {
     let gone = false;

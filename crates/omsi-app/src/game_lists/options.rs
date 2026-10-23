@@ -417,6 +417,8 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "exact_fare" => s.exact_fare,
         "pax_bad_driving" => s.pax_bad_driving,
         "auto_announce" => s.auto_announce,
+        // (as saved, not as this session draws: it takes effect at the next start)
+        "ray_tracing" => settings_file()["ray_tracing"].as_bool().unwrap_or(false),
         "collision_pedestrians" => s.collision_pedestrians,
         "ssao" => s.ssao,
         "detail_textures" => s.detail_textures,
@@ -699,6 +701,8 @@ pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static 
 /// interface (`bit` is the switch's value as kept).
 fn toggle_set_graphics_and_controls(app: &mut App, id: &str, on: bool, bit: String) -> Option<(&'static str, String)> {
     match id {
+        // (only the file: the renderer was opened with or without ray queries, see `toggle_now`)
+        "ray_tracing" => Some(("ray_tracing", bit)),
         "ssao" => {
             app.settings.ssao = on;
             Some(("ssao", bit))

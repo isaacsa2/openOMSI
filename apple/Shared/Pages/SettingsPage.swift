@@ -94,12 +94,17 @@ struct SettingsPage: View {
     // --- graphics --------------------------------------------------------------------------
 
     private var graphics: some View {
-        let mode = store.setting("graphics")?.string ?? "vanilla_plus"
+        let graphics = store.setting("graphics")?.string ?? "vanilla_plus"
+        let enhanced = graphics.hasPrefix("enhanced")
+        // (Enhanced+ is Enhanced with the ray tracing switch on)
+        let traced = enhanced && store.flag("ray_tracing", false)
+        let mode = traced ? "enhanced_plus" : graphics
         let classic = mode == "vanilla"
-        let traced = mode == "enhanced_plus"
-        let enhanced = mode.hasPrefix("enhanced")
         return Card("Graphics") {
-            SettingSelect(label: "Graphics", key: "graphics", options: [("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")])
+            SettingSelect(label: "Graphics", key: "graphics", options: [("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced")])
+            if enhanced {
+                SettingToggle(label: "Ray tracing", key: "ray_tracing", fallback: false, help: "Enhanced with ray-traced sun shadows, ambient occlusion and reflections, on a graphics card with hardware ray tracing; takes effect when the game starts the next time")
+            }
             PresetRow(mode: mode)
             OptimiseBlock()
             SettingSelect(label: "Anti-aliasing", key: "msaa", options: Choices.msaa, heavy: { $0 == "8" && !traced })

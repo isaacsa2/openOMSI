@@ -524,7 +524,9 @@ less of the GPU's time (on an M4 at 1080p about 0.8 ms of a frame). The camera e
 moment, with a camera's middle-tone contrast; street lamps are bright points with a little
 glare in clear air and wide halos in mist and rain.
 
-`graphics=enhanced_plus` (Enhanced+ in the launcher, `--enhanced-plus`) is Enhanced with
+**Ray tracing** (Enhanced's *Ray tracing* switch, `ray_tracing=1`, from the next start;
+`--enhanced-plus` for one run; a file's old `graphics=enhanced_plus` - the Enhanced+ mode it
+was before - reads as Enhanced with the switch on) is Enhanced with
 hardware ray tracing, where the graphics card traces rays (Apple M3/M4 and newer, RTX and
 RDNA 2 cards and newer through Vulkan and Direct3D 12; elsewhere it draws as Enhanced, and
 should a driver refuse the ray tracing it falls back to Enhanced as well). Every solid mesh within

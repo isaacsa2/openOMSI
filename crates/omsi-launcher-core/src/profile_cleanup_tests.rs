@@ -1,6 +1,7 @@
 use super::*;
 
-/// A quality preset keeps the graphics mode and what is not graphics; Vanilla's leave
+/// A quality preset keeps the graphics mode (Enhanced+: Enhanced with the ray tracing switch)
+/// and what is not graphics; Vanilla's leave
 /// out what OMSI 2 does not draw, Enhanced+'s keep its traced shadows, occlusion and
 /// reflections; High of Vanilla+ is the defaults.
 #[test]
@@ -10,7 +11,8 @@ fn quality_presets_keep_the_mode_and_the_rest() {
             let mut v = settings_from_text(Some(&format!("graphics={mode}\ngraphics_api=gl\nlanguage=PTB\nai_unsched_factor=25\n")));
             apply_graphics_profile(&preset, &mut v);
             let saved = settings_from_text(Some(&settings_to_text(&v, None)));
-            assert_eq!(saved["graphics"], mode);
+            assert_eq!(effective_graphics_mode(&saved), mode);
+            assert_eq!(saved["graphics"], base_graphics_mode(mode));
             assert_eq!(saved["graphics_api"], "gl");
             assert_eq!(saved["language"], "PTB");
             assert_eq!(saved["ai_unsched_factor"], 25);
@@ -199,4 +201,32 @@ fn the_reflections_are_a_strength_and_older_files_read_as_on_or_off() {
     let mut v = settings_from_text(None);
     v["reflections"] = json!(false);
     assert_eq!(settings_from_text(Some(&settings_to_text(&v, None)))["reflections"], 0.0);
+}
+
+/// Enhanced+ is Enhanced with the ray tracing switch on: an old file's or profile's mode
+/// becomes the two, and a profile saved before the switch says it with its mode alone.
+#[test]
+fn enhanced_plus_becomes_enhanced_with_ray_tracing() {
+    for old in ["enhanced_plus", "Enhanced+", "2"] {
+        let v = settings_from_text(Some(&format!("graphics={old}\n")));
+        assert_eq!((&v["graphics"], &v["ray_tracing"], &v["enhanced"]), (&json!("enhanced"), &json!(true), &json!(true)), "{old}");
+        let text = settings_to_text(&v, None);
+        assert!(text.contains("\ngraphics=enhanced\n") && text.contains("\nray_tracing=1\n"), "{old}");
+    }
+    let v = settings_from_text(Some("graphics=enhanced\n"));
+    assert_eq!((effective_graphics_mode(&v), &v["ray_tracing"]), ("enhanced", &json!(false)));
+    // (Vanilla+ keeps the switch for when Enhanced comes back, and draws without it)
+    let v = settings_from_text(Some("graphics=vanilla_plus\nray_tracing=1\n"));
+    assert_eq!((effective_graphics_mode(&v), &v["ray_tracing"]), ("vanilla_plus", &json!(true)));
+    let mut traced = settings_from_text(Some("graphics=enhanced\nray_tracing=1\n"));
+    apply_graphics_profile(&json!({ "graphics": "enhanced", "msaa": 2 }), &mut traced);
+    assert_eq!(traced["ray_tracing"], false, "an old Enhanced profile");
+    apply_graphics_profile(&json!({ "graphics": "enhanced_plus" }), &mut traced);
+    assert_eq!((&traced["graphics"], &traced["ray_tracing"]), (&json!("enhanced"), &json!(true)), "an old Enhanced+ profile");
+    // (a preset keeps the switch as it is)
+    let mut plain = settings_from_text(Some("graphics=enhanced\n"));
+    apply_graphics_profile(&graphics_presets_for("enhanced")[3].1, &mut plain);
+    assert_eq!(plain["ray_tracing"], false);
+    apply_graphics_profile(&graphics_presets_for("enhanced_plus")[0].1, &mut traced);
+    assert_eq!(effective_graphics_mode(&traced), "enhanced_plus");
 }
