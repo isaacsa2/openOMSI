@@ -175,7 +175,7 @@ impl Renderer {
     /// FSR 1 scales this view's picture up: asked for and built, the window's picture or an
     /// eye's (not a mirror's, nor with vanilla FXAA), drawn smaller than its target.
     pub(crate) fn fsr_draws(&self, f: &FrameCtx) -> bool {
-        (self.options.fsr1 || crate::fsr1_enabled()) && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
+        self.options.fsr1 && (f.with_overlays || f.xr_view) && !f.vanilla_fxaa
             && f.scene_target.is_some() && f.width < f.full_w && f.height < f.target.texture().height()
             && self.scale.fsr.is_some()
     }
@@ -250,8 +250,12 @@ impl Renderer {
                 }
                 // (OMSI_FSR_RAW_INPUT: the scene through a view that is not sRGB)
                 let raw_bg = self.scale.fsr.as_ref().filter(|p| p.raw_input).and_then(|_| f.scene_target.as_ref()).map(|(view, _)| {
-                    let raw = view.texture().create_view(&wgpu::TextureViewDescriptor { format: Some(self.format.remove_srgb_suffix()), ..Default::default() });
-                    self.picture_group(&raw)
+                    let mut kept = self.scale.fsr_raw_bg.borrow_mut();
+                    if kept.as_ref().is_none_or(|(t, _)| t != view.texture()) {
+                        let raw = view.texture().create_view(&wgpu::TextureViewDescriptor { format: Some(self.format.remove_srgb_suffix()), ..Default::default() });
+                        *kept = Some((view.texture().clone(), self.picture_group(&raw)));
+                    }
+                    kept.as_ref().expect("made above").1.clone()
                 });
                 // The HUD is composed on the finished picture, never upscaled or sharpened.
                 let draw_overlays = |pass: &mut wgpu::RenderPass| {

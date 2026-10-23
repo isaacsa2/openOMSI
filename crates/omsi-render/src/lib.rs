@@ -87,7 +87,6 @@ pub(crate) fn fsr1_enabled() -> bool {
     })
 }
 
-
 /// The enhanced path's post pipelines (post.wgsl).
 struct PostPipelines {
     down_first: wgpu::RenderPipeline,
@@ -480,6 +479,7 @@ impl Renderer {
     /// False when FSR 1 was asked for and the driver has just refused it (said once): the
     /// standard upscaler stays, and it is not tried again in this run.
     pub fn set_upscaler(&mut self, fsr1: bool, sharpness: f32, render_scale: f32) -> bool {
+        self.scale.upscaler_asked = (fsr1, sharpness, render_scale);
         self.options.fsr_sharpness = sharpness;
         self.options.render_scale = render_scale;
         let mut refused_now = false;
@@ -492,10 +492,16 @@ impl Renderer {
         self.options.fsr1 = fsr1 && self.scale.fsr.is_some();
         // Keep compiled pipelines for quick toggles, but release full-resolution images
         // while neither RCAS nor FSR needs them. They are recreated on the next draw.
-        if (!self.options.fsr1 && !fsr1_enabled()) || fsr1_rcas_strength(sharpness) == 0.0 {
+        if !self.options.fsr1 || fsr1_rcas_strength(sharpness) == 0.0 {
             self.scale.fsr_target.get_mut().clear();
         }
         !refused_now
+    }
+
+    /// FSR 1, its sharpening and the render scale as last asked for (`set_upscaler`; at the
+    /// start, the settings'): a menu change of something else leaves the upscaler alone.
+    pub fn upscaler_asked(&self) -> (bool, f32, f32) {
+        self.scale.upscaler_asked
     }
 
     /// VR starts with eyes of `eye_scale` (the eye resolution): the headset image's size as
@@ -521,7 +527,7 @@ impl Renderer {
     /// FSR 1 upscales the window's picture now (asked for, built, and the picture drawn
     /// smaller than the window).
     pub fn fsr_active(&self, width: u32, height: u32) -> bool {
-        (self.options.fsr1 || fsr1_enabled()) && self.scale.fsr.is_some() && self.scene_size(width, height) != (width, height)
+        self.options.fsr1 && self.scale.fsr.is_some() && self.scene_size(width, height) != (width, height)
     }
 
     /// The size the 3D scene is drawn at for a window of this size.

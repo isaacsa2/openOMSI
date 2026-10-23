@@ -541,6 +541,12 @@ pub(crate) struct Upscale {
     pub(crate) fsr_target: std::cell::RefCell<Vec<FsrTarget>>,
     /// FSR 1's passes were refused by the driver once (`set_upscaler`): not tried again.
     pub(crate) fsr_refused: bool,
+    /// What `set_upscaler` was last asked for (at the start: the settings'), FSR 1, its
+    /// sharpening and the render scale: see `Renderer::upscaler_asked`.
+    pub(crate) upscaler_asked: (bool, f32, f32),
+    /// OMSI_FSR_RAW_INPUT: the scene picture it was made for and the bind group reading it
+    /// through a view that is not sRGB (made again only for a new picture, not each frame).
+    pub(crate) fsr_raw_bg: std::cell::RefCell<Option<(wgpu::Texture, wgpu::BindGroup)>>,
     /// FSR 1 without its mip bias (OMSI_NO_FSR_MIP_BIAS; the tests compare with it).
     pub(crate) fsr_mip_bias_off: std::cell::Cell<bool>,
     pub(crate) copy_pipeline: wgpu::RenderPipeline,

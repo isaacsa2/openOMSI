@@ -48,11 +48,11 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         app.can_optimise().then(|| button("Optimise for my PC", "Start", "Measures while you drive and adjusts the graphics for a smooth frame rate; your settings are saved first", "optimise")),
         omsi_launcher_lib::optimise::backup().is_some().then(|| button("Restore my previous settings", "Restore", "The graphics settings as they were before the last optimisation", "optimise_restore")),
         pick("msaa", "Anti-aliasing", later),
-        pick("render_scale", "Render scale", later),
+        // (with FSR 1 it shows at once, as its quality does: see `sync_live`)
+        pick("render_scale", "Render scale", if s.upscaler == "fsr1" { "With FSR 1 it changes at once" } else { later }),
         pick("upscaler", "Upscaling", "Standard Catmull-Rom or experimental FSR 1; changes show at once"),
         pick("fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| s.upscaler == "fsr1"),
         slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength", &pct).filter(|_| s.upscaler == "fsr1"),
-
         pick("anisotropy", "Anisotropic", later),
         // (Enhanced+ traces its shadows, occlusion and reflections: always on there)
         switch_row(app, "shadows", "Sun shadows", "Enables/Disables shadows").filter(|_| shown("shadows")),
