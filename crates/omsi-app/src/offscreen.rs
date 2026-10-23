@@ -216,6 +216,9 @@ fn pose_player(p: &mut Player, renderer: &Renderer, scene: &mut Scene, args: &Ar
         matches!(args.view.as_str(), "driver" | "pax"),
         crate::rain::quality_of(&settings.rain_quality),
     );
+    if let Some(tv) = p.trolley_view.as_mut() {
+        tv.update(renderer, scene, 0.0, &mut p.vehicle);
+    }
     p.finish_window_paints(renderer, scene);
     crate::scene::sync_vehicle_damage(renderer, scene, &mut p.vehicle, &mut p.render);
     p.sync_driver(renderer, scene, 1.0 / 30.0, settings.driver, args.view == "driver");
@@ -238,7 +241,7 @@ fn world_lights(
     world.update_light_map_atlas(renderer, eye);
     lights::collect(
         world, scene, daylight, eye, vehicles,
-        lights::ConeWeather::new(weather.fog.0, daylight.night),
+        lights::ConeWeather { enhanced: !renderer.options.no_enhanced, ..lights::ConeWeather::of(weather, daylight.night) },
         lights::VehicleSmoke::from_setting(vehicle_smoke), player_first,
     );
     // (and the pictures the lights asked for first now: a picture has the one frame)

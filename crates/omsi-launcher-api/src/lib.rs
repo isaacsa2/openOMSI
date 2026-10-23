@@ -70,7 +70,7 @@ fn bootstrap(p: &dyn Platform) -> Answer {
     let root = core::root_dir().map(|p| p.to_string_lossy().to_string());
     let choice: Value = std::fs::read_to_string(core::data_dir().join("launcher-duty.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
     let favourites: Vec<String> = std::fs::read_to_string(core::data_dir().join("favourite-buses.txt")).map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(|l| l.replace('\\', "/").to_lowercase()).collect()).unwrap_or_default();
-    let languages: Vec<Value> = core::LANGUAGES.iter().map(|(code, name, iso, _)| json!({ "code": code, "name": name, "iso": iso })).collect();
+    let languages: Vec<Value> = core::LANGUAGES.iter().map(|(code, name, iso, _, _)| json!({ "code": code, "name": name, "iso": iso })).collect();
     // (a crash the last run left behind with nobody to tell: shown at the start, as the
     // game's own launcher did)
     let crash = p.previous_run_crash().map(|(what, tail)| crash_json(&what, &tail));
@@ -98,7 +98,7 @@ fn bootstrap(p: &dyn Platform) -> Answer {
 
 /// The interface texts in `lang` (the game's tables; English is the key).
 fn translations(lang: String) -> Answer {
-    to_json(crate::i18n::table(&lang))
+    to_json(&*crate::i18n::table(&lang))
 }
 
 /// The OMSI 2 folder and the game program (Setup).
@@ -410,7 +410,7 @@ pub fn game_ended(game: &core::instances::Instance) -> Option<(&'static str, Val
     }
     let log = std::path::Path::new(&game.log);
     if let Some(why) = core::crash::disconnect_of(log) {
-        return Some(("game-disconnected", json!({ "why": why })));
+        return Some(("game-disconnected", json!({ "why": core::i18n::tr_said(&why) })));
     }
     let (what, tail) = core::crash::crash_of(log)?;
     Some(("game-crashed", crash_json(&what, &tail)))
@@ -484,6 +484,22 @@ fn server_query(address: String) -> Answer {
         "version": i.version, "icon": icon, "time": i.time, "weather": i.weather, "password": i.password,
         "vehicles": i.vehicles, "reached_at": i.reached_at,
     }))
+}
+
+/// The public server list, moderated here (a flagged name or message is covered, an icon
+/// shown only if this launcher cleared it): the page shows what this returns and nothing the
+/// service said that was not checked (`omsi-serverlist`).
+fn public_servers() -> Answer {
+    let m = omsi_serverlist::BuiltinModerator;
+    let list = omsi_serverlist::client::fetch(omsi_serverlist::DEFAULT_SERVICE, &m)?;
+    Ok(json!(list
+        .into_iter()
+        .map(|e| json!({
+            "id": e.id, "address": e.address, "name": e.name, "motd": e.motd, "map": e.map,
+            "players": e.players, "max_players": e.max_players, "version": e.version, "covered": e.covered,
+            "icon": e.icon.as_deref().map(|i| format!("data:image/png;base64,{}", base64(i))),
+        }))
+        .collect::<Vec<_>>()))
 }
 
 /// A code host's first responsive status endpoint, including its tunnel.
@@ -581,7 +597,7 @@ fn depot_add(bus: String, paint: Option<String>, number: Option<String>, name: S
 /// A depot bus's name, paint, plate or fleet number changed (its wear stays).
 fn depot_update(id: String, patch: Value) -> Answer {
     core::depot::update(|d| {
-        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!("no depot bus {id}"))?;
+        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!(core::i18n::tr("No depot bus {id}").replace("{id}", &id)))?;
         let text = |k: &str| patch.get(k).and_then(Value::as_str).map(str::to_string);
         if let Some(v) = text("name") {
             b.name = v;
@@ -607,9 +623,9 @@ fn depot_update(id: String, patch: Value) -> Answer {
 /// Refuel, wash or repair a depot bus (all of it, or one part): its next drive starts so.
 fn depot_service(id: String, kind: String) -> Answer {
     core::depot::update(|d| {
-        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!("no depot bus {id}"))?;
+        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!(core::i18n::tr("No depot bus {id}").replace("{id}", &id)))?;
         if !b.service(&kind) {
-            anyhow::bail!("no depot service {kind}");
+            anyhow::bail!(core::i18n::tr("No depot service {kind}").replace("{kind}", &kind));
         }
         Ok(())
     })
@@ -639,7 +655,7 @@ fn depot_group(op: &str, name: String, to: Option<String>) -> Answer {
             }
         };
         if !done {
-            anyhow::bail!("there is already a depot called {}", to.as_deref().unwrap_or(&name).trim());
+            anyhow::bail!(core::i18n::tr("There is already a depot called {name}").replace("{name}", to.as_deref().unwrap_or(&name).trim()));
         }
         Ok(d.group_names())
     })
@@ -689,12 +705,15 @@ fn preview_frame(p: &dyn Platform, w: u32, h: u32, force: bool, dx: Option<f32>,
 }
 
 /// The map with the trip's route over it (see `mapview::export` in the launcher crate).
-fn route_map(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>) -> Answer {
-    serde_json::from_slice(&route_map_bytes(p, map, date, trip, surface)?).map_err(err)
+fn route_map(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>, editor: Option<bool>, route_only: Option<bool>) -> Answer {
+    serde_json::from_slice(&route_map_bytes(p, map, date, trip, surface, editor, route_only)?).map_err(err)
 }
 
-fn route_map_bytes(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>) -> Result<Vec<u8>, String> {
-    let (_, body) = p.renderer(json!({ "cmd": "map", "map": map, "date": date, "trip": trip, "surface": surface.unwrap_or(true) }), Duration::from_secs(120))?;
+/// `editor`: the timetable editor's map, which carries every stop of the timetable too;
+/// `route_only`: the trip's route alone. A `trip` of `@stops:<id>,<id>,...` is the route a
+/// list of stops would drive.
+fn route_map_bytes(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>, editor: Option<bool>, route_only: Option<bool>) -> Result<Vec<u8>, String> {
+    let (_, body) = p.renderer(json!({ "cmd": "map", "map": map, "date": date, "trip": trip, "surface": surface.unwrap_or(true), "editor": editor.unwrap_or(false), "route_only": route_only.unwrap_or(false) }), Duration::from_secs(120))?;
     Ok(body)
 }
 
@@ -790,6 +809,10 @@ fn list_dir(path: Option<String>, archives: bool) -> Answer {
 }
 
 pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
+    answer(cmd, args, p).map_err(|e| core::i18n::tr(&e))
+}
+
+fn answer(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
     match cmd {
         "bootstrap" => bootstrap(p),
         "translations" => translations(arg::<String>(args, "lang")?),
@@ -816,6 +839,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "timetable" => timetable::load(arg::<String>(args, "map")?),
         "timetable_save" => timetable::save(arg::<String>(args, "map")?, arg::<Vec<timetable::LineEdit>>(args, "lines")?),
         "timetable_reset" => timetable::reset(arg::<String>(args, "map")?),
+        "timetable_trip_save" => timetable::save_trip(arg::<String>(args, "map")?, arg::<timetable::TripNew>(args, "trip")?),
         "profiles" => profiles(),
         "profile" => profile(arg::<String>(args, "name")?),
         "profile_create" => profile_create(arg::<String>(args, "name")?, arg::<String>(args, "sex")?),
@@ -868,6 +892,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "servers_get" => servers_get(),
         "servers_save" => servers_save(arg::<Value>(args, "list")?),
         "server_query" => server_query(arg::<String>(args, "address")?),
+        "public_servers" => public_servers(),
         "choice_save" => choice_save(arg::<Value>(args, "choice")?),
         "favourites_save" => favourites_save(arg::<Vec<String>>(args, "list")?),
         "depot_get" => depot_get(),
@@ -883,7 +908,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "notes_save" => notes_save(arg::<String>(args, "key")?, arg::<String>(args, "text")?),
         "preview_look" => preview_look(p, arg::<String>(args, "bus")?, arg::<String>(args, "paint")?, arg::<String>(args, "map")?, arg::<String>(args, "weather")?, arg::<i32>(args, "time")?, arg::<String>(args, "date")?),
         "preview_warm" => preview_warm(p),
-        "route_map" => route_map(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?),
+        "route_map" => route_map(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?, arg(args, "editor")?, arg(args, "route_only")?),
         "keyboard_actions" => keyboard_actions(p, json!({ "lang": arg::<Option<String>>(args, "lang")?, "actions": arg::<Option<Vec<String>>>(args, "actions")?, "vehicles": arg::<Option<Vec<String>>>(args, "vehicles")?, "catalog": arg::<Option<bool>>(args, "catalog")?, "scan": arg::<Option<bool>>(args, "scan")?, "have": arg::<Option<String>>(args, "have")? })),
         "controllers_load" => controllers(p, "load", json!({}), 20),
         "controllers_state" => controllers(p, "state", json!({ "off": arg::<Option<Vec<String>>>(args, "off")?.unwrap_or_default() }), 5),
@@ -908,7 +933,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
 pub fn call_bytes(cmd: &str, args: &Value, p: &dyn Platform) -> Result<Vec<u8>, String> {
     match cmd {
         "content_picture" => content_picture(&arg::<String>(args, "path")?).ok_or_else(|| "not found".to_string()),
-        "route_map" => route_map_bytes(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?),
+        "route_map" => route_map_bytes(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?, arg(args, "editor")?, arg(args, "route_only")?),
         "map_ground" => {
             let mut req = args.clone();
             req["cmd"] = json!("map_ground");
@@ -930,14 +955,14 @@ mod setup_tests {
         let not_omsi = home.join("Downloads");
         std::fs::create_dir_all(&not_omsi).unwrap();
         let was = (std::env::var_os("HOME"), std::env::var_os("USERPROFILE"));
-        std::env::set_var("HOME", &home);
-        std::env::set_var("USERPROFILE", &home);
+        unsafe { std::env::set_var("HOME", &home) };
+        unsafe { std::env::set_var("USERPROFILE", &home) };
         let r = config_save(not_omsi.to_string_lossy().to_string(), String::new()).unwrap();
         let written = home.join(".openomsi").join("launcher.json").exists();
         for (k, v) in [("HOME", was.0), ("USERPROFILE", was.1)] {
             match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
+                Some(v) => unsafe { std::env::set_var(k, v) },
+                None => unsafe { std::env::remove_var(k) },
             }
         }
         assert_eq!(r["saved"], json!(false));
@@ -1028,13 +1053,24 @@ fn content_check(path: String, deep: bool) -> Answer {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let out = cmd.output().map_err(|e| format!("{}: {e}", game.display()))?;
+    let out = cmd.output().map_err(|e| format!("the game {} cannot start: {e}", game.display()))?;
     let text = String::from_utf8_lossy(&out.stdout);
     let line = text.lines().rev().find(|l| l.trim_start().starts_with('{')).ok_or_else(|| {
         let last = String::from_utf8_lossy(&out.stderr);
         format!("the game gave no answer ({})", last.lines().last().unwrap_or("").trim())
     })?;
-    serde_json::from_str(line).map_err(err)
+    let mut v: Value = serde_json::from_str(line).map_err(err)?;
+    for f in v.get_mut("findings").and_then(Value::as_array_mut).into_iter().flatten() {
+        for k in ["text", "what"] {
+            if let Some(t) = f.get(k).and_then(Value::as_str).map(core::i18n::tr) {
+                f[k] = json!(t);
+            }
+        }
+        if let Some(t) = f.get("hint").and_then(Value::as_str).map(|h| h.split("; ").map(core::i18n::tr).collect::<Vec<_>>().join("; ")) {
+            f["hint"] = json!(t);
+        }
+    }
+    Ok(v)
 }
 
 #[cfg(test)]

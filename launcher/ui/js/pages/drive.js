@@ -6,7 +6,7 @@ import { S, useStore, toast } from '../store.js';
 import { t, hhmm, language } from '../i18n.js';
 import { call, contentUrl } from '../api.js';
 import { Button, Dialog } from '../ui.js';
-import { choose, realTime, realDate, launcherLayout } from '../data.js';
+import { tourId, choose, realTime, realDate, launcherLayout } from '../data.js';
 import { MultiplayerDutyNotice } from './multiplayer.js';
 import { ClassicDrive } from './drive-classic.js';
 import { LayoutDrive } from './drive-layouts.js';
@@ -17,13 +17,22 @@ export const hms = (s) => hhmm((s || 0) / 60);
 /** An entry point's name, or its number when the map gives it none. */
 export const entryName = (e) => e.name?.trim() || `${t('Entry point')} ${e.index + 1}`;
 
-export function tripLength(tour) {
-  const runs = tour.trips.filter((x) => !depotRun(x)).map((x) => x.arrival - x.departure).sort((a, b) => a - b);
-  if (!runs.length) return '';
-  const m = Math.max(1, Math.round(runs[runs.length >> 1] / 60));
-  const unit = (n, u) => new Intl.NumberFormat(language(), { style: 'unit', unit: u, unitDisplay: 'short' }).format(n);
+/** A length of time in seconds as the player's language writes it, short: "22 min", "1 hr 5 min"
+ *  (a narrow column breaks it between the hours and the minutes, never inside "5 min"). */
+export function duration(seconds) {
+  const m = Math.max(1, Math.round(seconds / 60));
+  const unit = (n, u) => new Intl.NumberFormat(language(), { style: 'unit', unit: u, unitDisplay: 'short' }).format(n).replace(/ /g, '\u00a0');
   if (m < 60) return unit(m, 'minute');
   return m % 60 ? `${unit(Math.floor(m / 60), 'hour')} ${unit(m % 60, 'minute')}` : unit(m / 60, 'hour');
+}
+
+/** How long a trip takes, from its departure to its arrival (#2813). The arrival of a trip
+ *  over midnight runs on past 24:00, so the difference is its length. */
+export const tripTime = (x) => duration(x.arrival - x.departure);
+
+export function tripLength(tour) {
+  const runs = tour.trips.filter((x) => !depotRun(x)).map((x) => x.arrival - x.departure).sort((a, b) => a - b);
+  return runs.length ? duration(runs[runs.length >> 1]) : '';
 }
 
 export const mapPicture = (file) => (file ? contentUrl(file.replace(/\\/g, '/').replace(/[^/]*$/, 'picture.jpg')) : '');
@@ -62,7 +71,7 @@ export function findTours(line, now, q, showEnded, keep) {
   const endedCount = all.filter((x) => x.ended).length;
   const dep = (x) => x.tour.trips[x.at]?.departure ?? Infinity;
   const shown = all
-    .filter((x) => showEnded || !x.ended || (!q && x.tour.number === keep))
+    .filter((x) => showEnded || !x.ended || (!q && tourId(x.tour) === keep))
     .sort((a, b) => b.tour.runs - a.tour.runs || a.ended - b.ended || (q ? dep(a) - dep(b) : 0) || a.tour.number.localeCompare(b.tour.number, undefined, { numeric: true }));
   return { shown, endedCount };
 }
@@ -76,12 +85,12 @@ export function tourRoute(tour) {
 
 export function chooseLine(l) {
   const tr = findTours(l, S.choice.time * 60, '', false).shown[0]?.tour || l?.tours.find((x) => x.runs) || l?.tours[0];
-  choose({ line: l.name, tour: tr?.number ?? null, start_trip: null });
+  choose({ line: l.name, tour: tourId(tr) ?? null, start_trip: null });
 }
 
 export function chooseTour(x, trip) {
-  if (x.number === S.choice.tour && !trip) return;
-  const patch = { tour: x.number, start_trip: null };
+  if (tourId(x) === S.choice.tour && !trip) return;
+  const patch = { tour: tourId(x), start_trip: null };
   if (!x.runs && x.next_run && !realDate()) patch.date = x.next_run;
   choose(patch);
   if (trip) pickTrip(trip);
@@ -235,8 +244,13 @@ export function weatherFits(w, season) {
   return season !== 'summer' || w.temp >= 8;
 }
 
+const precipText = (p) => {
+  const m = /^(rain|snow) (\d+)%$/.exec(p || '');
+  return m ? (m[1] === 'rain' ? t('rain {n}%', { n: m[2] }) : t('snow {n}%', { n: m[2] })) : t(p || '');
+};
+
 /** What a weather file says about itself, short: "15 °C - rain 68% - 200 m". */
-export const weatherFacts = (w) => `${Math.round(w.temp)} °C - ${w.precip} - ${w.fog_m >= 20000 ? t('clear air') : `${Math.round(w.fog_m)} m`}`;
+export const weatherFacts = (w) => `${Math.round(w.temp)} °C - ${precipText(w.precip)} - ${w.fog_m >= 20000 ? t('clear air') : `${Math.round(w.fog_m)} m`}`;
 
 /** The icon a weather file deserves. */
 export function weatherIcon(w) {

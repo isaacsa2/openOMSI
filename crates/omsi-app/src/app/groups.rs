@@ -6,13 +6,17 @@ use super::*;
 pub(crate) struct SoundState {
     /// The player's bus radio as internet radio.
     pub(crate) radio: radio::Radio,
+    /// The MileZero card on the navigator (settings `milezero`).
+    pub(crate) milezero: crate::milezero::Milezero,
     pub(crate) audio: Option<omsi_audio::AudioEngine>,
     /// Sounds of the world around the camera (rain, footsteps).
     pub(crate) ambience: Option<ambience::Ambience>,
     /// openOMSI's ambience from recordings (settings `ambient`, `vol_ambient`).
     pub(crate) soundscape: Option<crate::soundscape::Soundscape>,
-    /// Positional voice through GreenTeaSpeak in a session (`voice`).
-    pub(crate) voice: Option<crate::voice::Voice>,
+    /// Voice chat in a session (`voice_chat`), alive while the settings have it on.
+    pub(crate) voice: Option<crate::voice_chat::VoiceChat>,
+    /// The players whose voice this player muted (by name, kept between sessions).
+    pub(crate) voice_mutes: omsi_voice::mutes::MuteList,
     /// How far the walker's eyes are inside the player's bus, as the sound follows them
     /// (see `App::foot_sound_amount`); None when nobody walks about it.
     pub(crate) foot_in: Option<f32>,
@@ -143,9 +147,44 @@ pub(crate) struct PerfState {
     pub(crate) frame_times: Vec<f32>,
     /// Each kept frame's stage times, `ProfKey::ALL` in order (seconds; OMSI_PROFILE only).
     pub(crate) frame_stages: Vec<f32>,
+    /// OMSI_PROFILE: the session's summary has been written (`App::log_profile_summary`).
+    pub(crate) profile_written: bool,
     pub(crate) overlay: crate::perf_overlay::PerfOverlay,
     pub(crate) texture_cut_at: Option<Instant>,
     pub(crate) optimiser: crate::optimiser::Optimiser,
+}
+
+impl PerfState {
+    /// Nothing measured yet: the `OMSI_INPUT` script to play and when the frame count began.
+    pub(crate) fn new(input_script: Vec<(f32, String)>, fps_t: Instant) -> PerfState {
+        PerfState {
+            fps: 0.0,
+            profile: Default::default(),
+            profile_prev: Default::default(),
+            total_frames: 0,
+            input_script,
+            shot: None,
+            frames: 0,
+            fps_t,
+            log_state: Default::default(),
+            spikes: 0,
+            worst_ms: 0.0,
+            governor: (0.0, 0, 0.0),
+            governor_low: 0,
+            governor_wait_prev: 0.0,
+            play_started: None,
+            cpu_mark: None,
+            thread_cpu_mark: None,
+            instructions_mark: None,
+            profile_mark: None,
+            profile_written: false,
+            frame_times: Vec::new(),
+            frame_stages: Vec::new(),
+            overlay: crate::perf_overlay::new(),
+            texture_cut_at: None,
+            optimiser: Default::default(),
+        }
+    }
 }
 
 /// The drawing around the renderer: the wgpu instance and surface, the tile streaming, the
@@ -263,6 +302,8 @@ pub(crate) struct InputState {
     pub(crate) pad_repeat: Vec<String>,
     /// A controller button held for the multiplayer bus radio (`voice_radio`).
     pub(crate) pad_voice_radio: bool,
+    /// The same for the nearby talk key (`voice_nearby`).
+    pub(crate) pad_voice_nearby: bool,
     /// The arrow keys turned the head (a glance that comes back when they are let go).
     pub(crate) arrow_glance: bool,
     /// Head tracking (Settings → head tracking), started with the first frame that wants it.
@@ -396,6 +437,10 @@ pub(crate) struct MenuState {
     /// The digits of a time being typed in the world page of the game menu (None: not typing).
     pub(crate) menu_edit: Option<String>,
     pub(crate) menu_edit_icao: bool,
+    /// The fleet number being edited in the vehicle page
+    pub(crate) menu_edit_number: bool,
+    /// The plate being edited in the vehicle page
+    pub(crate) menu_edit_ident: bool,
     /// `menu_edit` is the search of the open list being typed (see `game_lists::searchable`).
     pub(crate) menu_edit_search: bool,
     /// The search the open list is filtered by (empty: none).

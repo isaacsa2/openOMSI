@@ -56,7 +56,7 @@ impl App {
             let (trip, k) = d.trip_for_ibis();
             p.ibis_to_stop(trip, k);
         }
-        self.service_msg = Some((format!("Stop skipped: {name}"), 3.0));
+        self.service_msg = Some((omsi_ui::i18n::tr_fill("Stop skipped: {name}", &[("{name}", &name)]), 3.0));
     }
 
     #[cfg(windows)]
@@ -67,8 +67,9 @@ impl App {
             if self.xr.vr.is_some() {
                 self.xr.vr = None;
                 self.service_msg = Some(("Desktop mode".into(), 2.0));
-            } else if let Some(renderer) = self.renderer.as_ref() {
-                match crate::openxr::Vr::new(renderer, self.settings.vr_scale,
+            } else if let Some(renderer) = self.renderer.as_mut() {
+                let image_scale = renderer.start_xr(self.settings.vr_scale);
+                match crate::openxr::Vr::new(renderer, image_scale,
                                              self.settings.vr_desktop_mirror) {
                     Ok(vr) => {
                         self.xr.vr = Some(vr);
@@ -76,7 +77,7 @@ impl App {
                     }
                     Err(e) => {
                         log::error!("OpenXR could not restart: {e:#}");
-                        self.service_msg = Some((format!("{}: {e}", omsi_ui::tr("Could not start VR")), 5.0));
+                        self.service_msg = Some((omsi_ui::i18n::tr_fill_words("Could not start VR ({e})", &[("{e}", &e)]), 5.0));
                     }
                 }
             }
@@ -351,7 +352,7 @@ impl App {
             if !p.shift_gate_to(to) {
                 return false;
             }
-            self.service_msg = Some((format!("Gear {}", match to { 0 => "N".to_string(), -1 => "R".to_string(), n => n.to_string() }), 1.5));
+            self.service_msg = Some((omsi_ui::i18n::tr_fill("Gear {gear}", &[("{gear}", &match to { 0 => "N".to_string(), -1 => "R".to_string(), n => n.to_string() })]), 1.5));
             return true;
         }
         let Some(n) = names.iter().find(|n| p.vehicle.ty.program.trigger(n).is_some()) else {
@@ -425,7 +426,7 @@ impl App {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let path = dir.join(format!("omsi_{secs}.png"));
         if !cfg!(target_os = "android") {
-            self.service_msg = Some((format!("Screenshot: {}", path.display()), 4.0));
+            self.service_msg = Some((omsi_ui::i18n::tr_fill("Screenshot: {path}", &[("{path}", &path.display().to_string())]), 4.0));
         }
         self.perf.shot = Some((path, false));
     }

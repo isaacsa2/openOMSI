@@ -30,12 +30,14 @@ mod pose;
 mod program_ids;
 mod props;
 mod radio;
+mod rail;
 mod trailer;
+mod trolley;
 mod types;
 mod update;
 mod vars;
 mod visuals;
-mod weather;
+pub(crate) mod weather;
 
 pub use contact::*;
 pub use coupling::*;
@@ -43,8 +45,10 @@ pub use car_run::CarRun;
 #[cfg(test)]
 use drive::*;
 pub use pose::*;
+pub use rail::RailEnv;
 pub use props::*;
 pub use trailer::*;
+pub use trolley::TrolleyGear;
 pub use types::*;
 use update::*;
 pub use weather::*;
@@ -227,6 +231,7 @@ pub struct VehicleInstance {
     v_accel: [Option<omsi_script::VarId>; 3],
     v_wheels: Vec<[[Option<omsi_script::VarId>; 5]; 2]>,
     v_springfactor: Vec<[Option<omsi_script::VarId>; 2]>,
+    v_surface: Vec<[Option<omsi_script::VarId>; 2]>,
     /// The passengers' door variables, looked up on first use (see `pax_vars`); made
     /// again when the vehicle gains a variable.
     pax_vars: std::sync::OnceLock<PaxVars>,
@@ -234,4 +239,12 @@ pub struct VehicleInstance {
     engine_ids: std::sync::OnceLock<engine_vars::EngineVarIds>,
     /// The program's own variables the engine uses every frame (see `program_ids`).
     program_ids: std::sync::OnceLock<program_ids::ProgramIds>,
+    /// A trolleybus's poles and traction (see `trolley`); None for every other vehicle.
+    pub trolley: Option<Box<TrolleyGear>>,
+    /// The track a rail vehicle runs on (see `rail`); None for a road vehicle.
+    rail_env: Option<RailEnv>,
+    /// The vehicle's scripts have driven it (else pedals move it, see `rail`).
+    rail_scripted: bool,
+    rail_out: Option<crate::rail::Outcome>,
+    rail_log: f32,
 }

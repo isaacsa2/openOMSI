@@ -154,6 +154,41 @@ impl VehicleInstance {
         self.cabin_air = Some((t, hum, t));
     }
 
+    /// Change cabin temperature once without changing heater controls or coolant.
+    /// Shared-script rear sections read the leading state; independently scripted cars
+    /// need their own temperature and humidity updated too.
+    pub fn set_cabin_temperature(&mut self, temperature: f32) {
+        if !temperature.is_finite() {
+            return;
+        }
+        let humidity = self
+            .ev(Ev::CabinAbsHum)
+            .filter(|h| h.is_finite() && *h >= 0.0)
+            .unwrap_or_else(|| self.cabin_air.map_or(9.0, |(_, h, _)| h));
+        self.set_engine_ev(Ev::CabinTemp, temperature);
+        self.set_engine_ev(Ev::CabinAbsHum, humidity);
+        self.set_engine_ev(Ev::CabinRelHum, relative_humidity(temperature, humidity));
+        self.cabin_air = Some((temperature, humidity, temperature));
+        for part in &mut self.trailers {
+            if let Some(run) = part.run.as_mut() {
+                let humidity = run
+                    .names
+                    .get("cabinair_abshum")
+                    .map(|&id| run.state.vars[id as usize])
+                    .filter(|h| h.is_finite() && *h >= 0.0)
+                    .unwrap_or(humidity);
+                for (name, value) in [
+                    ("cabinair_temp", temperature),
+                    ("cabinair_relhum", relative_humidity(temperature, humidity)),
+                ] {
+                    if let Some(&id) = run.names.get(name) {
+                        run.state.vars[id as usize] = value;
+                    }
+                }
+            }
+        }
+    }
+
     /// Run one simulation frame: physics, scripts, then animations.
     pub fn update(&mut self, dt: f32) {
         self.host.clock.advance(dt);
@@ -514,6 +549,12 @@ impl VehicleInstance {
                 let turned = body_reversed(&t.ty.def, t.reversed);
                 let origin = joint + travel(turned, t.coupling_front.y);
                 let (y_front, y_rear) = t.rail_ends();
+                if omsi_cfg::flags::OMSI_DEBUG_TRAILERS.is_set() {
+                    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 6 {
+                        log::info!("rail part {i}: origin {origin:.2} m behind the lead's, joint before it {joint:.2}, running ends {y_front:.2} / {y_rear:.2}, front coupling {:.2}, back coupling {:.2} (declared: front {:?}, back {:?}, {} axles, boogies {:?})", t.coupling_front.y, t.coupling_back.y, t.ty.def.coupling_front.as_ref().map(|c| c.pos), t.ty.def.coupling_back.as_ref().map(|c| c.pos), t.ty.def.axles.len(), t.ty.def.boogies);
+                    }
+                }
                 match (at_behind(origin - y_front as f64), at_behind(origin - y_rear as f64)) {
                     (Some(front), Some(back)) => t.place_on_rails(self, dt, lead, (front, y_front), (back, y_rear)),
                     _ => t.update(self, dt, lead),

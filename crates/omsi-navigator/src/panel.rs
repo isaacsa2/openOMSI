@@ -34,7 +34,7 @@ impl Navigator {
     pub(super) fn draw(&mut self, renderer: &Renderer, target: &wgpu::TextureView, size: (u32, u32), map_h: f32, f: &NavFrame) {
         let (pw, ph) = (size.0 as f32, size.1 as f32);
         let s = pw / 360.0;
-        let wd = words(f.language);
+        let wd = &WORDS;
         let pal = *style::palette(self.light);
         self.atlas.begin_frame();
         let panel = Rect::new(0.0, 0.0, pw, ph);
@@ -109,7 +109,8 @@ impl Navigator {
             if self.route_mesh.0 != self.route.version || self.route_mesh.1 != self.jam_version || self.route_mesh.2 != anchor || self.route_mesh.4 != bus_lane || self.route_mesh.5 != look_key {
                 let mut p = Painter::new();
                 let style = RouteStyle { extra_m: -0.6, min_px: 5.0, arrows: Some((32.0, 900.0)), max_len: 12_000.0, near: Some((anchor, PANEL_REACH)) };
-                build_route(&mut p, rn, &self.route.lanes[self.route.progress.min(self.route.lanes.len())..], anchor, self.route.s, &self.route_jam, &style, bus_lane, &pal);
+                mapmesh::roads::build_route_to(&mut p, rn, &self.route.lanes[self.route.progress.min(self.route.lanes.len())..], anchor, self.route.s, &self.route_jam, &style, bus_lane, &pal, self.destination.as_ref().and_then(|d| d.path.as_ref().map(|p| p.end_s)));
+                self.draw_waypoint_routes(&mut p, rn, anchor, &style, &pal);
                 self.route_mesh = (self.route.version, self.jam_version, anchor, p.len(), bus_lane, look_key);
                 route_verts = Some(p.verts);
             }
@@ -165,11 +166,12 @@ impl Navigator {
         // the far end of the map: a haze into the land's colour
         ui.gradient(Rect::new(map.x, map.y, map.w, map.h * 0.16), pal.land.alpha(0.7), pal.land.alpha(0.0));
         self.draw_map_marks(&mut ui, f, map, vpm, vp, anchor, s, transit, &pal);
+        self.draw_destination_markers(&mut ui, &|q| project(vpm, vp, Vec3::new((q.x - anchor.x) as f32, (q.y - anchor.y) as f32, 0.0)), map, s, false, &pal);
         // the package's places: its icons on the map, the municipality and the street under it
         let icon_verts = self.minimap_icons(vpm, vp, anchor, f.bus.truncate(), map, s);
         let loc_h = self.place_row_height(s);
         self.draw_place_row(&mut ui, Rect::new(0.0, map.bottom(), pw, loc_h), 10.0 * s, s);
-        self.draw_cards(&mut ui, f, &wd, net, map, s, &pal);
+        self.draw_cards(&mut ui, f, wd, net, map, s, &pal);
         if self.schedule {
             let r = Rect::new(0.0, map.bottom() + loc_h, pw, ph - map.bottom() - loc_h);
             match self.board {
@@ -206,10 +208,13 @@ impl Navigator {
         let (icon_n, icon_tex) = self.place.upload(gpu, device, queue, 16, &icon_verts);
         gpu.upload_atlas(queue, &mut self.atlas);
         let flat = Layer::flat(clip_panel, radius, 1.0);
-        let backdrop = Layer::flat(clip_panel, radius, if self.cockpit_display { self.opacity } else { omsi_ui::theme::backdrop(self.opacity).min(1.0) });
+        let backdrop = Layer::flat(clip_panel, radius, if self.cockpit_display { 1.0 } else { omsi_ui::theme::backdrop(self.opacity).min(1.0) });
         let mut layers = [flat, map_layer, map_layer.with_shadow(), depth_layer, depth_layer, backdrop];
+        // The cockpit setting fades the map and its labels too; opaque map geometry
+        // would otherwise cover the background whose opacity was changed.
+        let opacity = self.shown * if self.cockpit_display { self.opacity } else { 1.0 };
         for l in layers.iter_mut() {
-            l.opacity *= self.shown;
+            l.opacity *= opacity;
         }
         let solid_n = self.roads.as_ref().map_or(0, |r| r.houses[1] as u32);
         let three = self.show_3d;
@@ -335,6 +340,10 @@ impl Navigator {
             ui.text(&mut self.atlas, &self.fonts, day, 11.0 * s, Weight::Medium, Vec2::new(b.right() - 10.0 * s - self.fonts.width(&time_text, 14.0 * s, Weight::Bold) - 5.0 * s, base), Align::Right, pal.card_dim);
             ui.text(&mut self.atlas, &self.fonts, &temp, 11.0 * s, Weight::Medium, Vec2::new(b.right() - 10.0 * s, b.y + 33.0 * s), Align::Right, pal.card_dim);
         }
+        if self.destination.is_some() {
+            self.draw_destination_card(ui, net, map, s, pal);
+            return;
+        }
         // --- bottom: the next stop
         let bottom_h = 52.0 * s;
         let card = Rect::new(map.x + pad, map.bottom() - pad - bottom_h, map.w - 2.0 * pad, bottom_h);
@@ -352,12 +361,12 @@ impl Navigator {
             None
         };
         let jam_note = (self.jam_cost >= 30.0).then(|| {
-            let what = if self.jam_cost >= 60.0 { wd.jam } else { wd.slow };
-            (format!("{what} +{:.0} {}", (self.jam_cost / 60.0).max(1.0).round(), omsi_ui::tr("min")), if self.jam_cost >= 60.0 { style::TRAFFIC[2] } else { style::TRAFFIC[1] })
+            let n = (self.jam_cost / 60.0).max(1.0).round();
+            (if self.jam_cost >= 60.0 { format!("Traffic jam +{n:.0} min") } else { format!("Slow traffic +{n:.0} min") }, if self.jam_cost >= 60.0 { style::TRAFFIC[2] } else { style::TRAFFIC[1] })
         });
         match f.stops.first() {
             Some(st) => {
-                let name = if f.stops.len() == 1 { format!("{} · {}", st.name.trim(), wd.last_stop) } else { st.name.trim().to_string() };
+                let name = if f.stops.len() == 1 { format!("{} · {}", st.name.trim(), omsi_ui::tr(wd.last_stop)) } else { st.name.trim().to_string() };
                 let line_w = match f.line.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
                     Some(l) => {
                         let px = 11.0 * s;
@@ -385,11 +394,11 @@ impl Navigator {
                 parts.push(format!("{:02}:{:02}", (st.arrival / 3600.0) as i32 % 24, ((st.arrival % 3600.0) / 60.0) as i32));
                 let line2 = parts.join(" · ");
                 // (closed: the way round in place of the distance)
-                let closed = st.closed.as_deref().map(|via| if via.is_empty() { wd.closed.to_string() } else { format!("{} · {via}", wd.closed) });
+                let closed = st.closed.as_deref().map(|via| if via.is_empty() { wd.closed.to_string() } else { format!("{} · {via}", omsi_ui::tr(wd.closed)) });
                 let (text, col) = match (&closed, &note, &jam_note) {
                     (Some(t), _, _) => (t.clone(), WARN),
                     (None, Some((t, c)), _) => (t.clone(), *c),
-                    (None, None, Some((t, c))) => (format!("{line2} · {t}"), *c),
+                    (None, None, Some((t, c))) => (format!("{line2} · {}", omsi_ui::tr(t)), *c),
                     _ => (line2, pal.card_dim),
                 };
                 let mut right = 0.0;
@@ -433,7 +442,6 @@ impl Navigator {
         ui.circle(c + Vec2::new(0.0, 1.5 * s), r + 1.0 * s, Color::rgba(0, 0, 0, 0.14));
         ui.circle(c, r, pal.card);
         let sp = format!("{speed:.0}");
-        let unit = if units == omsi_ui::units::Units::Metric { wd.kmh } else { unit };
         ui.text(&mut self.atlas, &self.fonts, &sp, 17.0 * s, Weight::Bold, Vec2::new(c.x, c.y + 3.0 * s), Align::Center, if over { style::TRAFFIC[2] } else { pal.card_text });
         ui.text(&mut self.atlas, &self.fonts, unit, 7.5 * s, Weight::Medium, Vec2::new(c.x, c.y + 12.0 * s), Align::Center, pal.card_dim);
         if let Some(v) = limit {

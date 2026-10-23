@@ -186,6 +186,12 @@ impl ApplicationHandler for App {
                 if event.state == ElementState::Pressed && self.menus.menu_edit_icao {
                     if let Some(text)=event.text.as_deref(){ self.icao_edit_text(text); }
                 }
+                if event.state == ElementState::Pressed && self.menus.menu_edit_number {
+                    if let Some(text)=event.text.as_deref(){ self.number_edit_text(text); }
+                }
+                if event.state == ElementState::Pressed && self.menus.menu_edit_ident {
+                    if let Some(text)=event.text.as_deref(){ self.ident_edit_text(text); }
+                }
                 // Route numbers are free display text in OMSI. Take the text produced by
                 // the keyboard layout (rather than only the physical key) so '-', shifted
                 // symbols and non-US layouts reach the destination display unchanged.
@@ -201,6 +207,8 @@ impl ApplicationHandler for App {
                         }
                     }
                 }
+                // a MileZero song request being typed takes the keyboard
+                if self.milezero_typing(&event) { return; }
                 // '/' opens the chat's input box wherever the keyboard has it (the key
                 // itself is then swallowed by the chat) - but not Numpad ÷, OMSI's stock
                 // front door key (keyboard.cfg `bus_doorfront0 181`)
@@ -476,6 +484,8 @@ impl ApplicationHandler for App {
     /// quit signal): the session is written and the LAN peers hear that we left, before
     /// anything else is torn down (Cmd+Q ends the process without returning from the loop).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // (OMSI_PROFILE: the summary when the player closes the game, not only after --exit-after)
+        self.log_profile_summary();
         crate::game_lists::flush_settings(true);
         self.abort_optimiser();
         self.finish_session();
