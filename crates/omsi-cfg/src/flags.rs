@@ -343,6 +343,7 @@ flags! {
     OMSI_NAV_ORIENT: Text, Test, Use, "map", "Offscreen: how the city map is turned: map (as it is drawn), north (real north up, where the package says it lies) or heading (the bus's heading up).";
     OMSI_NAV_PROBE: Text, Test, Use, "-", "x,y[,r]: the network lanes that start or end within r of that point.";
     OMSI_NAV_SCHEDULE: Bool, Test, Use, "off", "Navigation map shows the schedule.";
+    OMSI_NVIDIA_LEGACY_FULL_GPU: Bool, Switch, Use, "off", "A/B: disable the conservative Windows GT 730 / GTX 750 driver profile and restore requested graphics and optional pipeline cache features.";
     OMSI_NOZCHECK_BIAS: Bool, Switch, Use, "off", "The old reading of [matl_noZcheck] (A/B).";
     OMSI_NO_ANIMPARENT: Bool, Switch, Use, "off", "Every mesh animated on its own, without [animparent] (A/B).";
     OMSI_NO_AO: Bool, Switch, Frame, "off", "No ambient occlusion pass.";

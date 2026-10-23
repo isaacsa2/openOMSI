@@ -5,6 +5,32 @@ use crate::*;
 /// The chosen MSAA is being tried again after a remembered fallback (see `build_with_fallbacks`).
 static MSAA_RETRY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Explicitly identify the two older NVIDIA families with repeated device
+/// timeout reports. Do not reduce quality on newer GeForce cards or by vendor
+/// alone: driver quirks must stay narrow and reversible.
+fn legacy_nvidia_timeout_profile(vendor: u32, name: &str) -> bool {
+    if vendor != 0x10de {
+        return false;
+    }
+    let name = name.to_ascii_lowercase();
+    name.contains("geforce gt 730") || name.contains("geforce gtx 750")
+}
+
+#[cfg(test)]
+mod legacy_nvidia_tests {
+    use super::legacy_nvidia_timeout_profile;
+    #[test]
+    fn applies_only_to_the_reported_nvidia_families() {
+        for name in ["NVIDIA GeForce GT 730", "NVIDIA GeForce GTX 750", "GeForce GTX 750 Ti"] {
+            assert!(legacy_nvidia_timeout_profile(0x10de, name), "{name}");
+        }
+        assert!(!legacy_nvidia_timeout_profile(0x10de, "NVIDIA GeForce GTX 1650"));
+        assert!(!legacy_nvidia_timeout_profile(0x10de, "NVIDIA GeForce RTX 3070"));
+        assert!(!legacy_nvidia_timeout_profile(0x1002, "NVIDIA GeForce GT 730"));
+    }
+}
+
+
 impl Renderer {
     /// Create a renderer with the default options. `surface` is used to pick a compatible
     /// adapter and format.
@@ -100,6 +126,9 @@ impl Renderer {
             && info.backend == wgpu::Backend::Vulkan
             && info.vendor == 0x8086
             && !omsi_cfg::flags::OMSI_INTEL_FULL_GPU.is_set();
+        let legacy_nvidia_safe = cfg!(windows)
+            && legacy_nvidia_timeout_profile(info.vendor, &info.name)
+            && !omsi_cfg::flags::OMSI_NVIDIA_LEGACY_FULL_GPU.is_set();
         let options = if intel_vulkan_safe {
             log::warn!(
                 "Intel Vulkan adapter detected ({}): using the stable driver profile (1x MSAA, 1x anisotropy, SSAO and runtime texture compression off); set OMSI_INTEL_FULL_GPU=1 after updating the Intel driver to retry the requested settings",
@@ -112,6 +141,24 @@ impl Renderer {
                 compress_textures: false,
                 ..options
             }
+        } else if legacy_nvidia_safe {
+            // Kepler GT 730 and first-generation Maxwell GTX 750/750 Ti are
+            // repeatedly reported with Windows graphics-engine timeouts.
+            // Smaller render targets and less optional GPU work reduce risk;
+            // keep BC texture compression for VRAM residency. This is not a
+            // TDR/deadlock fix and does not modify system timeout settings.
+            log::warn!(
+                "{}: conservative older-NVIDIA graphics profile (1x MSAA, SSAO off, shadows <=1024, no ray queries or optional pipeline cache). OMSI_NVIDIA_LEGACY_FULL_GPU=1 restores requested settings for controlled A/B",
+                info.name
+            );
+            RenderOptions {
+                msaa: 1,
+                anisotropy: options.anisotropy.min(2),
+                ssao: false,
+                shadow_size: options.shadow_size.min(1024),
+                ray_tracing: false,
+                ..options
+            }
         } else {
             options
         };
@@ -119,12 +166,18 @@ impl Renderer {
         GL_BACKEND.store(info.backend == wgpu::Backend::Gl, std::sync::atomic::Ordering::Relaxed);
         let (options, lighter) = gpu_memory::lighter_picture(&info, vram, options);
         let most = gpu_memory::ceiling(&info, vram);
-        *CEILING.lock().unwrap_or_else(|e| e.into_inner()) = Some(if intel_vulkan_safe { gpu_memory::Ceiling { msaa: 1, ssao: false, shadow_size: most.shadow_size.min(2048), ..most } } else { most });
+        *CEILING.lock().unwrap_or_else(|e| e.into_inner()) = Some(if intel_vulkan_safe {
+            gpu_memory::Ceiling { msaa: 1, ssao: false, shadow_size: most.shadow_size.min(2048), ..most }
+        } else if legacy_nvidia_safe {
+            gpu_memory::Ceiling { msaa: 1, ssao: false, shadow_size: most.shadow_size.min(1024), ..most }
+        } else {
+            most
+        });
         let shadow_size = options
             .shadow_size
             .clamp(512, if intel_vulkan_safe { 2048 } else { 8192 });
         let mut limits = wgpu::Limits::default().using_resolution(adapter.limits());
-        if intel_vulkan_safe {
+        if intel_vulkan_safe || legacy_nvidia_safe {
             // Do not request every large limit the Intel driver advertises. In particular,
             // asking for its maximum storage-buffer and buffer sizes makes 31.0.101.2141
             // crash in vkCreateDevice instead of returning a VkResult. The WebGPU defaults
@@ -197,7 +250,7 @@ impl Renderer {
         } else {
             wgpu::Features::empty()
         };
-        if omsi_cfg::flags::OMSI_GPU_TIMERS.is_set() {
+        if !legacy_nvidia_safe && omsi_cfg::flags::OMSI_GPU_TIMERS.is_set() {
             required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
         // DXT textures stay compressed on the GPU where it takes them (Apple silicon does);
@@ -214,7 +267,7 @@ impl Renderer {
             required_features = wgpu::Features::empty();
         }
         // the driver's compiled pipelines kept for the next start (Vulkan, OpenGL)
-        if !intel_vulkan_safe {
+        if !intel_vulkan_safe && !legacy_nvidia_safe {
             required_features |= pipeline_cache::wanted(&adapter);
         }
         // Enhanced+: hardware ray queries where the device has them (Apple silicon from the
