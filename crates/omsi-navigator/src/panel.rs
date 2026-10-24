@@ -70,7 +70,13 @@ impl Navigator {
         }
         if rebuild && self.panel_job.is_none() && built.is_none() {
             let anchor = f.bus.truncate();
-            let parts = self.ground_parts(net, None);
+            let mut parts = self.ground_parts(net, None);
+            // The older-style navigator needs only roads and route data.
+            // Skip terrain meshes, map packages, buildings and their shadows entirely.
+            if self.classic_2d {
+                parts.md = None;
+                parts.surface = None;
+            }
             let look = if self.classic_2d {
                 GroundLook { surfaces: false, trees: false, dashes: false, tol: 1.0 }
             } else {
