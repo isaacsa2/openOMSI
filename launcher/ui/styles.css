@@ -317,6 +317,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .tag.ok { background: rgba(76, 183, 130, 0.14); color: var(--ok); }
 .tag.danger { background: var(--danger-soft); color: var(--danger); }
 .tag.warn { background: rgba(224, 164, 58, 0.14); color: var(--warn); }
+.tag-button { border: 0; font-family: inherit; cursor: pointer; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; flex: none; }
 .dot.ok { background: var(--ok); }
 .dot.danger { background: var(--danger); }
@@ -459,6 +460,8 @@ table.table { width: 100%; border-collapse: collapse; }
 .map-row.click:hover { background: var(--surface-3); }
 .map-row .pic { width: 76px; height: 46px; flex: none; }
 .map-row .pic.placeholder svg { width: 20px; height: 20px; }
+.addon-icon { width: 48px; height: 48px; flex: none; border-radius: 12px; }
+.addon-icon.placeholder svg { width: 24px; height: 24px; }
 .map-row .grow { display: flex; flex-direction: column; min-width: 0; }
 .map-row b { font-weight: 600; }
 .map-row .btn { pointer-events: none; flex: none; }
