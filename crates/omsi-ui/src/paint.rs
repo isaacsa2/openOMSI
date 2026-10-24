@@ -576,6 +576,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bounded_world_geometry_never_exceeds_budget() {
+        let mut p = Painter::with_vertex_budget(30);
+        let c = Color::WHITE;
+        let tri = [Vec3::ZERO, Vec3::X, Vec3::Y];
+        for _ in 0..100 {
+            p.world_poly(&tri, c);
+            p.solid_tri(tri[0], tri[1], tri[2], c, c, c);
+            p.shadow_tri([(Vec2::ZERO, Vec2::ZERO); 3], c);
+            p.ribbon(&tri, 3.0, 3.0, c, true);
+        }
+        assert!(p.verts.len() <= 30);
+        assert_eq!(p.verts.len() % 3, 0);
+    }
+
+    #[test]
+    fn ordinary_painter_still_has_no_geometry_budget() {
+        let mut p = Painter::new();
+        let c = Color::WHITE;
+        for _ in 0..100 {
+            p.world_poly(&[Vec3::ZERO, Vec3::X, Vec3::Y], c);
+        }
+        assert_eq!(p.verts.len(), 300);
+    }
+
+    #[test]
     fn shapes_make_whole_triangles() {
         let mut p = Painter::new();
         p.rounded(Rect::new(0.0, 0.0, 100.0, 40.0), 8.0, Color::WHITE);
