@@ -499,7 +499,12 @@ impl Navigator {
             } else {
                 GroundLook { surfaces: mpp < 0.7, trees: mpp < 0.7, dashes: mpp < 3.5, tol: (mpp * 0.5) as f32 }
             };
-            let parts = self.ground_parts(net, band.map(|b| b.0));
+            let mut parts = self.ground_parts(net, band.map(|b| b.0));
+            if self.classic_2d {
+                parts.md = None;
+                parts.surface = None;
+                parts.contours = None;
+            }
             let pal2 = *pal;
             let houses = !self.classic_2d && mpp < 6.0;
             let paved = !self.classic_2d && mpp < 2.2;
