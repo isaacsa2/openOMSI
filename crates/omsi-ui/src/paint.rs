@@ -159,6 +159,9 @@ impl Painter {
     pub fn with_vertex_budget(max_vertices: usize) -> Painter {
         Painter { vertex_budget: Some(max_vertices), ..Painter::new() }
     }
+    pub fn at_vertex_limit(&self) -> bool {
+        !self.room_for(3)
+    }
     fn room_for(&self, count: usize) -> bool {
         self.vertex_budget.is_none_or(|limit| self.verts.len().saturating_add(count) <= limit)
     }
