@@ -1,6 +1,8 @@
 //! Persistent wetness on the player's glass, cleared by the animated blade's swept area.
 //! A small mask uses the existing transmap binding: no extra draw or offscreen pass.
 
+mod glass_times;
+use glass_times::{GlassLap, GlassTimes};
 use omsi_weather::window_drops::{Canvas, Drops};
 use glam::{Vec2, Vec3};
 use omsi_geometry::MeshData;
@@ -72,6 +74,8 @@ pub struct WindowWipers {
     films: Vec<Film>,
     time: f64,
     runoff: Vec<f32>,
+    /// OMSI_PROFILE: where `update`'s time went since the last line in the log.
+    times: GlassTimes,
 }
 
 impl WindowWipers {
@@ -259,6 +263,7 @@ impl WindowWipers {
             films,
             time: vehicle.host.clock.run_time,
             runoff: vec![0.0; SIZE * SIZE],
+            times: GlassTimes::new(vehicle.host.clock.run_time),
         }
     }
 
@@ -283,6 +288,7 @@ impl WindowWipers {
         if self.films.is_empty() {
             return;
         }
+        let mut clock = GlassLap::start();
         let now = vehicle.host.clock.run_time;
         let dt = (now - self.time).max(0.0) as f32;
         self.time = now;
@@ -344,6 +350,7 @@ impl WindowWipers {
                             &mut self.runoff,
                         );
                     }
+                    clock.lap(0);
                     let wet = &film.wet;
                     let points = &film.points;
                     let bounds = film.bounds;
@@ -367,6 +374,7 @@ impl WindowWipers {
                         },
                     );
                 }
+                clock.lap(1);
                 let inverse = vehicle.mesh_transforms[film.mesh].inverse();
                 // (a dry pane with no drop on it has nothing to wipe: a blade sweeping it in
                 // the sun cost a quarter of a millisecond a frame)
@@ -421,6 +429,7 @@ impl WindowWipers {
                     );
                 }
             }
+            clock.lap(2);
             // (painted and uploaded 30 times a second; 15 at a lower rain quality)
             let every = if rain_quality >= 2 { 1.0 / 30.0 } else { 1.0 / 15.0 };
             if repaint_due(&mut film.paint_phase, dt, every) {
@@ -449,9 +458,11 @@ impl WindowWipers {
                     pixel[3] = alpha;
                 }
             }
+            clock.lap(3);
             if changed {
                 renderer.update_texture(scene, film.texture, &film.image);
             }
+            clock.lap(4);
             let inst = instances[film.mesh];
             renderer.set_material(scene, inst, film.slot, if liquid { film.material } else { film.snow_material });
             let mut alpha = scene.instances[inst].slot_alpha.clone();
@@ -469,6 +480,7 @@ impl WindowWipers {
                 visible,
                 &vehicle.mesh_props[film.mesh].slot_uv,
             );
+            clock.lap(5);
         }
         let pool = drops_pool();
         for film in &mut self.films {
@@ -512,6 +524,12 @@ impl WindowWipers {
         }
         for blade in &mut self.blades {
             blade.previous = blade.current;
+        }
+        clock.lap(6);
+        if clock.timed() {
+            let wiped_apart = self.films.iter().filter(|f| f.local).count();
+            let drops = self.films.iter().map(|f| f.drops.drops.len()).sum();
+            self.times.add(&clock, now, (self.films.len(), wiped_apart, self.blades.len(), drops));
         }
     }
 
