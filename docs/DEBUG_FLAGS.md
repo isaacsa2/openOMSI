@@ -116,9 +116,9 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_GROUND_LANES` | bool | off | use | sim | Along every street lane, every metre, how far the ground lies over or under the lane. |
 | `OMSI_LAN_TRACE` | text | - | use | app | LAN CSV file: where the host's people are drawn. |
 | `OMSI_LIST_ALIGNED` | bool | off | use | scene | Log the splines aligned to the terrain. |
-| `OMSI_PROFILE` | bool | off | use | app, platform, render, scene, sim, xr | Time per stage of the frame, logged. |
+| `OMSI_PROFILE` | bool | off | use | app, platform, render, scene, sim, xr | Time per stage of the frame, logged; the session summary comes after --exit-after or when the game is closed. |
 | `OMSI_PROFILE_GPU` | bool | off | use | app | Profile: wait for the GPU so its time shows as a stage of its own. |
-| `OMSI_PROFILE_JSON` | text | - | use | app | With OMSI_PROFILE and --exit-after: the exit summary (after the 15 s warm-up) as JSON into this file, see scripts/compare-performance.py. |
+| `OMSI_PROFILE_JSON` | text | - | use | app | With OMSI_PROFILE: the session summary written after --exit-after or when the game is closed (after the 15 s warm-up) as JSON into this file, see scripts/compare-performance.py. |
 | `OMSI_SUSP_TRACE` | text | - | use | app | Offscreen CSV: body height and each wheel's travel and load every frame. |
 | `OMSI_SUSP_TRACE_WINDOW` | text | - | use | app | Window CSV: each wheel's travel every frame. |
 | `OMSI_TRACE_AI` | text | - | use | sim | CSV: every AI car's pose, steering and speed every frame. |
@@ -150,6 +150,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_BRIDGE_ONLY` | bool | off | use | net | LAN: forget our own addresses so that only what the rendezvous bridge reports is tried. |
 | `OMSI_BUDGET_FROM` | text | - | use | app | Offscreen with OMSI_TEXTURE_MEMORY: x,y[,MB] - the texture budget is met as seen from that point. |
 | `OMSI_CABIN_LOG` | bool | off | use | app | Offscreen --drive: print the cabin air and the film on the windscreen, sides and rear every 20 s. |
+| `OMSI_CAM_SWEEP` | text | - | use | app | yaw[,jump]: the offscreen warm frames come from a camera turning yaw degrees a frame and ending in the picture's pose; with a jump (m), from a place that far to the side (a cut). For checking what reads the last frame. |
 | `OMSI_CAM_VEHICLE` | text | - | use | app | Offscreen: x,y,z,yaw,pitch[,fov] - a camera in the bus's own frame. |
 | `OMSI_CHECK_ENTRIES` | bool | off | use | app | Map check: is there ground to stand on where a player is put down. |
 | `OMSI_CHECK_GROUND` | bool | off | use | sim | Check: people on foot with a walkable surface above their heads, every two seconds. |
@@ -373,11 +374,13 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_PUDDLE_F0` | num | 0.08 | use | render | Puddle reflectance at normal incidence (0.02 to 0.2). |
 | `OMSI_PUDDLE_THICKNESS` | num | 0.12 | use | render | Puddle water film thickness. |
 | `OMSI_RUNNER_CHANCE` | num | 0.05 | use | sim | Chance a late passenger runs for a bus standing at a stop (0: never, 1: every bus). |
+| `OMSI_STORM` | text | - | use | render | activity[,azimuth]: a thunderstorm of this activity (0..1) over the place whatever the weather; with an azimuth (degrees, 0 east, 90 north) the flash stands frozen there at its first stroke (for checks). |
 | `OMSI_SURFACE_BIAS` | num | -24 | use | render | Depth bias of road surfaces. |
 | `OMSI_SURFACE_FLUSH` | num | 0.12 | once | sim | Height in metres under which a surface counts as flush with the road. |
 | `OMSI_TEXTURE_MEMORY` | num | settings | use | app | Texture budget in MB. |
 | `OMSI_TONE_CONTRAST` | text | 1 | once | render | day[,night]: tone mapping contrast. |
 | `OMSI_VIDEO_MEMORY` | num | settings | use | app | What the game may hold on the graphics card all together (textures, meshes, render targets), in MB. |
+| `OMSI_WIDE_AO` | text | - | use | render | reach,strength,gain,max: the street-scale occlusion of the sky and the bounced light (m, 0..1, 0..1, radiance). |
 | `OMSI_WINDY_TREES` | text | settings | use | app | 0 or 1: trees in the wind off or on (A/B renders). |
 
 ## Set-up

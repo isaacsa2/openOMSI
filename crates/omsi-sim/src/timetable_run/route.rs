@@ -40,11 +40,8 @@ pub(crate) fn shift_stops(net: &Network, route: &[usize], base: usize, stops: &m
     }
 }
 
-pub fn bay_offset(lat: f32, on: StopRoute) -> f32 {
-    // A stop tied to an authored track already specifies the bus's stopping lane.
-    // Its pole may sit across a central BRT platform, not in a bay on that lane.
-    // Keep the bus on the authored path rather than steering towards the pole.
-    if matches!(on, StopRoute::Track(_)) { f32::NAN } else { lat }
+pub fn bay_offset(lat: f32) -> f32 {
+    lat
 }
 
 /// Where a timetable bus stands across its lane at a stop, as Omsi.exe puts it

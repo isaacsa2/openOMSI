@@ -1520,7 +1520,15 @@ pub fn trip_path(map: &str, date: &str, trip: &str) -> Result<TripPath> {
         }
         return Ok(out);
     }
-    for w in out.stops.windows(2) {
+    out.route = link_route(&data, &out.stops, &at);
+    Ok(out)
+}
+
+/// The road pieces a run of stops drives by the map's station links (consecutive links
+/// repeat the piece they share).
+fn link_route(data: &omsi_timetable::TimetableData, stops: &[i64], at: &dyn Fn(f64) -> Option<(i32, i32)>) -> Vec<RoadPiece> {
+    let mut route: Vec<RoadPiece> = Vec::new();
+    for w in stops.windows(2) {
         let Some(link) = data.stn_links.iter().find(|l| l.from_id == w[0] && l.to_id == w[1]) else { continue };
         for e in &link.entries {
             if e.values.len() < 4 {
@@ -1528,13 +1536,24 @@ pub fn trip_path(map: &str, date: &str, trip: &str) -> Result<TripPath> {
             }
             let Some(tile) = at(e.values[2]) else { continue };
             let p = RoadPiece { tile_x: tile.0, tile_y: tile.1, spline: e.values[0] as i64, path: e.values[1] as u16 };
-            // consecutive links repeat the piece they share
-            if out.route.last() != Some(&p) {
-                out.route.push(p);
+            if route.last() != Some(&p) {
+                route.push(p);
             }
         }
     }
-    Ok(out)
+    route
+}
+
+/// A run of stops - a trip being made in the timetable editor - as a map picture needs it:
+/// the road pieces the map's station links drive between them.
+pub fn chain_path(map: &str, date: &str, stops: &[i64]) -> Result<TripPath> {
+    let map_dir = resolve_content(map)?.parent().map(|p| p.to_path_buf()).context("map folder")?;
+    let chrono = omsi_map::date_code(date.trim()).map(|c| omsi_map::active_chrono_dirs(&map_dir, c)).unwrap_or_default();
+    let off = omsi_map::chrono_deactivated_lines(&chrono);
+    let data = omsi_timetable::TimetableData::load_with_chrono(&map_dir, &chrono, &off);
+    let tiles = omsi_map::GlobalCfg::load(&map_dir.join("global.cfg")).map(|g| g.raw_tiles).unwrap_or_default();
+    let at = |tile_index: f64| tiles.get(tile_index as usize).copied();
+    Ok(TripPath { route: link_route(&data, stops, &at), stops: stops.to_vec() })
 }
 
 /// The lines of a map's timetable on `date` (`YYYY-MM-DD`, the game's default when empty):
@@ -2067,6 +2086,15 @@ fn cloud_quality(x: &str) -> &'static str {
     if x.trim().eq_ignore_ascii_case("low") { "low" } else { "high" }
 }
 
+/// The street-scale light: `on` or `off`, else `auto` (as the game's `settings::street_light`).
+fn street_light(x: &str) -> &'static str {
+    match x.trim().to_ascii_lowercase().as_str() {
+        "on" | "1" | "true" => "on",
+        "off" | "0" | "false" => "off",
+        _ => "auto",
+    }
+}
+
 /// The rain's quality: `medium` or `low`, else `high` (as the game's `settings::rain_quality`).
 fn rain_quality(x: &str) -> &'static str {
     match x.trim().to_ascii_lowercase().as_str() {
@@ -2112,6 +2140,7 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
 
 pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     let mut v = json!({ "msaa": 4, "anisotropy": 8, "ssao": true, "shadows": true, "shadow_size": 2048, "navigator": true, "ui_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "video_memory": 0, "texture_compression": true, "gpu_texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "cloud_quality": "high", "rain_quality": "high", "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "ambient": true, "vol_ambient": 0.8, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
+    v["street_light"] = json!("off");
     v["puddles"] = json!("high"); // (apart: the literal above is at the json! macro's recursion limit)
     v["vehicle_smoke"] = json!("all");
     if phone {
@@ -2246,6 +2275,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "mirror_refresh" => v[&k] = json!(mirror_refresh(val)),
             "mirror_quality" => v[&k] = json!(mirror_quality(val)),
             "cloud_quality" => v[&k] = json!(cloud_quality(val)),
+            "street_light" => v[&k] = json!(street_light(val)),
             "rain_quality" => v[&k] = json!(rain_quality(val)),
             "vehicle_smoke" => v[&k] = json!(vehicle_smoke(val)),
             "puddles" => v[&k] = json!(puddles(val)),
@@ -2437,8 +2467,8 @@ pub fn save_settings(v: &Value) -> Result<()> {
 
 /// The settings a graphics profile holds: what the Graphics tab shows, except the machine's
 /// own (fullscreen, graphics API).
-pub const GRAPHICS_PROFILE_KEYS: [&str; 32] = [
-    "graphics", "msaa", "render_scale", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "reflections", "clouds", "cloud_quality", "rain_quality", "vehicle_smoke", "puddles", "windy_trees",
+pub const GRAPHICS_PROFILE_KEYS: [&str; 33] = [
+    "graphics", "msaa", "render_scale", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "reflections", "clouds", "cloud_quality", "street_light", "rain_quality", "vehicle_smoke", "puddles", "windy_trees",
     "vsync", "max_fps", "view_distance", "max_obj_dist", "min_obj_size", "mirror_size", "mirror_refresh", "mirror_quality", "mirror_hud_every_frame", "video_memory", "texture_compression", "gpu_texture_compression",
 ];
 
@@ -2699,6 +2729,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!("resolution={}\n", resolution_text(v.get("resolution").and_then(|x| x.as_str()).unwrap_or("auto"))));
     text.push_str(&format!("gpu_texture_compression={}\n", b("gpu_texture_compression", true)));
     text.push_str(&format!("cloud_quality={}\n", cloud_quality(v.get("cloud_quality").and_then(|x| x.as_str()).unwrap_or("high"))));
+    text.push_str(&format!("street_light={}\n", street_light(v.get("street_light").and_then(|x| x.as_str()).unwrap_or("off"))));
     text.push_str(&format!("rain_quality={}\n", rain_quality(v.get("rain_quality").and_then(|x| x.as_str()).unwrap_or("high"))));
     text.push_str(&format!("vehicle_smoke={}\n", vehicle_smoke(v.get("vehicle_smoke").and_then(|x| x.as_str()).unwrap_or("all"))));
     text.push_str(&format!("puddles={}\n", puddles(v.get("puddles").and_then(|x| x.as_str()).unwrap_or("high"))));

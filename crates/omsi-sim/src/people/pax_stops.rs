@@ -2,10 +2,17 @@
 
 use super::*;
 
-// The stop object lies on the platform side of the bus. Near the centreline the
-// object's position is not reliable enough to exclude either side's doors.
-pub(super) fn platform_side(local_x: f32) -> Option<f32> {
+// For a two-sided stop, choose the passenger's physical side before the doors
+// open. A stop box may lie on the centreline or behind a platform.
+fn platform_side(local_x: f32) -> Option<f32> {
     (local_x.is_finite() && local_x.abs() > 0.75).then(|| local_x.signum())
+}
+
+fn boarding_side(side: u8, left_hand: bool, local_x: f32) -> Option<f32> {
+    match side {
+        0 | 1 => Some(if left_hand != (side == 1) { -1.0 } else { 1.0 }),
+        _ => platform_side(local_x),
+    }
 }
 
 pub(super) fn entry_on_platform(side: Option<f32>, door_side: f32) -> bool {
@@ -13,9 +20,12 @@ pub(super) fn entry_on_platform(side: Option<f32>, door_side: f32) -> bool {
 }
 
 impl PeopleSim {
-    /// Which side of this bus faces the stop object, in its local coordinates.
-    pub fn preferred_entry_side(&self, stop: i64, bn: &BusNow) -> Option<f32> {
-        self.stops.get(&stop).and_then(|s| platform_side(bn.to_local(s.pos).x))
+    /// Respect the map's side setting, as the vehicle's AI door scripts do.
+    /// At two-sided stops, use this passenger's side rather than the stop box.
+    pub(super) fn preferred_entry_side(&self, stop: i64, bn: &BusNow, position: DVec3) -> Option<f32> {
+        let s = self.stops.get(&stop)?;
+        let left = LEFT_HAND.load(std::sync::atomic::Ordering::Relaxed);
+        boarding_side(s.side, left, bn.to_local(position).x)
     }
 
     /// The passenger of person `i`, if it is one.
@@ -40,8 +50,6 @@ impl PeopleSim {
         for s in self.stops.values_mut() {
             s.buses.clear();
         }
-        let left = LEFT_HAND.load(std::sync::atomic::Ordering::Relaxed);
-        let _ = left;
         let mut ids: Vec<i64> = self.stops.keys().copied().collect();
         ids.sort_unstable();
         for bn in buses {
@@ -83,6 +91,11 @@ impl PeopleSim {
                     || bn.next_stop.as_ref().is_none_or(|next| next.id == *id);
                 if same_way && matches_trip {
                     reg.next = Some(*id);
+                }
+                // Active timetable service belongs to one platform, not every nearby
+                // stop with the same destination (including the opposite carriageway).
+                if bn.served.is_some_and(|served| served != *id) {
+                    continue;
                 }
                 // a bus not in service, or at its own terminus, empties and takes nobody
                 // (0x61f3e3); one in free drive only lets its riders off. So does one at the
@@ -127,14 +140,14 @@ impl PeopleSim {
         match p.line.and_then(|k| s.lines.get(k)) {
             None => s.buses.iter().find_map(|(id, _)| {
                 let bn = bus_ix.get(id).map(|k| &buses[*k])?;
-                let side = self.preferred_entry_side(stop, bn);
-                bn.cabin.entries.iter().any(|door| entry_on_platform(side, door.side))
+                let side = self.preferred_entry_side(stop, bn, self.people[i].position);
+                bn.cabin.entries.iter().any(|door| door.point.is_some() && entry_on_platform(side, door.side))
                     .then_some((*id, Fit::Any))
             }),
             Some((_, termini)) => best_bus(s.buses.iter().filter_map(|(id, _)| {
                 let bn = bus_ix.get(id).map(|k| &buses[*k])?;
-                let side = self.preferred_entry_side(stop, bn);
-                if !bn.cabin.entries.iter().any(|door| entry_on_platform(side, door.side)) {
+                let side = self.preferred_entry_side(stop, bn, self.people[i].position);
+                if !bn.cabin.entries.iter().any(|door| door.point.is_some() && entry_on_platform(side, door.side)) {
                     return None;
                 }
                 // (or the destination of another route of its service ending where its own
@@ -255,20 +268,5 @@ impl PeopleSim {
 }
 
 #[cfg(test)]
-mod brt_door_tests {
-    use super::{entry_on_platform, platform_side};
-
-    #[test]
-    fn passengers_only_use_doors_facing_the_platform() {
-        let left = platform_side(-3.0);
-        let right = platform_side(3.0);
-        assert_eq!(left, Some(-1.0));
-        assert_eq!(right, Some(1.0));
-        assert!(entry_on_platform(left, -1.0));
-        assert!(!entry_on_platform(left, 1.0));
-        assert!(entry_on_platform(right, 1.0));
-        assert!(!entry_on_platform(right, -1.0));
-        assert!(entry_on_platform(platform_side(0.0), -1.0));
-        assert!(entry_on_platform(platform_side(0.0), 1.0));
-    }
-}
+#[path = "brt_tests.rs"]
+mod brt_tests;

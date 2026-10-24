@@ -107,11 +107,43 @@ fn where_a_bus_is_on_a_partly_loaded_route() {
 
 #[test]
 fn bays() {
-    // Unbound stop boxes keep their lateral offset. Stops bound to a track must
-    // not shift the bus toward a left-hand BRT platform or a distant pole.
+    // the stop's box offset is kept as it is until the vehicle is known
     for lat in [0.0, 2.0, -4.0] {
-        assert_eq!(bay_offset(lat, StopRoute::Nearest), lat);
-        assert_eq!(bay_offset(lat, StopRoute::Outside), lat);
-        assert!(bay_offset(lat, StopRoute::Track(0)).is_nan());
+        assert_eq!(bay_offset(lat), lat);
+    }
+}
+
+#[test]
+fn brt_authored_track_projection_keeps_bays_and_platform_guards() {
+    use crate::traffic::{Network, LaneBuilder, LaneKind};
+    use glam::DVec3;
+    let bus = script_test_vehicle("{frame}\n{end}\n", "", "");
+    for radius in [-40.0, 40.0] {
+        for left_hand in [false, true] {
+            let net = Network {
+                lanes: vec![LaneBuilder::arc(DVec3::ZERO, 0.0, 60.0, radius, 0.0, LaneKind::Street, 3.0)],
+                left_hand,
+                ..Default::default()
+            };
+            let (point, heading) = net.lanes[0].at(30.0);
+            let h = (heading as f64).to_radians();
+            let right = DVec3::new(h.cos(), -h.sin(), 0.0);
+            for offset in [-14.0, -4.0, 4.0, 14.0] {
+                for side in [0.0, 1.0, 2.0] {
+                    let (ri, s, lat) = project_stop(&net, &[0, 0], point + right * offset,
+                        Some(25.0), 0, side, StopRoute::Track(1)).unwrap();
+                    assert_eq!(ri, 1, "do not replace the authored repeated track visit");
+                    assert!((s - 30.0).abs() < 0.5);
+                    let mut stops = [(ri, s, bay_offset(lat), 0.0, 42, side)];
+                    place_stops(&net, &[0, 0], 0, &mut stops, &bus.ty, false);
+                    let left = if side == 2.0 { lat < 0.0 } else { left_hand != (side == 1.0) };
+                    if lat.abs() > 8.0 || (left && lat > 0.3) || (!left && lat < -0.3) {
+                        assert_eq!(stops[0].2, 0.0, "never follow a distant/opposite platform box");
+                    } else {
+                        assert!(stops[0].2.abs() > 2.0, "retain conventional authored bays");
+                    }
+                }
+            }
+        }
     }
 }

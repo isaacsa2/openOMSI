@@ -102,6 +102,47 @@ promoted to stable releases (see [docs/VERSIONING.md](docs/VERSIONING.md)); the 
 - The bus preview of the launcher draws two pictures ahead while it turns, the JPEG is made on
   its own thread, and a turning bus is drawn smaller on a phone (the picture at rest is sharp),
   so the preview keeps up with the screen instead of about 20 pictures a second.
+
+**Weather and light (Enhanced)**
+
+- The eye adapts the way an eye does: a picture much darker than the light model expects
+  (a dark cab, an underpass) is made up for over some three seconds - five-sixths of it,
+  across six stops, where a bright surplus (snow, the sun in view) still only darkens the
+  picture a little - and a dazzle on coming out passes in about a second. This is for the
+  day: through the dusk it gives way to the old gentle metering, so the blue hour and the
+  twilight of a summer night are not shown brighter than the sun under the horizon makes
+  them (a white night comes only where the sun stays a few degrees below it). The
+  Enhanced+ picture takes the same metering.
+- The sky's occlusion by houses, trees and hills is worked out on the street's scale (18 m),
+  not only the first two metres: a narrow street or the shade under a crown is darker than a
+  square, and the surfaces round a point light it with what they send back (the last
+  frame's picture, colour included: a sunlit wall lights the one across the street, lit
+  windows light the street at night). The light is read where the surface was in the last
+  frame's picture, so it follows a turning head and a moving bus, and not at all after a
+  cut (another view, a jump) or where a surface was hidden then; the cab's own dashboard
+  and pillars do not shade the street. It is the Enhanced picture's with the AO on: the
+  other pipelines pay nothing for it (two-channel targets, no history picture, the old
+  blur). A lamp or a lit sign among the surfaces does not stand in the picture as a bright
+  square. The `street_light` setting (Graphics: Street light: Auto, On, Off) switches it.
+  It is off by default; On enables it, and Auto enables it except on a small or shared
+  graphics chip. The optimiser turns it off when the
+  GPU is the limit. `OMSI_WIDE_AO=reach,strength,gain,max` tunes it.
+- The physical weather model keeps the water of the grey deck (its optical depth, a thin
+  stratus to a raining nimbostratus), so a rainy or winter day is as bright or as dark as
+  its cloud is thick. It also gives the cumulus layer its own base (the condensation level)
+  and depth (a shallow sheet under a high, towers in moist rising air), altocumulus, and
+  thunderstorms.
+- A thunderstorm has lightning: flashes of several strokes light the clouds from inside and
+  the street with a cold light, a cloud-to-ground stroke draws its crooked channel, and the
+  thunder is heard after the distance's delay, from the flash's direction. The flashes are
+  worked out for every pipeline from the day's seed (a replay of a day repeats them), so the
+  thunder of a storm is there without the Enhanced picture. `OMSI_STORM=activity[,azimuth]`
+  shows one.
+- The sun's shafts between houses and trees are followed up to 420 m: the first 180 m in
+  the same steps as before, the rest in a few wider ones.
+- The cumulus layer's height follows the ground under the player, so a map in the hills
+  keeps its clouds.
+
 **Navigator and city map**
 
 - The navigator and the city map draw every map in the style of Apple Maps, from the map
@@ -238,6 +279,25 @@ promoted to stable releases (see [docs/VERSIONING.md](docs/VERSIONING.md)); the 
   way; dragging and zooming move a picture of the map and draw it anew when the mouse lets
   go; the roads are drawn in a few strokes instead of one per road. Around the map's tiles
   the land has the map's own green, no more grey that looked as if it were still loading.
+
+**Launcher**
+
+- **The timetable editor works on the map**, as Drive does: every stop of the timetable stands on
+  the map (the depots as amber squares), a stop clicked says which trips call there and puts one
+  into the tour, and a stop found by name flies the map to it. A new trip is made by clicking its
+  stops: only the stops the map has a station link to are ringed, the route it would drive is drawn
+  as they are chosen, and it is saved as a `.ttp` beside the line (the changed trip of a stop list
+  is saved as a new one, so the map's own stay as they are). The tours show their trips with a
+  departure field and a minute up and down; copies, repeats and the reset moved into small menus.
+- The route preview no longer runs doubled: the timetable lists the lanes of a road side by side
+  (three lanes of the same stretch, one after another), which were all drawn, and a change of
+  lane showed as a step sideways. The route is one line now, with a smooth curve over where it
+  changes lane, as the game's own map draws it.
+- No text of the launcher is set in capitals any more (the section titles, the menu's groups, the
+  destination sign); the stops under a trip in the roadbook have a rail and dots of their own
+  that no longer run over their times, a trip's depot-run label no longer sits on its stops, the
+  panels of the Drive page keep their width on a small window, and the menu folds to its icons
+  on a narrow one.
 
 **Trams, metros and trains** ([docs/RAIL.md](docs/RAIL.md))
 
@@ -521,6 +581,15 @@ promoted to stable releases (see [docs/VERSIONING.md](docs/VERSIONING.md)); the 
   500 MB was dropped. A texture memory set before (and OMSI's `texmemlimit`) was a texture
   budget and is not carried over: the video memory starts on Automatic. After a lost graphics
   device the safer settings take two thirds of what the card holds, not a fixed 800 MB.
+- **The frame rate no longer collapses after half an hour on DirectX 12 and Vulkan:** the game
+  kept its own total under the video memory setting while the card filled up anyway - the room
+  wgpu's allocator keeps free in its 128-256 MB blocks was left out of the bound, and a block
+  goes back to the driver only once it is empty. Far textures made smaller left holes, the
+  textures coming back needed bigger ones, so new blocks opened: on a 12 GB card set to 6 GB the
+  driver held 11.5 GB after 18 minutes (5.7 GB of it holes), the card paged, 10 fps. The holes
+  now count against the bound, so textures come back only into room the card really has, and
+  every card gets the allocator's small blocks (8-64 MB), which empty and go back to the driver
+  ([#2295](https://github.com/openOMSI-org/openOMSI/issues/2295)).
 - **Rain on the windows costs less:** the drops on the cab's panes are painted beside the
   frame instead of while it waits, and only the rows that changed go to the graphics card (12
   panes sent a megabyte each, 30 times a second). In heavy rain in the cab, on a Radeon 680M,
