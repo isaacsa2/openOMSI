@@ -4,6 +4,7 @@
 //!
 //! usage: omsi-plugin-host <library>   (then the protocol of `omsi_plugin::wire` on stdio)
 #[cfg(windows)]
+#[path = "../steam_error_dialog.rs"]
 mod steam_error_dialog;
 
 use omsi_plugin::{wire, Library};
