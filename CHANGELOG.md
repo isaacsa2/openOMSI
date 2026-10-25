@@ -472,6 +472,12 @@ promoted to stable releases (see [docs/VERSIONING.md](docs/VERSIONING.md)); the 
 
 ### Fixes
 
+- **Dense navigator maps keep their roads when the ground reaches its memory budget**:
+  instead of cutting the picture after the first full layer (often land, before any roads),
+  the game coarsens the complete ground into a bounded grid, in the original drawing order.
+  Small maps keep their exact geometry; very dense ones lose fine ground detail rather than
+  whole later layers. The city map and GPS retain their GPU budgets, and the launcher's map
+  keeps its complete geometry. This follows up #3266 and #3301 for the crash in #3249.
 - **The launcher's bus preview shows what the repaint chooses**: the showroom gives the bus
   its paint scheme as the game does, so the scheme's `[setvar]`s are set again after the
   scripts every frame (#3183). Set once when the bus was made, a script that writes them

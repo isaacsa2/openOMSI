@@ -11,6 +11,8 @@ use glam::{Vec2, Vec3};
 use crate::atlas::{Atlas, Sprite};
 use crate::text::{Fonts, Weight};
 
+mod ground_budget;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -140,6 +142,7 @@ pub struct Painter {
     pub scale: f32,
     /// Optional per-painter geometry budget; navigation meshes must stay bounded.
     vertex_budget: Option<usize>,
+    ground_budget: Option<ground_budget::GroundBudget>,
 }
 
 impl Default for Painter {
@@ -150,14 +153,36 @@ impl Default for Painter {
 
 impl Painter {
     pub fn new() -> Painter {
-        Painter { verts: Vec::new(), scale: 1.0, vertex_budget: None }
+        Painter { verts: Vec::new(), scale: 1.0, vertex_budget: None, ground_budget: None }
     }
     pub fn with_scale(scale: f32) -> Painter {
-        Painter { verts: Vec::new(), scale: scale.max(0.25), vertex_budget: None }
+        Painter { scale: scale.max(0.25), ..Painter::new() }
     }
     /// A bounded painter used by the map builders; general HUD painters remain unlimited.
     pub fn with_vertex_budget(max_vertices: usize) -> Painter {
         Painter { vertex_budget: Some(max_vertices), ..Painter::new() }
+    }
+    /// Flat map geometry: keep exact triangles while they fit, then coarsen the whole
+    /// ground into a bounded grid. Later roads must not disappear behind a full land layer.
+    /// Positions are relative to the map anchor, within +/- `reach` metres. Finish with
+    /// `finish_ground`, rather than reading `verts` (a reduced ground is held as cells).
+    pub fn with_ground_budget(max_vertices: usize, reach: f32, metres_per_pixel: f32) -> Painter {
+        Painter { ground_budget: Some(ground_budget::GroundBudget::new(max_vertices, reach, metres_per_pixel)), ..Painter::new() }
+    }
+    pub fn ground_reduced(&self) -> bool {
+        self.ground_budget.as_ref().is_some_and(|b| b.reduced())
+    }
+    pub fn finish_ground(self) -> Vec<Vertex> {
+        match self.ground_budget {
+            Some(b) => b.finish(self.verts),
+            None => self.verts,
+        }
+    }
+    fn world_vertices<const N: usize>(&mut self, vertices: [Vertex; N]) {
+        match self.ground_budget.as_mut() {
+            Some(b) => b.push(&mut self.verts, &vertices),
+            None => self.verts.extend(vertices),
+        }
     }
     pub fn at_vertex_limit(&self) -> bool {
         !self.room_for(3)
@@ -176,6 +201,7 @@ impl Painter {
     }
     pub fn clear(&mut self) {
         self.verts.clear();
+        if let Some(b) = self.ground_budget.as_mut() { b.clear(); }
     }
 
     fn px(p: Vec2, c: Color) -> Vertex {
@@ -441,7 +467,7 @@ impl Painter {
             let (a0, a1) = (Self::wv(a, na, hm, hp, c), Self::wv(a, -na, hm, hp, c));
             let (b0, b1) = (Self::wv(b, nb, hm, hp, c), Self::wv(b, -nb, hm, hp, c));
             if !self.room_for(6) { return; }
-            self.verts.extend([a0, b0, b1, a0, b1, a1]);
+            self.world_vertices([a0, b0, b1, a0, b1, a1]);
         }
         // round joints: a fan on both sides from one segment's edge to the next one's
         for (i, n0, n1) in joints {
@@ -459,7 +485,7 @@ impl Painter {
                     let t0 = a0 + da * k as f32 / steps as f32;
                     let t1 = a0 + da * (k + 1) as f32 / steps as f32;
                     if !self.room_for(3) { return; }
-                    self.verts.extend([Self::wv(p, Vec2::ZERO, hm, hp, c), Self::wv(p, Vec2::new(t0.cos(), t0.sin()), hm, hp, c), Self::wv(p, Vec2::new(t1.cos(), t1.sin()), hm, hp, c)]);
+                    self.world_vertices([Self::wv(p, Vec2::ZERO, hm, hp, c), Self::wv(p, Vec2::new(t0.cos(), t0.sin()), hm, hp, c), Self::wv(p, Vec2::new(t1.cos(), t1.sin()), hm, hp, c)]);
                 }
             }
         }
@@ -499,7 +525,7 @@ impl Painter {
             let a0 = base + std::f32::consts::PI * k as f32 / n as f32;
             let a1 = base + std::f32::consts::PI * (k + 1) as f32 / n as f32;
             if !self.room_for(3) { return; }
-            self.verts.extend([Self::wv(p, Vec2::ZERO, hm, hp, c), Self::wv(p, Vec2::new(a0.cos(), a0.sin()), hm, hp, c), Self::wv(p, Vec2::new(a1.cos(), a1.sin()), hm, hp, c)]);
+            self.world_vertices([Self::wv(p, Vec2::ZERO, hm, hp, c), Self::wv(p, Vec2::new(a0.cos(), a0.sin()), hm, hp, c), Self::wv(p, Vec2::new(a1.cos(), a1.sin()), hm, hp, c)]);
         }
     }
 
@@ -511,7 +537,7 @@ impl Painter {
             let a0 = std::f32::consts::TAU * k as f32 / n as f32;
             let a1 = std::f32::consts::TAU * (k + 1) as f32 / n as f32;
             if !self.room_for(3) { return; }
-            self.verts.extend([Self::wv(p, Vec2::ZERO, r_m, r_px, c), Self::wv(p, Vec2::new(a0.cos(), a0.sin()), r_m, r_px, c), Self::wv(p, Vec2::new(a1.cos(), a1.sin()), r_m, r_px, c)]);
+            self.world_vertices([Self::wv(p, Vec2::ZERO, r_m, r_px, c), Self::wv(p, Vec2::new(a0.cos(), a0.sin()), r_m, r_px, c), Self::wv(p, Vec2::new(a1.cos(), a1.sin()), r_m, r_px, c)]);
         }
     }
 
@@ -521,7 +547,7 @@ impl Painter {
         if !self.room_for(3) { return; }
         for k in 1..shape.len().saturating_sub(1) {
             if !self.room_for(3) { return; }
-            self.verts.extend([Self::wv(p, shape[0], s_m, s_px, c), Self::wv(p, shape[k], s_m, s_px, c), Self::wv(p, shape[k + 1], s_m, s_px, c)]);
+            self.world_vertices([Self::wv(p, shape[0], s_m, s_px, c), Self::wv(p, shape[k], s_m, s_px, c), Self::wv(p, shape[k + 1], s_m, s_px, c)]);
         }
     }
 
@@ -530,7 +556,7 @@ impl Painter {
     pub fn solid_tri(&mut self, a: Vec3, b: Vec3, c: Vec3, ca: Color, cb: Color, cc: Color) {
         if !self.room_for(3) { return; }
         let v = |p: Vec3, col: Color| Vertex { pos: p.to_array(), color: col.0, mode: [2.0, 0.0], ..Default::default() };
-        self.verts.extend([v(a, ca), v(b, cb), v(c, cc)]);
+        self.world_vertices([v(a, ca), v(b, cb), v(c, cc)]);
     }
 
     /// A shadow triangle on the ground (see `Vertex::mode`): each corner a point and how far
@@ -538,7 +564,7 @@ impl Painter {
     pub fn shadow_tri(&mut self, p: [(Vec2, Vec2); 3], col: Color) {
         if !self.room_for(3) { return; }
         let v = |(q, d): (Vec2, Vec2)| Vertex { pos: [q.x, q.y, 0.0], uv: d.to_array(), color: col.0, mode: [3.0, 0.0], ..Default::default() };
-        self.verts.extend([v(p[0]), v(p[1]), v(p[2])]);
+        self.world_vertices([v(p[0]), v(p[1]), v(p[2])]);
     }
 
     /// A world triangle grown by `w_px` pixels (at least `w_m` metres) all round: drawn
@@ -556,9 +582,7 @@ impl Painter {
             let s = (1.0 - e1.dot(bis).powi(2)).max(1e-4).sqrt();
             ext[i] = bis * (1.0 / s).min(3.0);
         }
-        for i in 0..3 {
-            self.verts.push(Self::wv(p[i], ext[i], w_m, w_px, c));
-        }
+        self.world_vertices(std::array::from_fn::<_, 3, _>(|i| Self::wv(p[i], ext[i], w_m, w_px, c)));
     }
 
     /// A convex polygon on the ground (world points).
@@ -566,7 +590,7 @@ impl Painter {
         if !self.room_for(3) { return; }
         for k in 1..pts.len().saturating_sub(1) {
             if !self.room_for(3) { return; }
-            self.verts.extend([Self::wv(pts[0], Vec2::ZERO, 0.0, 0.0, c), Self::wv(pts[k], Vec2::ZERO, 0.0, 0.0, c), Self::wv(pts[k + 1], Vec2::ZERO, 0.0, 0.0, c)]);
+            self.world_vertices([Self::wv(pts[0], Vec2::ZERO, 0.0, 0.0, c), Self::wv(pts[k], Vec2::ZERO, 0.0, 0.0, c), Self::wv(pts[k + 1], Vec2::ZERO, 0.0, 0.0, c)]);
         }
     }
 }

@@ -82,12 +82,13 @@ impl Navigator {
             let parts = self.ground_parts(net, None);
             let look = GroundLook { surfaces: true, trees: true, dashes: true, tol: 0.0 };
             let reach = PANEL_REACH;
+            let mpp = (2.0 * self.zoom * (FOV.to_radians() as f64 * 0.5).tan() / map.h.max(1.0) as f64) as f32;
             if self.global.is_some() {
                 let pal2 = pal;
                 let device = renderer.device.clone();
-                self.panel_job = Some(super::build::Job::start((look_key, lanes_now), move || super::build::build(&parts, anchor, reach, &pal2, look, true, Some(PANEL_MODELS), true).made_on(&device)));
+                self.panel_job = Some(super::build::Job::start((look_key, lanes_now), move || super::build::build(&parts, anchor, reach, &pal2, look, true, Some(PANEL_MODELS), true, mpp).made_on(&device)));
             } else {
-                let mut b = super::build::build(&parts, anchor, reach, &pal, look, true, Some(PANEL_MODELS), true);
+                let mut b = super::build::build(&parts, anchor, reach, &pal, look, true, Some(PANEL_MODELS), true, mpp);
                 let [_, houses @ ..] = b.counts;
                 self.roads = Some(Roads { look: look_key, anchor, lanes_seen: lanes_now, houses, runs: std::mem::take(&mut b.runs), built_at: self.time });
                 built = Some(b);
