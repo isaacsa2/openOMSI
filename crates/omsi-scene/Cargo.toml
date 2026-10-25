@@ -11,6 +11,7 @@ omsi-cfg = { path = "../omsi-cfg" }
 omsi-content = { path = "../omsi-content" }
 omsi-geometry = { path = "../omsi-geometry" }
 omsi-htmlengine = { path = "../omsi-htmlengine" }
+omsi-htmlpage = { path = "../omsi-htmlpage" }
 omsi-map = { path = "../omsi-map" }
 omsi-model = { path = "../omsi-model" }
 omsi-o3d = { path = "../omsi-o3d" }
@@ -20,6 +21,7 @@ omsi-script = { path = "../omsi-script" }
 omsi-sim = { path = "../omsi-sim" }
 omsi-soundscape = { path = "../omsi-soundscape" }
 omsi-texture = { path = "../omsi-texture" }
+omsi-transit = { path = "../omsi-transit" }
 omsi-trolley = { path = "../omsi-trolley" }
 omsi-ui = { path = "../omsi-ui" }
 omsi-vehicle = { path = "../omsi-vehicle" }

@@ -497,7 +497,7 @@ impl Navigator {
             let look = if self.classic_2d {
                 GroundLook { surfaces: false, trees: false, dashes: false, tol: (mpp * 0.5).max(0.3) as f32 }
             } else {
-                GroundLook { surfaces: mpp < 0.7, trees: mpp < 0.7, dashes: mpp < 3.5, tol: 0.0 }
+                GroundLook { surfaces: mpp < 0.7, trees: mpp < 0.7, dashes: mpp < 3.5, tol: (mpp * 0.5) as f32 }
             };
             let mut parts = self.ground_parts(net, band.map(|b| b.0));
             if self.classic_2d {
