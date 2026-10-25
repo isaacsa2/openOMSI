@@ -497,7 +497,7 @@ impl Navigator {
             let look = if self.classic_2d {
                 GroundLook { surfaces: false, trees: false, dashes: false, tol: (mpp * 0.5).max(0.3) as f32 }
             } else {
-                GroundLook { surfaces: mpp < 0.7, trees: mpp < 0.7, dashes: mpp < 3.5, tol: (mpp * 0.5) as f32 }
+                GroundLook { surfaces: mpp < 0.7, trees: mpp < 0.7, dashes: mpp < 3.5, tol: 0.0 }
             };
             let mut parts = self.ground_parts(net, band.map(|b| b.0));
             if self.classic_2d {
@@ -508,7 +508,7 @@ impl Navigator {
             let pal2 = *pal;
             let houses = !self.classic_2d && mpp < 6.0;
             let paved = !self.classic_2d && mpp < 2.2;
-            let job = move || super::build::build(&parts, centre, radius, &pal2, look, paved, houses.then_some(omsi_mapdraw::MODEL_TRIANGLES), true);
+            let job = move || super::build::build(&parts, centre, radius, &pal2, look, paved, houses.then_some(omsi_mapdraw::MODEL_TRIANGLES));
             if self.city.ground.is_none() {
                 // (the first picture at once: nothing to show meanwhile)
                 let b = job();
