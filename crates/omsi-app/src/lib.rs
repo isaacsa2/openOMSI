@@ -285,14 +285,32 @@ pub fn run() -> Result<()> {
     // Started by a double click or with no arguments at all: that is the launcher's job.
     // The launcher itself runs the game with a full command line (--no-menu, --map, ...).
     let bare = std::env::args().len() == 1;
-    let Some((args, server_cfg)) = prepare(args, bare)? else { return Ok(()) };
+    let Some((mut args, server_cfg)) = prepare(args, bare)? else { return Ok(()) };
     if bare && !args.menu {
-        // the launcher, another program (it starts the game again with a full command
-        // line): OMSI_LAUNCHER=<program>, else the desktop launcher beside the game
+        // A desktop launcher is preferred, but the native start menu must remain usable
+        // without WebView2 (Windows), WebKitGTK (Linux), or the launcher binary.
         if omsi_cfg::flags::OMSI_LAUNCHER.is_set() && open_launcher()? {
             return Ok(());
         }
-        return open_app_launcher(fatal_message);
+        // Keep the launcher's WebView repair/install attempts, but do not display a fatal
+        // error when we can still let the player choose a map and a bus natively.
+        match open_app_launcher(|message| log::warn!("desktop launcher: {message}")) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                log::warn!("desktop launcher unavailable ({e:#}); opening native start menu");
+                // Launcher mode deliberately permits a missing OMSI 2 folder (Setup
+                // normally selects it). The native menu does not have that Setup page.
+                if !is_omsi_root(&args.root) {
+                    let missing = omsi_cfg::missing_original_essentials(&args.root);
+                    let text = omsi_ui::tr(MISSING_ORIGINAL)
+                        .replace("{folder}", &args.root.display().to_string())
+                        .replace("{missing}", &missing.join(", "));
+                    fatal_dialog(&omsi_ui::tr("openOMSI cannot start"), &text);
+                    anyhow::bail!("{text}");
+                }
+                args.menu = true;
+            }
+        }
     }
     let Some(app) = make_app(args, server_cfg)? else { return Ok(()) };
     // a game session's start goes into the start guard's journal (a version whose sessions
