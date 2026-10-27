@@ -107,8 +107,8 @@ impl Menu {
     pub fn lines(&self) -> Vec<String> {
         let mark = |r: usize| if self.row == r { ">" } else { " " };
         vec![
-            "openOMSI - Native start menu".to_string(),
-            "Lightweight mode (no WebView required)".to_string(),
+            "openOMSI".to_string(),
+            String::new(),
             format!("{} Map:        {}", mark(0), self.maps.get(self.map).map(|m| m.0.as_str()).unwrap_or("-")),
             format!("{} Vehicle:    {}", mark(1), self.vehicles.get(self.vehicle).map(|v| v.0.as_str()).unwrap_or("-")),
             format!("{} Time:       {:02}:00", mark(2), self.hour),
