@@ -211,7 +211,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn closing_the_launcher_cleanly_does_not_reopen_another_menu() {
-        assert!(probe("exit 0").is_none());
+        let result = probe("exit 0");
+        assert!(result.is_none(), "clean launcher probe: {result:?}");
     }
 
     #[cfg(unix)]
