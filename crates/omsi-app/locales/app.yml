@@ -29908,6 +29908,19 @@ _version: 2
   ru: "Discord Rich Presence"
   ka: "Discord Rich Presence"
 
+"Disable plugins":
+  es: "Desactivar plugins"
+  fr: "Désactiver les plugins"
+  pt: "Desativar plugins"
+  pt-pt: "Desativar plugins"
+  de: "Plugins deaktivieren"
+"Starts the next game without Lua or legacy OMSI plugins, including vehicle plugins. Plugin features will be unavailable. Normal bus scripts still run.":
+  es: "Inicia la próxima partida sin plugins Lua ni plugins antiguos de OMSI, incluidos los plugins de vehículos. Las funciones de los plugins no estarán disponibles. Los scripts normales de los autobuses seguirán funcionando."
+  fr: "Lance la prochaine partie sans plugins Lua ni anciens plugins OMSI, y compris ceux des véhicules. Les fonctions des plugins seront indisponibles. Les scripts habituels des bus continueront de fonctionner."
+  pt: "Inicia a próxima partida sem plugins Lua ou plugins antigos do OMSI, incluindo os dos veículos. Os recursos dos plugins ficarão indisponíveis. Os scripts normais dos ônibus continuarão funcionando."
+  pt-pt: "Inicia a próxima partida sem plugins Lua ou plugins antigos do OMSI, incluindo os dos veículos. As funcionalidades dos plugins ficarão indisponíveis. Os scripts normais dos autocarros continuarão a funcionar."
+  de: "Startet die nächste Fahrt ohne Lua-Plugins oder ältere OMSI-Plugins, einschließlich Fahrzeug-Plugins. Plugin-Funktionen sind dann nicht verfügbar. Normale Bus-Skripte laufen weiterhin."
+
 "Display and driver":
   es: "Pantalla y conductor"
   ca: "Pantalla i controlador"
