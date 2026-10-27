@@ -271,10 +271,17 @@ from the cab with R and T. Details, the formats and the checks: [TROLLEYBUS.md](
 ## The launcher
 
 The launcher is a program of its own beside the game, `openomsi-launcher-app` (a Tauri window,
-`launcher/`, see its README): `openomsi` started without arguments opens it, and where it is
-missing - or its window cannot open, for want of WebView2 on an old Windows (the game offers
-Microsoft's installer) or of WebKitGTK 4.1 on Linux - the game says so and where it belongs
-(on Linux in a dialog of the desktop as well as in the terminal).
+`launcher/`, see its README). Starting `openomsi` without arguments opens it. When it is
+missing or its window fails to start (for example, WebView2 is unavailable on Windows or
+WebKitGTK 4.1 on Linux), openOMSI falls back to the **native start menu**, drawn by the
+game's renderer without a web view. On Windows it offers to install a missing WebView2
+runtime first; declining or failing that repair allows the native menu to open.
+Use the arrow keys to choose map, vehicle, time, traffic, passengers, weather, date or a
+saved situation; press Enter to start or Esc to quit. The fallback is intentionally
+minimal: it does not provide the full launcher pages for mods, profiles, multiplayer setup,
+updates or advanced settings. Launch `openomsi --menu` to choose this native menu directly.
+The native menu still needs a working graphics backend and an OMSI 2 content installation;
+if the content folder is not found, pass `--root "/path/to/OMSI 2"`.
 
 **Linux needs WebKitGTK 4.1** for the launcher's window: `libwebkit2gtk-4.1-0` on Debian and
 Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch. **SteamOS** (Steam Deck) does not
