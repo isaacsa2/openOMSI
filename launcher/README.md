@@ -28,10 +28,14 @@ window-free model `crates/omsi-launcher-model`. The game has no launcher window 
 
 ## How the game and the launcher find each other
 
-A plain start of `openomsi` (a double click) opens `openomsi-launcher-app` beside it; where it
-is missing, or its window cannot open (no WebView2 on an old Windows - the game offers
-Microsoft's installer -, no WebKitGTK 4.1 on Linux), the game says so and ends. A development
-build finds it when the launcher is built into the game's target folder
+A plain start of `openomsi` (a double click) opens `openomsi-launcher-app` beside it. If
+it is missing or exits during startup (for example, without WebView2 on Windows or
+WebKitGTK 4.1 on Linux), the game opens its lightweight **native start menu** instead
+(Windows still offers the missing WebView2 runtime installer first). The native menu is
+drawn with the game's renderer, has no web engine, and only offers the essential
+map/vehicle/session choices; it is not the old full wgpu launcher. It also needs a
+working graphics backend and a valid OMSI 2 content folder. `openomsi --menu` opens it
+directly. A development build finds the Tauri launcher when it is built into the game's target folder
 (`CARGO_TARGET_DIR=target cargo build --manifest-path launcher/src-tauri/Cargo.toml`). The
 launcher starts each duty as `openomsi` with a full command line, and rests out of sight
 while a game it started runs when the setting "The launcher rests while a game runs" is on. The duty chosen is kept in
