@@ -396,6 +396,12 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if !self.drive_window_start(event_loop) {
                     self.frame(event_loop);
+                    // With a bare launch the external Tauri launcher might have failed.
+                    // Once the native menu has drawn, consider the launcher healthy:
+                    // the guard must not time out while the player chooses a duty.
+                    if self.menus.menu.is_some() && std::env::args_os().len() == 1 {
+                        omsi_guard::healthy(omsi_guard::journal::Kind::Launcher);
+                    }
                 }
             }
             _ => {}
