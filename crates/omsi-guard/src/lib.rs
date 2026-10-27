@@ -116,6 +116,30 @@ fn own_state() -> Option<PathBuf> {
     (pid.parse::<u32>().ok()? == std::process::id()).then(|| PathBuf::from(path))
 }
 
+/// A deliberate WebView repair can wait for the player or Microsoft's installer longer
+/// than the startup deadline. Keep crash detection, but give startup a fresh deadline when
+/// the repair finishes. This state is not a successful start.
+#[cfg(windows)]
+pub(crate) struct WebViewRepair(Option<PathBuf>);
+
+#[cfg(windows)]
+pub(crate) fn webview_repair() -> WebViewRepair {
+    let state = own_state();
+    if let Some(path) = &state {
+        let _ = std::fs::write(path, "webview-repair");
+    }
+    WebViewRepair(state)
+}
+
+#[cfg(windows)]
+impl Drop for WebViewRepair {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::write(path, "begun");
+        }
+    }
+}
+
 /// A start of `kind` begins: the journal notes it, and a launcher start gets its watcher - or,
 /// when this version already failed here (or the project lists it as broken), is healed right
 /// now, before any window. Call it as early as possible (for the launcher: first thing in

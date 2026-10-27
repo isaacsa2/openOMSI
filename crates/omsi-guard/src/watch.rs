@@ -37,6 +37,44 @@ fn verdict(s: &str) -> Option<Option<End>> {
     }
 }
 
+/// Waiting for an installer or a player's answer is not an unresponsive launcher.
+fn timed_out(state: &str, now: Instant, since: &mut Instant, deadline: Duration) -> bool {
+    if state == "webview-repair" {
+        *since = now;
+    }
+    now.duration_since(*since) > deadline
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webview_repair_waits_for_the_player_without_claiming_a_healthy_start() {
+        let start = Instant::now();
+        let deadline = Duration::from_secs(120);
+        let mut since = start;
+        let later = start + Duration::from_secs(300);
+        assert_eq!(verdict("webview-repair"), None);
+        assert!(!timed_out("webview-repair", later, &mut since, deadline));
+        assert!(!timed_out("begun", later + Duration::from_secs(1), &mut since, deadline));
+        assert!(timed_out("begun", later + Duration::from_secs(121), &mut since, deadline));
+    }
+
+    #[test]
+    fn a_presented_native_menu_releases_the_launcher_watchdog() {
+        assert_eq!(verdict("begun"), None);
+        assert_eq!(verdict("healthy"), Some(None));
+        assert_eq!(verdict("exited-ok"), Some(None));
+        assert_eq!(verdict("exited-error"), Some(Some(End::Error)));
+        let mut journal = Journal::default();
+        journal.begin(Kind::Launcher, "test", "test", 42);
+        journal.mark_healthy(42);
+        assert!(!journal.broken(Kind::Launcher, "test", |_| true));
+        assert!(!journal.broken(Kind::Launcher, "test", |_| false));
+    }
+}
+
 /// The watcher's whole life: wait for the launcher's first frames, its end or the deadline;
 /// heal after a failed start.
 pub fn run(args: &[String]) -> i32 {
@@ -52,15 +90,17 @@ pub fn run(args: &[String]) -> i32 {
         std::thread::spawn(move || omsi_platform::recovery::remotely_bad(&version))
     };
     let started = Instant::now();
+    let mut waiting_since = started;
     let outcome = loop {
-        if let Some(v) = verdict(&read(state)) {
+        let current = read(state);
+        if let Some(v) = verdict(&current) {
             break v;
         }
         if !alive(pid) {
             // (it may have said how it went just before it ended)
             break verdict(&read(state)).unwrap_or(Some(End::Crash));
         }
-        if started.elapsed() > deadline {
+        if timed_out(&current, Instant::now(), &mut waiting_since, deadline) {
             kill(pid);
             break Some(End::Hang);
         }

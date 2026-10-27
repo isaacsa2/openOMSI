@@ -383,7 +383,7 @@ impl App {
         } else {
             let mut fonts = omsi_sim::texttex::FontLibrary::new(&self.args.root);
             self.menus.hud = Some(hud::Hud::new(&mut fonts));
-            self.menus.menu = Some(menu::Menu::new(&self.args.root, &self.args.map));
+            self.menus.menu = Some(menu::Menu::new(&self.args.root, &self.args.map).with_saved_situations(&self.args.root));
         }
     }
 

@@ -104,6 +104,21 @@ impl Menu {
         Menu { maps, vehicles, vehicle_meta, map, vehicle, hour: 9, traffic: 30, passengers: true, schedule: true, row: 0, start: false, situations, situation: 0, weathers, weather: 0, day: 150 }
     }
 
+    /// Extend only the start menu: in-game vehicle pickers also use `new`.
+    pub fn with_saved_situations(mut self, root: &Path) -> Self {
+        // Include the game's save slots and quicksave fallback folder through the same
+        // reader as Tauri. Discover once at menu creation, never on redraw; keep the
+        // original Situations entries (including saves shipped with a map) too.
+        for (map_name, map_file) in &self.maps {
+            for saved in omsi_launcher_lib::saved_situations(map_file) {
+                if !self.situations.iter().skip(1).any(|(_, file)| omsi_cfg::resolve_path(root, file) == saved.file) {
+                    self.situations.push((format!("{map_name}: {}", saved.name), saved.file.to_string_lossy().into_owned()));
+                }
+            }
+        }
+        self
+    }
+
     pub fn lines(&self) -> Vec<String> {
         let mark = |r: usize| if self.row == r { ">" } else { " " };
         vec![

@@ -305,8 +305,10 @@ pub fn run() -> Result<()> {
                     let text = omsi_ui::tr(MISSING_ORIGINAL)
                         .replace("{folder}", &args.root.display().to_string())
                         .replace("{missing}", &missing.join(", "));
-                    fatal_dialog(&omsi_ui::tr("openOMSI cannot start"), &text);
-                    anyhow::bail!("{text}");
+                    fatal_message(&text);
+                    // Missing content is not a broken binary: do not trigger an update,
+                    // rollback or safe-mode rescue for an installation the player must choose.
+                    return Ok(());
                 }
                 args.menu = true;
             }

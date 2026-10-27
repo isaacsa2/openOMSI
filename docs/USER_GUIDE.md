@@ -282,6 +282,9 @@ minimal: it does not provide the full launcher pages for mods, profiles, multipl
 updates or advanced settings. Launch `openomsi --menu` to choose this native menu directly.
 The native menu still needs a working graphics backend and an OMSI 2 content installation;
 if the content folder is not found, pass `--root "/path/to/OMSI 2"`.
+Blank or unresponsive Tauri windows that keep their process alive are not detected by the
+startup probe: close the window and use `--menu`. Recovery limits and the Windows/Linux
+test matrix are in [NATIVE_LAUNCHER_FALLBACK.md](NATIVE_LAUNCHER_FALLBACK.md).
 
 **Linux needs WebKitGTK 4.1** for the launcher's window: `libwebkit2gtk-4.1-0` on Debian and
 Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch. **SteamOS** (Steam Deck) does not

@@ -35,7 +35,9 @@ WebKitGTK 4.1 on Linux), the game opens its lightweight **native start menu** in
 drawn with the game's renderer, has no web engine, and only offers the essential
 map/vehicle/session choices; it is not the old full wgpu launcher. It also needs a
 working graphics backend and a valid OMSI 2 content folder. `openomsi --menu` opens it
-directly. A development build finds the Tauri launcher when it is built into the game's target folder
+directly. See [recovery limits and manual tests](../docs/NATIVE_LAUNCHER_FALLBACK.md),
+including the unsupported blank-window case. A development build finds the Tauri launcher
+when it is built into the game's target folder
 (`CARGO_TARGET_DIR=target cargo build --manifest-path launcher/src-tauri/Cargo.toml`). The
 launcher starts each duty as `openomsi` with a full command line, and rests out of sight
 while a game it started runs when the setting "The launcher rests while a game runs" is on. The duty chosen is kept in

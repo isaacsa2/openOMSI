@@ -259,6 +259,10 @@ impl App {
                     );
                     win.pre_present_notify();
                     s.present(&r.device, &r.queue, frame);
+                    // A redraw request alone need not produce a picture (a hidden or
+                    // lost surface). Only the presented menu releases the start guard;
+                    // choosing a session may then take as long as the player needs.
+                    omsi_guard::healthy(omsi_guard::journal::Kind::Launcher);
                 }
             }
             return false;

@@ -1,6 +1,7 @@
 //! The launcher is another program: the desktop launcher (`launcher/`, a Tauri window over
 //! omsi-launcher-core, `openomsi-launcher-app`) beside the game, or any program
-//! `OMSI_LAUNCHER` names. A plain start opens it; the game has no launcher window of its own.
+//! `OMSI_LAUNCHER` names. A plain start prefers it; on failure the game can reuse its native
+//! start menu without a web view.
 
 use anyhow::{anyhow, Result};
 use omsi_launcher_lib::i18n::{fill, tr, trf};
@@ -19,10 +20,10 @@ pub fn find_app_launcher() -> Option<PathBuf> {
 
 /// A plain start: the desktop launcher. Where it is missing, or ends at once with an error
 /// (a system without its web view: no WebKitGTK library on Linux, no WebView2 runtime on an
-/// old Windows - which is offered to be installed), the player is told why and where it
-/// should be, and the program ends with an error. The start guard counts the launcher as
-/// started (`healthy`) once it runs, and a start that failed as one to heal. `fatal_message`
-/// shows the player what went wrong (the game's own dialog).
+/// old Windows - which is offered to be installed), returns an error so the caller can
+/// open the native menu. `fatal_message` reports the diagnostic (the caller may just log
+/// it when recovery is available). The guard is released after the startup probe succeeds;
+/// this is a process-liveness check, not proof that the web page drew or responds.
 pub fn open_app_launcher(fatal_message: fn(&str)) -> Result<()> {
     let exe = std::env::current_exe().unwrap_or_default();
     let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -72,7 +73,8 @@ fn start_app_launcher(bin: &Path, exe: &Path, fresh: bool) -> Option<Failure> {
     while t0.elapsed() < std::time::Duration::from_secs(2) {
         match child.try_wait() {
             Ok(Some(status)) if !status.success() => return Some(("The openOMSI launcher ({launcher}) stopped right after it started ({why}).", status.to_string())),
-            Ok(Some(_)) | Err(_) => break,
+            Ok(Some(_)) => break,
+            Err(e) => return Some(("The openOMSI launcher ({launcher}) could not be started: {why}.", e.to_string())),
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
         }
     }
@@ -122,6 +124,7 @@ fn launcher_error() -> Option<String> {
 /// when the player wants it. True once it is installed.
 #[cfg(windows)]
 fn offer_webview2() -> bool {
+    let _repair = crate::webview_repair();
     use windows::core::PCWSTR;
     use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONQUESTION, MB_YESNO};
     let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
@@ -174,4 +177,47 @@ pub fn open_launcher() -> Result<bool> {
         .spawn()
         .map_err(|e| anyhow!("starting {}: {e}", bin.display()))?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_launcher_is_a_recoverable_start_failure() {
+        let missing = std::env::temp_dir().join(format!("openomsi-no-launcher-{}", std::process::id())).join(APP_LAUNCHER);
+        assert!(start_app_launcher(&missing, Path::new("openomsi"), false).is_some());
+    }
+
+    #[cfg(unix)]
+    fn probe(script: &str) -> Option<Failure> {
+        use std::os::unix::fs::PermissionsExt;
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let bin = std::env::temp_dir().join(format!("openomsi-launcher-probe-{}-{id}", std::process::id()));
+        std::fs::write(&bin, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let result = start_app_launcher(&bin, Path::new("openomsi"), false);
+        std::fs::remove_file(bin).unwrap();
+        result
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_immediate_launcher_error_allows_native_recovery() {
+        assert!(probe("exit 3").is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_the_launcher_cleanly_does_not_reopen_another_menu() {
+        assert!(probe("exit 0").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_live_process_passes_but_does_not_prove_webview_readiness() {
+        // Intentionally no window or web engine: documents the probe's boundary.
+        assert!(probe("exec sleep 3").is_none());
+    }
 }
