@@ -75,6 +75,13 @@ impl App {
                 None => self.frame_hidden(time.now),
             }
             self.frame_pace(time.now, shown_nothing, presented);
+            // A plain double-click normally starts a separate desktop launcher. When it
+            // fails and we show the native menu in this same process, tell the start
+            // guard as soon as a real menu frame was presented. Otherwise the watcher
+            // can mistake the player waiting at the menu for a hung launcher.
+            if presented && self.menus.menu.is_some() && std::env::args_os().len() == 1 {
+                omsi_guard::healthy(omsi_guard::journal::Kind::Launcher);
+            }
             // (what the sim thread stepped meanwhile is back before the frame is counted or
             // the session finished, see `sim_thread`)
             self.join_sim_thread();
