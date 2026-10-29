@@ -11,7 +11,7 @@ default = ["test-hooks", "fsr2-wgsl"]
 # it cannot be made to fail on purpose.
 test-hooks = []
 # Real AMD FSR 2 WGSL port, adapted locally to the custom wgpu 29 fork.
-fsr2-wgsl = ["dep:sp-fidelity", "dep:wgpu-naga-bridge"]
+fsr2-wgsl = ["dep:sp-fidelity", "dep:wgpu-naga-bridge", "dep:naga"]
 
 [dependencies]
 omsi-cfg = { path = "../omsi-cfg" }
@@ -20,6 +20,7 @@ omsi-texture = { path = "../omsi-texture" }
 wgpu.workspace = true
 sp-fidelity = { version = "=0.2.0", optional = true }
 wgpu-naga-bridge = { version = "29", optional = true }
+naga = { workspace = true, optional = true, features = ["wgsl-in"] }
 bytemuck.workspace = true
 glam.workspace = true
 pollster.workspace = true
