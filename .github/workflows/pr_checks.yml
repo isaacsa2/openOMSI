@@ -84,3 +84,7 @@ jobs:
       - name: Launcher theme startup
         if: ${{ !cancelled() }}
         run: node --experimental-vm-modules --test launcher/tests/theme-startup.test.mjs
+
+      - name: FSR graphics menu controls
+        if: ${{ !cancelled() }}
+        run: node --experimental-vm-modules --test launcher/tests/upscaler-settings.test.mjs
