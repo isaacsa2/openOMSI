@@ -162,7 +162,6 @@ fn the_rear_section_is_in_the_sync_table() {
     assert_ne!(whole.hash, alone.hash);
 }
 
-
 #[test]
 fn admin_password_command_is_private_for_any_case() {
     assert_eq!(admin_chat_arg("/admin hunter2"), Some("hunter2"));
