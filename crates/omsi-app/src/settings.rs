@@ -142,7 +142,7 @@ pub struct Settings {
     /// 0 = automatic (full size unless the window has more pixels than a 2560x1080 screen,
     /// as a Retina window does). The HUD is always drawn at full size.
     pub render_scale: f32,
-    /// Upscaling method for the main game picture: default or experimental fsr1.
+    /// Main picture: default, FSR 1, standalone TAA or FSR 2 preview (TAA-backed).
     pub upscaler: String,
     /// FSR1 internal resolution preset, or custom to use render_scale.
     pub fsr_quality: String,
@@ -624,7 +624,9 @@ impl Settings {
     /// standard upscaler, the Quality preset and 80 % sharpening.
     fn read_upscaler(&mut self, k: &str, v: &str) {
         match k {
-            "upscaler" => self.upscaler = if v.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }.into(),
+            "upscaler" => self.upscaler = match v.to_ascii_lowercase().as_str() {
+                "fsr1" => "fsr1", "taa" => "taa", "fsr2" => "fsr2", _ => "default",
+            }.into(),
             "fsr_quality" => self.fsr_quality = match v.to_ascii_lowercase().as_str() {
                 "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
                 "custom" => "custom", "auto" => "auto", _ => "quality",
@@ -1112,10 +1114,10 @@ impl Settings {
         log::warn!("safer graphics after a lost graphics device ({n}): msaa 1, SSAO off, shadows {} ({}), video memory {} of its limit, render scale {}", self.shadows, self.shadow_size, if n >= 2 { "half" } else { "two thirds" }, self.render_scale_text());
     }
 
-    /// The render scale the picture is drawn at: FSR 1's quality's, or the render scale's (0:
+    /// The render scale the picture is drawn at: FSR 1 or temporal preview quality, or the render scale's (0:
     /// automatic, the frame-rate governor's).
     pub fn scene_render_scale(&self) -> f32 {
-        if self.upscaler != "fsr1" {
+        if !matches!(self.upscaler.as_str(), "fsr1" | "fsr2") {
             return self.render_scale;
         }
         let preset: f32 = match self.fsr_quality.as_str() {
@@ -1134,8 +1136,12 @@ impl Settings {
 
     pub fn render_options(&self) -> omsi_render::RenderOptions {
         let fsr1 = self.upscaler == "fsr1";
+        let temporal_aa = matches!(self.upscaler.as_str(), "fsr2" | "taa");
         let render_scale = self.scene_render_scale();
-        omsi_render::RenderOptions { msaa: self.msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr_sharpness: self.fsr_sharpness, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
+        // Temporal histories need a single-sampled depth buffer. The launcher also
+        // persists MSAA=1 when one of these modes is selected.
+        let msaa = if temporal_aa { 1 } else { self.msaa };
+        omsi_render::RenderOptions { msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, temporal_aa, fsr_sharpness: self.fsr_sharpness, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
     }
 }
 

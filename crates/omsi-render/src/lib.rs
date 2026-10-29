@@ -287,6 +287,8 @@ pub struct RenderOptions {
     pub render_scale: f32,
     /// Experimental FSR1 spatial upscaler (at the start, or later with `set_upscaler`).
     pub fsr1: bool,
+    /// Standalone TAA or FSR 2 preview (TAA + spatial upscale, NOT AMD SDK).
+    pub temporal_aa: bool,
     /// RCAS sharpening strength, from 0 (none) to 1.
     pub fsr_sharpness: f32,
     /// VR: each eye is drawn at this fraction of its headset image and scaled up to it (by
@@ -370,6 +372,7 @@ impl Default for RenderOptions {
             ssao: true,
             render_scale: 0.0,
             fsr1: false,
+            temporal_aa: false,
             xr_scale: 1.0,
             fsr_sharpness: 0.8,
             compress_textures: true,
@@ -600,7 +603,13 @@ impl Renderer {
     /// False when FSR 1 was asked for and the driver has just refused it (said once): the
     /// standard upscaler stays, and it is not tried again in this run.
     pub fn set_upscaler(&mut self, fsr1: bool, sharpness: f32, render_scale: f32) -> bool {
-        self.scale.upscaler_asked = (fsr1, sharpness, render_scale);
+        self.set_upscaler_mode(fsr1, false, sharpness, render_scale)
+    }
+
+    /// Change between FSR 1, standalone TAA, and the experimental
+    /// TAA-backed temporal preview. This does not activate the FidelityFX SDK.
+    pub fn set_upscaler_mode(&mut self, fsr1: bool, temporal_aa: bool, sharpness: f32, render_scale: f32) -> bool {
+        self.scale.upscaler_asked = (fsr1, temporal_aa, sharpness, render_scale);
         self.options.fsr_sharpness = sharpness;
         self.options.render_scale = render_scale;
         let mut refused_now = false;
@@ -611,19 +620,23 @@ impl Renderer {
             }
         }
         self.options.fsr1 = fsr1 && self.scale.fsr.is_some();
-        // TAA and FSR1 are mutually exclusive. Reinitialize only when FSR1
-        // is actually disabled; unavailable pipelines retain the spatial fallback.
-        if self.options.fsr1 {
-            self.temporal_aa = None;
-            // Motion vectors were built only for TAA: FSR1 is spatial and must
-            // not keep their extra depth/fullscreen pass running.
-            if !omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() {
-                self.motion = None;
+        self.options.temporal_aa = temporal_aa;
+        // Only one temporal owner. The optional standalone TAA is also the
+        // FSR 2 preview's current reconstruction stage; no AMD SDK yet.
+        let want_taa = (temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
+            && !self.options.fsr1 && self.options.msaa <= 1 && !self.options.preview_only;
+        if want_taa {
+            if self.temporal_aa.is_none() {
+                self.temporal_aa = crate::gpu::optional_pipeline(&self.device, "experimental TAA", || temporal::Taa::new(&self.device, self.format));
             }
-        } else if omsi_cfg::flags::OMSI_TAA.is_set() && self.options.msaa <= 1 && self.temporal_aa.is_none() {
-            self.temporal_aa = crate::gpu::optional_pipeline(&self.device, "experimental TAA", || temporal::Taa::new(&self.device, self.format));
             if self.temporal_aa.is_some() && self.motion.is_none() {
                 self.set_motion_vectors(true);
+            }
+        } else {
+            self.temporal_aa = None;
+            // FSR 1 or standard scaling must not pay for an unused motion pass.
+            if !omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() {
+                self.motion = None;
             }
         }
         self.reset_motion_history();
@@ -632,12 +645,18 @@ impl Renderer {
         if !self.options.fsr1 || fsr1_rcas_strength(sharpness) == 0.0 {
             self.scale.fsr_target.get_mut().clear();
         }
-        !refused_now
+        !refused_now && (!temporal_aa || self.temporal_aa.is_some())
     }
 
     /// FSR 1, its sharpening and the render scale as last asked for (`set_upscaler`; at the
     /// start, the settings'): a menu change of something else leaves the upscaler alone.
     pub fn upscaler_asked(&self) -> (bool, f32, f32) {
+        let (fsr1, _, sharpness, render_scale) = self.scale.upscaler_asked;
+        (fsr1, sharpness, render_scale)
+    }
+
+    /// Latest live selection, including whether temporal reconstruction was requested.
+    pub fn upscaler_asked_mode(&self) -> (bool, bool, f32, f32) {
         self.scale.upscaler_asked
     }
 

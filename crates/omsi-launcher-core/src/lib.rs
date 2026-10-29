@@ -2372,7 +2372,9 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "rain_quality" => v[&k] = json!(rain_quality(val)),
             "vehicle_smoke" => v[&k] = json!(vehicle_smoke(val)),
             "puddles" => v[&k] = json!(puddles(val)),
-            "upscaler" => v[&k] = json!(if val.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }),
+            "upscaler" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
+                "fsr1" => "fsr1", "taa" => "taa", "fsr2" => "fsr2", _ => "default",
+            }),
             "fsr_quality" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
                 "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
                 "custom" => "custom", "auto" => "auto", _ => "quality",
@@ -2890,7 +2892,12 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         head_tracking_value("head_tracking_dead_zone", v.get("head_tracking_dead_zone").and_then(|x| x.as_f64())),
     ));
     text.push_str(&format!("upscaler={}\nfsr_quality={}\nfsr_sharpness={}\n",
-        if v.get("upscaler").and_then(|x| x.as_str()) == Some("fsr1") { "fsr1" } else { "default" },
+        match v.get("upscaler").and_then(|x| x.as_str()) {
+            Some("fsr1") => "fsr1",
+            Some("taa") => "taa",
+            Some("fsr2") => "fsr2",
+            _ => "default",
+        },
         match v.get("fsr_quality").and_then(|x| x.as_str()).unwrap_or("quality") {
             "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
             "custom" => "custom", "auto" => "auto", _ => "quality",

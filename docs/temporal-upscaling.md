@@ -115,3 +115,27 @@ The experimental TAA conservatively lowers its history contribution when rain
 or wet glass is present; it does not invent a per-pixel reactive mask. Switching
 back to FSR 1 releases TAA and its motion pass when no independent motion-vector
 debugging flag was requested, avoiding an unnecessary per-frame GPU cost.
+
+## Select temporal preview through the menu
+
+The Launcher and in-game Graphics → Upscaling menu now offer four distinct modes:
+
+- **Standard** (unchanged).
+- **AMD FSR 1**: the existing spatial EASU/RCAS implementation is retained.
+- **TAA (experimental)**: standalone motion-driven history at the current render scale.
+- **FSR 2 Preview (TAA-based, not AMD FidelityFX)**: selects the quality
+  scale (Ultra/Quality/Balanced/Performance) and processes the reduced-resolution
+  picture with the experimental TAA history, then the existing spatial scaler.
+  **This is a playable temporal *prototype*, not genuine AMD FSR 2**.
+
+FSR 1, TAA and the FSR 2 preview are mutually exclusive. Selecting a temporal
+option also stores MSAA=Off (required for the current motion-vector pass); selecting
+MSAA 2x/4x/8x while one is selected switches the upscaler to Standard. Existing
+FSR 1 settings, shader compilation, and quality presets remain available.
+Temporal settings are saved in `settings.cfg`, and switching the upscaler in-game
+attempts to update the active renderer without forcing a restart (switching the
+actual multisample render target still requires a restart).
+
+For testing, compare unchanged Standard vs FSR 1 vs Preview at the same quality
+and weather. The preview lacks real AMD SDK dispatch, jittered scene rendering,
+reactive masks, and animated-instance motion; it can ghost, so it is opt-in.

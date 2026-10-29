@@ -125,7 +125,12 @@ function SelectRow({ row }) {
   const value = match ? match[0] : cur == null ? '' : typeof cur === 'boolean' ? (cur ? '1' : '0') : String(cur);
   return html`<div class="setting-row">
     <${Name} label=${row.label} help=${row.help} warn=${row.heavy?.(value, s) && 'Heavy: can cost many frames per second on most graphics cards'} />
-    <${Select} value=${value} options=${options} raw=${row.raw} onChange=${async (v) => (await saveSettings({ [row.key]: asStored(cur, v) })) && row.recheckUpdates && checkUpdates()} />
+    <${Select} value=${value} options=${options} raw=${row.raw} onChange=${async (v) => {
+      const patch = { [row.key]: asStored(cur, v) };
+      if (row.key === 'upscaler' && (v === 'fsr2' || v === 'taa')) patch.msaa = 1;
+      if (row.key === 'msaa' && Number(v) > 1 && ['fsr2', 'taa'].includes(S.settings.upscaler)) patch.upscaler = 'default';
+      return (await saveSettings(patch)) && row.recheckUpdates && checkUpdates();
+    }} />
   </div>`;
 }
 
