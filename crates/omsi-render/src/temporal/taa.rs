@@ -113,7 +113,12 @@ impl Renderer {
         let targets = taa.targets.as_mut().unwrap();
         let next = 1 - targets.last;
         let previous_valid = targets.ready && !motion.frame_reset;
-        let values = [size.0 as f32, size.1 as f32, previous_valid as u8 as f32, 0.88f32];
+        // No per-pixel reactive mask yet: be conservative around glass and
+        // precipitation rather than accumulating wet-window/particle ghosts.
+        let precipitation = f.lighting.rain.clamp(0.0, 1.0);
+        let feedback = (0.88 * (1.0 - 0.8 * precipitation))
+            .min(if f.glass_on { 0.20 } else { 0.88 });
+        let values = [size.0 as f32, size.1 as f32, previous_valid as u8 as f32, feedback];
         self.queue.write_buffer(&taa.params, 0, bytemuck::cast_slice(&values));
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("TAA current/motion/previous"),

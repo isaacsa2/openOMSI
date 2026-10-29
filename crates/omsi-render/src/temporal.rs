@@ -137,7 +137,7 @@ impl crate::Renderer {
         &'a self,
         f: &'a crate::passes::FrameCtx<'_>,
     ) -> Option<FrameTextures<'a>> {
-        if !f.with_overlays || f.projection.is_some() || f.second_eye || self.device_lost().is_some() {
+        if self.options.fsr1 || !f.with_overlays || f.projection.is_some() || f.second_eye || self.device_lost().is_some() {
             return None;
         }
         let motion = self.motion.as_ref().filter(|m| m.frame_ready)?;

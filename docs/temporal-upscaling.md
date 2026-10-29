@@ -110,3 +110,8 @@ validates and borrows actual motion/depth/color texture views and the render
 and output dimensions. It refuses offscreen mirrors, XR eyes, stale motion,
 device-loss or absent scaled scene buffers. This is a private staging API,
 not an AMD SDK context, and does not perform a native FSR 2 dispatch.
+
+The experimental TAA conservatively lowers its history contribution when rain
+or wet glass is present; it does not invent a per-pixel reactive mask. Switching
+back to FSR 1 releases TAA and its motion pass when no independent motion-vector
+debugging flag was requested, avoiding an unnecessary per-frame GPU cost.

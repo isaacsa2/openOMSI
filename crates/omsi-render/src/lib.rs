@@ -615,6 +615,11 @@ impl Renderer {
         // is actually disabled; unavailable pipelines retain the spatial fallback.
         if self.options.fsr1 {
             self.temporal_aa = None;
+            // Motion vectors were built only for TAA: FSR1 is spatial and must
+            // not keep their extra depth/fullscreen pass running.
+            if !omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() {
+                self.motion = None;
+            }
         } else if omsi_cfg::flags::OMSI_TAA.is_set() && self.options.msaa <= 1 && self.temporal_aa.is_none() {
             self.temporal_aa = crate::gpu::optional_pipeline(&self.device, "experimental TAA", || temporal::Taa::new(&self.device, self.format));
             if self.temporal_aa.is_some() && self.motion.is_none() {
