@@ -88,3 +88,14 @@ jobs:
       - name: FSR graphics menu controls
         if: ${{ !cancelled() }}
         run: node --experimental-vm-modules --test launcher/tests/upscaler-settings.test.mjs
+
+      # Temporary FSR2 diagnostics: print Cargo's canonical lock diff before
+      # --locked verification, to resolve portability/compiler failures.
+      - name: FSR2 WGSL lock and compiler diagnostic
+        if: ${{ !cancelled() && github.event.pull_request.number == 302 }}
+        run: |
+          cargo metadata --format-version 1 > /dev/null
+          echo "=== Cargo.lock diff (must be empty on a clean PR) ==="
+          git diff -- Cargo.lock
+          cargo check --locked -p omsi-render --lib
+
