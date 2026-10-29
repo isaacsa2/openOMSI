@@ -560,3 +560,28 @@ fn cab_wheel_rotation_defaults_to_the_bus_and_is_clamped() {
     ui["cab_wheel_rotation"] = serde_json::json!(1080);
     assert_eq!(Settings::from_text(&omsi_launcher_lib::settings_to_text(&ui, None)).cab_wheel_rotation, 1080);
 }
+
+#[test]
+fn preview_and_taa_modes_preserve_fsr1_and_use_single_sample() {
+    let fsr1 = Settings::from_text("upscaler=fsr1\nfsr_quality=quality\nmsaa=4\n");
+    assert!(fsr1.render_options().fsr1);
+    assert!(!fsr1.render_options().temporal_aa);
+    assert_eq!(fsr1.render_options().msaa, 4);
+
+    let preview = Settings::from_text("upscaler=fsr2\nfsr_quality=balanced\nmsaa=4\n");
+    let options = preview.render_options();
+    assert!(options.temporal_aa);
+    assert!(!options.fsr1);
+    assert_eq!(options.msaa, 1, "temporal reconstruction requires MSAA off");
+    assert!((options.render_scale - 0.59).abs() < 0.001);
+    assert_eq!(Settings::from_text(&preview.to_text()).upscaler, "fsr2");
+
+    let taa = Settings::from_text("upscaler=taa\nrender_scale=1\nmsaa=8\n");
+    assert!(taa.render_options().temporal_aa);
+    assert!(!taa.render_options().fsr1);
+    assert_eq!(taa.render_options().msaa, 1);
+    assert!((taa.render_options().render_scale - 1.0).abs() < 0.001);
+
+    assert_eq!(Settings::from_text("upscaler=unknown\n").upscaler, "default");
+}
+
