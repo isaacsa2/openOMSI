@@ -478,6 +478,11 @@ pub(super) fn sync_live(app: &mut App) {
         if o.fsr2_wgsl && !r.fsr2_wgsl_active() && !r.set_fsr2_wgsl(true) {
             app.service_msg = Some(("FSR 2.0 requires a build with fsr2-wgsl and a compatible native GPU; Standard is used instead".into(), 6.0));
         }
+        // Also update the sharpening value on the frame that first enables
+        // FSR2: the shared spatial-scaler controls may have held FSR1's value.
+        if o.fsr2_wgsl && r.fsr2_wgsl_active() {
+            r.options.fsr_sharpness = o.fsr_sharpness;
+        }
         // FSR3 remains behind a development-only Cargo feature; it is not a
         // public menu mode. Unknown/legacy values fall back to Standard.
     }
