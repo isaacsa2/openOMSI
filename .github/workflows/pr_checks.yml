@@ -84,20 +84,3 @@ jobs:
       - name: Launcher theme startup
         if: ${{ !cancelled() }}
         run: node --experimental-vm-modules --test launcher/tests/theme-startup.test.mjs
-
-  fsr3-experimental:
-    # Only this prototype PR: don't make every upstream contributor compile
-    # FidelityFX shaders or wait for a large optional dependency.
-    if: github.event.pull_request.number == 302
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: optional-fsr3
-      - name: Check native wgpu 29 FidelityFX FSR3 code
-        run: cargo check --locked -p omsi-render --lib --features fsr3-wgpu
-      - name: Validate shaders and temporal unit tests
-        run: cargo test --locked -p omsi-render --lib --features fsr3-wgpu temporal:: -- --nocapture
