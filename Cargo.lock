@@ -7048,27 +7048,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
-name = "wgpu-ffx"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a5d4fec8a3ed04c3113f186faf0e8c69b17ad34ba2106fb36a20c58b80ff07d"
-dependencies = [
- "bitflags 2.13.2",
- "bytemuck",
- "half",
- "pollster 0.4.0",
- "thiserror 2.0.21",
- "wgpu",
- "wgpu-ffx-shaders-spv",
-]
-
-[[package]]
-name = "wgpu-ffx-shaders-spv"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7188412df1ef6714a00704b21b568c67e317c2fb09fbafe59baf0bd43ec43ff"
-
-[[package]]
 name = "wgpu"
 version = "29.0.4"
 source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf8062be2978d93e95556a4dd83f1d3b8#4eb06e5bf8062be2978d93e95556a4dd83f1d3b8"
@@ -7151,6 +7130,27 @@ source = "git+https://github.com/openOMSI-Project/wgpu-openomsi?rev=4eb06e5bf806
 dependencies = [
  "wgpu-hal",
 ]
+
+[[package]]
+name = "wgpu-ffx"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a5d4fec8a3ed04c3113f186faf0e8c69b17ad34ba2106fb36a20c58b80ff07d"
+dependencies = [
+ "bitflags 2.13.2",
+ "bytemuck",
+ "half",
+ "pollster 0.4.0",
+ "thiserror 2.0.21",
+ "wgpu",
+ "wgpu-ffx-shaders-spv",
+]
+
+[[package]]
+name = "wgpu-ffx-shaders-spv"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7188412df1ef6714a00704b21b568c67e317c2fb09fbafe59baf0bd43ec43ff"
 
 [[package]]
 name = "wgpu-hal"
