@@ -200,6 +200,22 @@ impl Renderer {
         if omsi_cfg::flags::OMSI_GPU_TIMERS.is_set() {
             required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
+        // FSR3 uses optional storage formats and subgroup compute. Ask for those
+        // only on an explicit experimental request; the default FSR1/GL path
+        // must keep its current device feature set (including legacy GPUs).
+        let fsr3_features = wgpu::Features::SUBGROUP
+            | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        let fsr3_compatible = cfg!(feature = "fsr3-wgpu")
+            && options.fsr3
+            && !intel_vulkan_safe
+            && info.backend != wgpu::Backend::Gl
+            && info.backend != wgpu::Backend::Noop
+            && adapter.features().contains(fsr3_features);
+        if fsr3_compatible {
+            required_features |= fsr3_features;
+        } else if options.fsr3 {
+            log::warn!("FSR3: adapter lacks subgroup/storage features or native backend; will use standard scaling");
+        }
         // DXT textures stay compressed on the GPU where it takes them (Apple silicon does);
         // OMSI_NO_BC=1 uploads everything as RGBA (the old way, for comparisons), and so does
         // the settings' `gpu_texture_compression` off
@@ -563,7 +579,13 @@ impl Renderer {
         // (OMSI_FSR1: FSR 1 from the start whatever the settings say - the menu can still turn
         // it off; what the settings asked for is kept, so that only a change of theirs does)
         let upscaler_asked = (options.fsr1, options.temporal_aa, options.fsr_sharpness, options.render_scale);
-        let options = RenderOptions { fsr1: (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr.is_some(), ..options };
+        let options = RenderOptions {
+            fsr1: (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr.is_some(),
+            // The feature is compiled and the adapter was approved *before*
+            // request_device; don't attempt the backend on an incompatible GPU.
+            fsr3: options.fsr3 && fsr3_compatible,
+            ..options
+        };
         let gpu_timers = std::array::from_fn(|_| GpuTimers::new(&device));
         // GLES cannot reliably read the depth buffer (the same limitation as SSAO).
         let puddles = (!gl && !passes.leave_out_enhanced).then(|| {
