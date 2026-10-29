@@ -52,3 +52,31 @@ frame's (`Rg16Float`, FSR 2's convention).
    and the cab's moving parts get vectors of their own.
 5. **FSR 2** itself (or the TAA upscaling the picture), as a choice of the upscaler setting next
    to the standard upscaler and FSR 1, with a reactive mask for glass, rain and particles.
+
+## FSR 2 backend handoff (staged)
+
+`crates/omsi-render/src/temporal.rs` defines a vendor-neutral frame contract, including
+the reversed-Z depth flag, render and presentation extents, motion scaling, jitter
+sequence, and reset signals. The motion-pass now tracks whether it produced input
+this frame and whether it has a previous valid view. Its GPU resources can be
+borrowed for an actual FSR 2 dispatch once an AMD FidelityFX backend exists.
+
+**There is no AMD FidelityFX SDK/context or FSR 2 output in this branch yet.**
+Do not expose an "FSR 2 active" menu item until a backend compiles, dispatches
+and passes image/performance tests on real Vulkan/DX12 devices. Do not enable
+jitter without a temporal resolver: an image without reconstruction would shake.
+
+- Temporal algorithms are mutually exclusive. FSR 1 must not combine with a
+  standalone TAA or a temporal upscaler; an unavailable FSR 2 / DLSS may fall
+  back to working TAA only after that independent backend is implemented.
+- The existing motion values are *normalized UV differences*, not render
+  pixels. FSR 2 must use the per-frame `motion_vector_scale` rather than
+  submitting these unscaled; depth uses reversed Z.
+- The frame's color, depth and motion must come from the same desktop main view
+  at render resolution and the same view projection. Currently animated
+  traffic, hands, wipers and passengers still need per-instance motion.
+- Reactive and transparency/composition masks are currently unavailable.
+  Before enabling production FSR 2, generate them for rain, glass, smoke and
+  moving semitransparent surfaces and validate with real modded buses.
+- Native Vulkan/DX12 access, resource-state transitions, official SDK linkage,
+  temporal output and full in-game performance validation remain required.

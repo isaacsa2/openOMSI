@@ -32,6 +32,7 @@ mod puddles;
 mod rt;
 mod rt_tex;
 mod shaders;
+pub mod temporal;
 mod srgb_encode;
 mod triple;
 mod frame_plan;

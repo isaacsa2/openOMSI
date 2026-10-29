@@ -73,6 +73,10 @@ pub(crate) struct MotionVectors {
     prev: Option<PreviousView>,
     /// Why the last frame had none (logged when it changes): "" while they are drawn.
     skipped: &'static str,
+    /// This frame produced valid GPU inputs for a temporal consumer.
+    pub(crate) frame_ready: bool,
+    /// The first frame after history invalidation must reset a temporal upscaler.
+    pub(crate) frame_reset: bool,
 }
 
 impl MotionVectors {
@@ -105,7 +109,7 @@ impl MotionVectors {
             no_vertex_pipeline("motion vectors debug", &pl("motion vectors debug", &debug_layout), &shader, "fs_debug", &[target(format, Some(wgpu::BlendState::ALPHA_BLENDING))]).create(device)
         });
         let params = uniform_buffer(device, "motion vectors", std::mem::size_of::<MotionParams>() as u64);
-        MotionVectors { pipeline, layout, debug_pipeline, debug_layout, params, target: None, prev: None, skipped: "" }
+        MotionVectors { pipeline, layout, debug_pipeline, debug_layout, params, target: None, prev: None, skipped: "", frame_ready: false, frame_reset: true }
     }
 
     /// The vectors' texture for pictures of `size` (made again when the size changes).
@@ -139,6 +143,8 @@ impl MotionVectors {
     /// vectors are all zero, and it becomes the last frame.
     pub(crate) fn reset(&mut self) {
         self.prev = None;
+        self.frame_ready = false;
+        self.frame_reset = true;
     }
 }
 
@@ -200,6 +206,8 @@ impl Renderer {
         // History is valid only for this camera, projection and viewport.
         let now = std::time::Instant::now();
         let previous = m.prev.filter(|p| reusable_previous(p, f.camera, (w, h), now));
+        m.frame_reset = previous.is_none();
+        m.frame_ready = true;
         let (prev_vp, known) = match previous {
             Some(p) => (p.vp * Mat4::from_translation((ro - p.origin).as_vec3()), true),
             None => (view_proj, false),
