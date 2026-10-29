@@ -108,7 +108,7 @@ fn input_key(duty: &PlayerDuty) -> u64 {
             stop.dep.to_bits().hash(&mut hasher);
         }
     }
-    duty.trips.get(duty.trip_index + 1).map(|t| t.departure.to_bits()).hash(&mut hasher);
+    duty.trip_index.checked_add(1).and_then(|next| duty.trips.get(next)).map(|t| t.departure.to_bits()).hash(&mut hasher);
     hasher.finish()
 }
 
