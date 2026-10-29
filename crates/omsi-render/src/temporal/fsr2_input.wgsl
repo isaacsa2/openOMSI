@@ -1,5 +1,5 @@
 // Converts the existing tone-mapped window colour into linear RGBA16F,
-// which wgpu-ffx's FSR3 compute backend requires. No CPU readback.
+// required by the FSR2 WGSL compute backend. No CPU readback.
 @group(0) @binding(0) var color_source: texture_2d<f32>;
 
 @vertex

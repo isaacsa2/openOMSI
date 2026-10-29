@@ -631,8 +631,6 @@ impl Settings {
                 "fsr1" => "fsr1",
                 "taa" => "taa",
                 "fsr2" | "fsr2wgsl" => "fsr2",
-                // FSR3 is intentionally removed from the user-facing options.
-                "fsr3" => "default",
                 _ => "default",
             }.into(),
             "fsr_quality" => self.fsr_quality = match v.to_ascii_lowercase().as_str() {
@@ -1149,14 +1147,13 @@ impl Settings {
         let fsr1 = self.upscaler == "fsr1";
         // The menu's fsr2 setting now selects the actual FSR2 WGSL SDK
         // passes, never the old TAA + spatial scaling preview.
-        let fsr3 = false;
         let fsr2_wgsl = self.upscaler == "fsr2";
         let temporal_aa = self.upscaler == "taa";
         let render_scale = self.scene_render_scale();
         // Temporal histories need a single-sampled depth buffer. The launcher also
         // persists MSAA=1 when one of these modes is selected.
-        let msaa = if temporal_aa || fsr3 || fsr2_wgsl { 1 } else { self.msaa };
-        omsi_render::RenderOptions { msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr3, fsr2_wgsl, temporal_aa, fsr_sharpness: if fsr2_wgsl { self.fsr2_sharpness } else { self.fsr_sharpness }, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
+        let msaa = if temporal_aa || fsr2_wgsl { 1 } else { self.msaa };
+        omsi_render::RenderOptions { msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr2_wgsl, temporal_aa, fsr_sharpness: if fsr2_wgsl { self.fsr2_sharpness } else { self.fsr_sharpness }, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
     }
 }
 

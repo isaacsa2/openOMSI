@@ -578,7 +578,7 @@ fn only_standard_taa_fsr1_and_actual_fsr2_are_public_modes() {
     let fsr2 = Settings::from_text("upscaler=fsr2\nfsr_quality=balanced\nmsaa=4\n");
     let o = fsr2.render_options();
     assert!(o.fsr2_wgsl, "FSR2 must run real WGSL, never TAA Preview");
-    assert!(!o.temporal_aa && !o.fsr1 && !o.fsr3);
+    assert!(!o.temporal_aa && !o.fsr1);
     assert_eq!(o.msaa, 1);
     assert!((o.render_scale - 0.59).abs() < 0.001);
     assert_eq!(Settings::from_text(&fsr2.to_text()).upscaler, "fsr2");
@@ -587,7 +587,6 @@ fn only_standard_taa_fsr1_and_actual_fsr2_are_public_modes() {
     let old = Settings::from_text("upscaler=fsr2wgsl\n");
     assert_eq!(old.upscaler, "fsr2");
     assert!(old.render_options().fsr2_wgsl);
-    assert_eq!(Settings::from_text("upscaler=fsr3\n").upscaler, "default");
     assert_eq!(Settings::from_text("upscaler=unknown\n").upscaler, "default");
 }
 

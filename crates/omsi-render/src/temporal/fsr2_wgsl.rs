@@ -42,7 +42,7 @@ impl Fsr2Wgsl {
         // No second wgpu device or native SDK pointer is introduced here.
         let shader = compile_shader(device, wgpu::ShaderModuleDescriptor {
             label: Some("FSR2 WGSL input conversion"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("fsr3_input.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("fsr2_input.wgsl").into()),
         });
         let convert_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("FSR2 source colour"),

@@ -455,7 +455,6 @@ pub(super) fn sync_live(app: &mut App) {
     // Temporal reconstruction is exclusive; switching MSAA may need a restart.
     let o = app.settings.render_options();
     if let Some(r) = app.renderer.as_mut() {
-        if r.options.fsr3 && !o.fsr3 { r.set_fsr3(false); }
         if r.options.fsr2_wgsl && !o.fsr2_wgsl { r.set_fsr2_wgsl(false); }
         // FSR2's sharpness is an independent live parameter. Avoid resetting
         // temporal history simply because its slider was moved.
@@ -484,8 +483,6 @@ pub(super) fn sync_live(app: &mut App) {
         if o.fsr2_wgsl && r.fsr2_wgsl_active() {
             r.options.fsr_sharpness = o.fsr_sharpness;
         }
-        // FSR3 remains behind a development-only Cargo feature; it is not a
-        // public menu mode. Unknown/legacy values fall back to Standard.
     }
     // (the street light takes effect at once: the renderer reads it every frame)
     let live = app.settings.render_options();
