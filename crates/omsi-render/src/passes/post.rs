@@ -219,7 +219,7 @@ impl Renderer {
                     occlusion_query_set: None, multiview_mask: None,
                 });
                 pass.set_pipeline(&self.scale.copy_pipeline);
-                pass.set_bind_group(0, &fsr2_bg, &[]);
+                pass.set_bind_group(0, fsr2_bg, &[]);
                 pass.draw(0..3, 0..1);
                 if !overlays.is_empty() {
                     pass.set_pipeline(&self.overlay_pipeline_1x);

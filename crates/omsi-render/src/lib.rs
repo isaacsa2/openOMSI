@@ -247,7 +247,7 @@ pub struct Renderer {
     /// Optional standalone TAA history test consumer, never combined with FSR1.
     temporal_aa: Option<temporal::Taa>,
     #[cfg(feature = "fsr2-wgsl")]
-    fsr2_wgsl: Option<temporal::Fsr2Handle>,
+    fsr2_wgsl: Option<temporal::Fsr2Wgsl>,
     /// Meshes share pages of buffers (the adapter draws with a base vertex).
     mesh_pages: bool,
     /// The size-keyed targets (see targets.rs): made on first use, let go of when unused.
@@ -579,7 +579,7 @@ impl Renderer {
             if self.options.preview_only {
                 return "not available in preview-only rendering".into();
             }
-            let missing = crate::temporal::Fsr2Handle::required_features()
+            let missing = crate::temporal::Fsr2Wgsl::required_features()
                 & !self.device.features();
             if !missing.is_empty() {
                 return format!("shader features {:?} were not enabled for this graphics session; restart with FSR2 selected (or check adapter support in the graphics log)", missing);
@@ -602,12 +602,12 @@ impl Renderer {
         #[cfg(feature = "fsr2-wgsl")]
         {
             if self.options.msaa > 1 || self.options.preview_only
-                || !self.device.features().contains(temporal::Fsr2Handle::required_features()) {
+                || !self.device.features().contains(temporal::Fsr2Wgsl::required_features()) {
                 log::warn!("FSR2 WGSL unavailable: {}", self.fsr2_wgsl_unavailable_reason());
                 return false;
             }
             if self.fsr2_wgsl.is_none() {
-                self.fsr2_wgsl = Some(temporal::Fsr2Handle::new());
+                self.fsr2_wgsl = Some(temporal::Fsr2Wgsl::new(&self.device));
             }
             if self.fsr2_wgsl.is_some() {
                 if self.motion.is_none() { self.set_motion_vectors(true); }

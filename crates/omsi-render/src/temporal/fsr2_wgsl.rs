@@ -252,6 +252,10 @@ impl Fsr2Wgsl {
         Fsr2Engine::required_features()
     }
 
+    pub(crate) fn available(&self) -> bool {
+        !self.refused
+    }
+
     pub(crate) fn new(_device: &wgpu::Device) -> Self {
         // Do not instantiate FfxInterface here: Renderer::build may run on
         // ANGLE's separate compiler thread and would make Renderer !Send.

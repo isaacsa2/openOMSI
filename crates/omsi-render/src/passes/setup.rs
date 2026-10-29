@@ -275,9 +275,8 @@ impl Renderer {
         #[cfg(feature = "fsr2-wgsl")]
         let vp_mat = if self.fsr2_wgsl_active() && f.with_overlays && f.projection.is_none() {
             let display = (f.full_w, f.target.texture().height());
-            let jitter = self.fsr2_wgsl.as_ref().expect("FSR2 WGSL")
-                .jitter(&self.device, (f.width, f.height), display);
-            jitter.map_or(vp_mat, |j| crate::temporal::jittered_view_projection(vp_mat, j, (f.width, f.height)))
+            let jitter = self.fsr2_wgsl.as_ref().expect("FSR2 WGSL").jitter((f.width, f.height), display);
+            crate::temporal::jittered_view_projection(vp_mat, jitter, (f.width, f.height))
         } else { vp_mat };
         // the last frame's picture for the bounced light, found again under this frame's view
         if lead_view {
