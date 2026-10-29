@@ -476,7 +476,8 @@ pub(super) fn sync_live(app: &mut App) {
             app.service_msg = Some((omsi_ui::tr(reason).into_owned(), 6.0));
         }
         if o.fsr2_wgsl && !r.fsr2_wgsl_active() && !r.set_fsr2_wgsl(true) {
-            app.service_msg = Some(("FSR 2.0 requires a build with fsr2-wgsl and a compatible native GPU; Standard is used instead".into(), 6.0));
+            let reason = r.fsr2_wgsl_unavailable_reason();
+            app.service_msg = Some((format!("FSR 2.0 unavailable: {reason}; using Standard scaling"), 7.0));
         }
         // Also update the sharpening value on the frame that first enables
         // FSR2: the shared spatial-scaler controls may have held FSR1's value.

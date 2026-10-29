@@ -573,8 +573,35 @@ impl Renderer {
         { false }
     }
 
-    /// Switch genuine WGSL FSR2 (not TAA). The feature is never loaded on
-    /// an unsupported GPU or an OpenGL device.
+    /// Switch genuine WGSL FSR2 (not TAA). Backends and vendors are
+    /// permitted when they expose the necessary shader capabilities.
+    /// Why FSR2 could not be activated; safe to display in the in-game UI.
+    /// Do not suggest that a noncompiled feature can be unlocked at runtime.
+    pub fn fsr2_wgsl_unavailable_reason(&self) -> String {
+        #[cfg(not(feature = "fsr2-wgsl"))]
+        {
+            return "not included in this build (requires omsi-render/fsr2-wgsl)".into();
+        }
+        #[cfg(feature = "fsr2-wgsl")]
+        {
+            if self.options.msaa > 1 {
+                return "MSAA must be disabled".into();
+            }
+            if self.options.preview_only {
+                return "not available in preview-only rendering".into();
+            }
+            let missing = crate::temporal::Fsr2Wgsl::required_features()
+                & !self.device.features();
+            if !missing.is_empty() {
+                return format!("graphics driver lacks {:?}", missing);
+            }
+            if self.motion.is_none() {
+                return "motion-vector pipeline is unavailable".into();
+            }
+            "FSR2 shader pipeline could not initialize (check graphics log)".into()
+        }
+    }
+
     pub fn set_fsr2_wgsl(&mut self, enabled: bool) -> bool {
         if !enabled {
             self.options.fsr2_wgsl = false;
@@ -585,9 +612,9 @@ impl Renderer {
         }
         #[cfg(feature = "fsr2-wgsl")]
         {
-            if self.options.msaa > 1 || crate::gl_backend() || self.options.preview_only
+            if self.options.msaa > 1 || self.options.preview_only
                 || !self.device.features().contains(temporal::Fsr2Wgsl::required_features()) {
-                log::warn!("FSR2 WGSL needs single-sample depth and the required compute features");
+                log::warn!("FSR2 WGSL unavailable: {}", self.fsr2_wgsl_unavailable_reason());
                 return false;
             }
             if self.fsr2_wgsl.is_none() {
@@ -605,7 +632,7 @@ impl Renderer {
                 return true;
             }
         }
-        log::warn!("FSR2 WGSL backend not compiled or unsupported by this GPU");
+        log::warn!("FSR2 WGSL unavailable: {}", self.fsr2_wgsl_unavailable_reason());
         false
     }
 
@@ -628,8 +655,14 @@ impl Renderer {
         }
         #[cfg(feature = "fsr3-wgpu")]
         {
-            if self.options.msaa > 1 || crate::gl_backend() || self.options.preview_only {
-                log::warn!("FSR 3 requires a single-sampled desktop Vulkan, DX12 or Metal device");
+            let needed = wgpu::Features::SUBGROUP
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+            if self.options.msaa > 1 || self.options.preview_only
+                || !self.device.features().contains(needed) {
+                log::warn!(
+                    "FSR3 upscaling requires MSAA off and shader features {:?}; driver reports missing {:?}",
+                    needed, needed & !self.device.features()
+                );
                 return false;
             }
             if self.fsr3.is_none() {

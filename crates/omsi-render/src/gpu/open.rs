@@ -200,34 +200,64 @@ impl Renderer {
         if omsi_cfg::flags::OMSI_GPU_TIMERS.is_set() {
             required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
-        // The WGSL SDK's reflection/compute passes require native-only
-        // storage formats and subgroups. Never alter regular FSR1 device caps.
+        // The WGSL backend is vendor-neutral. Do not blacklist the OpenGL
+        // backend (or an AMD/NVIDIA/Intel vendor ID): let the adapter report
+        // which compute features it actually implements. An OpenGL driver
+        // with no subgroup/atomic support will still be rejected safely.
+        // Intel's conservative Vulkan startup profile stays protected,
+        // because that particular driver can fault in vkCreateDevice.
         #[cfg(feature = "fsr2-wgsl")]
         {
             let needed = crate::temporal::Fsr2Wgsl::required_features();
-            if options.fsr2_wgsl && adapter.features().contains(needed)
-                && !intel_vulkan_safe && info.backend != wgpu::Backend::Gl
-                && info.backend != wgpu::Backend::Noop {
-                required_features |= needed;
-            } else if options.fsr2_wgsl {
-                log::warn!("FSR2 WGSL unavailable on this adapter; retaining Standard/FSR1");
+            if options.fsr2_wgsl {
+                let missing = needed & !adapter.features();
+                if intel_vulkan_safe {
+                    log::warn!(
+                        "FSR2 WGSL disabled by the Intel Vulkan driver safety profile; update the driver and use OMSI_INTEL_FULL_GPU=1 to retest"
+                    );
+                } else if info.backend == wgpu::Backend::Noop {
+                    log::warn!("FSR2 WGSL unavailable on the no-op graphics backend");
+                } else if !missing.is_empty() {
+                    log::warn!(
+                        "FSR2 WGSL cannot run on {} ({:?}): driver lacks {:?}; using Standard (not an AMD/vendor lock)",
+                        info.name, info.backend, missing
+                    );
+                } else {
+                    required_features |= needed;
+                    log::info!(
+                        "FSR2 WGSL: {} ({:?}) reports all required shader features; enabling experimental compute backend",
+                        info.name, info.backend
+                    );
+                }
             }
+        }
+        #[cfg(not(feature = "fsr2-wgsl"))]
+        if options.fsr2_wgsl {
+            log::warn!(
+                "FSR2 WGSL was selected but not compiled into this executable; build with --features omsi-render/fsr2-wgsl"
+            );
         }
         // FSR3 uses optional storage formats and subgroup compute. Ask for those
         // only on an explicit experimental request; the default FSR1/GL path
         // must keep its current device feature set (including legacy GPUs).
         let fsr3_features = wgpu::Features::SUBGROUP
             | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        // FSR3 upscaling also uses a vendor-neutral GPU compute path.
+        // Advertised features, not the backend name, decide whether it can
+        // be attempted. FSR3 remains hidden in the public graphics menu.
         let fsr3_compatible = cfg!(feature = "fsr3-wgpu")
             && options.fsr3
             && !intel_vulkan_safe
-            && info.backend != wgpu::Backend::Gl
             && info.backend != wgpu::Backend::Noop
             && adapter.features().contains(fsr3_features);
         if fsr3_compatible {
             required_features |= fsr3_features;
         } else if options.fsr3 {
-            log::warn!("FSR3: adapter lacks subgroup/storage features or native backend; will use standard scaling");
+            let missing = fsr3_features & !adapter.features();
+            log::warn!(
+                "FSR3 upscaling unavailable on {} ({:?}): missing {:?}, or protected driver profile; using Standard",
+                info.name, info.backend, missing
+            );
         }
         // DXT textures stay compressed on the GPU where it takes them (Apple silicon does);
         // OMSI_NO_BC=1 uploads everything as RGBA (the old way, for comparisons), and so does
@@ -592,14 +622,23 @@ impl Renderer {
         // (OMSI_FSR1: FSR 1 from the start whatever the settings say - the menu can still turn
         // it off; what the settings asked for is kept, so that only a change of theirs does)
         let upscaler_asked = (options.fsr1, options.temporal_aa, options.fsr_sharpness, options.render_scale);
+        // Preserve the requested upscale mode only if the actual device
+        // exposes every required shader feature. This permits any vendor or
+        // API that satisfies the contract, including capable GL drivers.
+        #[cfg(feature = "fsr2-wgsl")]
+        let fsr2_available = options.fsr2_wgsl
+            && !intel_vulkan_safe
+            && device.features().contains(crate::temporal::Fsr2Wgsl::required_features());
+        #[cfg(not(feature = "fsr2-wgsl"))]
+        let fsr2_available = false;
+        let fsr3_available = options.fsr3
+            && !intel_vulkan_safe
+            && cfg!(feature = "fsr3-wgpu")
+            && device.features().contains(fsr3_features);
         let options = RenderOptions {
             fsr1: (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr.is_some(),
-            // The feature is compiled and the adapter was approved *before*
-            // request_device; don't attempt the backend on an incompatible GPU.
-            fsr3: options.fsr3 && !gl && device.features().contains(
-                wgpu::Features::SUBGROUP | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-            ),
-            fsr2_wgsl: options.fsr2_wgsl && !gl && cfg!(feature = "fsr2-wgsl"),
+            fsr3: fsr3_available,
+            fsr2_wgsl: fsr2_available,
             ..options
         };
         let gpu_timers = std::array::from_fn(|_| GpuTimers::new(&device));
@@ -609,12 +648,12 @@ impl Renderer {
         });
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
         #[cfg(feature = "fsr2-wgsl")]
-        let fsr2_wgsl = (options.fsr2_wgsl && options.msaa <= 1 && !gl && !options.preview_only
+        let fsr2_wgsl = (options.fsr2_wgsl && options.msaa <= 1 && !options.preview_only
             && device.features().contains(crate::temporal::Fsr2Wgsl::required_features()))
             .then(|| crate::gpu::optional_pipeline(&device, "FSR2 WGSL", || crate::temporal::Fsr2Wgsl::new(&device)))
             .flatten();
         #[cfg(feature = "fsr3-wgpu")]
-        let fsr3 = (options.fsr3 && options.msaa <= 1 && !gl && !options.preview_only)
+        let fsr3 = (options.fsr3 && options.msaa <= 1 && !options.preview_only)
             .then(|| crate::gpu::optional_pipeline(&device, "FSR3 upscaling", || crate::temporal::Fsr3::new(&device)))
             .flatten();
         let temporal_aa = ((options.temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
