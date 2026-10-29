@@ -32,7 +32,7 @@ pub(crate) fn click(app: &mut crate::App, id: &str) {
         return;
     }
     let Some(heading) = app.player.as_ref().map(|p| p.vehicle.heading) else { return };
-    crate::admin::request_teleport(app, at, heading);
-    // The server answers the request; the client must not claim success yet.
-    app.service_event("teleport", "player", None);
+    if crate::admin::request_teleport(app, at, heading) {
+        app.service_event("teleport", "player", None);
+    }
 }
