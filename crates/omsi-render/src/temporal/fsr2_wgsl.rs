@@ -29,6 +29,7 @@ pub(crate) struct Fsr2Wgsl {
     targets: Option<Targets>,
     index: u32,
     ready: bool,
+    refused: bool,
 }
 
 impl Fsr2Wgsl {
@@ -65,7 +66,7 @@ impl Fsr2Wgsl {
         ).create(device);
         Self {
             backend, interface, context: FfxFsr2Context::default(),
-            convert, convert_layout, targets: None, index: 0, ready: false,
+            convert, convert_layout, targets: None, index: 0, ready: false, refused: false,
         }
     }
     pub(crate) fn reset(&mut self) {
@@ -142,7 +143,17 @@ impl Fsr2Wgsl {
         dt:f32, reset:bool, sharpness:f32,
     )->bool{
         self.ready=false;
-        if !self.ensure(device,queue,layout,uniform,sampler,render,display)||!dt.is_finite()||dt<0.0{return false;}
+        if self.refused || !dt.is_finite() || dt<0.0 { return false; }
+        // SDK context creation compiles additional shader permutations at the
+        // first frame or resize: capture driver validation/OOM instead of
+        // allowing an optional effect to poison the main render device.
+        let setup = crate::gpu::optional_pipeline(device, "FSR2 WGSL context", || {
+            self.ensure(device,queue,layout,uniform,sampler,render,display)
+        });
+        if setup != Some(true) {
+            self.refused = true;
+            return false;
+        }
         let jitter=self.jitter(render,display);
         let target=self.targets.as_ref().unwrap();
         let view=target.color.create_view(&Default::default());
@@ -191,8 +202,14 @@ impl Fsr2Wgsl {
         *encoder=owned;
         let gpu_error=backend.take_job_error();
         drop(backend);
-        if let Err(code)=dispatch{log::warn!("FSR2 WGSL dispatch failed: {code:#x}");self.reset();return false;}
-        if let Some(err)=gpu_error{log::warn!("FSR2 WGSL GPU job rejected: {err}");self.reset();return false;}
+        if let Err(code)=dispatch{
+            log::warn!("FSR2 WGSL dispatch failed: {code:#x}; backend disabled until toggled");
+            self.reset();self.refused=true;return false;
+        }
+        if let Some(err)=gpu_error{
+            log::warn!("FSR2 WGSL GPU job rejected: {err}; backend disabled until toggled");
+            self.reset();self.refused=true;return false;
+        }
         self.index=self.index.wrapping_add(1);
         self.ready=true;true
     }
