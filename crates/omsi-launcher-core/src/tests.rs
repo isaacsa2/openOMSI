@@ -570,7 +570,7 @@ fn comfortable_cabin_is_an_independent_opt_in_launch_flag() {
 
 #[test]
 fn fsr1_and_temporal_preview_settings_survive_launcher_round_trip() {
-    for (mode, quality) in [("default", "quality"), ("fsr1", "ultra"), ("taa", "quality"), ("fsr2", "balanced")] {
+    for (mode, quality) in [("default", "quality"), ("fsr1", "ultra"), ("taa", "quality"), ("fsr2", "balanced"), ("fsr3", "balanced")] {
         let mut settings = settings_from_text(None);
         settings["upscaler"] = json!(mode);
         settings["fsr_quality"] = json!(quality);

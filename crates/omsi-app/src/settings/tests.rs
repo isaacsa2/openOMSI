@@ -585,3 +585,14 @@ fn preview_and_taa_modes_preserve_fsr1_and_use_single_sample() {
     assert_eq!(Settings::from_text("upscaler=unknown\n").upscaler, "default");
 }
 
+
+#[test]
+fn fsr3_settings_are_distinct_from_taa_and_preserve_fsr1() {
+    let fsr3 = Settings::from_text("upscaler=fsr3\nfsr_quality=balanced\nmsaa=4\n");
+    let o = fsr3.render_options();
+    assert!(o.fsr3);
+    assert!(!o.fsr1 && !o.temporal_aa);
+    assert_eq!(o.msaa, 1);
+    assert!((o.render_scale - 0.59).abs() < 0.001);
+    assert_eq!(Settings::from_text(&fsr3.to_text()).upscaler, "fsr3");
+}

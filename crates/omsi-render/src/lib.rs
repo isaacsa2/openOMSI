@@ -33,6 +33,9 @@ mod rt;
 mod rt_tex;
 mod shaders;
 pub mod temporal;
+
+/// Whether this binary was compiled with the real (experimental) FSR 3 backend.
+pub const fn fsr3_compiled() -> bool { cfg!(feature = "fsr3-wgpu") }
 mod srgb_encode;
 mod triple;
 mod frame_plan;

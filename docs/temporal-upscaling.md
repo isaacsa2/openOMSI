@@ -171,3 +171,19 @@ expose the official FSR 2 native SDK as alternate, mutually exclusive choices.
 All require same-frame, correctly oriented motion vectors, true projection
 jitter, depth, color and an unjittered HUD. A frame where any input is absent
 must fall back rather than claim that FSR 2/3 is running.
+
+## Experimental real FSR3 integration
+
+`--features fsr3-wgpu` compiles the actual wgpu-ffx 0.1.0 implementation of
+AMD's **FSR3 temporal upscaler** (not frame generation). The scene's presentable
+colour is converted into a linear RGBA16F input, then the backend records its
+compute passes with the same-frame reversed-Z Depth32Float and RG16Float
+motion, dynamic resolution, jitter and output-size metadata. The resulting
+RGBA16F texture is presented at native size before the HUD, without FSR1 or TAA.
+
+The backend is off by default, not built for ordinary users; the menu only
+offers the in-game FSR3 option when the backend feature is compiled. The
+launcher labels it as requiring an experimental build. If any dependency
+or GPU driver rejects the backend, the renderer falls back to its existing
+scaler. Real GPU and performance checks are necessary before enabling
+`fsr3-wgpu` by default. This does not implement either of the FSR2 variants.
