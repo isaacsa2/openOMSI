@@ -41,8 +41,7 @@ use std::path::PathBuf;
 
 use journal::{End, Kind};
 
-
-/** Keep the newer half of a UTF-8 log without slicing through a character. */
+/// Keep the newer half of a UTF-8 log without slicing through a character.
 fn log_tail(text: &str) -> &str {
     let mut start = text.len() / 2;
     while !text.is_char_boundary(start) {
