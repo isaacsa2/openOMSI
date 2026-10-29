@@ -575,9 +575,8 @@ impl Renderer {
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
         #[cfg(feature = "fsr2-wgsl")]
         let fsr2_wgsl = (options.fsr2_wgsl && options.msaa <= 1 && !options.preview_only
-            && device.features().contains(crate::temporal::Fsr2Wgsl::required_features()))
-            .then(|| crate::gpu::optional_pipeline(&device, "FSR2 WGSL", || crate::temporal::Fsr2Wgsl::new(&device)))
-            .flatten();
+            && device.features().contains(crate::temporal::Fsr2Handle::required_features()))
+            .then(crate::temporal::Fsr2Handle::new);
         let temporal_aa = ((options.temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
             && !options.fsr1 && !options.fsr2_wgsl
             && options.msaa <= 1 && !options.preview_only)
@@ -814,7 +813,7 @@ fn fidelityfx_adapter_features(
     let mut requested = wgpu::Features::empty();
     #[cfg(feature = "fsr2-wgsl")]
     if options.fsr2_wgsl {
-        let needed = crate::temporal::Fsr2Wgsl::required_features();
+        let needed = crate::temporal::Fsr2Handle::required_features();
         let missing = needed & !adapter.features();
         if protected_intel_vulkan {
             log::warn!("FSR2 WGSL disabled by Intel Vulkan crash-avoidance profile; update driver and test with OMSI_INTEL_FULL_GPU=1");
@@ -847,7 +846,7 @@ fn enabled_upscalers(
 ) -> RenderOptions {
     #[cfg(feature = "fsr2-wgsl")]
     let fsr2 = options.fsr2_wgsl
-        && device.features().contains(crate::temporal::Fsr2Wgsl::required_features());
+        && device.features().contains(crate::temporal::Fsr2Handle::required_features());
     #[cfg(not(feature = "fsr2-wgsl"))]
     let fsr2 = false;
     RenderOptions {

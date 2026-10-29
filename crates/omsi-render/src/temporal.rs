@@ -12,10 +12,10 @@ mod fsr2_port;
 #[cfg(feature = "fsr2-wgsl")]
 mod fsr2_wgsl;
 #[cfg(feature = "fsr2-wgsl")]
-pub(crate) use fsr2_wgsl::Fsr2Wgsl;
+pub(crate) use fsr2_wgsl::Fsr2Handle;
 
 impl crate::Renderer {
-    pub(crate) fn fsr2_wgsl_present(&self, f: &crate::passes::FrameCtx<'_>) -> Option<&wgpu::BindGroup> {
+    pub(crate) fn fsr2_wgsl_present(&self, f: &crate::passes::FrameCtx<'_>) -> Option<wgpu::BindGroup> {
         #[cfg(feature = "fsr2-wgsl")]
         if self.fsr2_wgsl_active() && f.with_overlays && f.projection.is_none() && !f.second_eye {
             return self.fsr2_wgsl.as_ref().and_then(|b| b.present());
@@ -41,15 +41,16 @@ impl crate::Renderer {
                 _ => None,
             };
             if let Some((color, depth, motion, reset)) = inputs {
-                let result = self.fsr2_wgsl.as_mut().expect("FSR2 WGSL").encode(
+                let handle = self.fsr2_wgsl.as_ref().expect("FSR2 WGSL");
+                let result = handle.with_backend(&self.device, |backend| backend.encode(
                     &self.device, &self.queue, encoder,
                     &self.scale.upscale_layout, &self.scale.upscale_buf, &self.tone.post_sampler,
                     &color, &depth, &motion, (f.width, f.height),
                     (f.full_w, f.target.texture().height()), f.camera, f.dt, reset,
                     self.options.fsr_sharpness,
-                );
-                if !result { self.fsr2_wgsl.as_mut().expect("FSR2 WGSL").reset(); }
-            } else if let Some(fsr2) = self.fsr2_wgsl.as_mut() { fsr2.reset(); }
+                ));
+                if result != Some(true) { handle.mark_failed(); }
+            } else if let Some(handle) = self.fsr2_wgsl.as_ref() { handle.reset(); }
         }
         #[cfg(not(feature = "fsr2-wgsl"))]
         { let _ = (encoder, f); }
