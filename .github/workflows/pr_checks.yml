@@ -22,16 +22,6 @@ jobs:
       MAX_BYTES: 1000000
     steps:
       - uses: actions/checkout@v7
-      # Temporary FSR2 diagnostics: print Cargo's canonical lock diff before
-      # --locked verification, to resolve portability/compiler failures.
-      - name: FSR2 WGSL lock and compiler diagnostic
-        if: ${{ !cancelled() && github.event.pull_request.number == 302 }}
-        run: |
-          cargo metadata --format-version 1 > /dev/null
-          echo "=== Cargo.lock diff (must be empty on a clean PR) ==="
-          git diff -- Cargo.lock
-          cargo check --locked -p omsi-render --lib
-
       - name: Fetch the base commit
         run: git fetch --no-tags --depth=1 origin "$BASE"
 
@@ -99,3 +89,21 @@ jobs:
         run: node --experimental-vm-modules --test launcher/tests/upscaler-settings.test.mjs
 
 
+
+  fsr2-compile:
+    if: ${{ github.event.pull_request.number == 302 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve FSR2 lockfile and show diff
+        run: |
+          cargo metadata --format-version 1 > /dev/null
+          git diff -- Cargo.lock
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "::error::Cargo.lock needs the changes above"
+            exit 1
+          fi
+      - name: Compile real FSR2 WGSL on the patched wgpu 29 renderer
+        run: cargo check --locked -p omsi-render --lib
