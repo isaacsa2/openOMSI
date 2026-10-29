@@ -210,6 +210,15 @@ impl Fsr2Wgsl {
             log::warn!("FSR2 WGSL GPU job rejected: {err}; backend disabled until toggled");
             self.reset();self.refused=true;return false;
         }
+        // A benchmark must not mistake an absent/failed FSR2 backend for an
+        // actual FidelityFX result. Printed only after the first accepted FSR2
+        // WGSL dispatch in this context (not a GPU image-quality guarantee).
+        if self.index == 0 {
+            log::info!(
+                "FSR2_WGSL_BENCH_DISPATCH_OK: {}x{} -> {}x{} (WGSL)",
+                render.0, render.1, display.0, display.1
+            );
+        }
         self.index=self.index.wrapping_add(1);
         self.ready=true;true
     }
