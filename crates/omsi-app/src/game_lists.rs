@@ -1096,9 +1096,9 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
             });
             match found {
                 Some((pos, heading)) => {
-                    crate::admin::request_teleport(app, pos, heading);
-                    // The server acknowledges client teleport requests before applying them.
-                    app.service_event("teleport", app.menu_by(), None);
+                    if crate::admin::request_teleport(app, pos, heading) {
+                        app.service_event("teleport", app.menu_by(), None);
+                    }
                 }
                 None => app.service_msg = Some(("That start point is not in the map".into(), 3.0)),
             }
