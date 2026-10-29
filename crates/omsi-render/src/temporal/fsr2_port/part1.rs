@@ -41,7 +41,7 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use wgpu::util::DeviceExt;
 
-mod dispatch_grid;
+// dispatch_grid is declared by the root fsr2_port module for stable path resolution.
 // Upstream readback helper omitted: not used by the runtime backend.
 
 /// The wgpu features every SDK pass needs; request them when creating the
