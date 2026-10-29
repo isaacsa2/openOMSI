@@ -771,6 +771,7 @@ impl Renderer {
         self.encode_sky_cube(&mut enc.prepass, scene, &f, probe_redraw, &mut timers);
         self.encode_probe(&mut enc.prepass, scene, probe_redraw, &mut timers);
         let mut main_parts = self.encode_main_pass(&mut enc.picture, scene, &f, &plan, &main_bundles, &mut timers);
+        self.encode_motion(&mut enc.picture, &f, &plan, vp_mat, &mut timers);
         // Turning the recorded passes into Metal commands is the costliest CPU step of a
         // frame (wgpu checks every draw): the shadow maps, the prepass, the main pass and
         // the passes after it are finished side by side on helper threads and this one.
@@ -787,6 +788,7 @@ impl Renderer {
         if f.enhanced {
             self.encode_post(&mut enc.picture, scene, &f, puddles_on, &mut timers);
         }
+        self.encode_motion_debug(&mut enc.picture, &f);
         self.encode_upscale(&mut enc.picture, scene, &f, &mut timers);
         clock.stage(self, "encode", "mirror.encode");
         self.finish_and_submit(enc, main_parts, big, with_overlays, &mut clock, timers);

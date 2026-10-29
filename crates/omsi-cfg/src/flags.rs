@@ -219,6 +219,7 @@ flags! {
     OMSI_DEBUG_MESHES: Text, Debug, Use, "off", "Log per material slot which part of its texture a mesh shows (display texts).";
     OMSI_DEBUG_MIRRORS: Bool, Debug, Use, "off", "Log each mirror's eye, angles and field of view.";
     OMSI_DEBUG_MISSING: Bool, Debug, Use, "off", "Log where missing textures were looked for.";
+    OMSI_DEBUG_MOTION: Num, Debug, Use, "off", "With OMSI_MOTION_VECTORS: show them over the picture (the number: pixels of motion at full colour, 8 without one).";
     OMSI_DEBUG_NAN: Bool, Debug, Once, "off", "Warn at every write of a NaN or infinity into a script variable.";
     OMSI_DEBUG_NAV: Bool, Debug, Use, "off", "Log navigation details (e.g. stops whose tiles are not loaded).";
     OMSI_DEBUG_OBJECTS: Bool, Debug, Use, "off", "Log objects placed outside their tile.";
@@ -341,6 +342,7 @@ flags! {
     OMSI_MIRROR_ENHANCED: Bool, Switch, Frame, "off", "Draw the mirrors with the enhanced shading again.";
     OMSI_MIRROR_HUD: Num, Tuning, Use, "settings", "Mirror HUD mode (number).";
     OMSI_MOBILE: Bool, Test, Use, "off", "The phone layout on a computer (screen cut-outs).";
+    OMSI_MOTION_VECTORS: Bool, Switch, Use, "off", "Experimental: per-pixel motion vectors, the groundwork of temporal upscaling (the picture is unchanged).";
     OMSI_MUTE: Bool, Test, Use, "off", "Mix everything as usual but play nothing.";
     OMSI_NAV_2D: Bool, Test, Use, "off", "Navigator pictures with flat houses (the nav_3d setting off).";
     OMSI_NAV_CONTOURS: Bool, Test, Use, "off", "Offscreen: the city map in its terrain view (contour lines and their heights, when the map's package has them).";

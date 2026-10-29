@@ -238,6 +238,8 @@ pub struct Renderer {
     freed: std::cell::OnceCell<Freed>,
     /// Enhanced+: the ray tracer (on a device with ray queries, see `RenderOptions::ray_tracing`).
     rt: Option<rt::RayTracer>,
+    /// OMSI_MOTION_VECTORS: the window's picture's motion vectors (passes/motion.rs).
+    motion: Option<passes::motion::MotionVectors>,
     /// Meshes share pages of buffers (the adapter draws with a base vertex).
     mesh_pages: bool,
     /// The size-keyed targets (see targets.rs): made on first use, let go of when unused.
@@ -522,6 +524,51 @@ impl Renderer {
     /// game lowers it while a slow graphics chip cannot keep the frame rate up, and raises
     /// it again when there is room. Steps of a twentieth, so that the few sizes it takes
     /// keep their render targets.
+    /// The motion vectors (OMSI_MOTION_VECTORS, `passes::motion`) turned on or off while the
+    /// game runs.
+    pub fn set_motion_vectors(&mut self, on: bool) {
+        if !on {
+            self.motion = None;
+        } else if self.motion.is_none() {
+            self.motion = Some(passes::motion::MotionVectors::new(&self.device, self.format));
+        }
+    }
+
+    /// The last picture's motion vectors, read back (last frame's UV minus this frame's, per
+    /// pixel, row by row) - for the tests.
+    #[cfg(test)]
+    pub(crate) fn read_motion(&self) -> Option<(u32, u32, Vec<[f32; 2]>)> {
+        let t = self.motion.as_ref()?.target.as_ref()?;
+        let (w, h) = t.size;
+        let row = (w * 4).div_ceil(256) * 256;
+        let buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("motion read"), size: (row * h) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            t.texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        let sub = self.queue.submit([enc.finish()]);
+        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        wait_gpu(&self.device, Some(sub)).ok()?;
+        let data = buf.slice(..).get_mapped_range();
+        let half = |b: &[u8]| {
+            let h = u16::from_le_bytes([b[0], b[1]]) as u32;
+            let (sign, exp, man) = (h >> 15, (h >> 10) & 0x1f, h & 0x3ff);
+            let v = match exp {
+                0 => man as f32 * 2f32.powi(-24),
+                31 => f32::INFINITY,
+                e => (1.0 + man as f32 / 1024.0) * 2f32.powi(e as i32 - 15),
+            };
+            if sign == 1 { -v } else { v }
+        };
+        let px = (0..h).flat_map(|y| (0..w).map(move |x| (y, x))).map(|(y, x)| {
+            let o = (y * row + x * 4) as usize;
+            [half(&data[o..o + 2]), half(&data[o + 2..o + 4])]
+        });
+        Some((w, h, px.collect()))
+    }
+
     pub fn set_dynamic_scale(&self, s: f32) {
         // (1, 0.85, 0.7 or 0.55 - the last for a phone's chip that is still too slow: see
         // the game's governor)

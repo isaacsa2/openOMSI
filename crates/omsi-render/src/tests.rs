@@ -1462,6 +1462,7 @@ mod light_maps;
 mod long_road;
 mod light;
 mod more;
+mod motion;
 mod night_coverage;
 mod prepass_reach;
 mod snow_track_field;

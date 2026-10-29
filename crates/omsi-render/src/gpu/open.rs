@@ -570,6 +570,7 @@ impl Renderer {
             puddles::Pipelines::new(&device, &scene.shader, &scene.camera_layout, &scene.material_layout)
         });
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
+        let motion = omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set().then(|| crate::passes::motion::MotionVectors::new(&device, format));
         let cookie_atlas = cookies::CookieAtlas::new();
         Renderer {
             targets: Targets {
@@ -771,6 +772,7 @@ impl Renderer {
             pending_meshes: Default::default(),
             freed: std::cell::OnceCell::new(),
             rt,
+            motion,
             mesh_pages: false,
         }
     }

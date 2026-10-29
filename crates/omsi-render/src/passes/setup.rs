@@ -151,7 +151,9 @@ impl Renderer {
         let ao_on = with_overlays && self.rt.is_none() && self.options.ssao && self.ssao_pipeline.is_some() && !env.no_ao;
         // the enhanced path's shading is costly: the depth prepass keeps it to the visible
         // surface (without multisampling, see `share_depth`)
-        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none());
+        // Motion vectors require readable depth on a single-sampled desktop view.
+        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none())
+            || (self.motion.is_some() && with_overlays && projection.is_none() && self.options.msaa <= 1);
         let prepass_on = ao_on || depth_wanted;
         // the terrain's paint laid into one albedo picture first: the window's enhanced
         // picture, single-sampled, with the camera group's slot 8 free of the AO

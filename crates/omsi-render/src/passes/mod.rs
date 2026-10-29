@@ -10,6 +10,7 @@ mod effects;
 mod ground;
 mod headlamp_shadow;
 mod main_pass;
+pub(crate) mod motion;
 mod post;
 mod precip_map;
 pub(crate) use precip_map::*;

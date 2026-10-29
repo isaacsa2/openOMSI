@@ -53,6 +53,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_DEBUG_MESHES` | text | off | use | app | Log per material slot which part of its texture a mesh shows (display texts). |
 | `OMSI_DEBUG_MIRRORS` | bool | off | use | app | Log each mirror's eye, angles and field of view. |
 | `OMSI_DEBUG_MISSING` | bool | off | use | scene | Log where missing textures were looked for. |
+| `OMSI_DEBUG_MOTION` | num | off | use | render | With OMSI_MOTION_VECTORS: show them over the picture (the number: pixels of motion at full colour, 8 without one). |
 | `OMSI_DEBUG_NAN` | bool | off | once | script | Warn at every write of a NaN or infinity into a script variable. |
 | `OMSI_DEBUG_NAV` | bool | off | use | mapdraw, navigator, scene, sim | Log navigation details (e.g. stops whose tiles are not loaded). |
 | `OMSI_DEBUG_OBJECTS` | bool | off | use | scene | Log objects placed outside their tile. |
@@ -279,6 +280,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_LAMP_SHADOWS_EVERY_FRAME` | bool | off | frame | render | Redraw the street lamps' shadow tiles every frame (not only when they change). |
 | `OMSI_LIGHT_GRID_SQUARES` | bool | off | frame | render | A light goes into every cell of the light grid's square round its range, the corners its range misses too (A/B). |
 | `OMSI_MIRROR_ENHANCED` | bool | off | frame | app, render | Draw the mirrors with the enhanced shading again. |
+| `OMSI_MOTION_VECTORS` | bool | off | use | render | Experimental: per-pixel motion vectors, the groundwork of temporal upscaling (the picture is unchanged). |
 | `OMSI_NOZCHECK_BIAS` | bool | off | use | scene | The old reading of [matl_noZcheck] (A/B). |
 | `OMSI_NO_ANIMPARENT` | bool | off | use | sim | Every mesh animated on its own, without [animparent] (A/B). |
 | `OMSI_NO_AO` | bool | off | frame | render | No ambient occlusion pass. |
