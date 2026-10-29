@@ -228,3 +228,68 @@ impl Drop for Fsr2Wgsl {
         if self.targets.is_some(){let _=ffx_fsr2_context_destroy(&mut self.context);}
     }
 }
+
+// The third-party SDK uses Rc<RefCell<_>>. Renderer must be Send (ANGLE
+// moves the renderer between threads), so keep the SDK on the render thread.
+thread_local! {
+    static BACKENDS: RefCell<std::collections::HashMap<u64, Fsr2Wgsl>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub(crate) struct Fsr2Handle {
+    id: u64,
+    failed: std::sync::atomic::AtomicBool,
+}
+impl Fsr2Handle {
+    pub(crate) fn new() -> Self {
+        Self { id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            failed: std::sync::atomic::AtomicBool::new(false) }
+    }
+    pub(crate) fn required_features() -> wgpu::Features { Fsr2Wgsl::required_features() }
+    pub(crate) fn available(&self) -> bool {
+        !self.failed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    pub(crate) fn with_backend<T>(
+        &self, device: &wgpu::Device, f: impl FnOnce(&mut Fsr2Wgsl) -> T,
+    ) -> Option<T> {
+        if !self.available() { return None; }
+        BACKENDS.with(|cell| {
+            let mut contexts = cell.borrow_mut();
+            if !contexts.contains_key(&self.id) {
+                let Some(backend) = crate::gpu::optional_pipeline(
+                    device, "FSR2 WGSL", || Fsr2Wgsl::new(device)
+                ) else {
+                    self.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return None;
+                };
+                contexts.insert(self.id, backend);
+            }
+            contexts.get_mut(&self.id).map(f)
+        })
+    }
+    pub(crate) fn jitter(
+        &self, device: &wgpu::Device, render: (u32,u32), display: (u32,u32)
+    ) -> Option<[f32;2]> {
+        self.with_backend(device, |s| s.jitter(render, display))
+    }
+    pub(crate) fn present(&self) -> Option<wgpu::BindGroup> {
+        if !self.available() { return None; }
+        BACKENDS.with(|cell| cell.borrow().get(&self.id)
+            .and_then(|s| s.present().cloned()))
+    }
+    pub(crate) fn reset(&self) {
+        BACKENDS.with(|cell| {
+            if let Some(s) = cell.borrow_mut().get_mut(&self.id) { s.reset(); }
+        });
+    }
+    pub(crate) fn mark_failed(&self) {
+        self.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.reset();
+    }
+}
+impl Drop for Fsr2Handle {
+    fn drop(&mut self) {
+        BACKENDS.with(|cell| { cell.borrow_mut().remove(&self.id); });
+    }
+}
