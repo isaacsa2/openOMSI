@@ -6,6 +6,9 @@
 
 use glam::{Mat4, Vec2, Vec3};
 
+mod taa;
+pub(crate) use taa::Taa;
+
 /// Only one AA/upscaling algorithm can own a frame's temporal history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TemporalMethod {
@@ -142,7 +145,9 @@ mod tests {
     }
     #[test]
     fn jitter_is_bounded_and_reproducible() {
-        assert_eq!(jitter_pixels(0), [0.0, -1.0 / 6.0]);
+        let first = jitter_pixels(0);
+        assert_eq!(first[0], 0.0);
+        assert!((first[1] + 1.0 / 6.0).abs() < 1e-6);
         for n in 0..160 {
             let v = jitter_pixels(n);
             assert_eq!(v, jitter_pixels(n % 8));

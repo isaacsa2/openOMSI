@@ -789,6 +789,8 @@ impl Renderer {
             self.encode_post(&mut enc.picture, scene, &f, puddles_on, &mut timers);
         }
         self.encode_motion_debug(&mut enc.picture, &f);
+        // Standalone opt-in TAA tests motion/history before eventual official FSR 2 dispatch.
+        self.encode_temporal_aa(&mut enc.picture, &f);
         self.encode_upscale(&mut enc.picture, scene, &f, &mut timers);
         clock.stage(self, "encode", "mirror.encode");
         self.finish_and_submit(enc, main_parts, big, with_overlays, &mut clock, timers);

@@ -60,6 +60,7 @@ impl Renderer {
             .write_buffer(&self.tone.post_buf, 0, bytemuck::bytes_of(&pu));
         // (a mirror's small picture goes without FXAA)
         let fxaa = with_overlays
+            && self.temporal_aa.is_none()
             && self.options.fxaa
             && self.options.msaa <= 1
             && !f.env.no_fxaa;
@@ -203,6 +204,10 @@ impl Renderer {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
         if let Some((_, bg)) = &f.scene_target {
+            // TAA's resolved history replaces the scene input, never the HUD.
+            let taa_bg = self.temporal_aa.as_ref().and_then(|taa| taa.present())
+                .filter(|_| f.with_overlays && f.projection.is_none());
+            let bg = taa_bg.unwrap_or(bg);
             // Opt-in FSR1 experiment. Use the existing scene scale setting for quality.
             // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
             let full_h = f.target.texture().height();

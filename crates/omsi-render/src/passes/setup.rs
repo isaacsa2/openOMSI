@@ -83,6 +83,7 @@ impl Renderer {
         // edges (the Enhanced path has it in its post passes): the picture is drawn into a
         // texture of the window's size and smoothed on its way to the window, the HUD after
         let vanilla_fxaa = with_overlays
+            && self.temporal_aa.is_none()
             && (width, height) == (full_w, full_h)
             && self.options.fxaa
             && self.options.msaa <= 1
@@ -95,7 +96,8 @@ impl Renderer {
             && scene.glass_slot.is_some()
             && (lighting.rain > 0.001 || lighting.wetness > 0.02)
             && !env.no_glass_picture;
-        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view);
+        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view)
+            || (self.temporal_aa.is_some() && with_overlays && projection.is_none());
         let scene_target: Option<(wgpu::TextureView, wgpu::BindGroup)> = if scaled {
             Some(self.scale_target(width, height))
         } else {

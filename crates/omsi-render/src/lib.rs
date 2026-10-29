@@ -241,6 +241,8 @@ pub struct Renderer {
     rt: Option<rt::RayTracer>,
     /// OMSI_MOTION_VECTORS: the window's picture's motion vectors (passes/motion.rs).
     motion: Option<passes::motion::MotionVectors>,
+    /// Optional standalone TAA history test consumer, never combined with FSR1.
+    temporal_aa: Option<temporal::Taa>,
     /// Meshes share pages of buffers (the adapter draws with a base vertex).
     mesh_pages: bool,
     /// The size-keyed targets (see targets.rs): made on first use, let go of when unused.
@@ -533,6 +535,9 @@ impl Renderer {
         if let Some(motion) = self.motion.as_mut() {
             motion.reset();
         }
+        if let Some(taa) = self.temporal_aa.as_mut() {
+            taa.reset();
+        }
     }
 
     pub fn set_motion_vectors(&mut self, on: bool) {
@@ -606,6 +611,17 @@ impl Renderer {
             }
         }
         self.options.fsr1 = fsr1 && self.scale.fsr.is_some();
+        // TAA and FSR1 are mutually exclusive. Reinitialize only when FSR1
+        // is actually disabled; unavailable pipelines retain the spatial fallback.
+        if self.options.fsr1 {
+            self.temporal_aa = None;
+        } else if omsi_cfg::flags::OMSI_TAA.is_set() && self.options.msaa <= 1 && self.temporal_aa.is_none() {
+            self.temporal_aa = crate::gpu::optional_pipeline(&self.device, "experimental TAA", || temporal::Taa::new(&self.device, self.format));
+            if self.temporal_aa.is_some() && self.motion.is_none() {
+                self.set_motion_vectors(true);
+            }
+        }
+        self.reset_motion_history();
         // Keep compiled pipelines for quick toggles, but release full-resolution images
         // while neither RCAS nor FSR needs them. They are recreated on the next draw.
         if !self.options.fsr1 || fsr1_rcas_strength(sharpness) == 0.0 {

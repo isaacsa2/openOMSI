@@ -281,6 +281,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_LIGHT_GRID_SQUARES` | bool | off | frame | render | A light goes into every cell of the light grid's square round its range, the corners its range misses too (A/B). |
 | `OMSI_MIRROR_ENHANCED` | bool | off | frame | app, render | Draw the mirrors with the enhanced shading again. |
 | `OMSI_MOTION_VECTORS` | bool | off | use | render | Experimental: per-pixel motion vectors, the groundwork of temporal upscaling (the picture is unchanged). |
+| `OMSI_TAA` | bool | off | use | render | Standalone temporal history filter for FSR 2 input testing; requires MSAA off and FSR 1 disabled. Not AMD FSR 2. |
 | `OMSI_NOZCHECK_BIAS` | bool | off | use | scene | The old reading of [matl_noZcheck] (A/B). |
 | `OMSI_NO_ANIMPARENT` | bool | off | use | sim | Every mesh animated on its own, without [animparent] (A/B). |
 | `OMSI_NO_AO` | bool | off | frame | render | No ambient occlusion pass. |

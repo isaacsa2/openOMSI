@@ -80,3 +80,25 @@ jitter without a temporal resolver: an image without reconstruction would shake.
   moving semitransparent surfaces and validate with real modded buses.
 - Native Vulkan/DX12 access, resource-state transitions, official SDK linkage,
   temporal output and full in-game performance validation remain required.
+
+## Experimental temporal AA test consumer (not AMD FSR 2)
+
+Set `OMSI_TAA=1` to run an experimental temporal history filter, disabled by
+default and excluded when FSR 1 is active or MSAA exceeds 1. It samples the
+engine's motion vectors and two ping-pong history images, using a neighborhood
+clamp and velocity-weighted feedback. It draws before the spatial upscaler,
+keeping the HUD outside the history. No synchronous GPU readback is involved.
+
+The temporal filter currently runs **without camera jitter**: the Halton
+generator and clip-space conversion are implemented and tested, but enabling
+jitter before there is robust reconstruction for every render path would
+introduce visible shaking. This filter should be considered a *validation
+consumer / fallback prototype*, not final production TAA or AMD FSR 2.
+
+Discontinuities, invalid motion and resolution changes clear history. Mirrors,
+VR, and extra views never update the main history. Expected limitations:
+moving AI, animated wipers, partially transparent windows and rain need
+per-object motion and reactive/transparency masks, and may still ghost.
+
+Use `OMSI_MOTION_VECTORS=1 OMSI_DEBUG_MOTION=1` without TAA to inspect the
+original vectors directly; disable the flags to restore the existing pipeline.
