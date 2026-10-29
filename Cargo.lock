@@ -4245,7 +4245,9 @@ dependencies = [
  "pollster 1.0.1",
  "rayon",
  "wgpu",
+ "sp-fidelity",
  "wgpu-ffx",
+ "wgpu-naga-bridge",
  "windows 0.62.2",
  "winit",
 ]
@@ -5737,6 +5739,12 @@ checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "sp-fidelity"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a9e75045752d10ebd2f1c37debac276b4fdfeddf1f3cc420f2b79b742b67d3b"
 
 [[package]]
 name = "spade"
