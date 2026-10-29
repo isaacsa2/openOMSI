@@ -574,7 +574,7 @@ impl Renderer {
         #[cfg(feature = "fsr2-wgsl")]
         {
             if self.options.msaa > 1 {
-                return "MSAA must be disabled".into();
+                return "restart with FSR2 selected so the renderer starts without MSAA".into();
             }
             if self.options.preview_only {
                 return "not available in preview-only rendering".into();
@@ -582,7 +582,7 @@ impl Renderer {
             let missing = crate::temporal::Fsr2Handle::required_features()
                 & !self.device.features();
             if !missing.is_empty() {
-                return format!("graphics driver lacks {:?}", missing);
+                return format!("shader features {:?} were not enabled for this graphics session; restart with FSR2 selected (or check adapter support in the graphics log)", missing);
             }
             if self.motion.is_none() {
                 return "motion-vector pipeline is unavailable".into();
