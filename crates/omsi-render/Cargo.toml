@@ -12,6 +12,8 @@ default = ["test-hooks"]
 test-hooks = []
 # Optional native-wgpu FSR 3 compute backend; never built or run on a default/legacy installation.
 fsr3-wgpu = ["dep:wgpu-ffx"]
+# Real AMD FSR 2 WGSL port, adapted locally to the custom wgpu 29 fork.
+fsr2-wgsl = ["dep:sp-fidelity", "dep:wgpu-naga-bridge"]
 
 [dependencies]
 omsi-cfg = { path = "../omsi-cfg" }
@@ -21,6 +23,8 @@ wgpu.workspace = true
 # FSR 3 upscaler (not frame generation), uses wgpu 29 and the fork's patched wgpu.
 # Gated until real Vulkan/DX12/Metal tests pass; FSR 1 stays untouched.
 wgpu-ffx = { version = "=0.1.0", optional = true }
+sp-fidelity = { version = "=0.2.0", optional = true }
+wgpu-naga-bridge = { version = "29", optional = true }
 bytemuck.workspace = true
 glam.workspace = true
 pollster.workspace = true

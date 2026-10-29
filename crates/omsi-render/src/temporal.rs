@@ -7,6 +7,8 @@
 use glam::{Mat4, Vec2, Vec3};
 
 mod taa;
+#[cfg(feature = "fsr2-wgsl")]
+mod fsr2_port;
 #[cfg(feature = "fsr3-wgpu")]
 mod fsr3;
 #[cfg(feature = "fsr3-wgpu")]
