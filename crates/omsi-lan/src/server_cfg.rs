@@ -33,6 +33,9 @@ pub struct ServerCfg {
     /// The same with this password gives the moderator's role: the players and the chat,
     /// not the world (empty: none; one equal to `admin_password` is the admin's).
     pub moderator_password: String,
+    /// Whether ordinary players may teleport their own bus via F4, minimap and entrypoints.
+    /// Admins and moderators may always request self-teleports on a dedicated server.
+    pub allow_player_teleport: bool,
     /// Who may reach the web panel and its API (`admin_web`: `local`, `remote`, `off`).
     pub admin_web: omsi_admin::WebMode,
     /// Pages of these origins may act besides the server's own (`admin_web_origins`).
@@ -134,6 +137,10 @@ admin_password =
 # players to their bus alone
 # (at least 12 characters; empty: no moderators)
 moderator_password =
+
+# Allow ordinary players to teleport their OWN bus (F4, minimap, entrypoints).
+# 0 = only authenticated moderators/admins; 1 = everyone. Never moves another player.
+allow_player_teleport = 0
 
 # the web panel (http://127.0.0.1:<web_port>/admin/) and its API: local = from this machine
 # only (not through the tunnel or a proxy); remote = also over HTTPS through the proxies in
@@ -267,6 +274,7 @@ impl ServerCfg {
             icon,
             admin_password: admin_password(kv.get("admin_password").cloned().unwrap_or_default()),
             moderator_password: checked_password(kv.get("moderator_password").cloned().unwrap_or_default(), "moderator_password"),
+            allow_player_teleport: flag("allow_player_teleport", false),
             admin_web: web_mode(kv.get("admin_web").map(String::as_str)),
             admin_web_origins: kv.get("admin_web_origins").map(|v| v.split(';').map(|o| o.trim().trim_end_matches('/').to_string()).filter(|o| o.starts_with("https://") || o.starts_with("http://")).collect()).unwrap_or_default(),
             admin_trusted_proxies: trusted_proxies(kv.get("admin_trusted_proxies").map(String::as_str).unwrap_or("")),
