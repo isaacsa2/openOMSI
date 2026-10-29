@@ -111,6 +111,20 @@ impl App {
             self.receive_passenger_door_request(from, request);
             return;
         }
+        // A game hosted by code has no dedicated administration process. Its host may
+        // approve a player's request to move only their own bus; the client's requested
+        // destination is validated, and the authoritative teleport command comes back
+        // from peer 1. Dedicated servers handle this in server_command with RBAC.
+        if let Some(arg) = text.strip_prefix("tp-request ") {
+            if let Some(l) = self.net.lan.as_mut().filter(|l| l.role == omsi_net::Role::Host) {
+                if let Some((at, heading)) = omsi_lan::admin::parse_self_teleport(arg) {
+                    if l.peers().any(|p| p.pose.id == from && p.has_info) {
+                        l.command(from, &format!("teleport {:.3} {:.3} {:.3} {:.3}", at.x, at.y, at.z, heading));
+                    }
+                }
+            }
+            return;
+        }
         // a plugin's message to the same plugin here (`lan.send`)
         if self.plugin_lan_message(from, text) {
             return;
