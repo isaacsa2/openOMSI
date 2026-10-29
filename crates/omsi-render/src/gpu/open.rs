@@ -583,7 +583,9 @@ impl Renderer {
             fsr1: (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr.is_some(),
             // The feature is compiled and the adapter was approved *before*
             // request_device; don't attempt the backend on an incompatible GPU.
-            fsr3: options.fsr3 && fsr3_compatible,
+            fsr3: options.fsr3 && !gl && device.features().contains(
+                wgpu::Features::SUBGROUP | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+            ),
             ..options
         };
         let gpu_timers = std::array::from_fn(|_| GpuTimers::new(&device));
