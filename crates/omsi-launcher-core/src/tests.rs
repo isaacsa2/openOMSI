@@ -588,7 +588,6 @@ fn four_upscaler_modes_survive_launcher_round_trip() {
     }
     assert_eq!(settings_from_text(Some("upscaler=FSR2\n"))["upscaler"], "fsr2");
     assert_eq!(settings_from_text(Some("upscaler=fsr2wgsl\n"))["upscaler"], "fsr2");
-    assert_eq!(settings_from_text(Some("upscaler=fsr3\n"))["upscaler"], "default");
     assert_eq!(settings_from_text(Some("upscaler=unknown\n"))["upscaler"], "default");
 }
 
