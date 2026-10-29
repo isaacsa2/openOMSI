@@ -127,8 +127,8 @@ function SelectRow({ row }) {
     <${Name} label=${row.label} help=${row.help} warn=${row.heavy?.(value, s) && 'Heavy: can cost many frames per second on most graphics cards'} />
     <${Select} value=${value} options=${options} raw=${row.raw} onChange=${async (v) => {
       const patch = { [row.key]: asStored(cur, v) };
-      if (row.key === 'upscaler' && (v === 'fsr2' || v === 'taa' || v === 'fsr3' || v === 'fsr2wgsl')) patch.msaa = 1;
-      if (row.key === 'msaa' && Number(v) > 1 && ['fsr2', 'taa', 'fsr3', 'fsr2wgsl'].includes(S.settings.upscaler)) patch.upscaler = 'default';
+      if (row.key === 'upscaler' && (v === 'fsr2' || v === 'taa')) patch.msaa = 1;
+      if (row.key === 'msaa' && Number(v) > 1 && ['fsr2', 'taa'].includes(S.settings.upscaler)) patch.upscaler = 'default';
       return (await saveSettings(patch)) && row.recheckUpdates && checkUpdates();
     }} />
   </div>`;

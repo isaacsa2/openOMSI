@@ -562,48 +562,31 @@ fn cab_wheel_rotation_defaults_to_the_bus_and_is_clamped() {
 }
 
 #[test]
-fn preview_and_taa_modes_preserve_fsr1_and_use_single_sample() {
-    let fsr1 = Settings::from_text("upscaler=fsr1\nfsr_quality=quality\nmsaa=4\n");
+fn only_standard_taa_fsr1_and_actual_fsr2_are_public_modes() {
+    let fsr1 = Settings::from_text("upscaler=fsr1\nmsaa=4\n");
     assert!(fsr1.render_options().fsr1);
+    assert!(!fsr1.render_options().fsr2_wgsl);
     assert!(!fsr1.render_options().temporal_aa);
     assert_eq!(fsr1.render_options().msaa, 4);
 
-    let preview = Settings::from_text("upscaler=fsr2\nfsr_quality=balanced\nmsaa=4\n");
-    let options = preview.render_options();
-    assert!(options.temporal_aa);
-    assert!(!options.fsr1);
-    assert_eq!(options.msaa, 1, "temporal reconstruction requires MSAA off");
-    assert!((options.render_scale - 0.59).abs() < 0.001);
-    assert_eq!(Settings::from_text(&preview.to_text()).upscaler, "fsr2");
-
     let taa = Settings::from_text("upscaler=taa\nrender_scale=1\nmsaa=8\n");
-    assert!(taa.render_options().temporal_aa);
-    assert!(!taa.render_options().fsr1);
     assert_eq!(taa.render_options().msaa, 1);
-    assert!((taa.render_options().render_scale - 1.0).abs() < 0.001);
+    assert!(taa.render_options().temporal_aa);
+    assert!(!taa.render_options().fsr2_wgsl);
+    assert_eq!(taa.upscaler, "taa");
 
-    assert_eq!(Settings::from_text("upscaler=unknown\n").upscaler, "default");
-}
-
-
-#[test]
-fn fsr3_settings_are_distinct_from_taa_and_preserve_fsr1() {
-    let fsr3 = Settings::from_text("upscaler=fsr3\nfsr_quality=balanced\nmsaa=4\n");
-    let o = fsr3.render_options();
-    assert!(o.fsr3);
-    assert!(!o.fsr1 && !o.temporal_aa);
+    let fsr2 = Settings::from_text("upscaler=fsr2\nfsr_quality=balanced\nmsaa=4\n");
+    let o = fsr2.render_options();
+    assert!(o.fsr2_wgsl, "FSR2 must run real WGSL, never TAA Preview");
+    assert!(!o.temporal_aa && !o.fsr1 && !o.fsr3);
     assert_eq!(o.msaa, 1);
     assert!((o.render_scale - 0.59).abs() < 0.001);
-    assert_eq!(Settings::from_text(&fsr3.to_text()).upscaler, "fsr3");
-}
+    assert_eq!(Settings::from_text(&fsr2.to_text()).upscaler, "fsr2");
 
-#[test]
-fn genuine_fsr2_wgsl_is_distinct_from_preview_and_fsr1() {
-    let settings = Settings::from_text("upscaler=fsr2wgsl\nfsr_quality=balanced\nmsaa=8\n");
-    let options = settings.render_options();
-    assert!(options.fsr2_wgsl);
-    assert!(!options.fsr1 && !options.fsr3 && !options.temporal_aa);
-    assert_eq!(options.msaa, 1);
-    assert!((options.render_scale - 0.59).abs() < 0.001);
-    assert_eq!(Settings::from_text(&settings.to_text()).upscaler, "fsr2wgsl");
+    // Old experimental values are migrated to visible, canonical settings.
+    let old = Settings::from_text("upscaler=fsr2wgsl\n");
+    assert_eq!(old.upscaler, "fsr2");
+    assert!(old.render_options().fsr2_wgsl);
+    assert_eq!(Settings::from_text("upscaler=fsr3\n").upscaler, "default");
+    assert_eq!(Settings::from_text("upscaler=unknown\n").upscaler, "default");
 }

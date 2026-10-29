@@ -142,7 +142,8 @@ pub struct Settings {
     /// 0 = automatic (full size unless the window has more pixels than a 2560x1080 screen,
     /// as a Retina window does). The HUD is always drawn at full size.
     pub render_scale: f32,
-    /// Main picture: default, FSR 1, standalone TAA or FSR 2 preview (TAA-backed).
+    /// Main picture: Standard, TAA, FSR 1.0 or genuine FSR 2 WGSL.
+    /// Older fsr2wgsl values are accepted as an alias for fsr2 on load.
     pub upscaler: String,
     /// FSR1 internal resolution preset, or custom to use render_scale.
     pub fsr_quality: String,
@@ -625,7 +626,12 @@ impl Settings {
     fn read_upscaler(&mut self, k: &str, v: &str) {
         match k {
             "upscaler" => self.upscaler = match v.to_ascii_lowercase().as_str() {
-                "fsr1" => "fsr1", "taa" => "taa", "fsr2" => "fsr2", "fsr3" => "fsr3", "fsr2wgsl" => "fsr2wgsl", _ => "default",
+                "fsr1" => "fsr1",
+                "taa" => "taa",
+                "fsr2" | "fsr2wgsl" => "fsr2",
+                // FSR3 is intentionally removed from the user-facing options.
+                "fsr3" => "default",
+                _ => "default",
             }.into(),
             "fsr_quality" => self.fsr_quality = match v.to_ascii_lowercase().as_str() {
                 "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
@@ -1114,10 +1120,10 @@ impl Settings {
         log::warn!("safer graphics after a lost graphics device ({n}): msaa 1, SSAO off, shadows {} ({}), video memory {} of its limit, render scale {}", self.shadows, self.shadow_size, if n >= 2 { "half" } else { "two thirds" }, self.render_scale_text());
     }
 
-    /// The render scale the picture is drawn at: FSR 1 or temporal preview quality, or the render scale's (0:
+    /// The render scale used for FSR 1 or FSR 2, otherwise the chosen render scale (0:
     /// automatic, the frame-rate governor's).
     pub fn scene_render_scale(&self) -> f32 {
-        if !matches!(self.upscaler.as_str(), "fsr1" | "fsr2" | "fsr3" | "fsr2wgsl") {
+        if !matches!(self.upscaler.as_str(), "fsr1" | "fsr2") {
             return self.render_scale;
         }
         let preset: f32 = match self.fsr_quality.as_str() {
@@ -1136,9 +1142,11 @@ impl Settings {
 
     pub fn render_options(&self) -> omsi_render::RenderOptions {
         let fsr1 = self.upscaler == "fsr1";
-        let fsr3 = self.upscaler == "fsr3";
-        let fsr2_wgsl = self.upscaler == "fsr2wgsl";
-        let temporal_aa = matches!(self.upscaler.as_str(), "fsr2" | "taa");
+        // The menu's fsr2 setting now selects the actual FSR2 WGSL SDK
+        // passes, never the old TAA + spatial scaling preview.
+        let fsr3 = false;
+        let fsr2_wgsl = self.upscaler == "fsr2";
+        let temporal_aa = self.upscaler == "taa";
         let render_scale = self.scene_render_scale();
         // Temporal histories need a single-sampled depth buffer. The launcher also
         // persists MSAA=1 when one of these modes is selected.

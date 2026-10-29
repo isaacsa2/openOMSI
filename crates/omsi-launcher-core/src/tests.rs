@@ -569,8 +569,11 @@ fn comfortable_cabin_is_an_independent_opt_in_launch_flag() {
 }
 
 #[test]
-fn fsr1_and_temporal_preview_settings_survive_launcher_round_trip() {
-    for (mode, quality) in [("default", "quality"), ("fsr1", "ultra"), ("taa", "quality"), ("fsr2", "balanced"), ("fsr3", "balanced"), ("fsr2wgsl", "balanced")] {
+fn four_upscaler_modes_survive_launcher_round_trip() {
+    for (mode, quality) in [
+        ("default", "quality"), ("taa", "quality"),
+        ("fsr1", "ultra"), ("fsr2", "balanced"),
+    ] {
         let mut settings = settings_from_text(None);
         settings["upscaler"] = json!(mode);
         settings["fsr_quality"] = json!(quality);
@@ -584,7 +587,7 @@ fn fsr1_and_temporal_preview_settings_survive_launcher_round_trip() {
         assert_eq!(restored["fsr_quality"], quality);
     }
     assert_eq!(settings_from_text(Some("upscaler=FSR2\n"))["upscaler"], "fsr2");
-    assert_eq!(settings_from_text(Some("upscaler=taa\n"))["upscaler"], "taa");
+    assert_eq!(settings_from_text(Some("upscaler=fsr2wgsl\n"))["upscaler"], "fsr2");
+    assert_eq!(settings_from_text(Some("upscaler=fsr3\n"))["upscaler"], "default");
     assert_eq!(settings_from_text(Some("upscaler=unknown\n"))["upscaler"], "default");
 }
-

@@ -211,3 +211,19 @@ Neither the normal release nor OpenGL/GLES/mobile drivers try to compile
 or allocate the optional backend. Compiler tests on the wgpu 29 fork and
 actual DX12/Vulkan GPU tests are still required; do not claim performance
 or image conformance from default-feature CI alone.
+
+## Simplified user-facing upscaler selector (2026-10-29)
+
+The launcher and in-game settings now expose **exactly four modes**:
+Standard, TAA, AMD FSR 1.0, AMD FSR 2.0. The `fsr2` settings value now
+means **actual FidelityFX FSR2 WGSL**, never the old TAA-backed Preview.
+The old `fsr2wgsl` setting is migrated to `fsr2` on load; obsolete
+`fsr3` values return to Standard rather than exposing an unfinished mode.
+FSR3 source remains behind its opt-in experimental feature and is *not*
+in the public menu. FSR1 EASU/RCAS remains unchanged.
+
+FSR2 remains feature-gated (`--features fsr2-wgsl`), and the menu
+explains the GPU/MSAA requirement: on binaries without that optional backend
+or without the necessary native compute features, Standard scaling is used.
+This menu consolidation does not constitute GPU validation or enable the
+upscaler in release builds.
