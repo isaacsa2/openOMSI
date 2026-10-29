@@ -7,6 +7,10 @@
 use glam::{Mat4, Vec2, Vec3};
 
 mod taa;
+#[cfg(feature = "fsr3-wgpu")]
+mod fsr3;
+#[cfg(feature = "fsr3-wgpu")]
+pub(crate) use fsr3::Fsr3;
 pub(crate) use taa::Taa;
 
 /// Only one AA/upscaling algorithm can own a frame's temporal history.
