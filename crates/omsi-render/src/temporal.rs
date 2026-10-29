@@ -19,6 +19,46 @@ mod fsr3;
 pub(crate) use fsr3::Fsr3;
 
 impl crate::Renderer {
+    pub(crate) fn fsr2_wgsl_present(&self, f: &crate::passes::FrameCtx<'_>) -> Option<&wgpu::BindGroup> {
+        #[cfg(feature = "fsr2-wgsl")]
+        if self.fsr2_wgsl_active() && f.with_overlays && f.projection.is_none() && !f.second_eye {
+            return self.fsr2_wgsl.as_ref().and_then(|b| b.present());
+        }
+        let _ = f;
+        None
+    }
+
+    pub(crate) fn encode_fsr2_wgsl(&mut self, encoder: &mut wgpu::CommandEncoder, f: &crate::passes::FrameCtx<'_>) {
+        #[cfg(feature = "fsr2-wgsl")]
+        {
+            if !self.fsr2_wgsl_active() || !f.with_overlays || f.projection.is_some() || f.second_eye { return; }
+            let inputs = match (
+                f.scene_target.as_ref(),
+                self.targets.ao.as_ref().filter(|a| a.size == (f.width, f.height)),
+                self.motion.as_ref().filter(|m| m.frame_ready)
+                    .and_then(|m| m.target.as_ref().filter(|t| t.size == (f.width, f.height)))
+            ) {
+                (Some((color, _)), Some(depth), Some(motion)) => Some((
+                    color.clone(), depth.depth_tex.clone(), motion.texture.clone(),
+                    self.motion.as_ref().is_some_and(|m| m.frame_reset)
+                )),
+                _ => None,
+            };
+            if let Some((color, depth, motion, reset)) = inputs {
+                let result = self.fsr2_wgsl.as_mut().expect("FSR2 WGSL").encode(
+                    &self.device, &self.queue, encoder,
+                    &self.scale.upscale_layout, &self.scale.upscale_buf, &self.tone.post_sampler,
+                    &color, &depth, &motion, (f.width, f.height),
+                    (f.full_w, f.target.texture().height()), f.camera, f.dt, reset,
+                    self.options.fsr_sharpness,
+                );
+                if !result { self.fsr2_wgsl.as_mut().expect("FSR2 WGSL").reset(); }
+            } else if let Some(fsr2) = self.fsr2_wgsl.as_mut() { fsr2.reset(); }
+        }
+        #[cfg(not(feature = "fsr2-wgsl"))]
+        { let _ = (encoder, f); }
+    }
+
     pub(crate) fn fsr3_present(&self, f: &crate::passes::FrameCtx<'_>) -> Option<&wgpu::BindGroup> {
         #[cfg(feature = "fsr3-wgpu")]
         if self.fsr3_active() && f.with_overlays && f.projection.is_none() && !f.second_eye {

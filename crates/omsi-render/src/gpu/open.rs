@@ -200,6 +200,19 @@ impl Renderer {
         if omsi_cfg::flags::OMSI_GPU_TIMERS.is_set() {
             required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
+        // The WGSL SDK's reflection/compute passes require native-only
+        // storage formats and subgroups. Never alter regular FSR1 device caps.
+        #[cfg(feature = "fsr2-wgsl")]
+        {
+            let needed = crate::temporal::Fsr2Wgsl::required_features();
+            if options.fsr2_wgsl && adapter.features().contains(needed)
+                && !intel_vulkan_safe && info.backend != wgpu::Backend::Gl
+                && info.backend != wgpu::Backend::Noop {
+                required_features |= needed;
+            } else if options.fsr2_wgsl {
+                log::warn!("FSR2 WGSL unavailable on this adapter; retaining Standard/FSR1");
+            }
+        }
         // FSR3 uses optional storage formats and subgroup compute. Ask for those
         // only on an explicit experimental request; the default FSR1/GL path
         // must keep its current device feature set (including legacy GPUs).
@@ -586,6 +599,7 @@ impl Renderer {
             fsr3: options.fsr3 && !gl && device.features().contains(
                 wgpu::Features::SUBGROUP | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
             ),
+            fsr2_wgsl: options.fsr2_wgsl && !gl && cfg!(feature = "fsr2-wgsl"),
             ..options
         };
         let gpu_timers = std::array::from_fn(|_| GpuTimers::new(&device));
@@ -594,6 +608,11 @@ impl Renderer {
             puddles::Pipelines::new(&device, &scene.shader, &scene.camera_layout, &scene.material_layout)
         });
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
+        #[cfg(feature = "fsr2-wgsl")]
+        let fsr2_wgsl = (options.fsr2_wgsl && options.msaa <= 1 && !gl && !options.preview_only
+            && device.features().contains(crate::temporal::Fsr2Wgsl::required_features()))
+            .then(|| crate::gpu::optional_pipeline(&device, "FSR2 WGSL", || crate::temporal::Fsr2Wgsl::new(&device)))
+            .flatten();
         #[cfg(feature = "fsr3-wgpu")]
         let fsr3 = (options.fsr3 && options.msaa <= 1 && !gl && !options.preview_only)
             .then(|| crate::gpu::optional_pipeline(&device, "FSR3 upscaling", || crate::temporal::Fsr3::new(&device)))
@@ -603,13 +622,16 @@ impl Renderer {
             .then(|| crate::gpu::optional_pipeline(&device, "experimental TAA", || crate::temporal::Taa::new(&device, format)))
             .flatten();
         let fsr3_requested = cfg!(feature = "fsr3-wgpu") && options.fsr3;
-        let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some() || fsr3_requested)
+        let fsr2_requested = cfg!(feature = "fsr2-wgsl") && options.fsr2_wgsl;
+        let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some() || fsr3_requested || fsr2_requested)
             .then(|| crate::gpu::optional_pipeline(&device, "motion vectors", || crate::passes::motion::MotionVectors::new(&device, format)))
             .flatten();
         // A temporal pass without its motion source must not be presented as active.
         let temporal_aa = temporal_aa.filter(|_| motion.is_some());
         #[cfg(feature = "fsr3-wgpu")]
         let fsr3 = fsr3.filter(|_| motion.is_some());
+        #[cfg(feature = "fsr2-wgsl")]
+        let fsr2_wgsl = fsr2_wgsl.filter(|_| motion.is_some());
         let cookie_atlas = cookies::CookieAtlas::new();
         Renderer {
             targets: Targets {
@@ -815,6 +837,8 @@ impl Renderer {
             temporal_aa,
             #[cfg(feature = "fsr3-wgpu")]
             fsr3,
+            #[cfg(feature = "fsr2-wgsl")]
+            fsr2_wgsl,
             mesh_pages: false,
         }
     }

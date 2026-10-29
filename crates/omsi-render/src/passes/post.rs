@@ -206,17 +206,17 @@ impl Renderer {
         if let Some((_, bg)) = &f.scene_target {
             // Full-resolution FSR3 compute result bypasses every spatial
             // reconstruction stage. UI is drawn at native resolution afterwards.
-            if let Some(fsr3_bg) = self.fsr3_present(f) {
+            if let Some(fsr3_bg) = self.fsr2_wgsl_present(f).or_else(|| self.fsr3_present(f)) {
                 self.queue.write_buffer(&self.scale.upscale_buf, 0,
                     bytemuck::cast_slice(&[f.full_w as f32, f.target.texture().height() as f32, 0.0f32, 0.0]));
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("FidelityFX FSR3 reconstructed output"),
+                    label: Some("FidelityFX temporal reconstructed output"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: f.target, depth_slice: None, resolve_target: None,
                         ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
                     })],
                     depth_stencil_attachment: None,
-                    timestamp_writes: pass_timer(timers.set.as_ref(), &mut timers.timed, "FSR3 present"),
+                    timestamp_writes: pass_timer(timers.set.as_ref(), &mut timers.timed, "FidelityFX present"),
                     occlusion_query_set: None, multiview_mask: None,
                 });
                 pass.set_pipeline(&self.scale.copy_pipeline);

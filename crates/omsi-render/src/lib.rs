@@ -36,6 +36,8 @@ pub mod temporal;
 
 /// Whether this binary was compiled with the real (experimental) FSR 3 backend.
 pub const fn fsr3_compiled() -> bool { cfg!(feature = "fsr3-wgpu") }
+/// The true FSR2 WGSL SDK port, as distinct from the old TAA-based preview.
+pub const fn fsr2_wgsl_compiled() -> bool { cfg!(feature = "fsr2-wgsl") }
 mod srgb_encode;
 mod triple;
 mod frame_plan;
@@ -248,6 +250,8 @@ pub struct Renderer {
     temporal_aa: Option<temporal::Taa>,
     #[cfg(feature = "fsr3-wgpu")]
     fsr3: Option<temporal::Fsr3>,
+    #[cfg(feature = "fsr2-wgsl")]
+    fsr2_wgsl: Option<temporal::Fsr2Wgsl>,
     /// Meshes share pages of buffers (the adapter draws with a base vertex).
     mesh_pages: bool,
     /// The size-keyed targets (see targets.rs): made on first use, let go of when unused.
@@ -294,6 +298,8 @@ pub struct RenderOptions {
     pub fsr1: bool,
     /// Real experimental FSR 3 temporal upscaling, never frame generation.
     pub fsr3: bool,
+    /// True FSR 2.3.3 WGSL compute backend (not the experimental TAA preview).
+    pub fsr2_wgsl: bool,
     /// Standalone TAA or FSR 2 preview (TAA + spatial upscale, NOT AMD SDK).
     pub temporal_aa: bool,
     /// RCAS sharpening strength, from 0 (none) to 1.
@@ -380,6 +386,7 @@ impl Default for RenderOptions {
             render_scale: 0.0,
             fsr1: false,
             fsr3: false,
+            fsr2_wgsl: false,
             temporal_aa: false,
             xr_scale: 1.0,
             fsr_sharpness: 0.8,
@@ -553,6 +560,53 @@ impl Renderer {
         if let Some(fsr3) = self.fsr3.as_mut() {
             fsr3.reset();
         }
+        #[cfg(feature = "fsr2-wgsl")]
+        if let Some(fsr2) = self.fsr2_wgsl.as_mut() {
+            fsr2.reset();
+        }
+    }
+
+    pub fn fsr2_wgsl_active(&self) -> bool {
+        #[cfg(feature = "fsr2-wgsl")]
+        { return self.options.fsr2_wgsl && self.fsr2_wgsl.is_some() && self.motion.is_some(); }
+        #[cfg(not(feature = "fsr2-wgsl"))]
+        { false }
+    }
+
+    /// Switch genuine WGSL FSR2 (not TAA). The feature is never loaded on
+    /// an unsupported GPU or an OpenGL device.
+    pub fn set_fsr2_wgsl(&mut self, enabled: bool) -> bool {
+        if !enabled {
+            self.options.fsr2_wgsl = false;
+            #[cfg(feature = "fsr2-wgsl")]
+            { self.fsr2_wgsl = None; }
+            self.reset_motion_history();
+            return true;
+        }
+        #[cfg(feature = "fsr2-wgsl")]
+        {
+            if self.options.msaa > 1 || crate::gl_backend() || self.options.preview_only
+                || !self.device.features().contains(temporal::Fsr2Wgsl::required_features()) {
+                log::warn!("FSR2 WGSL needs single-sample depth and the required compute features");
+                return false;
+            }
+            if self.fsr2_wgsl.is_none() {
+                self.fsr2_wgsl = crate::gpu::optional_pipeline(&self.device, "FSR2 WGSL", || temporal::Fsr2Wgsl::new(&self.device));
+            }
+            if self.fsr2_wgsl.is_some() {
+                if self.motion.is_none() { self.set_motion_vectors(true); }
+                if self.motion.is_none() { self.fsr2_wgsl = None; return false; }
+                self.options.fsr1 = false;
+                self.options.temporal_aa = false;
+                self.temporal_aa = None;
+                self.set_fsr3(false);
+                self.options.fsr2_wgsl = true;
+                self.reset_motion_history();
+                return true;
+            }
+        }
+        log::warn!("FSR2 WGSL backend not compiled or unsupported by this GPU");
+        false
     }
 
     pub fn fsr3_active(&self) -> bool {
@@ -587,6 +641,7 @@ impl Renderer {
                 self.options.fsr1 = false;
                 self.options.temporal_aa = false;
                 self.temporal_aa = None;
+                self.set_fsr2_wgsl(false);
                 self.options.fsr3 = true;
                 self.reset_motion_history();
                 return true;
@@ -680,7 +735,10 @@ impl Renderer {
                 None => (self.scale.fsr_refused, refused_now) = (true, true),
             }
         }
-        if fsr1 || temporal_aa { self.set_fsr3(false); }
+        if fsr1 || temporal_aa {
+            self.set_fsr3(false);
+            self.set_fsr2_wgsl(false);
+        }
         self.options.fsr1 = fsr1 && self.scale.fsr.is_some();
         self.options.temporal_aa = temporal_aa;
         // Only one temporal owner. The optional standalone TAA is also the

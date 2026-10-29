@@ -789,7 +789,9 @@ impl Renderer {
             self.encode_post(&mut enc.picture, scene, &f, puddles_on, &mut timers);
         }
         self.encode_motion_debug(&mut enc.picture, &f);
-        // FSR 3 uses the actual AMD algorithm (wgpu-ffx), without CPU readback.
+        // Actual AMD FSR2 WGSL compute is independent of TAA preview or FSR1.
+        self.encode_fsr2_wgsl(&mut enc.picture, &f);
+        // FSR 3 uses its separate wgpu-ffx implementation.
         self.encode_fsr3(&mut enc.picture, &f);
         // TAA is a separate fallback only, never used together with FSR3.
         self.encode_temporal_aa(&mut enc.picture, &f);
