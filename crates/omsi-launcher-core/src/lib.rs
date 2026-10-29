@@ -2210,6 +2210,28 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
     settings_from_text_on(text, cfg!(any(target_os = "android", target_os = "ios")))
 }
 
+/// Public scaler choices. Accept deprecated configuration aliases but never
+/// expose an unfinished FSR3 or the old TAA-only FSR2 preview as active modes.
+fn parse_upscaler(value: &str) -> &'static str {
+    match value.to_ascii_lowercase().as_str() {
+        "fsr1" => "fsr1",
+        "taa" => "taa",
+        "fsr2" | "fsr2wgsl" => "fsr2",
+        _ => "default",
+    }
+}
+
+fn parse_fsr_quality(value: &str) -> &'static str {
+    match value.to_ascii_lowercase().as_str() {
+        "ultra" => "ultra",
+        "balanced" => "balanced",
+        "performance" => "performance",
+        "custom" => "custom",
+        "auto" => "auto",
+        _ => "quality",
+    }
+}
+
 pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     let mut v = json!({ "msaa": 4, "anisotropy": 8, "ssao": true, "shadows": true, "shadow_size": 2048, "navigator": true, "ui_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "video_memory": 0, "texture_compression": true, "gpu_texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "cloud_quality": "high", "rain_quality": "high", "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "ambient": true, "vol_ambient": 0.8, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
     v["upscaler"] = json!("default");
@@ -2373,17 +2395,8 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "rain_quality" => v[&k] = json!(rain_quality(val)),
             "vehicle_smoke" => v[&k] = json!(vehicle_smoke(val)),
             "puddles" => v[&k] = json!(puddles(val)),
-            "upscaler" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
-                "fsr1" => "fsr1", "taa" => "taa",
-                "fsr2" | "fsr2wgsl" => "fsr2",
-                // Deprecated development-only modes should not reappear.
-                "fsr3" => "default",
-                _ => "default",
-            }),
-            "fsr_quality" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
-                "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
-                "custom" => "custom", "auto" => "auto", _ => "quality",
-            }),
+            "upscaler" => v[&k] = json!(parse_upscaler(val)),
+            "fsr_quality" => v[&k] = json!(parse_fsr_quality(val)),
             "fsr_sharpness" | "fsr2_sharpness" => v[&k] = json!(val.parse::<f64>().ok()
                 .filter(|x| x.is_finite()).unwrap_or(0.8).clamp(0.0, 1.0)),
             "gpu_texture_compression" => v[&k] = json!(!matches!(val.trim().to_ascii_lowercase().as_str(), "0" | "off" | "no" | "false" | "disabled")),

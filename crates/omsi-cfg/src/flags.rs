@@ -480,13 +480,13 @@ flags! {
     OMSI_SKIP_OBJECT: Text, Test, Use, "-", "Leave out the objects whose file name contains this text.";
     OMSI_SKIP_PIPE: Text, Test, Frame, "-", "Pipeline kinds to leave out of the main pass (comma-separated numbers).";
     OMSI_SKY_CUBE_EVERY_FRAME: Bool, Switch, Frame, "off", "Enhanced: redraw a slice of the sky cube every frame again, not at most 60 a second (A/B).";
-    OMSI_TAA: Bool, Switch, Use, "off", "Experimental standalone temporal accumulation (NOT FSR2). Requires MSAA off; stays disabled when FSR1 is enabled.";
     OMSI_SPOT_SELECT: Num, Test, Use, "-", "Turn on spotlight n (headlight pictures).";
     OMSI_STORM: Text, Tuning, Use, "-", "activity[,azimuth]: a thunderstorm of this activity (0..1) over the place whatever the weather; with an azimuth (degrees, 0 east, 90 north) the flash stands frozen there at its first stroke (for checks).";
     OMSI_SURFACE_BIAS: Num, Tuning, Use, "-24", "Depth bias of road surfaces.";
     OMSI_SURFACE_FLUSH: Num, Tuning, Once, "0.12", "Height in metres under which a surface counts as flush with the road.";
     OMSI_SUSP_TRACE: Text, Debug, Use, "-", "Offscreen CSV: body height and each wheel's travel and load every frame.";
     OMSI_SUSP_TRACE_WINDOW: Text, Debug, Use, "-", "Window CSV: each wheel's travel every frame.";
+    OMSI_TAA: Bool, Switch, Use, "off", "Experimental standalone temporal accumulation (NOT FSR2). Requires MSAA off; stays disabled when FSR1 is enabled.";
     OMSI_TERRAIN_ALIGN: Bool, Switch, Use, "off", "Align the terrain to the splines again at load (A/B; Omsi.exe does not).";
     OMSI_TEST_AVATAR: Text, Test, Test, "-", "Test only: an avatar FBX for the avatar loading test (`cargo test -p omsi-sim a_rocketbox_avatar_loads -- --ignored`).";
     OMSI_TEST_CONTENT: Text, Test, Test, "-", "Content root for tests that need real OMSI content.";
