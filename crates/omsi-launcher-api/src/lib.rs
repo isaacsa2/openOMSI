@@ -257,6 +257,9 @@ fn profile_delete(name: String) -> Answer {
 
 /// The driver the next duty is driven by.
 fn profile_select(name: String) -> Answer {
+    if !core::is_plain_profile_name(&name) {
+        return Err(err("the name must be a plain file name"));
+    }
     let mut c = core::load_config();
     c.profile = name;
     core::save_config(&c).map_err(err)?;

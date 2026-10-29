@@ -567,3 +567,15 @@ fn comfortable_cabin_is_an_independent_opt_in_launch_flag() {
     assert!(enabled.iter().any(|a| a == "--comfortable-cabin-on-start"));
     assert!(!enabled.iter().any(|a| a == "--autostart"));
 }
+
+/// A driver's name becomes `Drivers/<name>.odr` on the game's command line: nothing that
+/// leads out of `Drivers` is one (the page's `profile_select` and the start both refuse it).
+#[test]
+fn a_profile_name_is_a_plain_file_name() {
+    for good in ["Pichau", "  Isaac S ", "Fahrer 2", "Jürgen"] {
+        assert!(super::is_plain_profile_name(good), "{good}");
+    }
+    for bad in ["", "   ", "../../x", "a/b", "a\\b", "C:x", "..", ".hidden", "x.", "a\0b"] {
+        assert!(!super::is_plain_profile_name(bad), "{bad:?}");
+    }
+}

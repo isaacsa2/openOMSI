@@ -1854,12 +1854,19 @@ pub fn get_profile(name: &str) -> Result<Profile> {
     Ok(Profile { name: name.to_string(), file: format!("Drivers/{name}.odr"), hours, km, xp, level, next_level_xp: next, stops, early, late, tickets, cash, crashes, hurt, rating_driving: rating[0], rating_comfort: rating[1], rating_tickets: rating[2], sessions: mine.into_iter().take(40).collect(), exists: driver.is_some() })
 }
 
+/// Whether `name` (trimmed) can name a driver: a plain file name in `Drivers`, nothing that
+/// leads out of it.
+pub fn is_plain_profile_name(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty() && !name.contains(['/', '\\', ':', '\0']) && name.trim_matches('.').len() == name.len()
+}
+
 /// Create the personnel file for a new driver (OMSI's own `.odr` format), so that the game
 /// can add every run to it.
 pub fn create_profile(name: &str, sex: &str) -> Result<Profile> {
     let root = root()?;
     let name = name.trim();
-    if name.is_empty() || name.contains(['/', '\\', ':']) {
+    if !is_plain_profile_name(name) {
         return Err(anyhow!(i18n::tr("the name must be a plain file name")));
     }
     let file = driver_write_path(&root, name);
@@ -1906,7 +1913,7 @@ fn delete_profile_sessions(dir: &Path, name: &str) -> Result<()> {
 /// original installation is left there: the original is never written.
 pub fn delete_profile(name: &str) -> Result<()> {
     let name = name.trim();
-    if name.is_empty() || name.contains(['/', '\\', ':']) {
+    if !is_plain_profile_name(name) {
         return Err(anyhow!(i18n::tr("the name must be a plain file name")));
     }
     let root = root()?;
@@ -3167,7 +3174,7 @@ fn duty_args_with_settings(d: &Duty, root: &Path, st: &Value) -> Result<Vec<Stri
     if let Some(sit) = d.situation.as_deref().filter(|s| !s.trim().is_empty()) {
         let mut a = start;
         a.extend(["--situation".into(), sit.to_string()]);
-        if let Some(p) = d.profile.as_deref().filter(|p| !p.trim().is_empty()) {
+        if let Some(p) = d.profile.as_deref().filter(|p| is_plain_profile_name(p)) {
             a.extend(["--driver".into(), format!("Drivers/{}.odr", p.trim())]);
         }
         // the traffic and the people as for any other start: a situation file keeps the
@@ -3297,7 +3304,7 @@ fn duty_args_with_settings(d: &Duty, root: &Path, st: &Value) -> Result<Vec<Stri
             a.extend(["--lan-name".into(), name.trim().to_string()]);
         }
     }
-    if !profile.trim().is_empty() {
+    if is_plain_profile_name(&profile) {
         a.extend(["--driver".into(), format!("Drivers/{}.odr", profile.trim())]);
     }
     Ok(a)
