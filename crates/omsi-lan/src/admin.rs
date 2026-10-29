@@ -302,7 +302,7 @@ pub fn allow_player_teleport(allowed: bool) {
 }
 
 /// Validate the entire wire request before issuing any authoritative host command.
-fn parse_self_teleport(arg: &str) -> Option<(glam::DVec3, f64)> {
+pub fn parse_self_teleport(arg: &str) -> Option<(glam::DVec3, f64)> {
     let values = arg.split_whitespace().map(str::parse::<f64>).collect::<Result<Vec<_>, _>>().ok()?;
     let [x, y, z, heading] = values.as_slice() else { return None };
     // Wide enough for large OMSI maps; rejects NaN, infinities and implausible coordinates.
