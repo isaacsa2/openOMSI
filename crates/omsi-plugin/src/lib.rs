@@ -106,14 +106,24 @@ pub fn parse_opl(text: &str) -> Opl {
     o
 }
 
+/// Whether a folder of the plugins folder is where plugins write: a `.oop`'s or a `.lua`'s
+/// data (`<name>.data`) or the `.oop` assets (`.oop-cache`, any folder whose name starts with a
+/// dot). Code is never looked for there: a plugin that may only keep files would otherwise put
+/// an `.opl` and its DLL, or a `main.lua`, there and have it run with every permission at the
+/// next start.
+pub fn is_plugin_storage(dir: &Path) -> bool {
+    dir.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).is_some_and(|n| n.starts_with('.') || n.ends_with(".data"))
+}
+
 /// Every `.opl` under `dir` (a folder's subfolders before its files, names compared without
-/// case - the order FindFilesRecursive gives).
+/// case - the order FindFilesRecursive gives); the plugins' own storage is left out
+/// ([`is_plugin_storage`]).
 pub fn find_opls(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else { return out };
     let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
     entries.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_uppercase()).unwrap_or_default());
-    for p in entries.iter().filter(|p| p.is_dir()) {
+    for p in entries.iter().filter(|p| p.is_dir() && !is_plugin_storage(p)) {
         out.extend(find_opls(p));
     }
     for p in entries.iter().filter(|p| p.is_file()) {

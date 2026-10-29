@@ -190,3 +190,28 @@ fn native_processes_need_both_player_consent_and_package_permission() {
         plugins.finalize();
     }
 }
+
+/// What a plugin may write (a `.oop`'s or `.lua`'s `<name>.data`, the `.oop` assets in
+/// `.oop-cache`) is never looked in for plugins: a plugin with only "storage" cannot leave an
+/// `.opl` and its DLL, or a `main.lua`, there to run with every permission at the next start.
+#[test]
+fn plugin_storage_is_never_loaded_as_code() {
+    let d = dir("storage");
+    for sub in ["evil.data", "Evil.DATA", ".oop-cache/evil", ".hidden"] {
+        let s = d.join(sub);
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::write(s.join("main.lua"), "omsi.log('escaped')").unwrap();
+        std::fs::write(s.join("evil.opl"), "[dll]\nevil.data\\evil.dll\n").unwrap();
+    }
+    // a plugin's own folder and a top-level `.opl` are still found
+    std::fs::create_dir_all(d.join("Folder")).unwrap();
+    std::fs::write(d.join("Folder/main.lua"), "omsi.log('folder')").unwrap();
+    std::fs::write(d.join("Folder/folder.opl"), "[dll]\nFolder\\x.dll\n").unwrap();
+    std::fs::write(d.join("top.opl"), "[dll]\nx.dll\n").unwrap();
+    let lua = omsi_plugin::lua::find_lua(&d);
+    assert_eq!(lua, [d.join("Folder/main.lua")]);
+    let opls = omsi_plugin::find_opls(&d);
+    assert_eq!(opls, [d.join("Folder/folder.opl"), d.join("top.opl")]);
+    let plugins = Plugins::load(std::slice::from_ref(&d), &HostConfig::default());
+    assert!(plugins.lua.iter().all(|p| !p.path.starts_with(d.join("evil.data"))));
+}

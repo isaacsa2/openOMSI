@@ -110,7 +110,8 @@ impl LuaSource for DiskSource {
 const DATA_DIR: &str = "data";
 
 /// Every Lua plugin of a plugins folder: top-level `*.lua` files and `<folder>/main.lua`.
-/// A one-file plugin's saved data (`<name>.save.lua`) is no plugin.
+/// A one-file plugin's saved data (`<name>.save.lua`) is no plugin, and the plugins' own storage
+/// is not looked in ([`crate::is_plugin_storage`]).
 pub fn find_lua(dir: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
@@ -118,6 +119,9 @@ pub fn find_lua(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for p in entries {
         if p.is_dir() {
+            if crate::is_plugin_storage(&p) {
+                continue;
+            }
             if let Some(main) = crate::resolve_path(&p, "main.lua").filter(|m| m.is_file()) {
                 out.push(main);
             }
