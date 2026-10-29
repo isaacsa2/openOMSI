@@ -31,12 +31,8 @@ pub(crate) fn click(app: &mut crate::App, id: &str) {
     if id != "yes" {
         return;
     }
-    if app.net.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client) {
-        app.service_msg = Some(("In a LAN session only the host moves vehicles on the map".into(), 4.0));
-        return;
-    }
     let Some(heading) = app.player.as_ref().map(|p| p.vehicle.heading) else { return };
-    crate::admin::teleport(app, at, heading);
-    app.service_msg = Some(("The bus stands where the map was clicked".into(), 3.0));
+    crate::admin::request_teleport(app, at, heading);
+    // The server answers the request; the client must not claim success yet.
     app.service_event("teleport", "player", None);
 }
