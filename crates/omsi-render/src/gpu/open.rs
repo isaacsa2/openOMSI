@@ -570,15 +570,22 @@ impl Renderer {
             puddles::Pipelines::new(&device, &scene.shader, &scene.camera_layout, &scene.material_layout)
         });
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
+        #[cfg(feature = "fsr3-wgpu")]
+        let fsr3 = (options.fsr3 && options.msaa <= 1 && !gl && !options.preview_only)
+            .then(|| crate::gpu::optional_pipeline(&device, "FSR3 upscaling", || crate::temporal::Fsr3::new(&device)))
+            .flatten();
         let temporal_aa = ((options.temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
             && !options.fsr1 && options.msaa <= 1 && !options.preview_only)
             .then(|| crate::gpu::optional_pipeline(&device, "experimental TAA", || crate::temporal::Taa::new(&device, format)))
             .flatten();
-        let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some())
+        let fsr3_requested = cfg!(feature = "fsr3-wgpu") && options.fsr3;
+        let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some() || fsr3_requested)
             .then(|| crate::gpu::optional_pipeline(&device, "motion vectors", || crate::passes::motion::MotionVectors::new(&device, format)))
             .flatten();
         // A temporal pass without its motion source must not be presented as active.
         let temporal_aa = temporal_aa.filter(|_| motion.is_some());
+        #[cfg(feature = "fsr3-wgpu")]
+        let fsr3 = fsr3.filter(|_| motion.is_some());
         let cookie_atlas = cookies::CookieAtlas::new();
         Renderer {
             targets: Targets {
@@ -782,6 +789,8 @@ impl Renderer {
             rt,
             motion,
             temporal_aa,
+            #[cfg(feature = "fsr3-wgpu")]
+            fsr3,
             mesh_pages: false,
         }
     }

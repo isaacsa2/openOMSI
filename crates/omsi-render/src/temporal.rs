@@ -11,6 +11,62 @@ mod taa;
 mod fsr3;
 #[cfg(feature = "fsr3-wgpu")]
 pub(crate) use fsr3::Fsr3;
+
+impl crate::Renderer {
+    pub(crate) fn fsr3_present(&self, f: &crate::passes::FrameCtx<'_>) -> Option<&wgpu::BindGroup> {
+        #[cfg(feature = "fsr3-wgpu")]
+        if self.fsr3_active() && f.with_overlays && f.projection.is_none() && !f.second_eye {
+            return self.fsr3.as_ref().and_then(|b| b.present());
+        }
+        let _ = f;
+        None
+    }
+
+    pub(crate) fn encode_fsr3(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        f: &crate::passes::FrameCtx<'_>,
+    ) {
+        #[cfg(feature = "fsr3-wgpu")]
+        {
+            if !self.fsr3_active() || !f.with_overlays || f.projection.is_some() || f.second_eye {
+                return;
+            }
+            // Never dispatch on a missing, stale or differently-sized depth buffer.
+            // A failed frame uses the original scaling path, not an old FSR3 image.
+            let inputs = match (
+                f.scene_target.as_ref(),
+                self.targets.ao.as_ref().filter(|a| a.size == (f.width, f.height)),
+                self.motion.as_ref().filter(|m| m.frame_ready)
+                    .and_then(|m| m.target.as_ref().filter(|t| t.size == (f.width, f.height)))
+            ) {
+                (Some((color, _)), Some(depth), Some(motion)) => Some((
+                    color.clone(), depth.depth_tex.clone(), motion.texture.clone(),
+                    self.motion.as_ref().is_some_and(|m| m.frame_reset)
+                )),
+                _ => None,
+            };
+            if let Some((color, depth, motion, reset)) = inputs {
+                let render = (f.width, f.height);
+                let display = (f.full_w, f.target.texture().height());
+                let scale = &self.scale;
+                let result = self.fsr3.as_mut().expect("FSR3").encode(
+                    &self.device, &self.queue, encoder,
+                    &scale.upscale_layout, &scale.upscale_buf, &self.tone.post_sampler,
+                    &color, &depth, &motion, render, display, f.camera,
+                    f.dt, reset, self.options.fsr_sharpness,
+                );
+                if !result {
+                    self.fsr3.as_mut().expect("FSR3").reset();
+                }
+            } else if let Some(fsr3) = self.fsr3.as_mut() {
+                fsr3.reset();
+            }
+        }
+        #[cfg(not(feature = "fsr3-wgpu"))]
+        { let _ = (encoder, f); }
+    }
+}
 pub(crate) use taa::Taa;
 
 /// Only one AA/upscaling algorithm can own a frame's temporal history.

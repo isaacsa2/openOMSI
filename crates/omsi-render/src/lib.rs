@@ -243,6 +243,8 @@ pub struct Renderer {
     motion: Option<passes::motion::MotionVectors>,
     /// Optional standalone TAA history test consumer, never combined with FSR1.
     temporal_aa: Option<temporal::Taa>,
+    #[cfg(feature = "fsr3-wgpu")]
+    fsr3: Option<temporal::Fsr3>,
     /// Meshes share pages of buffers (the adapter draws with a base vertex).
     mesh_pages: bool,
     /// The size-keyed targets (see targets.rs): made on first use, let go of when unused.
@@ -287,6 +289,8 @@ pub struct RenderOptions {
     pub render_scale: f32,
     /// Experimental FSR1 spatial upscaler (at the start, or later with `set_upscaler`).
     pub fsr1: bool,
+    /// Real experimental FSR 3 temporal upscaling, never frame generation.
+    pub fsr3: bool,
     /// Standalone TAA or FSR 2 preview (TAA + spatial upscale, NOT AMD SDK).
     pub temporal_aa: bool,
     /// RCAS sharpening strength, from 0 (none) to 1.
@@ -372,6 +376,7 @@ impl Default for RenderOptions {
             ssao: true,
             render_scale: 0.0,
             fsr1: false,
+            fsr3: false,
             temporal_aa: false,
             xr_scale: 1.0,
             fsr_sharpness: 0.8,
@@ -541,6 +546,51 @@ impl Renderer {
         if let Some(taa) = self.temporal_aa.as_mut() {
             taa.reset();
         }
+        #[cfg(feature = "fsr3-wgpu")]
+        if let Some(fsr3) = self.fsr3.as_mut() {
+            fsr3.reset();
+        }
+    }
+
+    pub fn fsr3_active(&self) -> bool {
+        #[cfg(feature = "fsr3-wgpu")]
+        { return self.options.fsr3 && self.fsr3.is_some() && self.motion.is_some(); }
+        #[cfg(not(feature = "fsr3-wgpu"))]
+        { false }
+    }
+
+    /// FSR3 uses the real FidelityFX compute passes, not the preview TAA path.
+    /// If unavailable, retain Standard/FSR1 without mutating the graphics device.
+    pub fn set_fsr3(&mut self, enabled: bool) -> bool {
+        if !enabled {
+            self.options.fsr3 = false;
+            #[cfg(feature = "fsr3-wgpu")]
+            { self.fsr3 = None; }
+            self.reset_motion_history();
+            return true;
+        }
+        #[cfg(feature = "fsr3-wgpu")]
+        {
+            if self.options.msaa > 1 || crate::gl_backend() || self.options.preview_only {
+                log::warn!("FSR 3 requires a single-sampled desktop Vulkan, DX12 or Metal device");
+                return false;
+            }
+            if self.fsr3.is_none() {
+                self.fsr3 = crate::gpu::optional_pipeline(&self.device, "FSR3 upscaling", || temporal::Fsr3::new(&self.device));
+            }
+            if self.fsr3.is_some() {
+                if self.motion.is_none() { self.set_motion_vectors(true); }
+                if self.motion.is_none() { self.fsr3 = None; return false; }
+                self.options.fsr1 = false;
+                self.options.temporal_aa = false;
+                self.temporal_aa = None;
+                self.options.fsr3 = true;
+                self.reset_motion_history();
+                return true;
+            }
+        }
+        log::warn!("FSR 3 backend not compiled or unavailable on this graphics device");
+        false
     }
 
     pub fn set_motion_vectors(&mut self, on: bool) {
@@ -627,6 +677,7 @@ impl Renderer {
                 None => (self.scale.fsr_refused, refused_now) = (true, true),
             }
         }
+        if fsr1 || temporal_aa { self.set_fsr3(false); }
         self.options.fsr1 = fsr1 && self.scale.fsr.is_some();
         self.options.temporal_aa = temporal_aa;
         // Only one temporal owner. The optional standalone TAA is also the

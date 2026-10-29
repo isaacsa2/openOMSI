@@ -204,6 +204,35 @@ impl Renderer {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
         if let Some((_, bg)) = &f.scene_target {
+            // Full-resolution FSR3 compute result bypasses every spatial
+            // reconstruction stage. UI is drawn at native resolution afterwards.
+            if let Some(fsr3_bg) = self.fsr3_present(f) {
+                self.queue.write_buffer(&self.scale.upscale_buf, 0,
+                    bytemuck::cast_slice(&[f.full_w as f32, f.target.texture().height() as f32, 0.0f32, 0.0]));
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("FidelityFX FSR3 reconstructed output"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: f.target, depth_slice: None, resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: pass_timer(timers.set.as_ref(), &mut timers.timed, "FSR3 present"),
+                    occlusion_query_set: None, multiview_mask: None,
+                });
+                pass.set_pipeline(&self.scale.copy_pipeline);
+                pass.set_bind_group(0, fsr3_bg, &[]);
+                pass.draw(0..3, 0..1);
+                if !overlays.is_empty() {
+                    pass.set_pipeline(&self.overlay_pipeline_1x);
+                    for (k, _) in overlays.iter().enumerate() {
+                        if let Some((_, _, group, _)) = scene.overlay_res.get(k) {
+                            pass.set_bind_group(0, group, &[]);
+                            pass.draw(0..6, 0..1);
+                        }
+                    }
+                }
+                return;
+            }
             // TAA's resolved history replaces the scene input, never the HUD.
             let taa_bg = self.temporal_aa.as_ref().and_then(|taa| taa.present())
                 .filter(|_| f.with_overlays && f.projection.is_none());

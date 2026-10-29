@@ -789,7 +789,9 @@ impl Renderer {
             self.encode_post(&mut enc.picture, scene, &f, puddles_on, &mut timers);
         }
         self.encode_motion_debug(&mut enc.picture, &f);
-        // Standalone opt-in TAA tests motion/history before eventual official FSR 2 dispatch.
+        // FSR 3 uses the actual AMD algorithm (wgpu-ffx), without CPU readback.
+        self.encode_fsr3(&mut enc.picture, &f);
+        // TAA is a separate fallback only, never used together with FSR3.
         self.encode_temporal_aa(&mut enc.picture, &f);
         // Establish an SDK-ready frame contract, without attempting native FSR 2.
         // The optional inputs are borrowed only for this frame; no readback occurs.
