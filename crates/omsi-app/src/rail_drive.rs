@@ -30,6 +30,18 @@ pub(crate) struct RailDrive {
     last_heading: Option<f64>,
 }
 
+/// Center between the front and rear bogies, ignoring malformed axle offsets.
+fn bogie_center(offsets: impl IntoIterator<Item = f32>) -> f32 {
+    let mut longs: Vec<f32> = offsets.into_iter().filter(|x| x.is_finite()).collect();
+    if longs.len() < 4 {
+        return 0.0;
+    }
+    longs.sort_by(|a, b| b.total_cmp(a));
+    let front = (longs[0] + longs[1]) * 0.5;
+    let rear = (longs[longs.len() - 2] + longs[longs.len() - 1]) * 0.5;
+    (front + rear) * 0.5
+}
+
 /// How much trail is kept behind the vehicle (m): a long train's length.
 const TRAIL: f64 = 400.0;
 
@@ -241,11 +253,7 @@ impl RailDrive {
                 p.vehicle.ty.def.rot_pnt_long
             } else if p.vehicle.ty.def.axles.len() >= 4 {
                 // If 4 axles (2 bogies), center_y is the midpoint between front and rear bogie centers
-                let mut longs: Vec<f32> = p.vehicle.ty.def.axles.iter().map(|a| a.long).collect();
-                longs.sort_by(|a, b| b.partial_cmp(a).unwrap());
-                let b0 = (longs[0] + longs[1]) * 0.5;
-                let b1 = (longs[longs.len() - 2] + longs[longs.len() - 1]) * 0.5;
-                (b0 + b1) * 0.5
+                bogie_center(p.vehicle.ty.def.axles.iter().map(|a| a.long))
             } else {
                 0.0
             }
@@ -712,5 +720,19 @@ mod tests {
         assert_eq!(lane, 0);
         let (lane, ..) = track_for(&net, search_point(lifted, 20.0), 0.0, 3000.0).unwrap();
         assert_eq!(lane, 1);
+    }
+}
+
+#[cfg(test)]
+mod bogie_center_tests {
+    use super::bogie_center;
+
+    #[test]
+    fn ignores_nonfinite_axles_without_changing_valid_geometry() {
+        let valid = [4.0, 3.0, -3.0, -4.0];
+        assert_eq!(bogie_center(valid), 0.0);
+        assert_eq!(bogie_center([4.0, 3.0, -3.0, -4.0, f32::NAN]), 0.0);
+        assert_eq!(bogie_center([4.0, 3.0, -3.0, -4.0, f32::INFINITY]), 0.0);
+        assert_eq!(bogie_center([f32::NAN; 4]), 0.0);
     }
 }
