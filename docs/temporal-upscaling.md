@@ -139,3 +139,35 @@ actual multisample render target still requires a restart).
 For testing, compare unchanged Standard vs FSR 1 vs Preview at the same quality
 and weather. The preview lacks real AMD SDK dispatch, jittered scene rendering,
 reactive masks, and animated-instance motion; it can ghost, so it is opt-in.
+
+## Genuine FidelityFX backend comparison (2026-10-29)
+
+FSR 1 EASU/RCAS already runs in **WGSL** (`fsr1.wgsl`). Do not confuse
+`FSR 2 Preview`, which currently uses a custom TAA and spatial stretch, with AMD FSR 2.
+The official AMD SDK and `sp-fidelity-wgpu` (unofficial 1:1 WGSL port of AMD FSR 2)
+are **two distinct backends**; neither is currently executing in the game.
+
+- **Official AMD FSR 2:** native Vulkan/DX12 interop, resource ownership and GPU
+  synchronization need to be implemented without CPU readback. Do not link an
+  unverified native SDK directly to GL/ANGLE/Android.
+- **FSR 2 WGSL (sp-fidelity 0.2):** the upstream port depends on `wgpu 30.0.1`,
+  while openOMSI pins a patched fork of `wgpu 29.0.4`. Our fork backports
+  several v30 fixes, but these are *not* proof of source/API compatibility.
+  The backend also requires SUBGROUP, TEXTURE_ATOMIC, TEXTURE_FORMAT_16BIT_NORM,
+  TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES, and FLOAT32_FILTERABLE. Query these
+  on each adapter before trying to create a FidelityFX device. A blind
+  dependency upgrade risks pulling in a second incompatible `wgpu` version.
+- **FSR 3 Upscaler (wgpu-ffx 0.1):** separate, early wgpu 29 implementation;
+  requires `Rgba16Float` colour and output, `Depth32Float`, `Rg16Float`
+  motion and extra intermediate compute resources. Generates no extra frames;
+  this is **upscaling only**. Its reactive-mask generation pass is unfinished.
+  The `fsr3-wgpu` Cargo feature adds its dependency but deliberately does
+  **not** make it available in the default build until the full dispatch path,
+  shader validation, actual jitter, resizes, device-loss and low-VRAM tests pass.
+
+**Priority:** keep FSR 1 and Standard unchanged, validate a complete FSR 3
+upscaling dispatch on Vulkan/DX12/Metal, then port the FSR 2 WGSL backend or
+expose the official FSR 2 native SDK as alternate, mutually exclusive choices.
+All require same-frame, correctly oriented motion vectors, true projection
+jitter, depth, color and an unjittered HUD. A frame where any input is absent
+must fall back rather than claim that FSR 2/3 is running.

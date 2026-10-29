@@ -2316,6 +2316,7 @@ version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
 dependencies = [
+ "bytemuck",
  "cfg-if",
  "crunchy",
  "num-traits",
@@ -4243,6 +4244,7 @@ dependencies = [
  "pollster 1.0.1",
  "rayon",
  "wgpu",
+ "wgpu-ffx",
  "windows 0.62.2",
  "winit",
 ]
@@ -7044,6 +7046,27 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "wgpu-ffx"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a5d4fec8a3ed04c3113f186faf0e8c69b17ad34ba2106fb36a20c58b80ff07d"
+dependencies = [
+ "bitflags 2.13.2",
+ "bytemuck",
+ "half",
+ "pollster 0.4.0",
+ "thiserror 2.0.21",
+ "wgpu",
+ "wgpu-ffx-shaders-spv",
+]
+
+[[package]]
+name = "wgpu-ffx-shaders-spv"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7188412df1ef6714a00704b21b568c67e317c2fb09fbafe59baf0bd43ec43ff"
 
 [[package]]
 name = "wgpu"
