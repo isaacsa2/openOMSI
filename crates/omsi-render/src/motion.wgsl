@@ -73,7 +73,13 @@ fn motion_at(px: vec2<i32>) -> vec2<f32> {
     }
     let prev_ndc = prev.xy / prev.w;
     let prev_uv = vec2<f32>(prev_ndc.x * 0.5 + 0.5, 0.5 - prev_ndc.y * 0.5);
-    return prev_uv - uv;
+    let motion = prev_uv - uv;
+    // Never write NaN, infinity or unrepresentable half-float motion into history.
+    // Large camera cuts are separately handled by PreviousView's validity checks.
+    if (!all(motion == motion) || any(abs(motion) > vec2<f32>(16.0))) {
+        return vec2<f32>(0.0);
+    }
+    return motion;
 }
 
 @fragment

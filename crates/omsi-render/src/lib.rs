@@ -526,6 +526,14 @@ impl Renderer {
     /// keep their render targets.
     /// The motion vectors (OMSI_MOTION_VECTORS, `passes::motion`) turned on or off while the
     /// game runs.
+    /// Invalidate temporal reprojection on explicit teleports, even short ones that
+    /// would not trigger the camera-distance discontinuity heuristic.
+    pub fn reset_motion_history(&mut self) {
+        if let Some(motion) = self.motion.as_mut() {
+            motion.reset();
+        }
+    }
+
     pub fn set_motion_vectors(&mut self, on: bool) {
         if !on {
             self.motion = None;
