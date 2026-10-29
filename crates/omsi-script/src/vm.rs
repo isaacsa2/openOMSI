@@ -590,7 +590,7 @@ fn b2f(b: bool) -> f32 {
 
 /// Longest string a script makes, in bytes: far beyond any display's text, short of what
 /// takes the game's memory (`$+`, `$SetLength*` and `$IntToStrEnh` stop there).
-pub const MAX_STR: usize = 1 << 16;
+pub const MAX_STR: usize = 1 << 17;
 
 /// The largest char boundary of `s` at or below `at`.
 fn floor_char(s: &str, at: usize) -> usize {
