@@ -5,9 +5,27 @@ use super::*;
 pub(crate) struct Parser {
     pub(crate) t: Vec<Tok>,
     pub(crate) i: usize,
+    /// How deep the statements and expressions being read are nested.
+    pub(crate) depth: u32,
 }
 
+/// Deepest nesting of statements and expressions a page's script may have: each level is
+/// several frames of this reader and of the interpreter on the game's thread, and a
+/// `<script>` of `x=` and a hundred thousand `(` overflowed its stack (no error a page can
+/// be told: the game ended).
+const MAX_NESTING: u32 = 200;
+
 impl Parser {
+    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, String>) -> Result<T, String> {
+        if self.depth >= MAX_NESTING {
+            return Err("the script is nested too deeply".into());
+        }
+        self.depth += 1;
+        let r = f(self);
+        self.depth -= 1;
+        r
+    }
+
     pub(crate) fn peek(&self) -> &Tok {
         self.t.get(self.i).unwrap_or(&Tok::Eof)
     }
@@ -69,6 +87,10 @@ impl Parser {
     }
 
     pub(crate) fn stmt(&mut self) -> Result<Stmt, String> {
+        self.nested(Self::stmt_inner)
+    }
+
+    fn stmt_inner(&mut self) -> Result<Stmt, String> {
         if self.is_p("{") {
             return Ok(Stmt::Block(self.block()?));
         }
@@ -211,6 +233,10 @@ impl Parser {
     }
 
     pub(crate) fn assign(&mut self) -> Result<Expr, String> {
+        self.nested(Self::assign_inner)
+    }
+
+    fn assign_inner(&mut self) -> Result<Expr, String> {
         if self.is_arrow() {
             return self.arrow();
         }
@@ -273,6 +299,10 @@ impl Parser {
     }
 
     pub(crate) fn unary(&mut self) -> Result<Expr, String> {
+        self.nested(Self::unary_inner)
+    }
+
+    fn unary_inner(&mut self) -> Result<Expr, String> {
         if let Tok::P(p) = self.peek().clone() {
             if matches!(p.as_str(), "!" | "-" | "+") {
                 self.i += 1;
