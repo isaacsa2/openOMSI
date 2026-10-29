@@ -8,14 +8,6 @@
 #   scripts/build-android.sh            build the APK
 #   scripts/build-android.sh install    ... and install it on the phone attached by USB (adb)
 set -eu
-# Temporary diagnostic on the FSR3 experiment branch: let Cargo resolve the
-# opt-in dependency and print exactly what --locked requires. Remove after
-# the resolved lockfile is committed and both platform builds are verified.
-if [ "${GITHUB_HEAD_REF:-}" = "feat/motion-vectors" ]; then
-  cargo metadata --format-version 1 > /dev/null
-  git diff -- Cargo.lock || true
-fi
-
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 export PATH="$HOME/.cargo/bin:$PATH"
 . android/env.sh
