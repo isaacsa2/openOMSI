@@ -575,7 +575,10 @@ impl Renderer {
             .then(|| crate::gpu::optional_pipeline(&device, "experimental TAA", || crate::temporal::Taa::new(&device, format)))
             .flatten();
         let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some())
-            .then(|| crate::passes::motion::MotionVectors::new(&device, format));
+            .then(|| crate::gpu::optional_pipeline(&device, "motion vectors", || crate::passes::motion::MotionVectors::new(&device, format)))
+            .flatten();
+        // A temporal pass without its motion source must not be presented as active.
+        let temporal_aa = temporal_aa.filter(|_| motion.is_some());
         let cookie_atlas = cookies::CookieAtlas::new();
         Renderer {
             targets: Targets {

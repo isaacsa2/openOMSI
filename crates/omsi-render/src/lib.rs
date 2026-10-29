@@ -546,8 +546,16 @@ impl Renderer {
     pub fn set_motion_vectors(&mut self, on: bool) {
         if !on {
             self.motion = None;
+            self.temporal_aa = None;
         } else if self.motion.is_none() {
-            self.motion = Some(passes::motion::MotionVectors::new(&self.device, self.format));
+            // The debug format/pipeline is not guaranteed on legacy GL devices.
+            // Refusing an optional feature must never take down the renderer.
+            self.motion = crate::gpu::optional_pipeline(&self.device, "motion vectors", || {
+                passes::motion::MotionVectors::new(&self.device, self.format)
+            });
+            if self.motion.is_none() {
+                self.temporal_aa = None;
+            }
         }
     }
 
