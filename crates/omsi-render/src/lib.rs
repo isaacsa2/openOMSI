@@ -744,7 +744,8 @@ impl Renderer {
         // Only one temporal owner. The optional standalone TAA is also the
         // FSR 2 preview's current reconstruction stage; no AMD SDK yet.
         let want_taa = (temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
-            && !self.options.fsr1 && self.options.msaa <= 1 && !self.options.preview_only;
+            && !self.options.fsr1 && !self.options.fsr2_wgsl && !self.options.fsr3
+            && self.options.msaa <= 1 && !self.options.preview_only;
         if want_taa {
             if self.temporal_aa.is_none() {
                 self.temporal_aa = crate::gpu::optional_pipeline(&self.device, "experimental TAA", || temporal::Taa::new(&self.device, self.format));

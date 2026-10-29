@@ -618,7 +618,8 @@ impl Renderer {
             .then(|| crate::gpu::optional_pipeline(&device, "FSR3 upscaling", || crate::temporal::Fsr3::new(&device)))
             .flatten();
         let temporal_aa = ((options.temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
-            && !options.fsr1 && options.msaa <= 1 && !options.preview_only)
+            && !options.fsr1 && !options.fsr2_wgsl && !options.fsr3
+            && options.msaa <= 1 && !options.preview_only)
             .then(|| crate::gpu::optional_pipeline(&device, "experimental TAA", || crate::temporal::Taa::new(&device, format)))
             .flatten();
         let fsr3_requested = cfg!(feature = "fsr3-wgpu") && options.fsr3;
