@@ -301,6 +301,9 @@ pub fn server_command(lan: &mut LanSession, from: u32, text: &str, adm: &mut Ser
             lan.set_voice_listener(from);
             lan.command(from, &policy)
         }
+        // Any connected player may read the host's RP speed policy. Changes to the
+        // policy come only from server.cfg, never from a client command.
+        "speed-limit?" => lan.command(from, &format!("speed-limit {}", crate::server_cfg::server_speed_limit_kmh())),
         "auth?" => {
             if !adm.enabled() {
                 lan.command(from, "admin-no");
