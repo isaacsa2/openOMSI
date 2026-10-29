@@ -23,6 +23,7 @@ nothing is drawn. `server.cfg` is written with a comment for every key on the fi
 | `name`, `motd` | shown in the players' server list and when they join |
 | `map`, `date`, `time`, `weather` | the map, the start date (empty: today), the time of day, the weather (a `.owt`, empty: the map's default, `cycle`: one after another through the day) |
 | `time_speed`, `real_time` | how fast the clock runs (1 to 30), or the machine's real date and time |
+| `speed_limit_kmh` | optional multiplayer RP road-speed governor: `0` off (default), or `60`, `75`, `80` km/h |
 | `metar_sync`, `metar_station` | the weather follows an airport's METAR report (ICAO code; empty: the one nearest the map), downloaded every ten minutes and passed on to the players |
 | `traffic`, `timetable`, `passengers`, `passenger_density` | AI cars, timetable buses, waiting passengers and how many of them (below) |
 | `port`, `web_port`, `max_players` | UDP port of the session (27015), TCP port of the web gateway (27025), player limit (16) |
@@ -209,6 +210,24 @@ them on to every other player, so nobody sees a stand-in.
   with a `vehicles` list only those buses are taken.
 * `accept_uploads = 0` switches it off. A player's game hosting a session (`--lan-host`) takes
   the joining players' buses the same way, and keeps its own bus in its store for them.
+
+## Optional RP speed governor
+
+The dedicated server may advertise a `speed_limit_kmh` of `60`, `75` or
+`80` to players. `0` (the default) preserves normal unrestricted controls.
+Unrecognized presets log a warning and disable the limiter. Clients ask the host
+periodically (including after reconnect) and apply a progressive throttle
+reduction in the final 5 km/h before the limit. Above it, a small braking
+assist counters downhill acceleration; steering, reverse and normal braking
+remain usable. The simulation does not abruptly clamp vehicle velocity.
+
+**Compatibility and limitation:** the policy is sent as an authenticated
+host-sourced LAN command, so older clients ignore it. At this stage the
+governor is **cooperative client-side RP behavior**, not an anti-cheat:
+modified game clients can ignore it. The dedicated host does not yet reject
+overspeed poses. Operators requiring competitive enforcement should verify
+client versions and treat overspeed detection as follow-up work. Restart
+the dedicated server after changing `server.cfg`.
 
 ## Administration
 
