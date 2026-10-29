@@ -102,3 +102,11 @@ per-object motion and reactive/transparency masks, and may still ghost.
 
 Use `OMSI_MOTION_VECTORS=1 OMSI_DEBUG_MOTION=1` without TAA to inspect the
 original vectors directly; disable the flags to restore the existing pipeline.
+
+### Engine-owned resource handoff
+
+After the 3D tone mapping and motion pass, `Renderer::fsr2_frame_inputs` now
+validates and borrows actual motion/depth/color texture views and the render
+and output dimensions. It refuses offscreen mirrors, XR eyes, stale motion,
+device-loss or absent scaled scene buffers. This is a private staging API,
+not an AMD SDK context, and does not perform a native FSR 2 dispatch.

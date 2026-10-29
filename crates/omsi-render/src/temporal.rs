@@ -129,6 +129,41 @@ pub struct FrameTextures<'a> {
     pub info: FrameInfo,
 }
 
+impl crate::Renderer {
+    /// Borrow the real color/depth/motion textures of the completed desktop 3D frame.
+    /// Not a working FSR 2 integration: these are inputs for a future official SDK
+    /// dispatch. We deliberately do not claim GPU support from its availability.
+    pub(crate) fn fsr2_frame_inputs<'a>(
+        &'a self,
+        f: &'a crate::passes::FrameCtx<'_>,
+    ) -> Option<FrameTextures<'a>> {
+        if !f.with_overlays || f.projection.is_some() || f.second_eye || self.device_lost().is_some() {
+            return None;
+        }
+        let motion = self.motion.as_ref().filter(|m| m.frame_ready)?;
+        let vector = motion.target.as_ref().filter(|t| t.size == (f.width, f.height))?;
+        let depth = &self.targets.ao.as_ref()?.depth_view;
+        // The current frame color must be offscreen and sampleable, not a
+        // swapchain image or a stale preview. For current FSR 1-style scaling it
+        // is the tone-mapped color; an official HDR path will need a separate tap.
+        let color = &f.scene_target.as_ref()?.0;
+        let render = (f.width, f.height);
+        let display = (f.full_w, f.target.texture().height());
+        // No projection jitter is applied yet. Passing invented nonzero jitter
+        // to FSR 2 would be worse than rejecting the dispatch.
+        let info = FrameInfo::new(render, display, [0.0, 0.0], motion.frame_reset, f.dt)?;
+        Some(FrameTextures {
+            color,
+            depth,
+            motion: &vector.view,
+            reactive: None,
+            transparency_composition: None,
+            exposure: None,
+            info,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

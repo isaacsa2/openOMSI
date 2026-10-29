@@ -173,7 +173,9 @@ impl Renderer {
     /// The motion vectors of the window's picture (after the main pass): when they are on,
     /// for the lead view, and when the main pass's depth is the readable single-sampled one.
     pub(crate) fn encode_motion(&mut self, encoder: &mut wgpu::CommandEncoder, f: &FrameCtx, plan: &DrawPlan, view_proj: Mat4, timers: &mut PassTimers) {
-        if self.motion.is_none() || !f.lead_view {
+        // A mirror, XR eye or offscreen thumbnail may share the renderer but
+        // must never advance the desktop's motion history.
+        if self.motion.is_none() || !f.with_overlays || f.projection.is_some() || f.second_eye {
             return;
         }
         let depth = self.targets.ao.as_ref().filter(|a| a.size == (f.width, f.height)).map(|a| a.depth_view.clone());
