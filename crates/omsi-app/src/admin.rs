@@ -217,6 +217,22 @@ fn teleport_beside(app: &mut App, pos: glam::DVec3, heading: f64) {
     teleport(app, glam::DVec3::new(x, y, pos.z), heading);
 }
 
+/// Ask the host to move our own bus when connected. A client must never grant itself
+/// a teleport: dedicated servers decide using their RP policy and the player's admin role.
+/// The host's existing `teleport` reply applies the move and publishes the next LAN pose.
+pub(crate) fn request_teleport(app: &mut App, at: glam::DVec3, heading: f64) {
+    if !at.is_finite() || !heading.is_finite() {
+        app.service_msg = Some(("Invalid teleport destination".into(), 3.0));
+        return;
+    }
+    if let Some(lan) = app.net.lan.as_mut().filter(|l| l.role == Role::Client) {
+        lan.command(1, &format!("tp-request {:.3} {:.3} {:.3} {:.3}", at.x, at.y, at.z, heading));
+        app.service_msg = Some(("Teleport requested from the server".into(), 3.0));
+        return;
+    }
+    teleport(app, at, heading);
+}
+
 /// Our bus put at `at` facing `heading` (stopped), with the walker back at its wheel.
 pub(crate) fn teleport(app: &mut App, at: glam::DVec3, heading: f64) {
     if app.session.on_foot.is_some() {
