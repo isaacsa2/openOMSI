@@ -211,6 +211,21 @@ them on to every other player, so nobody sees a stand-in.
   the joining players' buses the same way, and keeps its own bus in its store for them.
 
 ## Administration
+**Multiplayer relocation (dedicated servers).** A player authenticated with
+`/admin <password>` as administrator or moderator can relocate their own bus
+without reconnecting: Esc → Service → Teleport to a start point (e.g. Bauhof
+to Kraken), F4 map click and the navigator/city map teleport now request a
+host-authorized move. The dedicated host validates the sender and returns a
+`teleport` command; the client applies the same reset logic as existing
+host-controlled teleports. Moderators can `goto` and `unstick`; admins
+can additionally `bring` and `bringall` through the new Players menu.
+
+`allow_player_teleport = 0` in `server.cfg` (default) restricts self
+teleport to authenticated moderators/admins. Set it to `1` to allow every
+connected player to relocate **only their own bus** using the same UI.
+This setting does not authorize moving other players, setting the world clock,
+or editing the map. Old game clients do not support this request protocol.
+
 
 A server administers itself with passwords of `server.cfg`, at least 12 characters each (a
 shorter one lets nobody in, and the log says so - a server set up before with 8 to 11
