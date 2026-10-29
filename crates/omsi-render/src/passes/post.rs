@@ -204,9 +204,8 @@ impl Renderer {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
         if let Some((_, bg)) = &f.scene_target {
-            // Full-resolution FSR3 compute result bypasses every spatial
-            // reconstruction stage. UI is drawn at native resolution afterwards.
-            if let Some(fsr3_bg) = self.fsr2_wgsl_present(f).or_else(|| self.fsr3_present(f)) {
+            // Present FSR2 reconstruction before drawing the HUD at native resolution.
+            if let Some(fsr2_bg) = self.fsr2_wgsl_present(f) {
                 self.queue.write_buffer(&self.scale.upscale_buf, 0,
                     bytemuck::cast_slice(&[f.full_w as f32, f.target.texture().height() as f32, 0.0f32, 0.0]));
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -220,7 +219,7 @@ impl Renderer {
                     occlusion_query_set: None, multiview_mask: None,
                 });
                 pass.set_pipeline(&self.scale.copy_pipeline);
-                pass.set_bind_group(0, fsr3_bg, &[]);
+                pass.set_bind_group(0, fsr2_bg, &[]);
                 pass.draw(0..3, 0..1);
                 if !overlays.is_empty() {
                     pass.set_pipeline(&self.overlay_pipeline_1x);

@@ -791,9 +791,7 @@ impl Renderer {
         self.encode_motion_debug(&mut enc.picture, &f);
         // Actual AMD FSR2 WGSL compute is independent of TAA preview or FSR1.
         self.encode_fsr2_wgsl(&mut enc.picture, &f);
-        // FSR 3 uses its separate wgpu-ffx implementation.
-        self.encode_fsr3(&mut enc.picture, &f);
-        // TAA is a separate fallback only, never used together with FSR3.
+        // TAA is independent and never shares history with WGSL FSR2.
         self.encode_temporal_aa(&mut enc.picture, &f);
         // Establish an SDK-ready frame contract, without attempting native FSR 2.
         // The optional inputs are borrowed only for this frame; no readback occurs.

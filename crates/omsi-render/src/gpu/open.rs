@@ -578,24 +578,17 @@ impl Renderer {
             && device.features().contains(crate::temporal::Fsr2Wgsl::required_features()))
             .then(|| crate::gpu::optional_pipeline(&device, "FSR2 WGSL", || crate::temporal::Fsr2Wgsl::new(&device)))
             .flatten();
-        #[cfg(feature = "fsr3-wgpu")]
-        let fsr3 = (options.fsr3 && options.msaa <= 1 && !options.preview_only)
-            .then(|| crate::gpu::optional_pipeline(&device, "FSR3 upscaling", || crate::temporal::Fsr3::new(&device)))
-            .flatten();
         let temporal_aa = ((options.temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
-            && !options.fsr1 && !options.fsr2_wgsl && !options.fsr3
+            && !options.fsr1 && !options.fsr2_wgsl
             && options.msaa <= 1 && !options.preview_only)
             .then(|| crate::gpu::optional_pipeline(&device, "experimental TAA", || crate::temporal::Taa::new(&device, format)))
             .flatten();
-        let fsr3_requested = cfg!(feature = "fsr3-wgpu") && options.fsr3;
         let fsr2_requested = cfg!(feature = "fsr2-wgsl") && options.fsr2_wgsl;
-        let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some() || fsr3_requested || fsr2_requested)
+        let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some() || fsr2_requested)
             .then(|| crate::gpu::optional_pipeline(&device, "motion vectors", || crate::passes::motion::MotionVectors::new(&device, format)))
             .flatten();
         // A temporal pass without its motion source must not be presented as active.
         let temporal_aa = temporal_aa.filter(|_| motion.is_some());
-        #[cfg(feature = "fsr3-wgpu")]
-        let fsr3 = fsr3.filter(|_| motion.is_some());
         #[cfg(feature = "fsr2-wgsl")]
         let fsr2_wgsl = fsr2_wgsl.filter(|_| motion.is_some());
         let cookie_atlas = cookies::CookieAtlas::new();
@@ -801,8 +794,6 @@ impl Renderer {
             rt,
             motion,
             temporal_aa,
-            #[cfg(feature = "fsr3-wgpu")]
-            fsr3,
             #[cfg(feature = "fsr2-wgsl")]
             fsr2_wgsl,
             mesh_pages: false,
@@ -844,20 +835,6 @@ fn fidelityfx_adapter_features(
         log::warn!("FSR2 WGSL missing from this executable; rebuild with --features omsi-render/fsr2-wgsl");
     }
 
-    let fsr3_needed = wgpu::Features::SUBGROUP
-        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
-    if options.fsr3 {
-        let missing = fsr3_needed & !adapter.features();
-        if !cfg!(feature = "fsr3-wgpu") {
-            log::warn!("FSR3 upscaler missing from this build (feature fsr3-wgpu)");
-        } else if protected_intel_vulkan || info.backend == wgpu::Backend::Noop {
-            log::warn!("FSR3 cannot run on the protected or no-op graphics backend");
-        } else if !missing.is_empty() {
-            log::warn!("FSR3 on {} ({:?}): missing {:?}", info.name, info.backend, missing);
-        } else {
-            requested |= fsr3_needed;
-        }
-    }
     requested
 }
 
@@ -873,14 +850,9 @@ fn enabled_upscalers(
         && device.features().contains(crate::temporal::Fsr2Wgsl::required_features());
     #[cfg(not(feature = "fsr2-wgsl"))]
     let fsr2 = false;
-    let fsr3_needed = wgpu::Features::SUBGROUP
-        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
-    let fsr3 = cfg!(feature = "fsr3-wgpu") && options.fsr3
-        && device.features().contains(fsr3_needed);
     RenderOptions {
         fsr1: (options.fsr1 || crate::fsr1_enabled()) && fsr1_pipeline,
         fsr2_wgsl: fsr2,
-        fsr3,
         ..options
     }
 }

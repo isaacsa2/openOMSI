@@ -98,7 +98,6 @@ impl Renderer {
             && !env.no_glass_picture;
         let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view)
             || (self.temporal_aa.is_some() && with_overlays && projection.is_none())
-            || (self.fsr3_active() && with_overlays && projection.is_none())
             || (self.fsr2_wgsl_active() && with_overlays && projection.is_none());
         let scene_target: Option<(wgpu::TextureView, wgpu::BindGroup)> = if scaled {
             Some(self.scale_target(width, height))
@@ -277,12 +276,6 @@ impl Renderer {
         let vp_mat = if self.fsr2_wgsl_active() && f.with_overlays && f.projection.is_none() {
             let display = (f.full_w, f.target.texture().height());
             let jitter = self.fsr2_wgsl.as_ref().expect("FSR2 WGSL").jitter((f.width, f.height), display);
-            crate::temporal::jittered_view_projection(vp_mat, jitter, (f.width, f.height))
-        } else { vp_mat };
-        #[cfg(feature = "fsr3-wgpu")]
-        let vp_mat = if self.fsr3_active() && f.with_overlays && f.projection.is_none() {
-            let display = (f.full_w, f.target.texture().height());
-            let jitter = self.fsr3.as_ref().expect("active FSR3").jitter((f.width, f.height), display);
             crate::temporal::jittered_view_projection(vp_mat, jitter, (f.width, f.height))
         } else { vp_mat };
         // the last frame's picture for the bounced light, found again under this frame's view
