@@ -25,6 +25,7 @@ const OLD10: &str = "0.1.10";
 const LATER: &str = "0.2.21";
 const NEW: &str = super::VERSION;
 const TICKETS: &str = "0.3";
+const V36: &str = "0.3.36";
 
 /// Every event, in the order of the documentation.
 pub static EVENTS: &[EventDef] = &[
@@ -44,6 +45,7 @@ pub static EVENTS: &[EventDef] = &[
     ev("jolt", &["along", "across", "speed_kmh", "passengers"], LATER, "The bus braked, sped up or cornered hard enough to cost driving rating (m/s², signed); at most one a second."),
     ev("ticket_sold", &["name", "price"], LATER, "A ticket was sold at the cash desk: its name and price as the bus's ticket list has them."),
     ev("ui_click", &["panel", "element"], LATER, "A button (or another clickable part) of one of the plugin's panels was clicked; `element` is `nil` for the panel itself. Enter in a text field is a click on it."),
+    ev("menu_item", &["id"], V36, "The player chose one of the plugin's lines in the pause menu (`ui.set_menu_item`); the menu has closed."),
     ev("ui_focus", &["focused"], LATER, "The panels got the mouse or gave it back (also by Esc, or a menu of the game opening)."),
     ev("ui_change", &["panel", "element", "value"], NEW, "A checkbox (`true`/`false`), slider (its number), text field (its text, at every key) or tabs element (the tab's number from 1) of the plugin's panels was changed by the player."),
     ev("message", &["from", "topic", "data"], NEW, "Another plugin sent this one a message (`plugin.send`, `plugin.broadcast`): its name, the topic and the data (numbers, texts, tables)."),
@@ -88,6 +90,10 @@ pub static EVENTS: &[EventDef] = &[
     ev("lan_leave", &["id", "name"], NEW, "A player left the LAN session."),
     ev("lan_message", &["from", "data"], NEW, "The same plugin on another player's game sent this one a message (`lan.send`): the player's id and the text."),
     ev("lan_chat", &["name", "text"], NEW, "A line was said in the LAN session's chat (by another player or this one)."),
+    ev("object_init", &["id", "type", "x", "y", "z", "heading"], NEW, "A scenery object this script drives came within its range (once, again if it leaves and comes back): the map's id of the object, its type (the `.sco` file's name), where it stands and the way it faces. Only a script a `.sco` names with `[lua_script]` hears the `object_*` events."),
+    ev("object_frame", &["id", "dt"], NEW, "A frame of an object this script drives, while it is in range; `dt` is the game seconds since the last frame of that object (at the rate of the `.sco`'s `[lua_rate]`, else every game frame)."),
+    ev("object_gone", &["id"], NEW, "An object this script drives left its range or was unloaded with its tile; its state in the script can go."),
+    ev("object_click", &["id", "event"], NEW, "The player clicked the `[mouseevent]` of a mesh of an object this script drives."),
 ];
 
 /// The event of this name.

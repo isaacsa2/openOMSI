@@ -82,7 +82,7 @@ trunc ! /-/` (negate); `d` duplicates. `pi` pushes π, `random` replaces `st[0]`
 whole number in `[0, n)` with `n = |round(st[0])|` (the exe calls `Random(Abs(Round(x)))`). A reached `{else}` jumps to the next `{endif}` even when a stray `{endif}` has already closed its
 `{if}` (the Procity's dashboard script has one; ignoring that `{else}` blanked its odometer every
 frame). `$SetLengthL n` keeps the left n characters or pads on the right, `$SetLengthR n` keeps the
-right n or pads on the left (read off the exe's `str_SetLengthL/R`); re-checked Sept 24 2026 in `TXPC_calcblock_func` op 0x25 at 0x5d584a: `Copy(s, len-n+1, n)`). Unlike `$cutBegin`/`$cutEnd`, the three `$SetLength*` ops leave n on the number stack (the executor at 0x5d4a50 pops first only for the ops in its bit set at 0x5d5bac; the Kruger++ matrix display uses n again). Mod scripts that cannot show what they were written for under these semantics are patched before compiling by `omsi_script::compat` (recognised by their text: the LiAZ 5292's 4-character line matrix pads the line to `4 $SetLengthL` and then keeps `3 $SetLengthR`, which left lines 1-9 blank and 5E as `   E`; its number is now written `"03" $IntToStrEnh` → `005E`. Aachen's ibox keeps route digits in float `ibox_eingabe` and blanks the display at 0, so leading zeros never appeared; mode-10 route entry uses a string digit buffer on `ibox_Zahleingabe` (empty until typed — no `"00"` / `"02" $IntToStrEnh` auto-pad): typed `0` then `1` shows `01`, typed `1` alone shows `1`; mode-7 line entry stays empty for free typing with no auto leading zeros). `{if}` does **not** pop its condition (28 spots in the stock scripts
+right n or pads on the left (read off the exe's `str_SetLengthL/R`); re-checked Sept 24 2026 in `TXPC_calcblock_func` op 0x25 at 0x5d584a: `Copy(s, len-n+1, n)`). Unlike `$cutBegin`/`$cutEnd`, the three `$SetLength*` ops leave n on the number stack (the executor at 0x5d4a50 pops first only for the ops in its bit set at 0x5d5bac; the Kruger++ matrix display uses n again). Mod scripts that cannot show what they were written for under these semantics are patched before compiling by `omsi_script::compat` (recognised by their text: the LiAZ 5292's 4-character line matrix pads the line to `4 $SetLengthL` and then keeps `3 $SetLengthR`, which left lines 1-9 blank and 5E as `   E`; its number is now written `" 3" $IntToStrEnh` (padded with spaces, not zeros) → `  5E`. Aachen's ibox keeps route digits in float `ibox_eingabe` and blanks the display at 0, so leading zeros never appeared; mode-10 route entry uses a string digit buffer on `ibox_Zahleingabe` (empty until typed — no `"00"` / `"02" $IntToStrEnh` auto-pad): typed `0` then `1` shows `01`, typed `1` alone shows `1`; mode-7 line entry stays empty for free typing with no auto leading zeros). `{if}` does **not** pop its condition (28 spots in the stock scripts
 work on it: `(L.L.bremse_feststell) {if} ! (S.L.bremse_feststell)` releases the parking brake,
 `cond {if} (L.L.IBIS_busstop) 0 > &&` in the IBIS; the chura matrix writes `x d -1 = ! {if} *`).
 Tokens found in the executable's operator table: `/-/ <= >= && || sin arcsin arctan min max exp
@@ -312,7 +312,10 @@ far end at the spline's end, 3 and 4 the near end at its start, otherwise each p
 third value moves it past the end. A `.sli` without `[terrainholeprofile]` gets one per
 string of joined `[profile]`s (0x5ab908): its left end and right end 3 cm in and 3 mm
 down, a bottom 10 cm under its lowest point reaching 0.5 m past both ends. An outline
-that crosses itself cuts nothing. Each `[terrainhole] <mesh.o3d>` in a `.sco` or model.cfg names an
+that crosses itself cuts nothing. openOMSI does not cut this outline out of the drawn ground
+where the aligned spline lies in a trough: it fills the trough with solid ground instead, and
+cuts the outline as Omsi.exe does where the saved ground stands above the spline (a cutting)
+or where that fill cannot be built. Each `[terrainhole] <mesh.o3d>` in a `.sco` or model.cfg names an
 object-wide cutter, including declarations before the first `[mesh]` and repeated commands.
 The cutter sits next to its declaring file or in its `model` folder; declarations in a `.sco`
 also apply when it references a separate model.cfg. Explicit cutters apply even to deep
@@ -648,6 +651,12 @@ set_camera_outside_center schwerpunkt rollwiderstand rot_pnt_long inv_min_turnra
 newachse (achse_long achse_maxwidth achse_minwidth achse_raddurchmesser achse_feder achse_maxforce
 achse_daempfer achse_antrieb achse_inertia_inv) number registration_automatic registration_list
 registration_free kmcounter_init + model/script/sound/paths/passengercabin.
+openOMSI's own blocks (read the same way, `key value` lines to the next block): `[trolley_pole]`,
+`[trolley_rheostat]`, `[trolley_async]`, `[trolley_battery]`, `[trolley_aux]`, `[trolley_vars]`:
+the poles on the roof and the traction drive of a trolleybus (OMSI 2 has none: its trolleybus
+add-ons run a plugin beside the game). Every key, the variables the game writes for models and
+the map's `trolley.txt` (`[trolley_net]`, `[trolley_section]`, `[trolley_span]`,
+`[trolley_switch]`, `[trolley_insulator]`) are in [TROLLEYBUS.md](TROLLEYBUS.md).
 Built-in vehicle variables are listed in `program/varlist_roadvehicle.txt`; generated per axle:
 `Wheel_Rotation_ Wheel_RotationSpeed_ Axle_Steering_ Axle_Suspension_ Axle_Springfactor_
 Axle_Brakeforce_ Axle_SurfaceID_` × `{n}_{L|R}`, `PAX_Entry{n}_Open/_Req`, `PAX_Exit{n}_…`,

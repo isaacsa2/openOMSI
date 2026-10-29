@@ -45,6 +45,98 @@ impl Default for Axle {
     }
 }
 
+/// How an axle's strut works (an openOMSI extension; OMSI 2 knows one kind, the coil spring with
+/// a damper, which is what an axle without a `[suspension]` block gets).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SuspensionKind {
+    /// A steel coil spring and a hydraulic damper (OMSI 2's strut).
+    #[default]
+    Coil,
+    /// Leaf springs: the spring stiffens as it is loaded and the leaves rub on each other, which
+    /// adds dry friction to the damping.
+    Leaf,
+    /// Air bellows with a levelling valve: the ride height is held whatever the load, the bellows
+    /// stiffen as they are compressed.
+    Air,
+    /// A coil spring that stiffens as it is compressed.
+    Progressive,
+}
+
+impl SuspensionKind {
+    pub fn from_name(s: &str) -> Option<SuspensionKind> {
+        Some(match s.trim().to_ascii_lowercase().as_str() {
+            "coil" | "spring" | "steel" => SuspensionKind::Coil,
+            "leaf" | "leaf_spring" | "ressort" => SuspensionKind::Leaf,
+            "air" | "airbag" | "bellows" | "pneumatic" => SuspensionKind::Air,
+            "progressive" => SuspensionKind::Progressive,
+            _ => return None,
+        })
+    }
+}
+
+/// `[suspension]`: the strut of one axle (or of all, without `axle`).
+///
+/// ```text
+/// [suspension]
+/// axle 1               // index in the order of the [newachse] blocks; left out: every axle
+/// type leaf            // coil | leaf | air | progressive
+/// friction 2500        // N, dry friction of the leaves (leaf)
+/// progression 0.8      // how much stiffer at 10 cm of compression (leaf, progressive, air)
+/// level_time 4         // s, the levelling valve's time constant (air)
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Suspension {
+    pub axle: Option<usize>,
+    pub kind: SuspensionKind,
+    pub friction: f32,
+    pub progression: f32,
+    pub level_time: f32,
+}
+
+impl Suspension {
+    /// Reads the `key value` lines of the block.
+    pub fn parse(lines: &[&str]) -> Suspension {
+        let mut s = Suspension { axle: None, kind: SuspensionKind::Coil, friction: 0.0, progression: 0.0, level_time: 4.0 };
+        let mut explicit_progression = false;
+        for l in lines {
+            let l = l.split("//").next().unwrap_or("").trim();
+            let Some((k, v)) = l.split_once(char::is_whitespace) else { continue };
+            let (k, v) = (k.to_ascii_lowercase(), v.trim());
+            let num = || v.split_whitespace().next().and_then(|w| w.replace(',', ".").parse::<f32>().ok());
+            match k.as_str() {
+                "axle" => s.axle = v.parse().ok(),
+                "type" | "kind" => s.kind = SuspensionKind::from_name(v).unwrap_or_default(),
+                "friction" => s.friction = num().unwrap_or(0.0).max(0.0),
+                "progression" => {
+                    s.progression = num().unwrap_or(0.0).max(0.0);
+                    explicit_progression = true;
+                }
+                "level_time" => s.level_time = num().unwrap_or(4.0).clamp(0.2, 120.0),
+                _ => {}
+            }
+        }
+        // (typical values when the block gives none)
+        if !explicit_progression {
+            s.progression = match s.kind {
+                SuspensionKind::Leaf => 0.8,
+                SuspensionKind::Air => 0.35,
+                SuspensionKind::Progressive => 0.5,
+                SuspensionKind::Coil => 0.0,
+            };
+        }
+        if s.kind == SuspensionKind::Leaf && s.friction == 0.0 {
+            s.friction = 1500.0;
+        }
+        s
+    }
+
+    /// The strut of axle `index` among `list`: the last block that names it, else the last that
+    /// names none.
+    pub fn for_axle(list: &[Suspension], index: usize) -> Option<Suspension> {
+        list.iter().rev().find(|s| s.axle == Some(index)).or_else(|| list.iter().rev().find(|s| s.axle.is_none())).copied()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Attachment {
     pub ops: Vec<(String, Vec<f32>)>,
@@ -120,6 +212,18 @@ pub struct Vehicle {
     pub inv_min_turn_radius: f32,
     pub ai_delta_height: f32,
     pub axles: Vec<Axle>,
+    /// `[suspension]` blocks (openOMSI): the kind of strut per axle.
+    pub suspensions: Vec<Suspension>,
+    /// `[rail_traction]`, `[rail_brake]` and `[rail_coupler]` (openOMSI): the traction curve, the
+    /// brake system and the couplers of a rail vehicle (see `rail_spec`).
+    pub rail_traction: Option<crate::rail_spec::RailTraction>,
+    pub rail_brake: Option<crate::rail_spec::RailBrake>,
+    pub rail_coupler: Option<crate::rail_spec::RailCoupler>,
+    /// `[rail_power]`: where the vehicle gets its current (`Auto`: from its shape).
+    pub rail_power: crate::rail_spec::PowerKind,
+    /// `[vehicle_script]` (openOMSI): Lua (`.lua`) or compiled (`.oop`) scripts that belong to the
+    /// vehicle and run while it is the player's, with the plugin API (see `omsi_plugin`).
+    pub script_files: Vec<PathBuf>,
     pub attachments: Vec<Attachment>,
     pub coupling_front: Option<Coupling>,
     pub coupling_back: Option<Coupling>,
@@ -131,9 +235,28 @@ pub struct Vehicle {
     pub control_cable_back: Vec<ControlCable>,
     pub rowdy_factor: Option<(f32, f32)>,
     pub boogies: Option<f32>,
+    /// `[rail_class]` (an openOMSI extension): `tram`, `metro` or `train`, when the file's
+    /// shape does not tell.
+    pub rail_class: Option<String>,
+    /// The modes the file declares with `[bus_transport]`, `[tram_transport]`,
+    /// `[railway_transport]`, `[metro_transport]` and `[trolleybus_transport]` (openOMSI
+    /// keywords); empty when it declares none (`omsi_sim::transport::modes_of` then works
+    /// the mode out from the file's shape).
+    pub transport: omsi_cfg::transport::ModeSet,
+    /// `[pantograph_var]` / `[pantograph_trigger]` (openOMSI keywords): the script variable that
+    /// says the pantograph is raised (1) or down (0), and the mouse-event trigger that toggles it.
+    /// Without them a rail vehicle's pantograph is found by its mesh (see the game's
+    /// `detect_pantograph`).
+    pub pantograph_var: Option<String>,
+    pub pantograph_trigger: Option<String>,
+    /// The game found `pantograph_var` from the model; the file did not declare it.
+    pub pantograph_detected: bool,
     pub sinus: Option<[f32; 4]>,
     pub rail_body_osc: Option<[f32; 7]>,
     pub contact_shoes: Vec<[f32; 6]>,
+    /// openOMSI's trolleybus gear: `[trolley_pole]`, `[trolley_rheostat]`, `[trolley_async]`
+    /// and the like (see `omsi_trolley::TrolleyDef`).
+    pub trolley: omsi_trolley::TrolleyDef,
     pub ai_brake_performance: Option<[f32; 5]>,
     pub fixed: bool,
     pub unknown_keywords: Vec<(String, usize)>,
@@ -263,6 +386,11 @@ impl Vehicle {
         self.coupling_front.is_some() && !self.has_friendly_name
     }
 
+    /// The vehicle's mass in kg: a `[mass]` under 100 is tonnes (as every `.bus` of OMSI 2 has it).
+    pub fn mass_kg(&self) -> f32 {
+        if self.mass < 100.0 { self.mass * 1000.0 } else { self.mass }
+    }
+
     /// A rail vehicle: a car of a `.zug` runs on rails, which Omsi.exe stands end to end by
     /// their model bodies (its cars' declared coupling points need not be at the cars' ends).
     /// A road vehicle, a trailer or an articulated-bus rear section keeps its declared
@@ -276,6 +404,44 @@ impl Vehicle {
             || self.boogies.is_some()
             || !self.contact_shoes.is_empty()
             || self.rail_body_osc.is_some()
+    }
+
+    /// The kind of rail vehicle this is, `None` for a road vehicle: a `[rail_class]` the file
+    /// gives outright; else a `[contact_shoe]` (a third rail) is a metro; a car over 45 t, or a
+    /// locomotive (four driven axles over 60 t), a railway train; the rest, light cars on
+    /// bogies however long, trams. (A modern tram of 40 m is lighter than a 20 m coach.)
+    pub fn rail_mode(&self) -> Option<omsi_cfg::transport::TransportMode> {
+        use omsi_cfg::transport::TransportMode;
+        if !self.is_rail() {
+            return None;
+        }
+        if let Some(m) = self.rail_class.as_deref().and_then(TransportMode::from_name).filter(|m| m.is_rail()) {
+            return Some(m);
+        }
+        if !self.contact_shoes.is_empty() {
+            return Some(TransportMode::Metro);
+        }
+        let heavy = self.mass_kg() > 45_000.0;
+        let loco = self.axles.iter().filter(|a| a.driven).count() >= 4 && self.mass_kg() > 60_000.0;
+        Some(if heavy || loco { TransportMode::Railway } else { TransportMode::Tram })
+    }
+
+    /// The modes of the vehicle and whether its file declared them (`[bus_transport]` and
+    /// the like). A file that names none is judged by its shape, so every OMSI 2 vehicle keeps
+    /// working: a rail vehicle by [`Vehicle::rail_mode`], a vehicle with `[trolley_pole]` gear a
+    /// bus and a trolleybus (it also runs where only buses are expected, as it always did),
+    /// anything else a bus.
+    pub fn transport_modes(&self) -> (omsi_cfg::transport::ModeSet, bool) {
+        use omsi_cfg::transport::{ModeSet, TransportMode};
+        if !self.transport.is_empty() {
+            return (self.transport, true);
+        }
+        let inferred = match self.rail_mode() {
+            Some(m) => ModeSet::of(m),
+            None if !self.trolley.poles.is_empty() => [TransportMode::Bus, TransportMode::Trolleybus].into_iter().collect(),
+            None => ModeSet::of(TransportMode::Bus),
+        };
+        (inferred, false)
     }
 
     pub fn parse(file: &CfgFile) -> Vehicle {
@@ -345,6 +511,12 @@ impl Vehicle {
                 "view_ticketselling" => v.view_ticketselling = Some(v.cameras_driver.len().saturating_sub(1)),
                 "set_camera_std" => v.camera_std = r.usize(),
                 "set_camera_outside_center" => v.camera_outside_center = r.f32s::<3>(),
+                "rail_class" => v.rail_class = Some(r.str().to_string()),
+                k2 if omsi_cfg::transport::TransportMode::from_keyword(k2).is_some() => {
+                    v.transport.declare_keyword(k2);
+                }
+                "pantograph_var" => v.pantograph_var = Some(r.str().to_string()),
+                "pantograph_trigger" => v.pantograph_trigger = Some(r.str().to_string()),
                 "mass" => v.mass = r.f32(),
                 "momentofintertia" => v.moment_of_inertia = r.f32s::<3>(),
                 "boundingbox" => {
@@ -399,6 +571,24 @@ impl Vehicle {
                 "contact_shoe" => v.contact_shoes.push(r.f32s::<6>()),
                 "ai_brakeperformance" => v.ai_brake_performance = Some(r.f32s::<5>()),
                 "fixed" => v.fixed = true,
+                "rail_power" => v.rail_power = crate::rail_spec::PowerKind::from_name(r.str()),
+                "rail_traction" => v.rail_traction = Some(crate::rail_spec::RailTraction::parse(&r.rest_of_block())),
+                "rail_brake" => v.rail_brake = Some(crate::rail_spec::RailBrake::parse(&r.rest_of_block())),
+                "rail_coupler" => v.rail_coupler = Some(crate::rail_spec::RailCoupler::parse(&r.rest_of_block())),
+                "suspension" => {
+                    let lines = r.rest_of_block();
+                    v.suspensions.push(Suspension::parse(&lines));
+                }
+                "vehicle_script" => {
+                    let rel = r.str().trim().to_string();
+                    if !rel.is_empty() {
+                        v.script_files.push(omsi_cfg::resolve_path(&base, &rel));
+                    }
+                }
+                k2 if omsi_trolley::TrolleyDef::keywords().contains(&k2) => {
+                    let lines = r.rest_of_block();
+                    v.trolley.take_block(k2, &lines);
+                }
                 _ => v.unknown_keywords.push((k, r.block_line())),
             }
         }
@@ -617,6 +807,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn suspension_blocks_pick_the_strut_of_each_axle() {
+        let v = Vehicle::parse(&CfgFile::from_str("x.bus", "[mass]\n10\n[suspension]\ntype air\nlevel_time 6\n[suspension]\naxle 1\ntype leaf // rear\nfriction 3000\n[boundingbox]\n2.5\n11\n3.7\n0\n0\n2\n"));
+        assert_eq!(v.suspensions.len(), 2);
+        assert!(v.bounding_box.is_some(), "the block does not swallow its neighbour");
+        let front = Suspension::for_axle(&v.suspensions, 0).unwrap();
+        let rear = Suspension::for_axle(&v.suspensions, 1).unwrap();
+        assert_eq!((front.kind, front.level_time), (SuspensionKind::Air, 6.0));
+        assert_eq!((rear.kind, rear.friction), (SuspensionKind::Leaf, 3000.0));
+        assert!(Suspension::for_axle(&[], 0).is_none());
+    }
+
+    #[test]
+    fn a_vehicle_declares_its_transport_modes() {
+        let v = Vehicle::parse(&CfgFile::from_str("x.bus", "[mass]\n10\n[Tram_Transport]\n[boogies]\n1\n"));
+        assert_eq!(v.transport.describe(), "tram");
+        assert!(v.unknown_keywords.is_empty());
+        assert!(Vehicle::parse(&CfgFile::from_str("x.bus", "[mass]\n10\n")).transport.is_empty());
+    }
+
+    #[test]
+    fn vehicle_scripts_are_listed_beside_the_file() {
+        let v = Vehicle::parse(&CfgFile::from_str("Vehicles/Bus/x.bus", "[mass]\n10\n[vehicle_script]\nscripts/main.lua\n[vehicle_script]\nextra.oop\n"));
+        assert_eq!(v.script_files.len(), 2);
+        assert!(v.script_files[0].ends_with("scripts/main.lua") && v.script_files[1].ends_with("extra.oop"));
+    }
+
+    #[test]
     fn axles_with_and_without_keywords() {
         let keyed = "[newachse]\nachse_long\n2.943\nachse_raddurchmesser\n1.023\n1.05\nachse_feder\n240\nachse_antrieb\n0\n[newachse]\n-2.577\n2.4\n1.4\n1.023\n280\n116\n20\n1\n0.015\n\n[mass]\n10.9\n[cog]\n0\n0.2\n0.8\n";
         let v = Vehicle::parse(&CfgFile::from_str("x.bus", keyed));
@@ -626,6 +843,22 @@ mod tests {
         assert_eq!((b.long, b.max_width, b.min_width, b.wheel_diameter, b.spring, b.max_force, b.damper, b.driven, b.inertia_inv), (-2.577, 2.4, 1.4, 1.023, 280.0, 116.0, 20.0, true, 0.015));
         assert_eq!(v.mass, 10.9);
         assert_eq!(v.cog, Some([0.0, 0.2, 0.8]));
+    }
+
+    /// The trolleybus blocks: their lines are `key value`, and the keywords around them are read as ever.
+    #[test]
+    fn trolley_blocks_are_read_and_do_not_swallow_their_neighbours() {
+        let text = "[mass]\n11\n[trolley_pole]\nside left\npos -0.3 1.0 4.1\nlength 6.7\nmotor 1\n[trolley_pole]\nside right\npos 0.3 1.0 4.1\n[trolley_async]\nmax_force 28000\n[trolley_battery]\nkwh 3\n[boundingbox]\n2.5\n11\n3.7\n0\n0\n2\n";
+        let v = Vehicle::parse(&CfgFile::from_str("x.bus", text));
+        assert_eq!(v.mass, 11.0);
+        assert_eq!(v.trolley.poles.len(), 2);
+        assert_eq!(v.trolley.poles[0].side, -1);
+        assert!(v.trolley.poles[0].motor && !v.trolley.poles[1].motor);
+        assert!(matches!(&v.trolley.drive, Some(omsi_trolley::DriveKind::Async(a)) if a.max_force == 28000.0));
+        assert_eq!(v.trolley.battery.as_ref().map(|b| b.kwh), Some(3.0));
+        assert_eq!(v.bounding_box.map(|b| b[1]), Some(11.0));
+        // an ordinary vehicle has none of it
+        assert!(Vehicle::parse(&CfgFile::from_str("y.bus", "[mass]\n11\n")).trolley.is_empty());
     }
 
     /// `[add_camera_reflexion_static]` is one more reflection camera, numbered with the

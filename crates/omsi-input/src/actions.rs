@@ -11,10 +11,12 @@ pub fn is_game_action(name: &str) -> bool {
                 | "open_menu"
                 | "screenshot"
                 | "photo_mode"
+                | "flashlight"
                 | "quicksave"
                 | "toggel_mouse_ctrl"
                 | "toggel_ctrler"
                 | "voice_radio"
+                | "voice_nearby"
                 | "pax_door_request"
         )
 }

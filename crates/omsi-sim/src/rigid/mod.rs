@@ -25,6 +25,7 @@ use glam::{DVec2, DVec3, Quat, Vec2, Vec3};
 use omsi_vehicle::Vehicle;
 
 mod body;
+pub mod realism;
 mod tyre;
 #[cfg(test)]
 mod tests;
@@ -194,6 +195,8 @@ pub struct RigidWheel {
     pub max_force: f32,
     /// `Axle_Springfactor_*`: air suspensions scale the spring with the bellows pressure.
     pub spring_factor: f32,
+    /// The kind of strut (`[suspension]`); a coil spring unless the vehicle says otherwise.
+    pub strut: Strut,
     /// Static load at rest (N), from the mass split over the axles.
     pub rest_load: f32,
     /// Current compression (m, positive = the wheel pushed up into the body) and its rate.
@@ -215,8 +218,22 @@ pub struct RigidWheel {
     pub ground_seen: bool,
     /// Faces the tyre is up against.
     pub walls: Vec<WallFace>,
+    /// The `[surface]` id of what the tyre rolls on (`Axle_SurfaceID_`), the factor that
+    /// surface puts on the road's weather grip, and how much the road's unevenness lifts the
+    /// ground under the tyre at this moment (m; see [`realism::roughness`]).
+    pub surface: u8,
+    /// The surface in force, the one before it and how far (0..1, a metre) the road has
+    /// changed from the one to the other.
+    pub surface_now: u8,
+    pub surface_was: u8,
+    pub surface_mix: f32,
+    pub mu_scale: f32,
+    pub rough: f32,
     /// Horizontal push (N) of a step the tyre climbs or a wall it stands against.
     pub step_force: f32,
+    /// How far the contact patch lags behind the wheel across (m, positive to the right): the
+    /// tyre's lateral deflection, which the slip-angle model turns into a side force.
+    pub lat_defl: f32,
 }
 
 fn sign(x: f32) -> f32 {
@@ -226,6 +243,68 @@ fn sign(x: f32) -> f32 {
         -1.0
     } else {
         0.0
+    }
+}
+
+/// The kind of strut of a wheel and what it remembers (see `omsi_strut`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Strut {
+    pub kind: omsi_vehicle::vehicle::SuspensionKind,
+    /// Dry friction of leaf springs (N).
+    pub friction: f32,
+    /// The extra stiffness at 10 cm of compression, as a fraction of the spring's rate.
+    pub progression: f32,
+    /// The levelling valve's time constant (s).
+    pub level_time: f32,
+    /// What the levelling valve has added to the bellows' force (N).
+    pub preload: f32,
+}
+
+impl Default for Strut {
+    fn default() -> Strut {
+        Strut { kind: omsi_vehicle::vehicle::SuspensionKind::Coil, friction: 0.0, progression: 0.0, level_time: 4.0, preload: 0.0 }
+    }
+}
+
+impl Strut {
+    pub fn from_block(s: Option<omsi_vehicle::vehicle::Suspension>) -> Strut {
+        match s {
+            Some(s) => Strut { kind: s.kind, friction: s.friction, progression: s.progression, level_time: s.level_time, preload: 0.0 },
+            None => Strut::default(),
+        }
+    }
+
+    /// The spring's force at `t` metres of compression, rate `k` N/m. A coil spring is linear;
+    /// the other kinds stiffen by `progression` per 10 cm.
+    pub fn spring(&self, k: f32, t: f32) -> f32 {
+        use omsi_vehicle::vehicle::SuspensionKind::Coil;
+        if self.kind == Coil {
+            return k * t;
+        }
+        k * t * (1.0 + self.progression * (t / 0.10).max(0.0)) + self.preload
+    }
+
+    /// The damping force at an upward speed `v_up` (m/s): the damper, and for leaf springs
+    /// the friction of the leaves, which is there at any speed and fades to nothing at rest.
+    pub fn damping(&self, damper: f32, v_up: f32) -> f32 {
+        use omsi_vehicle::vehicle::SuspensionKind::Leaf;
+        let mut f = damper * v_up;
+        if self.kind == Leaf {
+            f += self.friction * (v_up / 0.03).tanh();
+        }
+        f
+    }
+
+    /// The levelling valve of air bellows: it lets air in or out until the body stands where
+    /// the empty bus stood (`design` m of compression), at a pace of one rate-times-error per
+    /// `level_time` seconds, so that bumps pass it by and a change of load does not.
+    pub fn level(&mut self, k: f32, t: f32, design: f32, dt: f32, load: f32) {
+        if self.kind != omsi_vehicle::vehicle::SuspensionKind::Air {
+            return;
+        }
+        self.preload += k * (t - design) / self.level_time.max(0.1) * dt;
+        // (the bellows cannot hold more than a fraction more than the load, nor suck)
+        self.preload = self.preload.clamp(-0.6 * load, 1.5 * load);
     }
 }
 
@@ -325,6 +404,8 @@ struct Contact {
     /// What the brake (and the rolling resistance) can hold.
     brake: f32,
     grip: f32,
+    /// Friction coefficient of this tyre on this road.
+    mu: f32,
     v_long: f32,
     /// Takes side forces (a coupled part's joint does not).
     lateral: bool,
@@ -437,4 +518,29 @@ pub struct RigidBody {
     /// as OMSI's do - its wheels know no faces - and a step nobody sees (a height profile
     /// over the drawn road, a helper object's collision box) is no invisible wall.
     pub wheel_walls: bool,
+    /// How the air meets the vehicle (see [`realism::Aero`]), its density (kg/m³) and the
+    /// wind (world, m/s).
+    pub aero: realism::Aero,
+    pub air_density: f32,
+    pub wind: Vec3,
+    /// How wet the road is, 0 dry .. 1 wet .. 2 under snow (the host's `street_cond`).
+    pub wetness: f32,
+    /// Distance driven along the road (m, signed): where on the road's unevenness the
+    /// body's origin is. An axle at `y` metres from the origin is at `road_s + y`.
+    pub road_s: f64,
+    /// The road model of the "Realistic road physics" setting: slip-angle tyres, grip and
+    /// roughness by surface, wind. Off, the body is OMSI 2's (follows its wheels until the grip
+    /// is passed, one grip, no unevenness, its old air drag).
+    pub realistic: bool,
+}
+
+static REALISTIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether new bodies take the realistic road model (the setting; `OMSI_REALISTIC_ROAD=1` too).
+pub fn set_realistic_default(on: bool) {
+    REALISTIC.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn realistic_default() -> bool {
+    REALISTIC.load(std::sync::atomic::Ordering::Relaxed) || omsi_cfg::flags::OMSI_REALISTIC_ROAD.is_set()
 }

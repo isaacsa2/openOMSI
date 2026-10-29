@@ -53,6 +53,11 @@ pub struct DoorWants {
     pub places: Vec<(String, bool)>,
 }
 
+/// Sale events to play money sounds
+pub enum SaleEvent {
+    PassengerGaveMoney,
+}
+
 /// A bus as the passengers know it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BusId {
@@ -315,6 +320,8 @@ pub struct PeopleSim {
     pub content: u32,
     pub ticket_requests: u32,
     pub ticket_points: u32,
+    //sale events to play money sounds
+    pub sale_events: Vec<(BusId, SaleEvent)>,
     /// `PAX_Entry<i>_Req`: somebody at the kerb wants in through entry `i`.
     pub entry_req: Vec<bool>,
     /// `PAX_Exit<i>_Req`: somebody inside wants out through exit `i`.
@@ -389,8 +396,9 @@ pub struct PeopleSim {
     /// whether the trip has reached its last stop. None: free drive, and nobody waiting
     /// boards the player's bus.
     pub duty: Option<(Arc<DutyTrip>, usize, bool)>,
-    /// Buses whose validator somebody used since the app last looked (`take_stamped`).
-    pub stamped: Vec<BusId>,
+    /// Buses whose validator somebody used since the app last looked (`take_stamped`), with
+    /// the index of that `[stamper]` in the bus's cabin.
+    pub stamped: Vec<(BusId, Option<usize>)>,
     /// Pedestrians to keep strolling near the player (scaled by `density`).
     pub pedestrians: usize,
     /// Omsi.exe's people (`[AIMaxCountRandom]`'s second line, the `ai_max_humans` setting):
@@ -415,8 +423,6 @@ pub struct PeopleSim {
     pub stand_chance: f32,
     /// The driver pressed the ticket key (`ticket_give`): sell the requested ticket.
     pub give_ticket: bool,
-    /// The driver pressed `change_give`: all the change owed goes on the tray at once.
-    pub give_change_all: bool,
     /// The key that sells a ticket, as the HUD names it.
     pub ticket_key: String,
     /// Where the player looks from (set by the app every frame).

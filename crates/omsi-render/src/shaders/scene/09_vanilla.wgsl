@@ -49,7 +49,7 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
         // terrain: uv is tile space; the ground texture repeats extra.z times per tile
         duv = in.uv * material.extra.z;
     }
-    var tex = diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv);
+    var tex = diffuse_border(textureSampleBias(t_diffuse, s_diffuse, duv, camera.lod.x), duv);
     if (is_snow_pane()) {
         tex = snow_on_pane(in, film_water);
     }
@@ -62,7 +62,7 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
         // modulated over it as the original's terrain pass does. The stock detail maps are
         // bright (noise_low averages 242, gras_det 179), so they are meant to be multiplied
         // in plainly: doubling like a grey-centred D3D detail map blows the ground out.
-        let det = textureSample(t_light, s_diffuse, in.uv * material.extra.y);
+        let det = textureSampleBias(t_light, s_diffuse, in.uv * material.extra.y, camera.lod.x);
         tex = vec4<f32>(clamp(tex.rgb * det.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), tex.a);
     }
     if (material.params.z > 0.5) {
@@ -141,12 +141,13 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
     let tree_unlamped = camera.sky_color.w > 0.5 && material.params.y > 0.1 && material.params.y < 0.2;
     let map_lamps = select(1.0, 0.0, (material.params.y > 0.2 && material.params.y < 0.3) || lm_only || tree_unlamped);
     let lamp_light = point_lights(in.world, n, map_lamps);
-    var light = diffuse + lamp_light;
+    // (the headlight, lit at the vertices: see `classic_spot`)
+    var light = diffuse + lamp_light + in.spot_diffuse + in.spot_ambient;
     // D3D lights the material's diffuse colour with the sun, the light from above and the
-    // lamps, and its ambient colour with the ambient light (C). Omsi.exe makes every o3d
-    // slot's ambient white (0x7c62f8), so a white sign texture on a green material shows
-    // white in the shade, not green.
-    let ambient_light = camera.ambient.xyz * ao;
+    // lamps, and its ambient colour with the ambient light (C) and the headlight's ambient
+    // light. Omsi.exe makes every o3d slot's ambient white (0x7c62f8), so a white sign
+    // texture on a green material shows white in the shade, not green.
+    let ambient_light = camera.ambient.xyz * ao + in.spot_ambient;
     let mat_light = material.color.rgb * (light - ambient_light) + material.ambient.rgb * ambient_light;
     let light_mapped = material.params2.x > 0.5 && material.extra.x < 0.5;
     // The low-range Vanilla+ target has no exposure/tonemapping. Saturate the
@@ -176,7 +177,7 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
     if (classic && material.params.y < 0.5) {
         var v = clamp(material.emissive.rgb + mat_light + material.color.rgb * interior_lamps(in.world, n, in.params2.z), vec3<f32>(0.0), vec3<f32>(1.0));
         if (light_mapped) {
-            let lm = srgb_encode(textureSample(t_light, s_diffuse, buv).rgb) * clamp(in.params2.x, 0.0, 1.0);
+            let lm = srgb_encode(textureSampleBias(t_light, s_diffuse, buv, camera.lod.x).rgb) * clamp(in.params2.x, 0.0, 1.0);
             v = v + lm * (vec3<f32>(1.0) - v);
         }
         if (terrain_night) {
@@ -207,7 +208,7 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
         // too, 0x5fa8f0) among them - clamped at 1. (Added once more after the map, the
         // saloon lamps lit a cabin twice over, flat white where the map was full; and the
         // material's colour took the map down with it.)
-        let lm = srgb_encode(textureSample(t_light, s_diffuse, buv).rgb) * clamp(in.params2.x, 0.0, 1.0);
+        let lm = srgb_encode(textureSampleBias(t_light, s_diffuse, buv, camera.lod.x).rgb) * clamp(in.params2.x, 0.0, 1.0);
         let v = clamp(material.emissive.rgb + mat_light + material.color.rgb * interior_lamps(in.world, n, in.params2.z), vec3<f32>(0.0), vec3<f32>(1.0));
         lit = srgb_decode(srgb_encode(albedo) * (v + lm * (vec3<f32>(1.0) - v)));
     }
@@ -250,7 +251,7 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
             env_uv = env_uv + bump_offset(duv);
         }
         let env = textureSample(t_env, s_diffuse, env_uv);
-        let diffuse_a = diffuse_border(textureSample(t_diffuse, s_diffuse, duv), duv).a;
+        let diffuse_a = diffuse_border(textureSampleBias(t_diffuse, s_diffuse, duv, camera.lod.x), duv).a;
         if (material.params.x < 1.5) {
             // rain: a painted body goes darker and glossier when it is wet, so the bus
             // stands out against a grey street instead of fading into it
@@ -286,7 +287,7 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
         let g = clamp(dot(lamp_light, vec3<f32>(1.0 / 3.0)) + dot(camera.sun_color.rgb, vec3<f32>(1.0 / 3.0)), 0.0, 1.0);
         var kk = vec3<f32>(0.0);
         if (has_transmap_declared() || has_env_mask()) {
-            let a = select(diffuse_a, textureSample(t_envmask, s_diffuse, duv).a, has_env_mask());
+            let a = select(diffuse_a, textureSampleBias(t_envmask, s_diffuse, duv, camera.lod.x).a, has_env_mask());
             kk = vec3<f32>(a * g);
         } else {
             kk = omsi_texture_factor(material.params2.y, camera.ambient.rgb + vec3<f32>(g));
@@ -332,18 +333,38 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
     // (nor on a texture that is the season's snow picture: the map's own WinterSnow
     // textures show the snow as OMSI 2 does, and whitened over, the snowy grass and the
     // grey road went one flat white, the lane markings left standing in it, #879)
-    let snow = camera.ambient.w * outside * select(1.0, 0.0, in.params2.w > 1.5 || camera.sky_color.w > 0.5 || material.ambient.w > 0.5);
-    if (snow > 0.0) {
+    let snow_ok = outside * select(1.0, 0.0, in.params2.w > 1.5 || camera.sky_color.w > 0.5 || material.ambient.w > 0.5);
+    // a carriageway (a [moisture] texture that is not the terrain) under snow that builds
+    // up: its own cover, the ruts of the lanes and the tyres' tracks (road_snow.wgsl)
+    let carriageway = material.extra.x < 0.5 && material.params2.z > 0.0 && road_snow_dynamic();
+    var rs = vec3<f32>(0.0);
+    if (carriageway && snow_ok > 0.0) {
+        rs = road_snow(in.world);
+    }
+    // a vehicle's part: the snow its own roof has gathered, where that is kept (another
+    // player's bus keeps the weather's)
+    let vehicle = vehicle_snow_kept(in.params2.w);
+    var on_vehicle = 0.0;
+    if (vehicle && snow_ok > 0.0) {
+        on_vehicle = vehicle_snow(in.params2.w, in.local);
+    }
+    let snow = select(select(camera.ambient.w, rs.x, carriageway), on_vehicle, vehicle) * snow_ok;
+    if (snow > 0.0 || rs.y > 0.0) {
         let up = clamp(n.z, 0.0, 1.0);
         let ground = select(0.0, 1.0, material.extra.x > 0.5 || material.params2.z > 0.0);
-        // (a road kept clear - "snow on road" off - stays asphalt, #1362)
-        let cleared = select(1.0, 0.0, camera.post.z > 0.5 && material.extra.x < 0.5 && material.params2.z > 0.0);
+        // (a road kept clear - "snow on road" off - stays asphalt, #1362; built-up snow
+        // brings its own cover)
+        let cleared = select(1.0, 0.0, !carriageway && camera.post.z > 0.5 && material.extra.x < 0.5 && material.params2.z > 0.0);
         // only surfaces that really face up get a cover; a soft threshold keeps the snow
         // off the sides and off the grazing rims that showed as a white outline
         let cover = cleared * snow * clamp(max(ground, smoothstep(0.78, 0.95, up) * 0.8), 0.0, 1.0);
         let light = camera.sun_color.rgb * camera.sun_dir.w * ndl * shadow * 0.6 + camera.sky_color.rgb * 0.7 + camera.ambient.xyz;
         let white = vec3<f32>(0.92, 0.94, 0.98) * light * ao;
-        lit = mix(lit, white, cover * (0.55 + 0.35 * tex.a));
+        // (a vehicle's gathered snow lies thick enough to hide the paint: the ground's
+        // dusting lets the texture show through)
+        lit = mix(lit, white, min(cover * select(0.55 + 0.35 * tex.a, 1.2, vehicle), 1.0));
+        // the slush in the ruts and the tracks: wet, grey, darker than the snow beside it
+        lit = mix(lit, lit * 0.6 + white * 0.12, rs.y * snow_ok);
     }
     let dist = distance(in.world, camera.cam_pos.xyz);
     let f = 1.0 - exp(-fog_distance(in.world) * camera.fog.w);
@@ -375,5 +396,37 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, eye: vec3<f32>) ->
     if (!is_snow_pane()) {
         a = a * clamp(film_water, 0.0, 1.0);
     }
+    if (mode > 1.5 && min(material.emissive.r, min(material.emissive.g, material.emissive.b)) > 0.99 && material.emissive.w < 1.5) {
+        a = encoded_blend_alpha(rgb, a, light);
+    }
     return vec4<f32>(rgb, a);
+}
+
+// What lies under a self-lit layer, for `encoded_blend_alpha`: a surface of this encoded
+// brightness lit by the light at the layer (the road's asphalt under the KVB Citaro's
+// light cone is 0.44 - 0.49 encoded).
+const BLEND_GROUND_ENCODED: f32 = 0.45;
+
+// A self-lit blended layer (emissive white: a light cone laid on the road, a glow) as
+// Omsi.exe blends it: Direct3D 9 mixes the gamma-encoded colours, the sRGB target here mixes
+// linear ones, and a faint layer came out far brighter - the KVB Citaro's `lichtkegel.o3d`
+// (alpha 0.14 on average) a flat beige sheet over the road where OMSI 2 shows a soft pool,
+// 120 of 255 against its 85. The target cannot be read, so what is under the layer is taken
+// to be ground lit by the light here (`light`, the vertex light the layer would have):
+// the alpha is the one that gives Omsi.exe's encoded mix over it, never more than the
+// layer's own.
+fn encoded_blend_alpha(rgb: vec3<f32>, a: f32, light: vec3<f32>) -> f32 {
+    let w = vec3<f32>(0.2126, 0.7152, 0.0722);
+    let s = max(rgb, vec3<f32>(0.0));
+    if (a <= 0.0) {
+        return a;
+    }
+    let d_enc = clamp(light, vec3<f32>(0.0), vec3<f32>(1.0)) * BLEND_GROUND_ENCODED;
+    let d = dot(srgb_decode(d_enc), w);
+    let over = dot(srgb_decode(srgb_encode(s) * a + d_enc * (1.0 - a)), w);
+    let span = dot(s, w) - d;
+    if (span < 1e-4) {
+        return a;
+    }
+    return clamp((over - d) / span, 0.0, a);
 }

@@ -407,7 +407,7 @@ fn declared_transmap_ignores_slot_alpha() {
             ..Default::default()
         },
     );
-    let map = renderer.add_blank_texture(&mut scene, 1, 1);
+    let map = renderer.add_blank_texture(&mut scene, 1, 1, false);
     let bound = blended(&mut scene, Some((map, true)), MaterialExtra::default());
     // another bit of the same flags, no transmap
     let metal = blended(
@@ -1042,7 +1042,9 @@ fn metering_defaults_are_gentle() {
     // way, so snow stays white and a night stays dark
     let m = meter_tuning();
     assert!(m[0] > 0.0 && m[0] < 0.6, "{m:?}");
-    assert!(m[2] <= 2.5 && m[3] <= 2.0, "{m:?}");
+    assert!(m[2] <= 2.5 && m[3] <= 6.0, "{m:?}");
+    // (a shortfall is another matter: the eye makes up most of a tunnel's darkness)
+    assert!(METER_SHORTFALL_GAIN > 0.6 && METER_SHORTFALL_GAIN < 1.0);
     // a snow field metered 1.5 EV over the target is darkened by well under a stop
     let ev = ((m[1] - (m[1] + 1.5)) * m[0]).clamp(-m[2], m[3]);
     assert!(ev < 0.0 && ev >= -0.75, "{ev}");
@@ -1448,4 +1450,37 @@ fn envmapped_paint_with_normals_off_its_faces_mirrors_no_more_than_with_sound_on
     let off = mirrored(Vec3::new(1.0, -0.15, 0.0));
     assert!(sound >= 4, "the paint mirrors nothing to compare with: {sound}");
     assert!(off <= 2 * sound + 6, "normals along the face mirrored {off} where sound ones mirror {sound}");
+}
+
+#[test]
+fn the_rain_and_snow_shaders_translate_to_glsl_with_a_float_roof_map() {
+    use wgpu::naga;
+    use wgpu::naga::back::glsl;
+    let glsl_of = |src: &str| -> Result<(), String> {
+        let module = naga::front::wgsl::parse_str(src).map_err(|e| e.emit_to_string(src))?;
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .map_err(|e| format!("{e:?}"))?;
+        let (module, info) =
+            naga::back::pipeline_constants::process_overrides(&module, &info, None, &Default::default()).map_err(|e| format!("{e:?}"))?;
+        for version in [glsl::Version::Embedded { version: 310, is_webgl: false }, glsl::Version::Desktop(430)] {
+            let options = glsl::Options { version, ..Default::default() };
+            for entry in &module.entry_points {
+                let pipeline = glsl::PipelineOptions { shader_stage: entry.stage, entry_point: entry.name.clone(), multiview: None };
+                let mut out = String::new();
+                glsl::Writer::new(&mut out, &module, &info, &options, &pipeline, Default::default())
+                    .and_then(|mut w| w.write())
+                    .map_err(|e| format!("{version:?} {}: {e:?}", entry.name))?;
+            }
+        }
+        Ok(())
+    };
+    let depth = |src: String| {
+        src.replace("var roof_map: texture_2d<f32>;", "var roof_map: texture_depth_2d;")
+            .replace("return textureLoad(roof_map, t, 0).x; }", "return textureLoad(roof_map, t, 0); }")
+    };
+    for src in [rain_shader_source(), snow_shader_source(), lean_rain(rain_shader_source())].map(depth) {
+        assert!(glsl_of(&src).is_err_and(|e| e.contains("epth")), "{:?}", glsl_of(&src));
+        glsl_of(&roof_as_float(src)).unwrap();
+    }
 }

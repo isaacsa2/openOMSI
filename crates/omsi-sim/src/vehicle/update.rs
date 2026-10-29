@@ -154,6 +154,41 @@ impl VehicleInstance {
         self.cabin_air = Some((t, hum, t));
     }
 
+    /// Change cabin temperature once without changing heater controls or coolant.
+    /// Shared-script rear sections read the leading state; independently scripted cars
+    /// need their own temperature and humidity updated too.
+    pub fn set_cabin_temperature(&mut self, temperature: f32) {
+        if !temperature.is_finite() {
+            return;
+        }
+        let humidity = self
+            .ev(Ev::CabinAbsHum)
+            .filter(|h| h.is_finite() && *h >= 0.0)
+            .unwrap_or_else(|| self.cabin_air.map_or(9.0, |(_, h, _)| h));
+        self.set_engine_ev(Ev::CabinTemp, temperature);
+        self.set_engine_ev(Ev::CabinAbsHum, humidity);
+        self.set_engine_ev(Ev::CabinRelHum, relative_humidity(temperature, humidity));
+        self.cabin_air = Some((temperature, humidity, temperature));
+        for part in &mut self.trailers {
+            if let Some(run) = part.run.as_mut() {
+                let humidity = run
+                    .names
+                    .get("cabinair_abshum")
+                    .map(|&id| run.state.vars[id as usize])
+                    .filter(|h| h.is_finite() && *h >= 0.0)
+                    .unwrap_or(humidity);
+                for (name, value) in [
+                    ("cabinair_temp", temperature),
+                    ("cabinair_relhum", relative_humidity(temperature, humidity)),
+                ] {
+                    if let Some(&id) = run.names.get(name) {
+                        run.state.vars[id as usize] = value;
+                    }
+                }
+            }
+        }
+    }
+
     /// Run one simulation frame: physics, scripts, then animations.
     pub fn update(&mut self, dt: f32) {
         self.host.clock.advance(dt);
@@ -166,8 +201,11 @@ impl VehicleInstance {
         self.update_engine_vars(dt);
         crate::timetable_run::apply_pending_destination(self);
         self.apply_scheme_vars_each_frame();
+        self.run_control_cables();
         let p = self.ty.program.clone();
         self.vm.run_frame(&p, &mut self.state, &mut self.host);
+        // and once more after them: what is drawn is the scheme's (see the method)
+        self.apply_scheme_vars_each_frame();
         self.show_radio_text();
         self.clear_pax_requests();
         self.update_visuals(dt);
@@ -190,6 +228,12 @@ impl VehicleInstance {
         }
     }
 
+    pub(super) fn run_control_cables(&mut self) {
+        for &(write, read) in &self.v_cables {
+            self.state.vars[read as usize] = self.state.vars[write as usize];
+        }
+    }
+
     /// Run the scripts' frame once with no time passing (no physics, no clock): what a
     /// switch just pressed makes of the variables the scripts derive from it.
     pub fn update_scripts_only(&mut self, _dt: f32) {
@@ -197,7 +241,9 @@ impl VehicleInstance {
         let p = self.ty.program.clone();
         let gap = self.host.clock.timegap;
         self.host.clock.timegap = 0.0;
+        self.run_control_cables();
         self.vm.run_frame(&p, &mut self.state, &mut self.host);
+        self.apply_scheme_vars_each_frame();
         self.host.clock.timegap = gap;
     }
 
@@ -219,18 +265,25 @@ impl VehicleInstance {
         if self.ground.is_none() && self.contact.is_none() {
             return;
         }
-        let rot = self.body_rotation();
-        let pos = self.position;
+        self.host.ground_probe = self.height_probe_at(self.position, self.body_rotation());
+    }
+
+    /// `GetHeightAbovePoint` for a body standing at `pos` turned by `rot` on this vehicle's
+    /// ground (a coupled car asks it for its own place).
+    pub(super) fn height_probe_at(&self, pos: DVec3, rot: Mat4) -> Option<car_run::GroundHeightProbe> {
+        if self.ground.is_none() && self.contact.is_none() {
+            return None;
+        }
         let g = self.ground.clone();
         let contact = self.contact.clone();
-        self.host.ground_probe = Some(std::sync::Arc::new(move |x, y, z| {
+        Some(std::sync::Arc::new(move |x, y, z| {
             let w = pos + rot.transform_point3(glam::Vec3::new(x, y, z)).as_dvec3();
             let h = match &contact {
                 Some(c) => c.probe(w.x, w.y, w.z + 0.5).below,
                 None => g.as_ref().and_then(|g| g(w.x, w.y)),
             };
             h.map_or(0.0, |h| (w.z - h) as f32)
-        }));
+        }))
     }
 
     /// One frame of an AI-controlled vehicle: the pose is set by the traffic system
@@ -380,6 +433,7 @@ impl VehicleInstance {
         // below, must win over them - its v_font 7 for the Cyrillic font stood reset to the
         // scheme's 0 here, and its display read Latin in the other players' games)
         self.apply_scheme_vars_each_frame();
+        self.run_control_cables();
         for &(id, v) in inputs.iter().chain(pinned) {
             self.put(Some(id), v);
         }
@@ -400,6 +454,9 @@ impl VehicleInstance {
             self.vm.run_frame_ai(&p, &mut self.state, &mut self.host);
         }
         self.clear_pax_requests();
+        // (the scheme's [setvar]s after the scripts as well, and what another game pinned
+        // after those: see `apply_scheme_vars_each_frame`)
+        self.apply_scheme_vars_each_frame();
         for &(id, v) in pinned {
             self.put(Some(id), v);
         }
@@ -447,6 +504,7 @@ impl VehicleInstance {
         }
         let mut trailers = std::mem::take(&mut self.trailers);
         super::car_run::set_couplings(&mut trailers);
+        super::car_run::start_bus(self);
         let mut lead: Option<(DVec3, Mat4, f64)> = None;
         let mut turn = self.turning();
         for t in &mut trailers {
@@ -479,6 +537,7 @@ impl VehicleInstance {
         }
         let mut trailers = std::mem::take(&mut self.trailers);
         super::car_run::set_couplings(&mut trailers);
+        super::car_run::start_bus(self);
         let mut lead: Option<(DVec3, Mat4, f64)> = None;
         let mut turn = self.turning();
         if self.ty.def.is_rail() {
@@ -505,6 +564,12 @@ impl VehicleInstance {
                 let turned = body_reversed(&t.ty.def, t.reversed);
                 let origin = joint + travel(turned, t.coupling_front.y);
                 let (y_front, y_rear) = t.rail_ends();
+                if omsi_cfg::flags::OMSI_DEBUG_TRAILERS.is_set() {
+                    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 6 {
+                        log::info!("rail part {i}: origin {origin:.2} m behind the lead's, joint before it {joint:.2}, running ends {y_front:.2} / {y_rear:.2}, front coupling {:.2}, back coupling {:.2} (declared: front {:?}, back {:?}, {} axles, boogies {:?})", t.coupling_front.y, t.coupling_back.y, t.ty.def.coupling_front.as_ref().map(|c| c.pos), t.ty.def.coupling_back.as_ref().map(|c| c.pos), t.ty.def.axles.len(), t.ty.def.boogies);
+                    }
+                }
                 match (at_behind(origin - y_front as f64), at_behind(origin - y_rear as f64)) {
                     (Some(front), Some(back)) => t.place_on_rails(self, dt, lead, (front, y_front), (back, y_rear)),
                     _ => t.update(self, dt, lead),

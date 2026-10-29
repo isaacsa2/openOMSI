@@ -96,8 +96,9 @@ impl World {
         order.sort_by_key(|q| (q.tx, q.ty));
         // (Omsi.exe does not move the ground at all when it loads a map: the editor's "align
         // the terrain to the spline" wrote the heights into the tile's `.terrain`, and the
-        // flag left in the map only makes the spline cut its outline out of the ground -
-        // see `hole_rims`. Pulled onto the road again here, every vertex under it took
+        // flag left in the map describes the spline's terrain profile. The render mesh
+        // fits its solid backing separately in `cut_tile`. Pulled onto the road again
+        // here, every coarse vertex under it took
         // the height of whatever lay over it, and between those five-metre points the
         // ground's triangles cut through the camber and past the kerbs: a piece of road
         // gone under the grass, while beside it the ground stood lifted over the verge.
@@ -461,11 +462,12 @@ impl World {
         note_place_stats(stats, &st, &res, objects.len());
         self.tile_state.lock().insert(key, state);
         let light_map = self.tile_light_map(key, &st, layout, staged);
-        let (splines, ground_splines) = self.tile_splines(&st);
+        let (splines, ground_splines) = self.tile_splines(&st, &objects, staged, layout);
         Some(Prepared {
             tx,
             ty,
-            terrain: Some(build_terrain_mesh(terrain)),
+            // (`cut_tile` makes the ground: fitted to the aligned splines, or the saved mesh)
+            terrain: None,
             hole_walls: MeshData::default(),
             paint_masks: self.load_ground_paint(&st.path),
             paint: Vec::new(),
@@ -682,13 +684,68 @@ impl World {
     /// The tile's spline meshes for the GPU: their `[terrainmapping]` faces pooled apart,
     /// the rest batched.
     #[allow(clippy::type_complexity)]
-    fn tile_splines(&self, st: &StagedTile) -> (Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3)>, Vec<Arc<MeshData>>) {
+    fn tile_splines(&self, st: &StagedTile, objects: &[PlacedObject], staged: &HashMap<(i32, i32), Arc<StagedTile>>, layout: &TileLayout) -> (Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3, crate::spline_layers::SplineLayer)>, Vec<Arc<MeshData>>) {
         // the whole spline meshes go to the GPU from here (a later load reads the tile again)
         let meshes = st.meshes.lock().take().unwrap_or_default();
+        // (in the tile's order, before anything is split off or batched: a spline laid on an
+        // earlier one at its height, or on a `[surface]` object, is drawn over it, as in
+        // Omsi.exe)
+        let levels = if omsi_cfg::flags::OMSI_NO_DRAW_ORDER_DEPTH.is_set() {
+            vec![Default::default(); meshes.len()]
+        } else {
+            // the `[surface]` objects of this tile, and those of the tiles around it that
+            // reach into it (a lane near the edge lies on the next tile's junction)
+            let size = tile_size() as f32;
+            let mut ground: Vec<[glam::Vec3; 3]> = Vec::new();
+            let mut add = |ot: &ObjectType, pos: DVec3, xf: &Mat4, warped: Option<&Vec<MeshData>>, edge_only: bool| {
+                if !ot.sco.surface {
+                    return;
+                }
+                let at = (pos - st.origin).as_vec3();
+                let meshes: Vec<&MeshData> = match warped {
+                    Some(w) => w.iter().collect(),
+                    None => ot.meshes.iter().map(|(m, _, _)| m).collect(),
+                };
+                for m in meshes {
+                    let placed: Vec<glam::Vec3> = m.positions.iter().map(|v| at + xf.transform_point3(*v)).collect();
+                    if edge_only {
+                        let (lo, hi) = placed.iter().fold((glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+                        if hi.x < -1.0 || hi.y < -1.0 || lo.x > size + 1.0 || lo.y > size + 1.0 {
+                            continue;
+                        }
+                    }
+                    ground.extend(m.indices.chunks_exact(3).filter_map(|t| {
+                        let p = |i: u32| placed.get(i as usize).copied();
+                        Some([p(t[0])?, p(t[1])?, p(t[2])?])
+                    }));
+                }
+            };
+            for o in objects {
+                add(&o.ot, o.pos, &o.xf, o.warped.as_deref(), false);
+            }
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    if (dx, dy) == (0, 0) {
+                        continue;
+                    }
+                    let nk = (st.tx + dx, st.ty + dy);
+                    let Some(n) = staged.get(&nk) else { continue };
+                    // (resolved now if it is not yet, as the terrain cut does: taken only when
+                    // ready, a lane came out right or not by the order the tiles loaded in)
+                    let Some(res) = self.resolve(nk, &Self::sources(layout, staged, nk)) else { continue };
+                    for (oi, (o, pose)) in n.objects.iter().zip(res.poses.iter()).enumerate() {
+                        let Some(Pose { pos, rot }) = *pose else { continue };
+                        add(&o.ot, pos, &rot, res.warped.get(&oi).map(|w| w.as_ref()), true);
+                    }
+                }
+            }
+            crate::spline_layers::spline_layers(&meshes.iter().map(|m| m.as_ref()).collect::<Vec<_>>(), &ground)
+        };
         let splines: Vec<_> = meshes
             .into_iter()
             .zip(st.splines.iter())
-            .map(|(m, sp)| (m, sp.ty.clone(), sp.casts_shadow, sp.sort_origin))
+            .zip(levels)
+            .map(|((m, sp), level)| (m, sp.ty.clone(), sp.casts_shadow, sp.sort_origin, level))
             .collect();
         let (splines, ground_splines) = if omsi_cfg::flags::OMSI_NO_GROUND_SPLINE_BATCHING.is_set()
             || omsi_cfg::flags::OMSI_NO_SPLINE_BATCHING.is_set()
@@ -698,7 +755,7 @@ impl World {
             let mut slots_by_type = HashMap::new();
             let mut rest = Vec::new();
             let mut ground = Vec::new();
-            for (mesh, ty, casts, sort_origin) in splines {
+            for (mesh, ty, casts, sort_origin, level) in splines {
                 let slots: &Vec<usize> = slots_by_type.entry(Arc::as_ptr(&ty) as usize).or_insert_with(|| {
                     let dirs = texture_dirs(&self.root, &ty.dir);
                     let dirs: Vec<&Path> = dirs.iter().map(|p| p.as_path()).collect();
@@ -707,13 +764,13 @@ impl World {
                         .map(|(i, _)| i).collect()
                 });
                 if slots.is_empty() {
-                    rest.push((mesh, ty, casts, sort_origin));
+                    rest.push((mesh, ty, casts, sort_origin, level));
                     continue;
                 }
                 let faces = terrain_ground(&mesh, slots, st.origin, Mat4::IDENTITY, st.origin);
                 if !faces.is_empty() { ground.push(Arc::new(faces)); }
                 let mesh = terrain_rest(&mesh, slots);
-                if !mesh.ranges.is_empty() { rest.push((Arc::new(mesh), ty, casts, sort_origin)); }
+                if !mesh.ranges.is_empty() { rest.push((Arc::new(mesh), ty, casts, sort_origin, level)); }
             }
             (rest, batch_ground_splines(ground))
         };
@@ -916,16 +973,39 @@ fn object_lights(state: &mut TileState, ot: &ObjectType, pos: DVec3, xf: Mat4, l
         // colour is the brightness, so the intensity stays at one: an Esso sign
         // declared as 0.1 red is a glow by its pumps, not a red wash over the
         // whole street.
-        state.lights.push(omsi_render::PointLight {
+        // (A building's window glow is declared with a core of 60 or 120 m: filled at full colour that
+        // far round, the ground of the whole street glowed with it, evenly, from windows that light
+        // a few metres of their facade. The core is held to 15 m - a street lamp's is 12 - and the
+        // light falls off with the square of the distance beyond it. The baked light maps of the vanilla
+        // picture keep the authored radius.)
+        // (And a building's light is not a street lamp's: a lit room lights the ground outside a
+        // fifth as much - a courtyard ringed by lit windows came out as bright as the street under
+        // a lamp, as every window added a lamp's full colour.)
+        // (A source of 6 to 25 m - a floodlight mast's core is 20, a petrol station's canopy 10 and
+        // 20 - is held so for the plain picture, Vanilla and Vanilla+, as before. The Enhanced
+        // picture lights its ground by the lamps alone, not by the baked pools as well, and takes it
+        // as declared, at its own full colour: see `LightMode`.)
+        let window_glow = lamp.is_none() && ml.radius > 6.0;
+        let held = ml.radius.max(0.5).min(15.0);
+        let glow = if window_glow { 0.2 } else { 1.0 };
+        let owner = embedded.get(k).copied().unwrap_or(false).then_some(key);
+        let light = |core: f32, glow: f32, mode: omsi_render::LightMode| omsi_render::PointLight {
             position: p,
-            radius: ml.radius.max(0.5) * 6.0,
-            color: ml.color,
+            radius: core * 6.0,
+            color: [ml.color[0] * glow, ml.color[1] * glow, ml.color[2] * glow],
             intensity: 1.0,
-            core: ml.radius.max(0.5),
+            core,
             housed: true,
-            shadow_owner: embedded.get(k).copied().unwrap_or(false).then_some(key),
+            shadow_owner: owner,
+            mode,
             ..Default::default()
-        });
+        };
+        if window_glow && ml.radius <= 25.0 {
+            state.lights.push(light(held, glow, omsi_render::LightMode::Vanilla));
+            state.lights.push(light(ml.radius, 1.0, omsi_render::LightMode::Enhanced));
+        } else {
+            state.lights.push(light(held, glow, omsi_render::LightMode::Both));
+        }
     }
 }
 
@@ -1164,6 +1244,34 @@ mod embedded_light_tests {
             assert_eq!(placed.color, source.color);
             assert_eq!(placed.intensity, 1.0);
         }
+    }
+
+    /// A floodlight mast's core (20 m) and a petrol station's canopy are held, as before, for the
+    /// plain picture and as declared for the Enhanced one; a building's window glow, declared with
+    /// a core past 25 m, is held to 15 m and a fifth in both.
+    #[test]
+    fn floodlights_are_as_declared_in_enhanced_and_held_in_the_plain_picture() {
+        use omsi_render::LightMode;
+        let mut fixture = pole_fixture();
+        fixture.sco.crash_mode_pole = None;
+        fixture.sco.map_lights = vec![
+            omsi_scenery::sco::MapLight { pos: [0.0; 3], color: [1.0, 0.776, 0.46], radius: 20.0 },
+            omsi_scenery::sco::MapLight { pos: [8.0, 0.0, 0.0], color: [1.0; 3], radius: 60.0 },
+        ];
+        let mut state = TileState::default();
+        object_lights(&mut state, &fixture, DVec3::ZERO, Mat4::IDENTITY, None, 7);
+        assert_eq!(state.lights.len(), 3);
+        let [plain, enhanced, glow] = [&state.lights[0], &state.lights[1], &state.lights[2]];
+        assert_eq!((plain.mode, plain.core, plain.radius), (LightMode::Vanilla, 15.0, 90.0));
+        assert!((plain.color[0] - 0.2).abs() < 1e-6 && (plain.color[1] - 0.1552).abs() < 1e-4);
+        assert_eq!((enhanced.mode, enhanced.core, enhanced.radius), (LightMode::Enhanced, 20.0, 120.0));
+        assert_eq!(enhanced.color, [1.0, 0.776, 0.46]);
+        assert_eq!((glow.mode, glow.core, glow.radius), (LightMode::Both, 15.0, 90.0));
+        assert!((glow.color[0] - 0.2).abs() < 1e-6);
+        // a street lamp's source (a `lamp`) is a lamp's full colour, one light for both
+        let mut state = TileState::default();
+        object_lights(&mut state, &fixture, DVec3::ZERO, Mat4::IDENTITY, Some((3, 0, true)), 7);
+        assert!(state.lights.iter().all(|l| l.mode == LightMode::Both && l.color[0] == 1.0));
     }
 }
 

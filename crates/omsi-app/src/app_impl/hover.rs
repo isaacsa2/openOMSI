@@ -57,7 +57,7 @@ impl App {
         }
         #[cfg(windows)]
         if !self.input.mouse_drive && self.xr.vr.as_ref().is_some_and(|vr| vr.needs_cursor_surface(
-            self.input.cursor, self.menus.game_menu.is_some() || self.menus.chooser.is_some())) {
+            self.menus.game_menu.is_some() || self.menus.chooser.is_some())) {
             let surface = self.player.as_ref()
                 .zip(self.camera.as_ref())
                 .zip(self.gfx.surface.as_ref())
@@ -164,7 +164,7 @@ impl App {
         };
         let (o, d, _) = self.cockpit_cursor_ray(cam, (s.config.width, s.config.height));
         self.gfx.sim_view.people.ticket_blocks.as_ref().is_some_and(|b| b.hit(o, d, &p.vehicle).is_some())
-            || h.sim.money.as_ref().is_some_and(|m| crate::money::change_hit(m, o, d, &p.vehicle).is_some())
+            || h.sim.money.as_ref().is_some_and(|m| crate::money::money_hit(m, o, d, &p.vehicle).is_some())
     }
 
     /// Show the mouse cursor `kind` (0 arrow, 1 pointing hand, 2 cross, 3 arrows, 4 closed hand).

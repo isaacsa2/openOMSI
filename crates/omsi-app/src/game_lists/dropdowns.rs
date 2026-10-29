@@ -140,14 +140,29 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
         }
         "pick" => {
             if let Some((key, value)) = arg.split_once(' ') {
+                let before = app.settings.mirror_hud;
                 remember_setting(key, value);
                 reload_settings(app);
+                if key == "light_shadows" && value == "all" && app.renderer.as_ref().is_some_and(|r| !r.lamp_cube_maps()) {
+                    app.service_msg = Some((omsi_ui::tr("Takes effect when the game starts the next time").into_owned(), 5.0));
+                }
+                if key == "mirror_hud" && app.settings.mirror_hud != before {
+                    if let Some(p) = app.player.as_ref() {
+                        app.gfx.mirror_hud.apply_setting(p, app.settings.mirror_hud);
+                    }
+                }
+                // (another source: the tracker starts anew with it, a few seconds on - the
+                // old one's UDP port is let go first)
+                if key == "head_tracking_source" {
+                    app.input.headtrack = None;
+                    app.input.headtrack_failed = Some(std::time::Instant::now());
+                }
             }
         }
         "preset" => {
-            if let Some(i) = arg.trim().parse::<usize>().ok().filter(|i| *i < 4) {
+            if let Some(i) = arg.trim().parse::<usize>().ok().filter(|i| *i < 6) {
                 store_with(app, |v| {
-                    // (the preset of the mode the file has: it keeps the mode)
+                    // (a preset sets the mode as well)
                     let Some(p) = presets(v).into_iter().nth(i) else { return };
                     if let Some(o) = p.1.as_object() {
                         for (k, x) in o {
@@ -249,11 +264,16 @@ pub(super) fn same_value(a: &str, b: &str) -> bool {
 pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
     match key {
         "cloud_quality" => vec![("high", "High"), ("low", "Low")],
+        "street_light" => vec![("auto", "Auto"), ("on", "On"), ("off", "Off")],
         "rain_quality" => vec![("high", "High"), ("medium", "Medium"), ("low", "Low")],
+        "vehicle_smoke" => vec![("all", "All vehicles"), ("player", "Player only"), ("off", "Off")],
         "puddles" => vec![("high", "High"), ("low", "Low"), ("off", "Off")],
-        "graphics" => vec![("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced"), ("enhanced_plus", "Enhanced+")],
+        "graphics" => vec![("vanilla", "Vanilla (as OMSI 2)"), ("vanilla_plus", "Vanilla+"), ("enhanced", "Enhanced")],
+        "light_shadows" => vec![("off", "Off"), ("street", "Street lamps and vehicles"), ("all", "Every light")],
         "msaa" => vec![("1", "Off"), ("2", "2x MSAA"), ("4", "4x MSAA"), ("8", "8x MSAA")],
         "render_scale" => vec![("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")],
+        "upscaler" => vec![("default", "Standard (Catmull-Rom)"), ("fsr1", "AMD FSR 1 (experimental)")],
+        "fsr_quality" => vec![("ultra", "Ultra Quality (77%)"), ("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("auto", "Automatic (keeps the frame rate)"), ("custom", "Use render scale")],
         "anisotropy" => vec![("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")],
         "shadow_size" => vec![("1024", "1024"), ("2048", "2048"), ("4096", "4096")],
         "shadow_casters" => vec![("all", "Every solid mesh"), ("omsi", "[shadow] meshes, as OMSI")],
@@ -263,6 +283,7 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
         "min_obj_size" => vec![("0.005", "All"), ("0.013", "Normal"), ("0.02", "Fewer (faster)"), ("0.03", "Few (fastest)")],
         "mirror_size" => vec![("0", "Off"), ("128", "Low (128)"), ("256", "Normal (256)"), ("512", "High (512)"), ("1024", "Very high (1024)")],
         "mirror_refresh" => vec![("off", "None (frozen picture)"), ("eco", "Economical"), ("full", "Full"), ("every", "Every frame (smoothest)")],
+        "mirror_hud" => vec![("0", "Off"), ("2", "Left mirror"), ("1", "Right mirror"), ("3", "Left and right"), ("7", "Left, right and front")],
         "mirror_quality" => vec![("standard", "Standard"), ("enhanced", "As the picture (Enhanced)")],
         "video_memory" => vec![("0", "Automatic"), ("1000", "1 GB"), ("1500", "1.5 GB"), ("2000", "2 GB"), ("3000", "3 GB"), ("4000", "4 GB"), ("6000", "6 GB"), ("8000", "8 GB"), ("12000", "12 GB"), ("16000", "16 GB")],
         "drive_keys" => vec![("omsi", "Custom controls (Controls page)"), ("simple", "W A S D + arrows"), ("wasd", "W A S D only"), ("arrows", "Arrow keys only")],
@@ -271,6 +292,7 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
         "boarding" => vec![("auto", "Pay and take the ticket"), ("pay", "The driver sells the ticket"), ("walk", "Just walk in")],
         "standing_chance" => vec![("0", "Never"), ("5", "5%"), ("10", "10%"), ("25", "25%"), ("50", "50%"), ("100", "Always")],
         "units" => vec![("metric", "Metric (km/h, km, °C)"), ("uk", "British (mph, miles, yards, °C)"), ("us", "American (mph, miles, feet, °F)")],
+        "head_tracking_source" => vec![("auto", "Automatic"), ("tobii", "Tobii eye tracker"), ("opentrack", "opentrack (UDP 4242)")],
         "pax_voices" => vec![("all", "Greetings and tickets"), ("tickets", "Only the ticket asked for"), ("off", "Silent")],
         "perf_overlay" => vec![("off", "Off"), ("compact", "Compact"), ("detailed", "Detailed")],
         "maintenance" => vec![("0", "Infinite (no wear)"), ("1", "Very bad"), ("2", "Bad"), ("3", "Normal"), ("4", "Good")],
@@ -280,10 +302,37 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
         // (OMSI's AIMaxHumans, #2087)
         "ai_max_humans" => vec![("50", "50"), ("100", "100"), ("200", "200"), ("400", "400"), ("720", "720"), ("1000", "1000")],
         "language" => omsi_launcher_lib::LANGUAGES.iter().map(|l| (l.0, l.1)).collect(),
+        "ui_theme" => vec![("dark", "Dark"), ("light", "Light theme")],
         "vr_scale" => vec![("0.5", "50%"), ("0.65", "65%"), ("0.8", "80%"), ("1", "100%")],
         "vr_head_smoothing_ms" => vec![("0", "Off"), ("5", "5 ms"), ("10", "10 ms"), ("20", "20 ms"), ("30", "30 ms")],
         "vr_mirror_rate" => vec![("0", "Off"), ("8", "8/s"), ("16", "16/s"), ("24", "24/s"), ("32", "32/s"), ("48", "48/s"), ("60", "60/s"), ("90", "90/s"), ("120", "120/s"), ("180", "180/s"), ("240", "240/s"), ("360", "360/s"), ("-1", "Every frame")],
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn interface_theme_dropdown_uses_the_shared_dark_and_light_values() {
+        assert_eq!(select_options("ui_theme"), [("dark", "Dark"), ("light", "Light theme")]);
+    }
+
+    #[test]
+    fn live_interface_theme_updates_the_navigator_map() {
+        let args = crate::cli::Args::parse_from(["openomsi"]);
+        let mut app = crate::assemble_app(args, crate::settings::Settings::default());
+        app.menus.navigator = Some(omsi_navigator::Navigator::new(true, 0.85, "bottom-left"));
+
+        app.settings.ui_theme = "light".into();
+        sync_live(&mut app);
+        assert!(app.menus.navigator.as_ref().is_some_and(|n| n.light));
+
+        app.settings.ui_theme = "dark".into();
+        sync_live(&mut app);
+        assert!(app.menus.navigator.as_ref().is_some_and(|n| !n.light));
     }
 }
 
@@ -303,10 +352,10 @@ pub(super) fn select_row(file: &serde_json::Value, key: &str, name: &str, desc: 
     Some((row(name, 'o', &label, desc, None), format!("sel {key}")))
 }
 
-/// The quality presets for the graphics mode of `file` (`graphics_presets_for`, as the
-/// launcher's): they keep the mode.
-pub(super) fn presets(file: &serde_json::Value) -> [(&'static str, serde_json::Value); 4] {
-    omsi_launcher_lib::graphics_presets_for(file.get("graphics").and_then(|v| v.as_str()).unwrap_or("vanilla_plus"))
+/// The quality presets (`graphics_presets`, as the launcher's): Low to Ultra, each with its
+/// graphics mode.
+pub(super) fn presets(_file: &serde_json::Value) -> [(&'static str, serde_json::Value); 6] {
+    omsi_launcher_lib::graphics_presets()
 }
 
 pub(super) fn preset_now(file: &serde_json::Value) -> Option<usize> {
@@ -347,7 +396,7 @@ pub(super) fn reload_settings(app: &mut App) {
 }
 
 pub(crate) fn session_mode(app: &App) -> &'static str {
-    mode_of_session(&app.args.session_settings, &app.settings.graphics)
+    mode_of_session(&app.args.session_settings, app.settings.mode())
 }
 
 pub(super) fn mode_of_session(session: &crate::startup::SessionSettings, graphics: &str) -> &'static str {
@@ -365,7 +414,7 @@ pub(super) fn mode_of_session(session: &crate::startup::SessionSettings, graphic
 
 fn settings_in_mode(mode: &str) -> crate::settings::Settings {
     let s = crate::settings::Settings::load();
-    if s.graphics == mode {
+    if s.mode() == mode {
         return s;
     }
     let text = crate::settings::Settings::path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
@@ -377,10 +426,36 @@ fn settings_in_mode(mode: &str) -> crate::settings::Settings {
 }
 
 pub(super) fn text_in_mode(text: &str, mode: &str) -> crate::settings::Settings {
-    crate::settings::Settings::from_text(&format!("{text}\ngraphics={mode}\n"))
+    // (the mode as the file spells it: Enhanced and ray tracing apart)
+    let (graphics, rt) = match mode {
+        "enhanced_plus" => ("enhanced", "1"),
+        "enhanced" => ("enhanced", "0"),
+        other => (other, "0"),
+    };
+    crate::settings::Settings::from_text(&format!("{text}\ngraphics={graphics}\nray_tracing={rt}\n"))
 }
 
 pub(super) fn sync_live(app: &mut App) {
+    // (the upscaler and its sharpening at once, FSR 1 built when first asked for; and the
+    // render scale with them, FSR's quality being one. Only when one of them changed and FSR
+    // was or is asked for: without it the render scale stays for the next start, as its row
+    // says)
+    let o = app.settings.render_options();
+    if let Some(r) = app.renderer.as_mut() {
+        let asked = r.upscaler_asked();
+        if (o.fsr1 || asked.0) && (o.fsr1, o.fsr_sharpness, o.render_scale) != asked && !r.set_upscaler(o.fsr1, o.fsr_sharpness, o.render_scale) {
+            app.service_msg = Some((omsi_ui::tr("FSR 1 does not run on this graphics driver: the standard upscaler stays").into_owned(), 6.0));
+        }
+    }
+    // (the street light takes effect at once: the renderer reads it every frame)
+    let live = app.settings.render_options();
+    if let Some(r) = app.renderer.as_mut() {
+        r.options.street_light = live.street_light;
+        // (so do the lights' shadows, the clouds' and the glow: read every frame)
+        r.options.light_shadows = live.light_shadows;
+        r.options.cloud_shadows = live.cloud_shadows;
+        r.options.light_glow = live.light_glow;
+    }
     let s = &app.settings;
     if let Some(w) = app.world.as_ref() {
         w.settings.set_sound_scenery(s.vol_scenery);
@@ -390,6 +465,7 @@ pub(super) fn sync_live(app: &mut App) {
     }
     if let Some(n) = app.menus.navigator.as_mut() {
         n.arrows = s.nav_arrows;
+        n.light = s.is_light_theme();
     }
     if let Some(h) = app.session.humans.as_mut() {
         h.exact_fare = s.exact_fare;

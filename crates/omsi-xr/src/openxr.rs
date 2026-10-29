@@ -6,17 +6,15 @@ use glam::{DVec3, Mat4, Quat, Vec3, Vec4};
 use openxr as xr;
 use std::time::{Duration, Instant};
 use windows::core::Interface;
-use windows::Win32::Graphics::Direct3D12::{
-    ID3D12CommandAllocator, ID3D12CommandList, ID3D12GraphicsCommandList, ID3D12PipelineState,
-    ID3D12Resource, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_RESOURCE_BARRIER,
-    D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-    D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-    D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_RENDER_TARGET,
-    D3D12_RESOURCE_TRANSITION_BARRIER,
-};
+use windows::Win32::Graphics::Direct3D12::ID3D12Resource;
 use windows::Win32::Graphics::Dxgi::Common::*;
 
 use omsi_render::{Camera, Lighting, Renderer, Scene};
+
+mod pointer;
+use pointer::HeadPointer;
+mod sync;
+use sync::SwapchainSync;
 
 pub struct Vr {
     instance: xr::Instance,
@@ -27,7 +25,6 @@ pub struct Vr {
     swapchain: xr::Swapchain<xr::D3D12>,
     images: Vec<wgpu::Texture>,
     resources: Vec<ID3D12Resource>,
-    prepared: Vec<bool>,
     width: u32,
     height: u32,
     blend: xr::EnvironmentBlendMode,
@@ -41,10 +38,7 @@ pub struct Vr {
     menu_anchor: Option<UiAnchor>,
     cursor_anchor: Option<UiAnchor>,
     cursor_surface_local: Option<Vec3>,
-    cockpit_cursor_anchor: Option<UiAnchor>,
-    cockpit_cursor_surface_local: Option<Vec3>,
-    last_cursor_position: Option<(f32, f32)>,
-    last_cursor_move: Option<Instant>,
+    head_pointer: HeadPointer,
     cursor_menu_open: bool,
     zoom_from: f32,
     zoom_to: f32,
@@ -57,10 +51,19 @@ pub struct Vr {
     stats_wait: Duration,
     stats_image_wait: Duration,
     stats_render: Duration,
-    stats_gpu_wait: Duration,
     stats_eyes: [Duration; 2],
     stats_desktop_mirror: Duration,
     stats_stages_prev: std::collections::BTreeMap<&'static str, f64>,
+    // Drop last: keep the bound device/queue alive through XR destruction.
+    sync: SwapchainSync,
+}
+
+impl Drop for Vr {
+    fn drop(&mut self) {
+        // Field destruction follows this body. Finish application commands before
+        // xrDestroySwapchain, while retaining the device/queue until after it.
+        self.sync.finish();
+    }
 }
 
 struct Mirror {
@@ -139,16 +142,11 @@ impl UiAnchor {
         let position = (self.origin - eye.position).as_vec3();
         projection * Mat4::look_to_rh(Vec3::ZERO, eye.forward(), eye.up()) * position.extend(1.0)
     }
-
-    fn cursor_on_screen(&self, eye: &Camera, projection: Mat4) -> bool {
-        let clip = self.cursor_clip(eye, projection);
-        clip.w > 0.0 && (clip.x / clip.w).abs() < 0.85 && (clip.y / clip.w).abs() < 0.85
-    }
 }
 
 impl Vr {
     pub fn new(
-        renderer: &Renderer,
+        renderer: &mut Renderer,
         configured_scale: f32,
         desktop_mirror: bool,
     ) -> Result<Self> {
@@ -210,10 +208,8 @@ impl Vr {
         }
         // The runtime's recommendation is a quality target, not a minimum.
         // Rendering both eyes at the full Quest Link size is expensive.
-        let scale = omsi_cfg::flags::OMSI_OPENXR_SCALE.parse::<f32>()
-            .filter(|s| s.is_finite())
-            .unwrap_or(configured_scale)
-            .clamp(0.5, 1.0);
+        // (`OMSI_OPENXR_SCALE` is in `configured_scale` already: `Renderer::start_xr`)
+        let scale = configured_scale.clamp(0.5, 1.0);
         let width = ((recommended_width as f32 * scale).round() as u32).max(1);
         let height = ((recommended_height as f32 * scale).round() as u32).max(1);
         let (format, dxgi_format) = match renderer.format() {
@@ -294,10 +290,9 @@ impl Vr {
             .map(|image| {
                 // OpenXR retains ownership; cloning the COM interface gives wgpu a
                 // separate reference for the lifetime of the imported texture.
+                let raw = image.cast();
                 let resource = unsafe {
-                    windows::Win32::Graphics::Direct3D12::ID3D12Resource::from_raw_borrowed(
-                        &image.cast(),
-                    )
+                    windows::Win32::Graphics::Direct3D12::ID3D12Resource::from_raw_borrowed(&raw)
                 }
                 .ok_or_else(|| anyhow!("OpenXR returned a null swapchain image"))?
                 .clone();
@@ -320,7 +315,6 @@ impl Vr {
             })
             .collect::<Result<Vec<_>>>()?;
         let (images, resources): (Vec<_>, Vec<_>) = imported.into_iter().unzip();
-        let prepared = vec![false; images.len()];
         let blend = instance
             .enumerate_environment_blend_modes(system, view_type)?
             .into_iter()
@@ -339,7 +333,12 @@ impl Vr {
         if let Some(rate) = omsi_cfg::flags::OMSI_OPENXR_MIRROR_RATE.var() {
             log::info!("OpenXR bus mirror rate override: {rate} pictures/s (-1: every mirror each game frame)");
         }
+        // Release the HAL guards before asking wgpu to compile more pipelines.
+        drop(queue);
+        drop(device);
+        renderer.prepare_xr_eye_pipelines();
         Ok(Self {
+            sync: SwapchainSync::new(&renderer.device, &renderer.queue, images.len()),
             instance,
             session,
             frame_waiter,
@@ -348,7 +347,6 @@ impl Vr {
             swapchain,
             images,
             resources,
-            prepared,
             width,
             height,
             blend,
@@ -362,10 +360,7 @@ impl Vr {
             menu_anchor: None,
             cursor_anchor: None,
             cursor_surface_local: None,
-            cockpit_cursor_anchor: None,
-            cockpit_cursor_surface_local: None,
-            last_cursor_position: None,
-            last_cursor_move: None,
+            head_pointer: HeadPointer::default(),
             cursor_menu_open: false,
             zoom_from: 0.0,
             zoom_to: 0.0,
@@ -378,7 +373,6 @@ impl Vr {
             stats_wait: Duration::ZERO,
             stats_image_wait: Duration::ZERO,
             stats_render: Duration::ZERO,
-            stats_gpu_wait: Duration::ZERO,
             stats_eyes: [Duration::ZERO; 2],
             stats_desktop_mirror: Duration::ZERO,
             stats_stages_prev: Default::default(),
@@ -429,10 +423,7 @@ impl Vr {
     pub fn recenter_pointer(&mut self) {
         self.cursor_anchor = None;
         self.cursor_surface_local = None;
-        self.cockpit_cursor_anchor = None;
-        self.cockpit_cursor_surface_local = None;
-        self.last_cursor_position = None;
-        self.last_cursor_move = Some(Instant::now());
+        self.head_pointer = HeadPointer::default();
     }
 
     pub fn toggle_desktop_mirror(&mut self) -> bool {
@@ -450,12 +441,8 @@ impl Vr {
         }
     }
 
-    pub fn needs_cursor_surface(&self, position: (f32, f32), menu_open: bool) -> bool {
+    pub fn needs_cursor_surface(&self, menu_open: bool) -> bool {
         !menu_open
-            && (self.cursor_menu_open
-                || self.last_cursor_position.is_none_or(|p| {
-                    (p.0 - position.0).abs() > 0.5 || (p.1 - position.1).abs() > 0.5
-                }))
     }
 
     pub fn set_cursor_surface(
@@ -491,17 +478,7 @@ impl Vr {
         camera: &Camera,
         projection: Mat4,
     ) -> DVec3 {
-        if !self.cursor_menu_open {
-            if let (Some(anchor), Some(previous)) = (self.cursor_anchor, self.last_cursor_position)
-            {
-                let dx = (position.0 - previous.0) * 2.0 / size.0.max(1) as f32;
-                let dy = (previous.1 - position.1) * 2.0 / size.1.max(1) as f32;
-                return anchor.origin
-                    + (camera.right() * (dx * anchor.half_width)
-                        + camera.up() * (dy * anchor.half_height))
-                        .as_dvec3();
-            }
-        }
+        let position = self.head_pointer.position(position, size);
         let direction = eye_ray(
             camera,
             projection,
@@ -523,13 +500,12 @@ impl Vr {
         let (camera, projection) = self.mirror_camera?;
         let h = size.1.max(1) as f32;
         let crop = self.desktop_crop(size);
-        let direction = if self.cursor_anchor.is_some() && !self.cursor_menu_open {
-            (self.cursor_target((x, y), size, &camera, projection) - camera.position)
-                .as_vec3()
-                .normalize_or_zero()
+        let position = if !self.cursor_menu_open {
+            self.head_pointer.position((x, y), size)
         } else {
-            eye_ray(&camera, projection, x, y, size, crop)
+            (x, y)
         };
+        let direction = eye_ray(&camera, projection, position.0, position.1, size, crop);
         let spread = 2.0 * (camera.fov_deg.to_radians() * 0.5).tan() * crop.1 / h;
         Some((camera.position, direction, spread))
     }
@@ -659,11 +635,7 @@ impl Vr {
         // transition the actual resource to COMMON before wgpu's first barrier.
         // Later acquisitions need no fix: wgpu leaves both layers in
         // RENDER_TARGET, which is also the state OpenXR requires on release.
-        let first_use = if !self.prepared[index] {
-            Some(transition_first_use(renderer, &self.resources[index])?)
-        } else {
-            None
-        };
+        self.sync.prepare_image(index, &self.resources[index])?;
         let mut vr_base = *base;
         vr_base.roll = 0.0;
         // Driver cameras may look down at the dashboard by default. In VR the
@@ -725,16 +697,13 @@ impl Vr {
         }
         renderer.set_env_heading(None);
         let menu_open = !menu_range.is_empty();
-        self.place_cursor(menu_open, cockpit_pointer_enabled, cursor_position, desktop_size, bus_pose, &eye_cameras, &eye_projections, &ui_cameras, views[0].fov);
+        self.place_cursor(menu_open, cursor_position, desktop_size, bus_pose, &eye_cameras, &eye_projections, &ui_cameras, views[0].fov);
         let menu_transforms = [0, 1].map(|eye| {
             self.menu_anchor
                 .map(|anchor| anchor.transform(&ui_cameras[eye], ui_projections[eye]))
                 .unwrap_or(Mat4::IDENTITY)
         });
-        let cursor_visible = (menu_open || cockpit_pointer_enabled)
-            && self
-                .last_cursor_move
-                .is_some_and(|t| t.elapsed() < Duration::from_secs(10));
+        let cursor_visible = self.head_pointer.visible(menu_open || cockpit_pointer_enabled, Instant::now());
         let cursor_transforms = [0, 1].map(|eye| {
             self.cursor_anchor
                 .filter(|_| cursor_visible)
@@ -765,16 +734,11 @@ impl Vr {
             navigator,
         );
         self.draw_desktop(renderer, index, desktop, desktop_size);
-        // The runtime may sample this image immediately after release. Wait for
-        // wgpu's submissions until explicit D3D12 fence handoff is implemented.
-        let gpu_wait_start = Instant::now();
-        renderer.device.poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        })?;
-        let gpu_wait_time = gpu_wait_start.elapsed();
-        self.prepared[index] = true;
-        drop(first_use);
+        // All eye/UI/mirror commands have been submitted on the exact queue bound
+        // to OpenXR, with both layers restored to RENDER_TARGET. The D3D12 OpenXR
+        // contract orders runtime access on that queue; CPU completion is needed
+        // at swapchain destruction, not at release. Keep native first-use command
+        // objects alive in `sync` until that shutdown wait.
         self.swapchain.release_image()?;
         let rect = xr::Rect2Di {
             offset: xr::Offset2Di { x: 0, y: 0 },
@@ -799,35 +763,15 @@ impl Vr {
             .views(&projection_views);
         self.frame_stream
             .end(frame.predicted_display_time, self.blend, &[&layer])?;
-        self.record_frame_stats(renderer, wait_time, render_start, gpu_wait_time);
+        self.record_frame_stats(renderer, wait_time, render_start);
         Ok(true)
     }
 
-    /// Where the menu and the cursor hang in front of the eyes this frame: the menu before the
-    /// head while it is open, the cursor on the menu, on what it points at in the bus (kept in
-    /// the bus's frame as it drives on) or before the eyes, hidden after ten idle seconds.
+    /// Menus retain their existing placement. The cockpit pointer is reconstructed
+    /// from the current head pose and mouse offset every frame, so neither driving
+    /// nor looking elsewhere leaves the cursor attached to the old world position.
     #[allow(clippy::too_many_arguments)]
-    fn place_cursor(&mut self, menu_open: bool, cockpit_pointer_enabled: bool, cursor_position: (f32, f32), desktop_size: (u32, u32), bus_pose: Option<(DVec3, Mat4)>, eye_cameras: &[Camera; 2], eye_projections: &[Mat4; 2], ui_cameras: &[Camera; 2], fov: xr::Fovf) {
-        if !menu_open
-            && cockpit_pointer_enabled
-            && self
-                .last_cursor_move
-                .is_some_and(|t| t.elapsed() >= Duration::from_secs(10))
-        {
-            self.cursor_anchor = None;
-            self.cursor_surface_local = None;
-            self.last_cursor_move = None;
-        }
-        if menu_open && !self.cursor_menu_open {
-            self.cockpit_cursor_anchor = self.cursor_anchor;
-            self.cockpit_cursor_surface_local = self.cursor_surface_local;
-        } else if !menu_open && self.cursor_menu_open {
-            self.cursor_anchor = self.cockpit_cursor_anchor.take();
-            self.cursor_surface_local = self.cockpit_cursor_surface_local.take();
-            self.last_cursor_position = self.cursor_anchor.map(|_| cursor_position);
-            self.last_cursor_move = Some(Instant::now());
-            self.cursor_menu_open = false;
-        }
+    fn place_cursor(&mut self, menu_open: bool, cursor_position: (f32, f32), desktop_size: (u32, u32), bus_pose: Option<(DVec3, Mat4)>, eye_cameras: &[Camera; 2], eye_projections: &[Mat4; 2], ui_cameras: &[Camera; 2], fov: xr::Fovf) {
         if menu_open {
             let center = (ui_cameras[0].position + ui_cameras[1].position) * 0.5
                 + (ui_cameras[0].forward() * 2.0).as_dvec3();
@@ -841,69 +785,41 @@ impl Vr {
         } else {
             self.menu_anchor = None;
         }
-        let moved = self.last_cursor_position.is_none_or(|p| {
-            (p.0 - cursor_position.0).abs() > 0.5 || (p.1 - cursor_position.1).abs() > 0.5
-        }) || self.cursor_menu_open != menu_open;
-        let place_in_front = !menu_open
-            && (self.cursor_anchor.is_none()
-                || (moved
-                    && self.cursor_anchor.is_some_and(|anchor| {
-                        !anchor.cursor_on_screen(&eye_cameras[0], eye_projections[0])
-                    })));
-        let cursor_target = if place_in_front {
-            eye_cameras[0].position + (eye_cameras[0].forward() * 1.5).as_dvec3()
-        } else {
-            self.cursor_target(
-                cursor_position,
-                desktop_size,
-                &eye_cameras[0],
-                eye_projections[0],
-            )
-        };
-        if moved {
-            self.last_cursor_move = Some(Instant::now());
-            self.last_cursor_position = Some(cursor_position);
-        }
         if let Some(menu) = self.menu_anchor {
             let (w, h) = (desktop_size.0.max(1) as f32, desktop_size.1.max(1) as f32);
-            let x = cursor_position.0 / w * 2.0 - 1.0;
-            let y = 1.0 - cursor_position.1 / h * 2.0;
             self.cursor_anchor = Some(UiAnchor {
-                origin: menu.point(x, y),
+                origin: menu.point(
+                    cursor_position.0 / w * 2.0 - 1.0,
+                    1.0 - cursor_position.1 / h * 2.0,
+                ),
                 ..menu
             });
-        } else if moved {
-            if place_in_front {
-                self.cursor_surface_local = None;
-            }
-            let hit =
+        } else {
+            let camera = &eye_cameras[0];
+            let target =
+                self.cursor_target(cursor_position, desktop_size, camera, eye_projections[0]);
+            let direction = (target - camera.position).as_vec3().normalize_or_zero();
+            // A recent surface hit supplies binocular depth, never the aim. Project
+            // that depth onto the current ray so drawing and picking cannot diverge
+            // while the headset or vehicle moves between hover updates.
+            let distance =
                 self.cursor_surface_local
                     .zip(bus_pose)
                     .map(|(local, (position, rotation))| {
-                        position + rotation.transform_point3(local).as_dvec3()
-                    });
-            let point = hit.unwrap_or(cursor_target);
-            // Keep free-space cursor positions in the bus frame too. Otherwise a
-            // cursor without a surface hit stays in the world as the bus drives on.
-            self.cursor_surface_local = bus_pose.map(|(position, rotation)| {
-                rotation
-                    .inverse()
-                    .transform_point3((point - position).as_vec3())
-            });
-            let distance = (point - eye_cameras[0].position).length() as f32;
+                    let hit = position + rotation.transform_point3(local).as_dvec3();
+                    (hit - camera.position).as_vec3()
+                        .dot(direction)
+                        .clamp(0.3, 8.0)
+                })
+                .unwrap_or(1.5);
+            let point = camera.position + (direction * distance).as_dvec3();
             self.cursor_anchor = Some(UiAnchor::at(
-                point,
-                &eye_cameras[0],
+                point, camera,
                 fov,
-                distance.clamp(0.3, 8.0),
-            ));
-        } else if let (Some(local), Some((position, rotation)), Some(anchor)) = (
-            self.cursor_surface_local,
-            bus_pose,
-            self.cursor_anchor.as_mut(),
-        ) {
-            anchor.origin = position + rotation.transform_point3(local).as_dvec3();
+                distance));
         }
+        self.head_pointer
+            .update(cursor_position, desktop_size, menu_open);
         self.cursor_menu_open = menu_open;
     }
 
@@ -956,16 +872,15 @@ impl Vr {
 
     /// The frame's times added to the statistics, logged every five seconds (with the
     /// renderer's mirror stages under `OMSI_PROFILE`).
-    fn record_frame_stats(&mut self, renderer: &Renderer, wait_time: Duration, render_start: Instant, gpu_wait_time: Duration) {
+    fn record_frame_stats(&mut self, renderer: &Renderer, wait_time: Duration, render_start: Instant) {
         self.stats_frames += 1;
         self.stats_wait += wait_time;
         self.stats_render += render_start.elapsed();
-        self.stats_gpu_wait += gpu_wait_time;
         let interval = self.stats_since.elapsed();
         if interval >= Duration::from_secs(5) {
             let count = self.stats_frames as f64;
             log::info!(
-                "OpenXR: {:.1} fps, frame wait {:.1} ms/frame, image wait {:.1}, render {:.1} (eyes {:.1}+{:.1}, desktop mirror {:.1}, GPU sync {:.1} ms/frame)",
+                "OpenXR: {:.1} fps, frame wait {:.1} ms/frame, image wait {:.1}, render {:.1} (eyes {:.1}+{:.1}, desktop mirror {:.1})",
                 count / interval.as_secs_f64(),
                 self.stats_wait.as_secs_f64() * 1000.0 / count,
                 self.stats_image_wait.as_secs_f64() * 1000.0 / count,
@@ -973,7 +888,6 @@ impl Vr {
                 self.stats_eyes[0].as_secs_f64() * 1000.0 / count,
                 self.stats_eyes[1].as_secs_f64() * 1000.0 / count,
                 self.stats_desktop_mirror.as_secs_f64() * 1000.0 / count,
-                self.stats_gpu_wait.as_secs_f64() * 1000.0 / count,
             );
             if omsi_cfg::flags::OMSI_PROFILE.is_set() {
                 let stages = renderer.stats.borrow();
@@ -1006,7 +920,6 @@ impl Vr {
             self.stats_wait = Duration::ZERO;
             self.stats_image_wait = Duration::ZERO;
             self.stats_render = Duration::ZERO;
-            self.stats_gpu_wait = Duration::ZERO;
             self.stats_eyes = [Duration::ZERO; 2];
             self.stats_desktop_mirror = Duration::ZERO;
         }
@@ -1186,52 +1099,6 @@ impl Mirror {
         }));
         renderer.queue.submit(Some(encoder.finish()));
     }
-}
-
-fn transition_first_use(
-    renderer: &Renderer,
-    resource: &ID3D12Resource,
-) -> Result<(ID3D12CommandAllocator, ID3D12GraphicsCommandList)> {
-    let device = unsafe { renderer.device.as_hal::<wgpu_hal::api::Dx12>() }
-        .ok_or_else(|| anyhow!("OpenXR lost the DX12 graphics device"))?;
-    let queue = unsafe { renderer.queue.as_hal::<wgpu_hal::api::Dx12>() }
-        .ok_or_else(|| anyhow!("OpenXR lost the DX12 command queue"))?;
-    // Submit on wgpu's own queue so its subsequent COMMON -> RENDER_TARGET
-    // transition executes after this barrier. Keep the command objects alive
-    // until the frame's device.poll completes.
-    let allocator: ID3D12CommandAllocator = unsafe {
-        device
-            .raw_device()
-            .CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)
-    }?;
-    let list: ID3D12GraphicsCommandList = unsafe {
-        device.raw_device().CreateCommandList(
-            0,
-            D3D12_COMMAND_LIST_TYPE_DIRECT,
-            &allocator,
-            None::<&ID3D12PipelineState>,
-        )
-    }?;
-    let mut barrier = D3D12_RESOURCE_BARRIER {
-        Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        Anonymous: D3D12_RESOURCE_BARRIER_0 {
-            Transition: std::mem::ManuallyDrop::new(D3D12_RESOURCE_TRANSITION_BARRIER {
-                pResource: std::mem::ManuallyDrop::new(Some(resource.clone())),
-                Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                StateBefore: D3D12_RESOURCE_STATE_RENDER_TARGET,
-                StateAfter: D3D12_RESOURCE_STATE_COMMON,
-            }),
-        },
-    };
-    unsafe {
-        list.ResourceBarrier(std::slice::from_ref(&barrier));
-        std::mem::ManuallyDrop::drop(&mut (*barrier.Anonymous.Transition).pResource);
-        list.Close()?;
-        let command_list: ID3D12CommandList = list.cast()?;
-        queue.as_raw().ExecuteCommandLists(&[Some(command_list)]);
-    }
-    Ok((allocator, list))
 }
 
 fn xr_position(pose: xr::Posef) -> Vec3 {

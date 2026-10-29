@@ -12,15 +12,21 @@ use omsi_sim::{Daylight, VehicleInstance};
 /// street under a lamp, and less beyond.
 const HEADLIGHT_INTENSITY: f32 = 1800.0;
 
+/// The road-headlamp profile has a brighter high-beam core of its own. At the
+/// renderer's 55 lux per intensity unit, the old strength gave each lamp nearly
+/// 50,000 cd on low beam and 350,000 cd on high beam. This scale brings the generic
+/// pair to 33,000 / 231,000 cd, without dimming work lights or authored cookies.
+const ROAD_HEADLIGHT_GAIN: f32 = 1.0 / 3.0;
+
 /// A `[spotlight]` declaring this range or more is a full beam (the stock buses' 500, the
 /// Grand Paris-Moulon Citaro's 450), less a low beam (the stock 100, that Citaro's 200).
 const FULL_BEAM_RANGE: f32 = 300.0;
 
-/// A headlight's strength in the classic picture, as a map lamp's (`PointLight::intensity`).
-/// Measured against OMSI 2 from above, the stock NL202 at night in Spandau: its pool is
-/// some 18 of 255 over the unlit cobbles 1.5 - 2.5 m ahead, 12 at 4 - 5 m and nearly gone
-/// at 7 m; this gives 20, 12 and 5 there. (At 1 it was 60, 40 and 15.)
-const VANILLA_HEADLIGHT_INTENSITY: f32 = 0.2;
+/// How far the classic picture's headlight is followed (m), at most: Omsi.exe gives its
+/// Direct3D spot four times the declared range, where its light has long gone (the stock low
+/// beam's, range 100, is down to 3 per cent of the bumper's at 45 m), and a light that far
+/// would take a place in every light-grid cell of the street.
+const VANILLA_SPOT_REACH: f32 = 150.0;
 
 /// Lighting parameters for the renderer from the daylight model.
 pub fn lighting_from(d: &Daylight, fog_range: f32) -> Lighting {
@@ -47,6 +53,12 @@ pub fn lighting_from(d: &Daylight, fog_range: f32) -> Lighting {
         day_seed: d.day_seed,
         ..Default::default()
     }
+}
+
+/// How dark the weather alone makes the day (0..0.45): a closed sky and rain bring the night
+/// factor up, so the interior lights and nightmaps start to show.
+pub fn gloom_darkness(overcast: f32, rain: f32) -> f32 {
+    0.45 * (overcast * 0.5 + rain * 0.5).clamp(0.0, 1.0)
 }
 
 /// What the weather does to the light: an overcast sky takes the sun away and turns
@@ -98,8 +110,7 @@ pub fn apply_weather(
     l.overcast = overcast;
     l.rain = rain;
     l.snowfall = if precip_kind == 2 { rain } else { 0.0 };
-    let gloom = (overcast * 0.5 + rain * 0.5).clamp(0.0, 1.0);
-    l.night = l.night.max(0.45 * gloom);
+    l.night = l.night.max(gloom_darkness(overcast, rain));
     // (night maps on with the street lamps, or where the weather makes it that dark: a
     // clear dusk showed the lit windows and signs at a fraction, a rainy one at nearly
     // full, #276)
@@ -123,7 +134,8 @@ pub fn vehicle_lights(
     v: &VehicleInstance,
     coronas: &mut Vec<Corona>,
     lights: &mut Vec<PointLight>,
-    night: f32,
+    // the player's vehicle: Omsi.exe lights the road by its [spotlight] alone (light 3)
+    player: bool,
     fades: &parking_lot::Mutex<CookieFades>,
     lent_beams: bool,
 ) {
@@ -170,8 +182,19 @@ pub fn vehicle_lights(
                 let dl = Vec3::new(vals[3], vals[4], vals[5]).normalize_or_zero();
                 let d = body.transform_vector3(dl).normalize_or_zero();
                 let level = level_axis(body, dl);
-                for (at, share) in spot_origins(&ty.model, ty.def.bounding_box, &vals, &v.light_fade, &value_of) {
-                    push_spot(lights, v.position + body.transform_point3(at).as_dvec3(), d, level, &vals, share, night);
+                let origins = spot_origins(&ty.model, ty.def.bounding_box, &vals, &v.light_fade, &value_of);
+                // the classic picture: Omsi.exe's one spot, the player's, where the
+                // [spotlight] puts it (its light leaves from the vehicle's face, see
+                // `push_classic_spot`) - wherever that is: the Karosa B951's full beams stand
+                // 5 m up, over its roof
+                let total: f32 = origins.iter().map(|o| o.1).sum();
+                if player && total > 0.0 {
+                    let face = origins.iter().map(|(at, share)| *at * *share).sum::<Vec3>() / total;
+                    let at = Vec3::new(vals[0], face.y, vals[2]);
+                    push_classic_spot(lights, v.position + body.transform_point3(at).as_dvec3(), d, &vals, 1.0, face.y - vals[1], 1.0);
+                }
+                for (at, share) in origins {
+                    push_enhanced_spot(lights, v.position + body.transform_point3(at).as_dvec3(), d, level, &vals, share);
                 }
             }
         }
@@ -199,7 +222,7 @@ pub fn vehicle_lights(
             for (pos, dir, share) in spotlight_2_lamps(sp, value_of(sp.variable.as_str())) {
                 let at = origin + rot.transform_point3(pos).as_dvec3();
                 let d = rot.transform_vector3(dir).normalize_or_zero();
-                push_spot(lights, at, d, level_axis(rot, dir), &sp.values, share, night);
+                push_spot(lights, at, d, level_axis(rot, dir), &sp.values, share);
             }
         }
     }
@@ -219,7 +242,7 @@ pub fn vehicle_lights(
             let local = cookie_direction(Vec3::from(c.dir), turn(&c.yaw), turn(&c.pitch));
             let at = origin + rot.transform_point3(Vec3::from(c.pos)).as_dvec3();
             let d = rot.transform_vector3(local).normalize_or_zero();
-            push_cookie(lights, at, d, c, on, cookie_picture_id(dir, &c.picture), night);
+            push_cookie(lights, at, d, c, on, cookie_picture_id(dir, &c.picture));
         }
     }
     // [interiorlight]s light only the meshes listing them and the passengers (per-instance
@@ -314,7 +337,7 @@ fn cookie_direction(dir: Vec3, yaw_deg: f32, pitch_deg: f32) -> Vec3 {
 /// its picture `picture` (0: not found - its cone lights it): the classic picture's spot, as
 /// `push_spot` makes it, and the enhanced picture's, as bright as one headlamp's beam at
 /// its strongest where the picture is white, lit by the picture within its cone.
-fn push_cookie(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, c: &omsi_model::SpotlightCookie, on: f32, picture: u16, night: f32) {
+fn push_cookie(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, c: &omsi_model::SpotlightCookie, on: f32, picture: u16) {
     let color = [c.color[0] / 255.0, c.color[1] / 255.0, c.color[2] / 255.0];
     let half = |deg: f32| (deg.clamp(1.0, 170.0) * 0.5).to_radians();
     let tan = [half(c.width).tan(), half(c.height).tan()];
@@ -325,12 +348,13 @@ fn push_cookie(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, c: &omsi_model:
     let inner = half(c.width.min(c.height)).cos().max(outer);
     lights.push(PointLight {
         position: at,
-        radius: spot_reach(c.range, 45.0),
+        radius: classic_spot_reach(c.range),
         color,
-        intensity: VANILLA_HEADLIGHT_INTENSITY * on * (0.3 + 0.7 * night),
+        intensity: on,
         direction: d,
         cone: [inner, outer],
         mode: LightMode::Vanilla,
+        d3d_spot: Some([c.range.max(0.1), 0.0, 0.0]),
         ..Default::default()
     });
     let reach = spot_reach(c.range, 60.0);
@@ -424,26 +448,43 @@ fn level_axis(rot: glam::Mat4, local: Vec3) -> Vec3 {
 /// The lights of one headlamp at `at` shining along `d`, with a `[spotlight]`'s numbers
 /// (`vals`: colour 6-8, range 9, inner and outer cone 10 and 11) and `share` of its light;
 /// `level` its axis in the vehicle's floor (see [`level_axis`]).
-fn push_spot(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, level: Vec3, vals: &[f32; 12], share: f32, night: f32) {
+fn push_spot(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, level: Vec3, vals: &[f32; 12], share: f32) {
+    push_classic_spot(lights, at, d, vals, share, 0.0, 0.0);
+    push_enhanced_spot(lights, at, d, level, vals, share);
+}
+
+/// How far the classic picture follows a spot of this declared range (see
+/// `VANILLA_SPOT_REACH`).
+fn classic_spot_reach(range: f32) -> f32 {
+    (range.max(0.1) * 4.0).min(VANILLA_SPOT_REACH)
+}
+
+/// The classic picture's spot, as Omsi.exe sets up its Direct3D spot light for the
+/// `[spotlight]` the script selects (0x708acc): at the spotlight's own place, its colour
+/// (0..255, 0x5f3f71) times 0.3 as diffuse light and 0.1 as ambient light, its cone's full
+/// angles (degrees to radians, 0x7f1f30) with a falloff of 2, attenuation
+/// 1 / (0.2 + (1 / range) d + (40 / range²) d²) (0.01 x 100 / range and 0.004 x (100 /
+/// range)²); the shader's `point_lights` lights it so. `share` of its light; `setback` (m)
+/// how far behind `at` along the vehicle's axis the spotlight itself lies: its light leaves
+/// from the vehicle's face (`spot_origins` - the stock NL202's spot is 3.8 m inside the bus)
+/// but is as strong as Omsi.exe has it from the spotlight's place.
+fn push_classic_spot(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, vals: &[f32; 12], share: f32, setback: f32, kind: f32) {
     let color = [vals[6] / 255.0, vals[7] / 255.0, vals[8] / 255.0];
     // inner and outer cone as full angles (values 10 and 11)
     let (inner, outer) = (vals[10], vals[11]);
     let half = |deg: f32| (deg.clamp(1.0, 179.0) * 0.5).to_radians().cos();
     let cone = [half(inner.min(outer)), half(outer)];
-    // vanilla: the spot, lit as the classic picture lights a lamp, only inside
-    // its cone (three point lights along its axis stood in for it before: they
-    // shone every way, on the bus's own body and saloon)
     lights.push(PointLight {
         position: at,
-        radius: spot_reach(vals[9], 45.0),
+        radius: classic_spot_reach(vals[9]),
         color,
-        intensity: VANILLA_HEADLIGHT_INTENSITY * share * (0.3 + 0.7 * night),
+        intensity: share,
         direction: d,
         cone,
         mode: LightMode::Vanilla,
+        d3d_spot: Some([vals[9].max(0.1), setback, kind]),
         ..Default::default()
     });
-    push_enhanced_spot(lights, at, d, level, vals, share);
 }
 
 /// At most this many cars, the nearest to the camera within `AI_BEAM_RANGE`, are lent
@@ -452,6 +493,13 @@ fn push_spot(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, level: Vec3, vals
 /// near it - for cars whose beams far off light a few metres of road nobody sees.
 const AI_BEAMS: usize = 12;
 const AI_BEAM_RANGE: f64 = 200.0;
+/// How dark the scene has to be (0 day, 1 night; the sun's height and the weather's gloom, the
+/// larger) for the cars to be lent any beams, and how dark for all of `AI_BEAMS` of them within
+/// `AI_BEAM_RANGE`. In between, in a grey or rainy day, only the nearest few close by.
+const AI_BEAM_MIN_DARK: f32 = 0.12;
+const AI_BEAM_FULL_DARK: f32 = 0.5;
+const AI_BEAMS_DIM: usize = 3;
+const AI_BEAM_RANGE_DIM: f64 = 60.0;
 
 /// Whether a vehicle has no spot of its own and is lent its headlamps' beams.
 fn lends_beams(model: &omsi_model::Model) -> bool {
@@ -459,18 +507,26 @@ fn lends_beams(model: &omsi_model::Model) -> bool {
 }
 
 /// Which of `vehicles` (by index) may be lent their headlamps' beams (lit ones alone get
-/// them): the nearest `AI_BEAMS` without spots of their own within `AI_BEAM_RANGE` of the
-/// camera.
-fn cars_with_beams(vehicles: &[&VehicleInstance], camera: DVec3) -> Vec<usize> {
+/// them): the nearest without spots of their own - `AI_BEAMS` within `AI_BEAM_RANGE` of the
+/// camera in the dark, `AI_BEAMS_DIM` within `AI_BEAM_RANGE_DIM` in a gloomy day (`dark` from
+/// `AI_BEAM_MIN_DARK`), none by day.
+fn cars_with_beams(vehicles: &[&VehicleInstance], camera: DVec3, dark: f32) -> Vec<usize> {
+    let (count, range) = if dark < AI_BEAM_MIN_DARK {
+        return Vec::new();
+    } else if dark < AI_BEAM_FULL_DARK {
+        (AI_BEAMS_DIM, AI_BEAM_RANGE_DIM)
+    } else {
+        (AI_BEAMS, AI_BEAM_RANGE)
+    };
     let mut near: Vec<(f64, usize)> = vehicles
         .iter()
         .enumerate()
         .filter(|(_, v)| lends_beams(&v.ty.model))
         .map(|(k, v)| ((v.position - camera).length(), k))
-        .filter(|(d, _)| *d < AI_BEAM_RANGE)
+        .filter(|(d, _)| *d < range)
         .collect();
     near.sort_by(|a, b| a.0.total_cmp(&b.0));
-    near.into_iter().take(AI_BEAMS).map(|(_, k)| k).collect()
+    near.into_iter().take(count).map(|(_, k)| k).collect()
 }
 
 /// The headlamps a model without a `[spotlight]` has (its position, direction, colour 0..255
@@ -589,7 +645,7 @@ fn push_enhanced_spot(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, level: V
         position: at,
         radius: reach,
         color,
-        intensity: HEADLIGHT_INTENSITY * share * weaker,
+        intensity: HEADLIGHT_INTENSITY * share * weaker * if beam != 0.0 { ROAD_HEADLIGHT_GAIN } else { 1.0 },
         direction: if beam != 0.0 { level } else { d },
         cone,
         core: 1.0,
@@ -598,6 +654,8 @@ fn push_enhanced_spot(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, level: V
         shadow_owner: None,
         mode: LightMode::Enhanced,
         cookie: None,
+        flash: false,
+        d3d_spot: None,
     });
 }
 
@@ -634,13 +692,13 @@ mod cookie_tests {
     fn a_cookie_lamp_falls_back_to_its_cone() {
         let c = omsi_model::SpotlightCookie { dir: [0.0, 1.0, 0.0], color: [255.0; 3], range: 80.0, width: 60.0, height: 20.0, ..Default::default() };
         let mut lights = Vec::new();
-        push_cookie(&mut lights, DVec3::ZERO, Vec3::Y, &c, 1.0, 7, 1.0);
+        push_cookie(&mut lights, DVec3::ZERO, Vec3::Y, &c, 1.0, 7);
         let e = lights.iter().find(|l| l.mode == LightMode::Enhanced).unwrap();
         assert_eq!(e.cookie.map(|c| c.picture), Some(7));
         assert_eq!(e.beam, 0.0);
         assert!(e.cone[1] < 30f32.to_radians().cos(), "the cone holds the picture's corners");
         lights.clear();
-        push_cookie(&mut lights, DVec3::ZERO, Vec3::Y, &c, 1.0, 0, 1.0);
+        push_cookie(&mut lights, DVec3::ZERO, Vec3::Y, &c, 1.0, 0);
         assert!(lights.iter().all(|l| l.cookie.is_none()));
         assert_eq!(lights.len(), 2);
     }
@@ -686,15 +744,39 @@ mod spot_tests {
         let beam = |range: f32| {
             let vals = [0.0, 6.5, 0.76, 0.0, 1.0, -0.3, 255.0, 255.0, 233.0, range, 30.0, 80.0];
             let mut lights = Vec::new();
-            super::push_spot(&mut lights, glam::DVec3::ZERO, glam::Vec3::Y, glam::Vec3::Y, &vals, 0.5, 1.0);
+            super::push_spot(&mut lights, glam::DVec3::ZERO, glam::Vec3::Y, glam::Vec3::Y, &vals, 0.5);
             lights.iter().find(|l| l.mode == omsi_render::LightMode::Enhanced).map(|l| l.beam)
         };
         assert_eq!([100.0, 200.0, 450.0, 500.0].map(beam), [Some(1.0), Some(1.0), Some(-1.0), Some(-1.0)]);
         // a lamp over a door, pointing down, keeps its cone
         let vals = [0.0, 6.5, 2.5, 0.0, 0.0, -1.0, 255.0, 255.0, 233.0, 100.0, 30.0, 80.0];
         let mut lights = Vec::new();
-        super::push_spot(&mut lights, glam::DVec3::ZERO, glam::Vec3::NEG_Z, glam::Vec3::ZERO, &vals, 0.5, 1.0);
+        super::push_spot(&mut lights, glam::DVec3::ZERO, glam::Vec3::NEG_Z, glam::Vec3::ZERO, &vals, 0.5);
         assert_eq!(lights.iter().find(|l| l.mode == omsi_render::LightMode::Enhanced).map(|l| l.beam), Some(0.0));
+    }
+
+    /// The classic picture's `[spotlight]` is Omsi.exe's Direct3D spot (0x708acc): one light,
+    /// its colour 0..1, its range as declared for the shader's attenuation, its cone's half
+    /// angles, as strong by day as by night; a `[spotlight_2]` is lit the same way per pixel.
+    #[test]
+    fn a_spotlight_is_omsis_direct3d_spot_in_the_classic_picture() {
+        let vals = [0.0, 2.0, 0.863, 0.0, 1.0, -0.3, 255.0, 255.0, 233.0, 100.0, 30.0, 70.0];
+        let mut lights = Vec::new();
+        super::push_classic_spot(&mut lights, glam::DVec3::ZERO, glam::Vec3::Y, &vals, 1.0, 3.9, 1.0);
+        assert_eq!(lights.len(), 1);
+        let l = &lights[0];
+        assert_eq!(l.mode, omsi_render::LightMode::Vanilla);
+        assert_eq!(l.d3d_spot, Some([100.0, 3.9, 1.0]));
+        assert_eq!((l.intensity, l.radius), (1.0, super::VANILLA_SPOT_REACH));
+        assert_eq!(l.color, [1.0, 1.0, 233.0 / 255.0]);
+        assert!((l.cone[0] - 15f32.to_radians().cos()).abs() < 1e-6 && (l.cone[1] - 35f32.to_radians().cos()).abs() < 1e-6, "{:?}", l.cone);
+        // (a short range: four times it, as Direct3D cuts the light off)
+        let mut short = vals;
+        short[9] = 5.0;
+        let mut lights = Vec::new();
+        super::push_spot(&mut lights, glam::DVec3::ZERO, glam::Vec3::Y, glam::Vec3::Y, &short, 0.5);
+        let van = lights.iter().find(|l| l.mode == omsi_render::LightMode::Vanilla).unwrap();
+        assert_eq!((van.radius, van.intensity, van.d3d_spot), (20.0, 0.5, Some([5.0, 0.0, 0.0])));
     }
 
     /// A headlamp's beam lies about the vehicle's floor: on a bus pitched up a ramp its
@@ -707,7 +789,7 @@ mod spot_tests {
         let dl = glam::Vec3::new(0.0, 1.0, -0.3).normalize();
         let d = body.transform_vector3(dl);
         let mut lights = Vec::new();
-        super::push_spot(&mut lights, glam::DVec3::ZERO, d, super::level_axis(body, dl), &vals, 0.5, 1.0);
+        super::push_spot(&mut lights, glam::DVec3::ZERO, d, super::level_axis(body, dl), &vals, 0.5);
         let enh = lights.iter().find(|l| l.mode == omsi_render::LightMode::Enhanced).unwrap();
         assert_eq!(enh.beam, 1.0);
         assert!((enh.direction.z - pitch.sin()).abs() < 1e-4 && (enh.direction.y - pitch.cos()).abs() < 1e-4, "{:?}", enh.direction);
@@ -804,6 +886,8 @@ mod spot_tests {
 /// Map lights and scenery coronas are only drawn this close to the camera.
 const MAP_LIGHT_RANGE: f64 = 600.0;
 const CORONA_RANGE: f64 = 1500.0;
+/// A vehicle out of the view (`VehicleInstance::ai_visuals`) shines only this close to the camera.
+const UNSEEN_LIGHT_RANGE: f64 = 120.0;
 /// How far the camera may move before the nearby static lights are gathered again.
 const NEAR_MARGIN: f64 = 100.0;
 
@@ -822,6 +906,25 @@ pub(crate) struct NearLights {
     coronas: Vec<Corona>,
 }
 
+/// Which vehicles may draw their script-authored smoke particles. Scenery smoke and
+/// emissive vehicle effects (sparks, flares) are independent of this option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VehicleSmoke {
+    All,
+    PlayerOnly,
+    Off,
+}
+
+impl VehicleSmoke {
+    pub fn from_setting(s: &str) -> Self {
+        match s {
+            "player" => Self::PlayerOnly,
+            "off" => Self::Off,
+            _ => Self::All,
+        }
+    }
+}
+
 /// Fill the scene's lights for this frame, the lamps' cones in the weather `cone`.
 pub fn collect(
     world: &World,
@@ -830,6 +933,8 @@ pub fn collect(
     camera_pos: DVec3,
     vehicles: &[&VehicleInstance],
     cone: ConeWeather,
+    smoke_mode: VehicleSmoke,
+    player_first: bool,
 ) {
     scene.lights.clear();
     scene.coronas.clear();
@@ -919,12 +1024,32 @@ pub fn collect(
     let vehicle_smoke = scene.smoke.len();
     // the headlamps lent to cars without spots of their own: the nearest few alone (see
     // `AI_BEAMS`)
-    let beams = cars_with_beams(vehicles, camera_pos);
+    // (by day they light nothing anyone sees, yet any light at all in the scene makes every
+    // pixel look through the lamp grid and the weather's fog work the lamps' air light out -
+    // 13 ms of a 25 ms frame in a grey winter noon where the cars have their lights on; so
+    // how many cars are lent beams, and how far, goes with how dark the scene is, the weather's
+    // gloom included, see `cars_with_beams`)
+    let dark = if cone.enhanced { night.max(cone.gloom) } else { 1.0 };
+    let beams = cars_with_beams(vehicles, camera_pos, dark);
     for (k, v) in vehicles.iter().enumerate() {
-        vehicle_lights(v, &mut scene.coronas, &mut scene.lights, night, &world.cookie_fades, beams.contains(&k));
-        particle_sprites(&v.particles, &mut scene.smoke, &mut scene.coronas);
+        // (what is not drawn does not shine: a car out of the view and beyond the mirrors'
+        // reach, or past the coronas' range, is left out whole - at night with hundreds of
+        // cars about their lamps made up most of the lights and coronas of a frame)
+        let d = (v.position - camera_pos).length();
+        if d > CORONA_RANGE || (!v.ai_visuals && d > UNSEEN_LIGHT_RANGE) {
+            continue;
+        }
+        vehicle_lights(v, &mut scene.coronas, &mut scene.lights, player_first && k == 0, &world.cookie_fades, beams.contains(&k));
+        // light_vehicles puts the player's bus first (if any). LAN guests and AI
+        // traffic must not be mistaken for it when no bus is driven locally.
+        let vehicle_smoke_enabled = match smoke_mode {
+            VehicleSmoke::All => true,
+            VehicleSmoke::PlayerOnly => player_first && k == 0,
+            VehicleSmoke::Off => false,
+        };
+        particle_sprites_filtered(&v.particles, &mut scene.smoke, &mut scene.coronas, vehicle_smoke_enabled);
         for t in &v.trailers {
-            particle_sprites(&t.particles, &mut scene.smoke, &mut scene.coronas);
+            particle_sprites_filtered(&t.particles, &mut scene.smoke, &mut scene.coronas, vehicle_smoke_enabled);
         }
     }
     crate::puddles::keep_out_of_cab(vehicles, camera_pos, &mut scene.smoke, vehicle_smoke);
@@ -996,6 +1121,41 @@ pub fn collect(
     scene.lights.sort_by(|a, b| (a.position - camera_pos).length_squared().total_cmp(&(b.position - camera_pos).length_squared()));
 }
 
+/// The player's flashlight: a hand lamp held beside the eye and aimed where the view looks,
+/// a narrow bright cone with a soft edge that lights the way by night (or the inside of a dark
+/// cab by day) and reaches 50 m. It shines in both pictures and puts itself first among the
+/// lights, so the light grid's cells (which hold a limited number) never drop it.
+pub fn flashlight(lights: &mut Vec<PointLight>, eye: DVec3, forward: Vec3, right: Vec3, up: Vec3) {
+    let d = forward.normalize_or_zero();
+    if d == Vec3::ZERO {
+        return;
+    }
+    // (held a hand's width to the right and below the eye: from the eye itself the cone
+    // would light the very pixels it is looked through, without the shading a torch has)
+    let at = eye + (right * 0.18 - up * 0.14).as_dvec3();
+    // values as a `[spotlight]` declares them: position, direction, colour, range, inner and
+    // outer cone (degrees, full angles); a warm white, 50 m, 14 and 42 degrees
+    let vals = [0.0, 0.0, 0.0, d.x, d.y, d.z, 255.0, 240.0, 215.0, 50.0, 14.0, 42.0];
+    // (the classic picture's spot is Omsi.exe's Direct3D light, as bright by day as by night)
+    push_classic_spot(lights, at, d, &vals, FLASHLIGHT_CLASSIC_SHARE, 0.0, 0.0);
+    push_enhanced_spot(lights, at, d, Vec3::ZERO, &vals, FLASHLIGHT_SHARE);
+}
+
+/// The flashlight held at the camera's eye, shining along its view (`flashlight`).
+pub fn flashlight_ahead(scene: &mut Scene, cam: &omsi_render::Camera) {
+    let mut torch = Vec::with_capacity(2);
+    flashlight(&mut torch, cam.position, cam.forward(), cam.right(), cam.up());
+    // (first of the lights: they are sorted by distance and a grid cell holds a few)
+    scene.lights.splice(0..0, torch);
+}
+
+/// A flashlight's share of a headlamp pair's strength: one small lamp, not two big ones.
+const FLASHLIGHT_SHARE: f32 = 0.45;
+
+/// The same lamp's share in the classic picture, whose spot is attenuated by its range (a
+/// 50 m range keeps half of the light at 10 m).
+const FLASHLIGHT_CLASSIC_SHARE: f32 = 1.0;
+
 /// How far Omsi.exe moves every `[smoke]` and `[particle_emitter]` puff towards the eye in
 /// depth (m): 0x5a1d54 gives each particle 0.1, which 0x5a2b5c takes off the view depth it
 /// projects the puff's depth at.
@@ -1004,7 +1164,15 @@ const SMOKE_Z_OFFSET: f32 = 0.1;
 /// The particles of a particle set as the renderer draws them: smoke blended over the scene,
 /// and the glowing ones (`--PS_emissive--`: sparks, rockets, a flame) as coronas.
 pub fn particle_sprites(set: &omsi_sim::particles::ParticleSet, smoke: &mut Vec<omsi_render::SmokeParticle>, coronas: &mut Vec<Corona>) {
+    particle_sprites_filtered(set, smoke, coronas, true);
+}
+
+/// Keep glowing effects even when a vehicle's non-emissive smoke is hidden.
+fn particle_sprites_filtered(set: &omsi_sim::particles::ParticleSet, smoke: &mut Vec<omsi_render::SmokeParticle>, coronas: &mut Vec<Corona>, smoke_enabled: bool) {
     for (p, def) in set.particles() {
+        if !smoke_enabled && !def.emissive {
+            continue;
+        }
         let alpha = p.alpha();
         if alpha <= 0.002 {
             continue;
@@ -1186,11 +1354,23 @@ pub fn upload_corona_textures(renderer: &mut omsi_render::Renderer) {
 pub struct ConeWeather {
     pub fog_visibility_m: f32,
     pub night: f32,
+    /// How dark the weather alone makes the day (`gloom_darkness`): it does not change the
+    /// cones, but counts in whether the scene is dark enough for the AI cars' beams.
+    pub gloom: f32,
+    pub enhanced: bool,
 }
 
 impl ConeWeather {
     pub fn new(fog_visibility_m: f32, night: f32) -> ConeWeather {
-        ConeWeather { fog_visibility_m, night: night.clamp(0.0, 1.0) }
+        ConeWeather { fog_visibility_m, night: night.clamp(0.0, 1.0), gloom: 0.0, enhanced: false }
+    }
+
+    /// [`ConeWeather::new`] for the weather `w`, whose clouds and rain darken the day.
+    pub fn of(w: &omsi_content::weather::Weather, night: f32) -> ConeWeather {
+        let (kind, rate) = omsi_weather::conditions::precip_of(w);
+        let overcast = (omsi_content::weather_choice::cover_of(w).clamp(0.0, 1.0) - 0.45).max(0.0) / 0.55;
+        let rain = if kind != 0 { rate.clamp(0.0, 1.0) } else { 0.0 };
+        ConeWeather { gloom: gloom_darkness(overcast, rain), ..ConeWeather::new(w.fog.0, night) }
     }
 
     /// The visibility (no fog: a million metres) and the dark.

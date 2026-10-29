@@ -39,10 +39,11 @@ const snap = (step) => (v) => Number((Math.round(v / step) * step).toFixed(4));
 
 // --- conditions -------------------------------------------------------------------------
 
-const mode = (s) => s.graphics || 'vanilla_plus';
+// (a file of the days of Enhanced+ names it as a mode: Enhanced with Real-Time Ray Tracing)
+const mode = (s) => (s.graphics === 'enhanced_plus' ? 'enhanced' : s.graphics || 'vanilla_plus');
 const classic = (s) => mode(s) === 'vanilla';
-const traced = (s) => mode(s) === 'enhanced_plus';
-const enhanced = (s) => mode(s) === 'enhanced' || traced(s);
+const enhanced = (s) => mode(s) === 'enhanced';
+const traced = (s) => enhanced(s) && (!!s.ray_tracing || s.graphics === 'enhanced_plus');
 const mobile = (s, p) => p === 'android' || p === 'ios';
 const windows = (s, p) => p === 'windows';
 const tripleOn = (s) => !!s.triple_screen;
@@ -80,15 +81,19 @@ const graphics = {
       title: 'Graphics',
       rows: [
         // the mode first, then the quality presets for it: they set most of what follows
-        { type: 'select', key: 'graphics', label: 'Graphics', options: [['vanilla', 'Vanilla (as OMSI 2)'], ['vanilla_plus', 'Vanilla+'], ['enhanced', 'Enhanced'], ['enhanced_plus', 'Enhanced+']] },
+        { type: 'select', key: 'graphics', label: 'Graphics', options: [['vanilla', 'Vanilla (as OMSI 2)'], ['vanilla_plus', 'Vanilla+'], ['enhanced', 'Enhanced']] },
+        { type: 'toggle', key: 'ray_tracing', label: 'Real-Time Ray Tracing', help: 'Enhanced: the sun\'s shadows, the ambient occlusion and the reflections traced with hardware ray queries, where the card has them; the heaviest option (takes effect when the game starts the next time)', heavy: (v) => !!v, when: enhanced },
         { type: 'custom', id: 'preset' },
         { type: 'custom', id: 'optimise' },
-        { type: 'select', key: 'msaa', label: 'Anti-aliasing', options: [['1', 'Off'], ['2', '2x MSAA'], ['4', '4x MSAA'], ['8', '8x MSAA']], heavy: (v, s) => v === '8' && s.graphics !== 'enhanced_plus' },
+        { type: 'select', key: 'msaa', label: 'Anti-aliasing', options: [['1', 'Off'], ['2', '2x MSAA'], ['4', '4x MSAA'], ['8', '8x MSAA']], heavy: (v, s) => v === '8' && !traced(s) },
+        { type: 'select', key: 'upscaler', label: 'Upscaling', options: [['default', 'Standard (Catmull-Rom)'], ['fsr1', 'AMD FSR 1 (experimental)']], help: 'Standard Catmull-Rom or experimental FSR 1; changes show at once' },
+        { type: 'select', key: 'fsr_quality', label: 'FSR quality', options: [['ultra', 'Ultra Quality (77%)'], ['quality', 'Quality (67%)'], ['balanced', 'Balanced (59%)'], ['performance', 'Performance (50%)'], ['auto', 'Automatic (keeps the frame rate)'], ['custom', 'Use render scale']], when: (s) => s.upscaler === 'fsr1' },
+        { type: 'slider', key: 'fsr_sharpness', label: 'FSR sharpness', help: 'RCAS sharpening strength', min: 0, max: 1, step: 0.05, def: 0.8, store: snap(0.05), format: pct, when: (s) => s.upscaler === 'fsr1' },
         { type: 'select', key: 'render_scale', label: 'Render scale', options: [['auto', 'Auto'], ['1', '100%'], ['0.85', '85%'], ['0.75', '75%'], ['0.67', '67%'], ['0.5', '50%']] },
         { type: 'select', key: 'anisotropy', label: 'Anisotropic', options: [['1', 'Off'], ['2', '2x'], ['4', '4x'], ['8', '8x'], ['16', '16x']] },
         // Vanilla draws what OMSI 2 draws: no sun shadows, ambient occlusion or detail grain
         { type: 'select', key: 'shadow_size', label: 'Shadow map', options: [['1024', '1024'], ['2048', '2048'], ['4096', '4096']], when: (s) => !classic(s) },
-        // (Enhanced+ traces its shadows, occlusion and reflections: always on there)
+        // (with Real-Time Ray Tracing the shadows, occlusion and reflections are traced: always on)
         { type: 'toggle', key: 'ssao', label: 'Ambient occlusion', when: (s) => !classic(s) && !traced(s) },
         { type: 'toggle', key: 'shadows', label: 'Sun shadows', when: (s) => !classic(s) && !traced(s) },
         { type: 'select', key: 'shadow_casters', label: 'Shadows cast by', options: [['all', 'Every solid mesh'], ['omsi', '[shadow] meshes, as OMSI']], when: (s) => !classic(s) },
@@ -98,14 +103,25 @@ const graphics = {
         { type: 'slider', key: 'led_mips', label: 'LED mip strength', min: 0, max: 4, step: 0.05, def: 1.3, format: (v) => (v < 0.005 ? t('Off') : v.toFixed(2)), store: snap(0.05), when: enhanced },
         // (the `[isshadow]` blob under a vehicle is drawn in every mode, the vanilla one included)
         { type: 'toggle', key: 'shadow_blobs', label: "OMSI's shadow meshes (under vehicles)" },
-        { type: 'slider', key: 'reflections', label: 'Reflection maps (paint, chrome, glass)', min: 0, max: 1, step: 0.05, def: 1, format: (v) => (v < 0.005 ? t('Off') : pct(v)), store: snap(0.05), when: (s) => !traced(s) },
+        { type: 'slider', key: 'reflections', label: 'Reflective objects reflect', min: 0, max: 1, step: 0.05, def: 1, format: (v) => (v < 0.005 ? t('Off') : pct(v)), store: snap(0.05), when: (s) => !traced(s) },
         { type: 'toggle', key: 'clouds', label: 'Clouds' },
         // (only the enhanced modes march volumetric clouds; the vanilla ones are a texture)
         { type: 'select', key: 'cloud_quality', label: 'Cloud quality', options: [['high', 'High'], ['low', 'Low']], when: (s) => enhanced(s) && s.clouds !== false },
+        // (the Enhanced picture's own: the ray-traced one has its own occlusion; Auto turns it off on a small or shared chip)
+        { type: 'select', key: 'street_light', label: 'Street light', options: [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']], when: (s) => enhanced(s) && !traced(s) },
+        // (the Enhanced picture's light: what casts shadows, the clouds' shadow over the land, the glare of lights)
+        { type: 'select', key: 'light_shadows', label: 'Light has shadows', options: [['off', 'Off'], ['street', 'Street lamps and vehicles'], ['all', 'Every light']], help: 'Enhanced: which lights cast shadows - the street lamps and the vehicles\' headlamps, or every light: spots along their own axis and the lamps that shine every way in cube maps. Cached maps, a few passes a frame', when: enhanced },
+        { type: 'toggle', key: 'cloud_shadows', label: 'Cloud shadows and light shafts', help: 'Enhanced: the clouds\' shadow moving over the land and the sun\'s shafts through the gaps of a broken sky', when: enhanced },
+        { type: 'toggle', key: 'light_glow', label: 'Glow of lights', help: 'Enhanced: the glare round bright lights and the lamps\' halo in the night air', when: enhanced },
         { type: 'select', key: 'rain_quality', label: 'Rain quality', options: [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']] },
+        { type: 'select', key: 'vehicle_smoke', label: 'Vehicle smoke', options: [['all', 'All vehicles'], ['player', 'Player only'], ['off', 'Off']], help: 'Controls the vehicles\' smoke particles, not scenery effects or glowing particles.' },
         // (the wet roads' reflections need the reflection maps on)
-        { type: 'select', key: 'puddles', label: 'Puddles', options: [['high', 'High'], ['low', 'Low'], ['off', 'Off']], when: (s) => Number(s.reflections ?? 1) > 0.005 },
+        // (the same setting, named for what Enhanced makes of it)
+        { type: 'select', key: 'puddles', label: 'Puddles', options: [['high', 'High'], ['low', 'Low'], ['off', 'Off']], when: (s) => !enhanced(s) && Number(s.reflections ?? 1) > 0.005 },
+        { type: 'select', key: 'puddles', label: 'Real-Time Reflections', options: [['high', 'High'], ['low', 'Low'], ['off', 'Off']], when: (s) => enhanced(s) && Number(s.reflections ?? 1) > 0.005 },
         { type: 'toggle', key: 'windy_trees', label: 'Windy trees' },
+        // (the snow built up on the roads and the vehicles' roofs; the classic picture shows the season's snow only)
+        { type: 'toggle', key: 'road_snow', label: 'Built-up snow on roads and roofs', help: 'While it snows, snow builds up on the roads and on the vehicles\' roofs, with ruts and tyre tracks, and thaws again; off: the weather\'s own snow on road, as in OMSI 2', when: (s) => !classic(s) },
       ],
     },
     {
@@ -127,6 +143,8 @@ const graphics = {
         { type: 'select', key: 'mirror_refresh', label: 'Bus mirror refresh', options: [['off', 'None (frozen picture)'], ['eco', 'Economical'], ['full', 'Full'], ['every', 'Every frame (smoothest)']], heavy: (v, s) => v === 'every' && String(s.mirror_size) !== '0' },
         { type: 'select', key: 'mirror_quality', label: 'Mirror quality', options: [['standard', 'Standard'], ['enhanced', 'As the picture (Enhanced)']], when: enhanced },
         { type: 'toggle', key: 'mirror_hud_every_frame', label: 'Mirror panels every frame' },
+        { type: 'toggle', key: 'mirror_shadows', label: 'Shadows in the mirrors' },
+        { type: 'toggle', key: 'mirror_particles', label: 'Smoke and spray in the mirrors' },
         { type: 'select', key: 'video_memory', label: 'Video memory', options: videoMemory, help: 'Everything the game keeps on the graphics card: textures, models and the picture itself. Automatic is nine tenths of the card.' },
         { type: 'toggle', key: 'texture_compression', label: 'Compress textures on loading' },
         // (off: block formats decoded on loading, for a driver that mishandles them)
@@ -177,6 +195,8 @@ const driving = {
         // about two and a half turns)
         { type: 'slider', key: 'wheel_range', label: 'Wheel rotation', min: 180, max: 1800, step: 30, def: 900, format: deg, store: round },
         { type: 'slider', key: 'wheel_lock', label: 'Full lock at', min: 0, max: 1800, step: 30, def: 0, format: (v) => (v < 45 ? t('OMSI') : deg(v)), store: (v) => (v < 45 ? 0 : Math.round(v)) },
+        // how far the cab's own steering wheel model turns (0: as the bus's animation)
+        { type: 'slider', key: 'cab_wheel_rotation', label: 'Cab wheel rotation', min: 0, max: 1800, step: 30, def: 0, format: (v) => (v < 90 ? t('Automatic') : deg(v)), store: (v) => (v < 90 ? 0 : Math.round(v)), help: "How far the steering wheel in the cab turns, lock to lock. Automatic = as the bus's own model; set it to your wheel's rotation so both turn alike. Some mod buses animate their wheel from a script of their own and keep their own rotation." },
         { type: 'slider', key: 'pedal_throttle', label: 'Throttle pedal strength', min: 0.5, max: 2, step: 0.05, def: 1, format: pedal, store: r2 },
         { type: 'slider', key: 'pedal_brake', label: 'Brake pedal strength', min: 0.5, max: 2, step: 0.05, def: 1, format: pedal, store: r2 },
         { type: 'toggle', key: 'momentary_gears', label: 'H-pattern shifter: return to neutral when the gear is released' },
@@ -190,15 +210,15 @@ const driving = {
         { type: 'slider', key: 'pad_deadzone', label: 'Stick dead zone', min: 0, max: 0.4, step: 0.01, def: 0.08, format: (v) => `${(v * 100).toFixed(0)} %`, store: r2 },
         { type: 'toggle', key: 'pad_steer_linear', label: 'Stick steers like a wheel (a wheel seen as a gamepad)' },
         { type: 'section', title: 'Force feedback' },
-        { type: 'toggle', key: 'ff_enabled', label: 'Force feedback and vibration' },
+        { type: 'toggle', key: 'ff_enabled', label: 'Force feedback and vibration', help: "Off: the game sends the wheel no forces; any resistance left comes from the wheel's own driver software (for example the centre spring in Logitech G HUB)" },
         { type: 'toggle', key: 'ff_invert', label: 'Invert force feedback by default' },
         { type: 'note', text: 'Wheels with a saved direction use their own setting under Controls → Game controllers.' },
         // what the wheel feels all the time: the road's grain, the engine's buzz, and how
         // long a jolt eases away
         { type: 'slider', key: 'ff_road_vib', label: 'Road texture vibration', min: 0, max: 4, step: 0.05, def: 1, format: vibration, store: (v) => Math.round(v * 20) / 20 },
-        { type: 'slider', key: 'ff_engine_vib', label: 'Engine vibration', min: 0, max: 4, step: 0.05, def: 1, format: vibration, store: (v) => Math.round(v * 20) / 20 },
+        { type: 'slider', key: 'ff_engine_vib', label: 'Engine vibration', help: 'The running engine buzzes in the wheel, felt even at a standstill', min: 0, max: 4, step: 0.05, def: 1, format: vibration, store: (v) => Math.round(v * 20) / 20 },
         { type: 'slider', key: 'ff_fade', label: 'Vibration fade-out', min: 0, max: 1.5, step: 0.05, def: 0.28, format: (v) => (v < 0.01 ? t('Off') : `${Math.round(v * 1000)} ms`), store: r2 },
-        { type: 'button', label: 'Reset wheel settings', icon: 'refresh', patch: () => ({ wheel_range: 900, wheel_lock: 0, ff_invert: false, ff_enabled: true, ff_road_vib: 1, ff_engine_vib: 1, ff_fade: 0.28 }) },
+        { type: 'button', label: 'Reset wheel settings', icon: 'refresh', patch: () => ({ wheel_range: 900, wheel_lock: 0, cab_wheel_rotation: 0, ff_invert: false, ff_enabled: true, ff_road_vib: 1, ff_engine_vib: 1, ff_fade: 0.28 }) },
       ],
     },
   ],
@@ -233,6 +253,7 @@ const camera = {
         { type: 'toggle', key: 'driverview_smooth', label: 'Camera glides between viewpoints' },
         { type: 'toggle', key: 'hands_in_cab', label: "Driver's hands in the cab view" },
         { type: 'toggle', key: 'alt_view', label: 'Right mouse button turns the view, Shift+right zooms (off: right zooms as in OMSI, the wheel button turns)' },
+        { type: 'select', key: 'mirror_hud', label: 'Mirror panels on the screen', options: [['0', 'Off'], ['2', 'Left mirror'], ['1', 'Right mirror'], ['3', 'Left and right'], ['7', 'Left, right and front']] },
         { type: 'toggle', key: 'precision_zoom', label: 'Precision mouse zoom (FOV curve instead of the linear way)' },
       ],
     },
@@ -243,6 +264,9 @@ const camera = {
         { type: 'toggle', key: 'driver', label: 'Driver at the wheel (outside views)' },
         { type: 'section', title: 'Head tracking' },
         { type: 'toggle', key: 'head_tracking', label: 'Head tracking (native TrackIR / OpenTrack)' },
+        // (a Tobii eye tracker read natively, Windows only; "Automatic" takes opentrack while it sends)
+        { type: 'select', key: 'head_tracking_source', label: 'Head tracking with', options: [['auto', 'Automatic'], ['tobii', 'Tobii eye tracker'], ['opentrack', 'opentrack (UDP 4242)']], when: (s) => s.head_tracking },
+        { type: 'toggle', key: 'tobii_edges', label: "Look further at the screen's edges (Tobii)", when: (s) => s.head_tracking && s.head_tracking_source !== 'opentrack' },
         // (percent per axis: 0 switches an axis off, 100 is 1:1)
         { type: 'section', title: 'Rotation' },
         trackSlider('head_tracking_yaw_sens', 'Yaw sensitivity (left / right)'),
@@ -287,7 +311,7 @@ const camera = {
   ],
 };
 
-const vol = (key, label, def) => ({ type: 'slider', key, label, min: 0, max: 1, step: 0.05, def, format: pct, store: r2 });
+const vol = (key, label, def, when, max = 1) => ({ type: 'slider', key, label, min: 0, max, step: 0.05, def, format: pct, store: r2, ...(when ? { when } : {}) });
 
 const sound = {
   id: 'sound',
@@ -307,6 +331,18 @@ const sound = {
         vol('radio_speaker', 'Radio: small speaker', 0),
         vol('radio_hiss', 'Radio: FM hiss', 0),
         vol('radio_dropouts', 'Radio: signal dropouts', 0),
+        // voice chat in multiplayer (off until switched on; the microphone is used with a talk key held)
+        { type: 'section', title: 'Voice chat in multiplayer' },
+        { type: 'toggle', key: 'voice_enabled', label: 'Voice chat', help: 'Hold a talk key to speak: Nearby (V) is heard by players close to you, Radio (B) by everybody in the session. The keys are in Controls. The system asks for the microphone the first time. Nothing is recorded or stored; the microphone is used only while a talk key is held (or always, in the open mode).' },
+        { type: 'select', key: 'voice_mode', label: 'Microphone', options: [['ptt', 'Push to talk'], ['open', 'Open microphone (nearby)']], when: (s) => !!s.voice_enabled },
+        { type: 'slider', key: 'voice_mic_gain', label: 'Microphone gain', min: 0, max: 4, step: 0.1, def: 1, format: pct, store: r1, when: (s) => !!s.voice_enabled },
+        { type: 'slider', key: 'voice_threshold_db', label: 'Open microphone: speech threshold', min: -80, max: -10, step: 1, def: -45, format: (v) => `${v.toFixed(0)} dB`, store: round, when: (s) => !!s.voice_enabled && s.voice_mode === 'open' },
+        vol('voice_volume', 'Voices: volume', 1, (s) => !!s.voice_enabled, 2),
+        vol('voice_volume_nearby', 'Voices: nearby players', 1, (s) => !!s.voice_enabled, 2),
+        vol('voice_volume_radio', 'Voices: radio', 1, (s) => !!s.voice_enabled, 2),
+        { type: 'slider', key: 'voice_range', label: 'Nearby voice range when you host', min: 10, max: 300, step: 5, def: 75, format: (v) => `${v.toFixed(0)} m`, store: round, when: (s) => !!s.voice_enabled },
+        { type: 'toggle', key: 'voice_talker_list', label: 'Show who is talking', when: (s) => !!s.voice_enabled },
+        { type: 'toggle', key: 'voice_all_off', label: "Everybody else's voice chat off", help: 'Single players are muted in the pause menu, under Players.', when: (s) => !!s.voice_enabled },
       ],
     },
     {
@@ -333,6 +369,7 @@ const gameplay = {
         { type: 'select', key: 'character_models', label: 'Character models', options: [['original', 'Original'], ['improved', 'High quality (improved)']], help: 'High quality draws the people with the Microsoft Rocketbox avatars and their living faces, on this computer only: servers and other players keep their own. They are downloaded once (about 310 MB).' },
         { type: 'toggle', key: 'exact_fare', label: 'Passengers pay the exact fare' },
         { type: 'toggle', key: 'pax_bad_driving', label: 'Passengers react to bad driving' },
+        { type: 'toggle', key: 'auto_announce', label: 'Arrival announcements at the stop', help: 'On depot files that keep two recordings per stop (the Chinese maps), the arrival one is played as the bus reaches the stop: the IBIS\'s next stop key, pressed as the driver would' },
         { type: 'slider', key: 'pax_density', label: 'How many passengers', min: 0, max: 2, step: 0.1, def: 1, format: pct, store: r2 },
         { type: 'toggle', key: 'get_up', label: 'Ability to get up (Ctrl+Shift+G)' },
         { type: 'toggle', key: 'full_tank', label: 'Start with a full tank' },
@@ -383,7 +420,7 @@ const general = {
         { type: 'toggle', key: 'machine_translation', label: 'Translate the remaining texts automatically (offline, downloads 620 MB once)' },
         { type: 'toggle', key: 'launcher_rest', label: 'The launcher rests while a game runs (gives the graphics card to the game)' },
         { type: 'toggle', key: 'discord_status', label: 'Discord Rich Presence', help: 'Shows the launcher or your map, bus, line and multiplayer status in Discord.' },
-        { type: 'toggle', key: 'voice_chat', label: 'Voice chat through GreenTeaSpeak (multiplayer)', help: 'Players near you are heard from where they stand, when GreenTeaSpeak runs with the openOMSI plugin and the server names a voice server.' },
+        { type: 'toggle', key: 'disable_plugins', label: 'Disable plugins', help: 'Starts the next game without Lua or legacy OMSI plugins, including vehicle plugins. Plugin features will be unavailable. Normal bus scripts still run.' },
         // (larger for those who find the texts hard to read, smaller for more of the picture)
         { type: 'slider', key: 'ui_scale', label: 'Game interface size', min: 0.5, max: 2, step: 0.05, def: 1, format: pct, store: r2 },
         { type: 'toggle', key: 'ui_scale_window', label: 'Interface grows with the window' },
@@ -403,7 +440,7 @@ const general = {
         { type: 'toggle', key: 'nav_arrows', label: 'Route arrows (as in OMSI 2)' },
         { type: 'toggle', key: 'nav_ai', label: 'AI vehicles on the map' },
         { type: 'toggle', key: 'nav_surface', label: 'Map surface under the roads' },
-        { type: 'toggle', key: 'nav_light', label: 'Light map' },
+        { type: 'toggle', key: 'nav_classic_2d', label: 'Classic 2D navigator (lightweight)' },
         { type: 'toggle', key: 'nav_3d', label: '3D buildings on the map' },
         { type: 'toggle', key: 'nav_widget', label: 'Navigator as a widget (drag it anywhere, size it at its corner)' },
         { type: 'slider', key: 'nav_size', label: 'Navigator size', min: 0.6, max: 2, step: 0.05, def: 1, format: (v) => `${Math.round(v * 100)} %` },
@@ -430,13 +467,15 @@ const general = {
   ],
 };
 
-/** Content test: no settings - the page draws the test itself (content-test.js). */
-const contentTest = { id: 'content', label: 'Content test', page: 'content', cols: [], when: (s, p) => !mobile(s, p) };
+/** AI Lists: no settings - the page draws its own editor (ai-lists.js). */
+const aiLists = { id: 'ailists', label: 'AI Lists', page: 'ailists', cols: [], when: (s, p) => !mobile(s, p) };
 
-export const SETTINGS_TABS = [graphics, driving, camera, sound, gameplay, general, contentTest];
+// (the content test, once a tab here, is the model test of Help -> Troubleshooting now: troubleshoot.js;
+// the Settings tab "Troubleshooting" leads there, settings.js)
+export const SETTINGS_TABS = [graphics, driving, camera, sound, gameplay, general, aiLists];
 
 /** The settings a saved graphics profile holds (`GRAPHICS_PROFILE_KEYS`). */
 export const GRAPHICS_PROFILE_KEYS = [
-  'graphics', 'msaa', 'render_scale', 'anisotropy', 'shadow_size', 'ssao', 'shadows', 'shadow_casters', 'detail_textures', 'night_brightness', 'led_glow', 'led_mips', 'shadow_blobs', 'reflections', 'clouds', 'cloud_quality', 'rain_quality', 'puddles', 'windy_trees',
+  'graphics', 'msaa', 'render_scale', 'upscaler', 'fsr_quality', 'fsr_sharpness', 'anisotropy', 'shadow_size', 'ssao', 'shadows', 'shadow_casters', 'detail_textures', 'night_brightness', 'led_glow', 'led_mips', 'shadow_blobs', 'lamp_shadows', 'reflections', 'clouds', 'cloud_quality', 'street_light', 'rain_quality', 'vehicle_smoke', 'puddles', 'windy_trees', 'road_snow', 'ray_tracing', 'light_shadows', 'cloud_shadows', 'light_glow',
   'vsync', 'max_fps', 'view_distance', 'max_obj_dist', 'min_obj_size', 'mirror_size', 'mirror_refresh', 'mirror_quality', 'mirror_hud_every_frame', 'video_memory', 'texture_compression', 'gpu_texture_compression',
 ];

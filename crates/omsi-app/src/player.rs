@@ -183,6 +183,7 @@ pub(crate) struct Player {
     /// Bound to the rails (see `rail_drive`), and where on them once it is placed.
     pub(crate) rail_bound: bool,
     pub(crate) rail: Option<crate::rail_drive::RailDrive>,
+    pub(crate) rail_placed_z: f64,
     /// The driver camera chosen before the timetable or ticket desk camera took over.
     pub(crate) cam_before_special: Option<usize>,
     /// The actions a key started, by its scan code: its release lets go of the same ones,
@@ -250,6 +251,10 @@ pub(crate) struct Player {
     /// The duty is typed into the IBIS by itself (after Shift+U or `--autostart`): a new
     /// trip of the duty is typed too.
     pub(crate) duty_typed: bool,
+    /// The plugins (by owner mark) that leave the IBIS to the driver (`duty.set_auto_ibis`):
+    /// the game types the duty into it by itself (Shift+U, `--autostart`, each new trip) only
+    /// while there is none. Each plugin lets go of its own hold as it goes.
+    pub(crate) ibis_holds: std::collections::BTreeSet<u64>,
     /// The stop a page asked the duty to go on with (`omsi.setNextStop`), for the game to
     /// hand to the duty.
     pub(crate) html_next_stop: Option<usize>,
@@ -265,6 +270,13 @@ pub(crate) struct Player {
     /// The settings' "Indicators cancel themselves" (`blinker_cancel`): off, the script's
     /// own cancelling after a turn is undone (#451).
     pub(crate) blinker_cancel: bool,
+    /// The overhead wire of the map and the trolleybus's poles drawn (see `omsi_scene::trolley_view`).
+    pub(crate) trolley_view: Option<Box<omsi_scene::trolley_view::TrolleyView>>,
+    /// The sparks of a rail vehicle's pantograph (see `omsi_scene::arc_fx`).
+    pub(crate) panto_fx: omsi_scene::arc_fx::ArcFx,
+    pub(crate) trolley_sound: crate::trolley_sound::TrolleySound,
+    /// The stop announcements the game presses the IBIS on for (see `auto_announce`).
+    pub(crate) announce: crate::auto_announce::AutoAnnounce,
 }
 
 // Putting a bus into service (Shift+U, `--autostart`) is `omsi_sim::startup`: it presses
@@ -776,6 +788,11 @@ impl Player {
         } else {
             "Putting the vehicle into service ...".to_string()
         }
+    }
+
+    /// An auto-start is under way putting the bus into service (not switching it off).
+    pub(crate) fn putting_into_service(&self) -> bool {
+        self.startup.as_ref().is_some_and(|s| !s.shutting_down())
     }
 
     /// The vehicle actions `Inputs/keyboard.cfg` puts on keys.

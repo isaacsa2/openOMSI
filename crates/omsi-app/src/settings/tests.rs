@@ -1,6 +1,46 @@
 use super::Settings;
 
 #[test]
+fn fsr1_menu_settings_round_trip_into_renderer() {
+    let mut ui = omsi_launcher_lib::settings_from_text(None);
+    assert_eq!(ui["upscaler"], "default");
+    ui["upscaler"] = serde_json::json!("fsr1");
+    ui["fsr_quality"] = serde_json::json!("balanced");
+    ui["fsr_sharpness"] = serde_json::json!(0.45);
+    let saved = omsi_launcher_lib::settings_to_text(&ui, None);
+    let game = Settings::from_text(&saved);
+    assert_eq!(game.upscaler, "fsr1");
+    assert_eq!(game.fsr_quality, "balanced");
+    assert!((game.fsr_sharpness - 0.45).abs() < 0.0001);
+    let graphics = game.render_options();
+    assert!(graphics.fsr1);
+    assert!((graphics.render_scale - 0.59).abs() < 0.0001);
+    assert!((graphics.fsr_sharpness - 0.45).abs() < 0.0001);
+    assert_eq!(Settings::from_text(&game.to_text()), game);
+    assert_eq!(omsi_launcher_lib::settings_from_text(Some(&saved))["fsr_quality"], "balanced");
+
+    // A corrupt or future setting must not enable experimental shaders.
+    assert_eq!(Settings::from_text("upscaler=anything_else\\n").upscaler, "default");
+    assert_eq!(Settings::from_text("fsr_sharpness=nan\\n").fsr_sharpness, 0.8);
+}
+
+#[test]
+fn fsr1_presets_keep_the_render_scale_caps() {
+    let mut s = Settings::from_text("upscaler=fsr1\nfsr_quality=ultra\n");
+    assert!((s.scene_render_scale() - 0.77).abs() < 0.0001);
+    // (the optimiser's step down, or the safer graphics after a second lost device)
+    s.apply_safe_gpu(2);
+    assert!((s.scene_render_scale() - 0.75).abs() < 0.0001);
+    s.render_scale = 0.5;
+    assert!((s.render_options().render_scale - 0.5).abs() < 0.0001);
+    // (a cap above the preset leaves it as it is; auto stays with the frame-rate governor)
+    s.render_scale = 1.0;
+    assert!((s.scene_render_scale() - 0.77).abs() < 0.0001);
+    s.fsr_quality = "auto".into();
+    assert_eq!(s.scene_render_scale(), 0.0);
+}
+
+#[test]
 fn mobile_door_mode_defaults_and_round_trips() {
     assert_eq!(Settings::from_text("").touch_door_mode, "standard");
     assert_eq!(Settings::from_text("touch_door_mode=Direct\n").touch_door_mode, "direct");
@@ -47,6 +87,25 @@ fn gamepad_settings_round_trip_and_are_clamped() {
 }
 
 /// The enhanced clouds' quality is kept, `high` unless the file says `low`.
+#[test]
+fn street_light_round_trips_and_reaches_the_renderer() {
+    assert_eq!(Settings::default().street_light, "off");
+    assert_eq!(Settings::default().render_options().street_light, Some(false));
+    for phone in [false, true] {
+        let launcher = omsi_launcher_lib::settings_from_text_on(None, phone);
+        assert_eq!(launcher["street_light"], "off");
+        let game = Settings::from_text(&omsi_launcher_lib::settings_to_text(&launcher, None));
+        assert_eq!(game.render_options().street_light, Some(false));
+    }
+    for (q, want) in [("auto", None), ("on", Some(true)), ("off", Some(false))] {
+        let s = Settings::from_text(&format!("graphics=enhanced\nstreet_light={q}\n"));
+        assert_eq!(Settings::from_text(&s.to_text()).street_light, q);
+        assert_eq!(s.render_options().street_light, want);
+    }
+    assert_eq!(Settings::from_text("street_light=OFF\n").street_light, "off");
+    assert_eq!(Settings::from_text("street_light=broken\n").street_light, "auto");
+}
+
 #[test]
 fn cloud_quality_round_trips() {
     assert_eq!(Settings::default().cloud_quality, "high");
@@ -218,8 +277,32 @@ fn graphics_modes() {
     assert!(rt.enhanced && rt.ray_tracing() && rt.shadows && rt.ssao && rt.reflections == 1.0);
     assert_eq!(["1", "0", "true", "off", "0.35", "7", "x"].map(|v| Settings::from_text(&format!("reflections={v}\n")).reflections), [1.0, 0.0, 1.0, 0.0, 0.35, 1.0, 0.0]);
     assert!(rt.render_options().ray_tracing && !rt.render_options().no_enhanced);
+    let switched = crate::startup::SessionSettings { enhanced: true, ..Default::default() };
+    assert!(Settings::default().render_options().no_enhanced && !switched.render_options(&Settings::default()).no_enhanced);
     let s = Settings { graphics: "enhanced".into(), enhanced: true, ..Default::default() };
     assert_eq!(Settings::from_text(&s.to_text()), s);
+}
+
+/// Ray tracing is a switch of Enhanced, not a mode of its own; the lights' shadows, the clouds' and
+/// the glow are Enhanced's options, kept and read back.
+#[test]
+fn enhanced_options_and_ray_tracing() {
+    let on = Settings::from_text("graphics=enhanced\nray_tracing=1\nlight_shadows=all\ncloud_shadows=0\nlight_glow=0\n");
+    assert!(on.ray_tracing() && on.enhanced && on.graphics == "enhanced" && on.mode() == "enhanced_plus");
+    let o = on.render_options();
+    assert_eq!((o.ray_tracing, o.light_shadows, o.cloud_shadows, o.light_glow), (true, 2, false, false));
+    let text = on.to_text();
+    assert!(text.contains("graphics=enhanced\n") && text.contains("ray_tracing=1\n") && text.contains("light_shadows=all\n"), "{text}");
+    assert_eq!(Settings::from_text(&text), on);
+    // without Enhanced it traces nothing, and the defaults keep the street lamps' shadows
+    let plain = Settings::from_text("graphics=vanilla_plus\nray_tracing=1\n");
+    assert!(!plain.ray_tracing() && !plain.render_options().ray_tracing && plain.mode() == "vanilla_plus");
+    let d = Settings::default().render_options();
+    assert_eq!((d.light_shadows, d.cloud_shadows, d.light_glow, d.ray_tracing), (1, false, false, false));
+    assert_eq!(["off", "street", "all", "every", "x", "0"].map(|v| Settings::from_text(&format!("light_shadows={v}\n")).light_shadows), ["off", "street", "all", "all", "street", "off"]);
+    // a file of the days of Enhanced+ is written back as Enhanced with ray tracing
+    let old = Settings::from_text("graphics=enhanced_plus\n");
+    assert!(old.to_text().contains("ray_tracing=1\n") && !old.to_text().contains("enhanced_plus"));
 }
 
 #[test]
@@ -305,10 +388,29 @@ fn discord_settings_round_trip_and_default_enabled() {
 }
 
 #[test]
-fn voice_chat_round_trips_and_is_on_by_default() {
-    assert!(Settings::default().voice_chat);
-    let s = Settings { voice_chat: false, ..Default::default() };
+fn voice_chat_is_off_by_default_and_round_trips() {
+    let d = Settings::default();
+    assert!(!d.voice_enabled && !d.voice_all_off && d.voice_mode == "ptt" && d.voice_range == 75.0);
+    // an old file with the earlier switch does not turn it on
+    assert!(!Settings::from_text("voice_chat=1\n").voice_enabled);
+    let s = Settings {
+        voice_enabled: true,
+        voice_mode: "open".into(),
+        voice_mic_gain: 1.5,
+        voice_threshold_db: -50.0,
+        voice_input_device: "USB Mic".into(),
+        voice_volume: 0.8,
+        voice_volume_nearby: 1.2,
+        voice_volume_radio: 0.5,
+        voice_range: 120.0,
+        voice_talker_list: false,
+        voice_all_off: true,
+        ..Default::default()
+    };
     assert_eq!(Settings::from_text(&s.to_text()), s);
+    // wrong values are cut to what the voice chat takes
+    let w = Settings::from_text("voice_mic_gain=99\nvoice_range=1\nvoice_mode=shout\nvoice_volume=nan\nvoice_threshold_db=0\n");
+    assert_eq!((w.voice_mic_gain, w.voice_range, w.voice_mode.as_str(), w.voice_volume, w.voice_threshold_db), (4.0, 5.0, "ptt", 1.0, -10.0));
 }
 
 #[test]
@@ -350,4 +452,111 @@ fn puddles_round_trip() {
         assert_eq!(Settings::from_text(&s.to_text()).puddles, q);
     }
     assert_eq!(Settings::from_text("puddles=ultra\n").puddles, "high");
+}
+
+#[test]
+fn vehicle_smoke_setting_round_trips_through_game_and_launcher() {
+    assert_eq!(Settings::default().vehicle_smoke, "all");
+    for mode in ["all", "player", "off"] {
+        let s = Settings::from_text(&format!("vehicle_smoke={mode}\n"));
+        assert_eq!(s.vehicle_smoke, mode);
+        assert_eq!(Settings::from_text(&s.to_text()).vehicle_smoke, mode);
+        let mut launcher = omsi_launcher_lib::settings_from_text(None);
+        launcher["vehicle_smoke"] = serde_json::json!(mode);
+        let saved = omsi_launcher_lib::settings_to_text(&launcher, None);
+        assert_eq!(Settings::from_text(&saved).vehicle_smoke, mode);
+        assert_eq!(omsi_launcher_lib::settings_from_text(Some(&saved))["vehicle_smoke"], mode);
+    }
+    assert_eq!(Settings::from_text("vehicle_smoke=unknown\n").vehicle_smoke, "all");
+    assert_eq!(Settings::from_text("vehicle_smoke=PLAYER_ONLY\n").vehicle_smoke, "player");
+}
+
+
+/// The arrival announcements of the maps that keep two recordings per stop: off out of the
+/// box, and kept through the launcher's writer (the game's Gameplay page turns it on).
+#[test]
+fn arrival_announcements_are_off_at_first_and_kept() {
+    assert!(!Settings::default().auto_announce);
+    assert!(!Settings::from_text("version=4\n").auto_announce);
+    assert!(Settings::from_text("auto_announce=1\n").auto_announce);
+    let mut launcher = omsi_launcher_lib::settings_from_text(None);
+    assert_eq!(launcher["auto_announce"], false);
+    launcher["auto_announce"] = serde_json::json!(true);
+    let saved = omsi_launcher_lib::settings_to_text(&launcher, None);
+    assert!(Settings::from_text(&saved).auto_announce, "{saved}");
+    let on = Settings { auto_announce: true, ..Default::default() };
+    assert_eq!(Settings::from_text(&on.to_text()), on);
+}
+
+#[test]
+fn quick_actions_settings_round_trip_and_launcher_preservation() {
+    let input = "pause_quick_actions=[\"save\",\"camera\"]\n";
+    let game = Settings::from_text(input);
+    assert_eq!(game.pause_quick_actions, "[\"save\",\"camera\"]");
+    assert_eq!(Settings::from_text(&game.to_text()).pause_quick_actions, game.pause_quick_actions);
+    let launcher = omsi_launcher_lib::settings_from_text(Some(input));
+    let saved = omsi_launcher_lib::settings_to_text(&launcher, Some(input));
+    assert_eq!(Settings::from_text(&saved).pause_quick_actions, game.pause_quick_actions);
+    let empty = omsi_launcher_lib::settings_from_text(Some("pause_quick_actions=[]\n"));
+    assert_eq!(Settings::from_text(&omsi_launcher_lib::settings_to_text(&empty, None)).pause_quick_actions, "[]");
+}
+
+#[test]
+fn quick_actions_pending_setting_is_not_lost_when_other_settings_are_saved() {
+    let mut launcher = omsi_launcher_lib::settings_from_text(None);
+    crate::game_lists::apply_pending(&mut launcher, &[("pause_quick_actions".into(), r#"["world","save"]"#.into())]);
+    launcher["volume"] = serde_json::json!(0.4);
+    let saved = omsi_launcher_lib::settings_to_text(&launcher, None);
+    assert_eq!(Settings::from_text(&saved).pause_quick_actions, r#"["world","save"]"#);
+    assert_eq!(saved.matches("pause_quick_actions=").count(), 1);
+}
+
+#[test]
+fn ui_theme_uses_one_setting_and_migrates_the_old_map_switch() {
+    assert_eq!(Settings::default().ui_theme, "dark");
+    assert_eq!(Settings::from_text("ui_theme=light\n").ui_theme, "light");
+    assert_eq!(Settings::from_text("ui_theme=dark\n").ui_theme, "dark");
+    assert_eq!(Settings::from_text("ui_theme=neon\n").ui_theme, "dark");
+    assert_eq!(Settings::from_text("nav_light=1\n").ui_theme, "light");
+    assert_eq!(Settings::from_text("nav_light=1\nui_theme=dark\n").ui_theme, "dark");
+    let mut light = Settings::default();
+    light.ui_theme = "light".into();
+    let saved = light.to_text();
+    assert!(saved.lines().any(|line| line == "ui_theme=light"));
+    assert!(!saved.lines().any(|line| line.starts_with("nav_light=")));
+    assert_eq!(Settings::from_text(&saved).ui_theme, "light");
+}
+
+#[test]
+fn ui_theme_light_helper_is_the_only_runtime_boolean_conversion() {
+    assert!(!Settings::from_text("ui_theme=dark\n").is_light_theme());
+    assert!(Settings::from_text("ui_theme=light\n").is_light_theme());
+}
+
+#[test]
+fn lamp_shadows_on_by_default_and_round_trip_through_the_launcher() {
+    assert!(Settings::from_text("").lamp_shadows);
+    let mut ui = omsi_launcher_lib::settings_from_text(None);
+    assert!(Settings::from_text(&omsi_launcher_lib::settings_to_text(&ui, None)).lamp_shadows);
+    ui["lamp_shadows"] = serde_json::json!(false);
+    let game = Settings::from_text(&omsi_launcher_lib::settings_to_text(&ui, None));
+    assert!(!game.lamp_shadows);
+    assert_eq!(Settings::from_text(&game.to_text()), game);
+}
+
+/// The cab wheel's rotation: the bus's own (0) at first and in a file from before it; under 90
+/// Automatic, else rounded within 180..=1800, as the launcher reads it; kept through both
+/// writers.
+#[test]
+fn cab_wheel_rotation_defaults_to_the_bus_and_is_clamped() {
+    assert_eq!(Settings::default().cab_wheel_rotation, 0);
+    assert_eq!(Settings::from_text("version=4\nwheel_range=1080\n").cab_wheel_rotation, 0);
+    for (text, want) in [("1080", 1080), ("0", 0), ("89", 0), ("-540", 0), ("nan", 0), ("bogus", 0), ("90", 180), ("120", 180), ("180", 180), ("900.4", 900), ("1800", 1800), ("5000", 1800)] {
+        assert_eq!(Settings::from_text(&format!("cab_wheel_rotation={text}\n")).cab_wheel_rotation, want, "{text}");
+    }
+    let s = Settings { cab_wheel_rotation: 1080, ..Default::default() };
+    assert_eq!(Settings::from_text(&s.to_text()), s);
+    let mut ui = omsi_launcher_lib::settings_from_text(None);
+    ui["cab_wheel_rotation"] = serde_json::json!(1080);
+    assert_eq!(Settings::from_text(&omsi_launcher_lib::settings_to_text(&ui, None)).cab_wheel_rotation, 1080);
 }

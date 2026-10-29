@@ -10,6 +10,7 @@ impl Renderer {
             textures: Vec::new(),
             glass_slot: None,
             materials: Vec::new(),
+            trolley_wire_drawn: Vec::new(),
             instances: Vec::new(),
             render_origin: DVec3::ZERO,
             lights: Vec::new(),
@@ -23,6 +24,7 @@ impl Renderer {
             corona_buf: None,
             corona_count: 0,
             corona_sent: Vec::new(),
+            snow_track_seen: 0,
             smoke: Vec::new(),
             smoke_buf: None,
             smoke_count: 0,
@@ -31,6 +33,7 @@ impl Renderer {
             corona_runs: Vec::new(),
             draw_buf: None,
             camera_bind_group: None,
+            ground_camera_bind_group: None,
             shadow_bind_group: None,
             precip_bind_group: None,
             sky_bind_group: None,
@@ -68,7 +71,10 @@ impl Renderer {
             grid_strength: Vec::new(),
             grid_marks: Vec::new(),
             smoke_scratch: Default::default(),
-            lamp_shadow_last: Vec::new(),
+            lamp_slots: Default::default(),
+            cabin_slots: Default::default(),
+            cube_slots: Default::default(),
+            cabin_places: Vec::new(),
             last_lights: Vec::new(),
             bind_groups: HashMap::new(),
             looks: hashbrown::HashMap::new(),
@@ -148,6 +154,7 @@ impl Renderer {
             casts_shadow: true,
             shadow_owner: None,
             roof: None,
+            roof_snow: None,
         });
         if scene.bounds_known.get(mesh).copied().unwrap_or(false) {
             scene.bounds_users.push(scene.instances.len() - 1);
@@ -209,6 +216,7 @@ impl Renderer {
             casts_shadow: false,
             shadow_owner: None,
             roof: None,
+            roof_snow: None,
         });
         if scene.bounds_known.get(mesh).copied().unwrap_or(false) {
             scene.bounds_users.push(scene.instances.len() - 1);
@@ -311,6 +319,28 @@ impl Renderer {
     pub fn set_casts_shadow(&self, scene: &mut Scene, instance: usize, on: bool) {
         if let Some(i) = scene.instances.get_mut(instance) {
             i.casts_shadow = on;
+        }
+    }
+
+    /// The depth step of a spline laid on an earlier spline of its tile at the same height
+    /// (every slot alike, at most `MAX_LEVEL`; see `draw_order_level`).
+    pub fn set_spline_layer(&self, scene: &mut Scene, instance: usize, level: u8) {
+        if let Some(i) = scene.instances.get_mut(instance) {
+            let level = level.min(crate::scene::overlay::MAX_LEVEL);
+            if i.slot_levels.iter().any(|l| *l != level) {
+                i.slot_levels.iter_mut().for_each(|l| *l = level);
+                Self::mark_changed(scene, instance);
+            }
+        }
+    }
+
+    /// How much snow lies on the roof of an instance's vehicle (see [`Instance::roof_snow`]).
+    pub fn set_roof_snow(&self, scene: &mut Scene, instance: usize, snow: Option<f32>) {
+        if let Some(i) = scene.instances.get_mut(instance) {
+            if i.roof_snow != snow {
+                i.roof_snow = snow;
+                Self::mark_changed(scene, instance);
+            }
         }
     }
 

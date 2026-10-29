@@ -20,7 +20,7 @@ pub struct GpuTexture {
     pub(crate) bytes: u64,
     /// Which texture this is (a slot is reused and a texture replaced): part of the
     /// key of a material bind group made this frame (see `Scene::bind_groups`).
-    pub(crate) gen: u64,
+    pub(crate) generation: u64,
 }
 
 pub(crate) static TEXTURE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -33,7 +33,7 @@ impl GpuTexture {
     /// A slot showing `view` (a picture the renderer draws: the one behind the rain on the
     /// glass), with `texture` a small stand-in the slot's bookkeeping asks about.
     pub(crate) fn showing(texture: wgpu::Texture, view: wgpu::TextureView, size: (u32, u32)) -> GpuTexture {
-        GpuTexture { texture, view, size, bytes: 0, gen: next_gen() }
+        GpuTexture { texture, view, size, bytes: 0, generation: next_gen() }
     }
 
     pub(crate) fn new(texture: wgpu::Texture, size: (u32, u32), bytes: u64) -> GpuTexture {
@@ -43,7 +43,7 @@ impl GpuTexture {
             view,
             size,
             bytes,
-            gen: next_gen(),
+            generation: next_gen(),
         }
     }
 }
@@ -52,6 +52,49 @@ impl GpuTexture {
 /// [`try_create_texture`]); read with the device's own out-of-memory flag by
 /// `Renderer::take_out_of_memory`.
 pub(crate) static TEXTURE_OUT_OF_MEMORY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+static MALFORMED_MIP_UPLOADS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FAILED_TEXTURE_CREATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Cumulative texture upload failures in this process, for the game log.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextureUploadFaults {
+    pub malformed_mips: u64,
+    pub failed_creations: u64,
+}
+
+pub fn texture_upload_faults() -> TextureUploadFaults {
+    use std::sync::atomic::Ordering::Relaxed;
+    TextureUploadFaults {
+        malformed_mips: MALFORMED_MIP_UPLOADS.load(Relaxed),
+        failed_creations: FAILED_TEXTURE_CREATIONS.load(Relaxed),
+    }
+}
+
+/// Count a rejected upload, including the level and the byte count needed to reproduce it.
+fn report_short_mip(w: u32, h: u32, format: omsi_texture::PixelFormat, level: usize, have: usize, need: usize) {
+    let n = MALFORMED_MIP_UPLOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n <= 5 || n % 100 == 0 {
+        log::warn!(
+            "texture upload rejected (#{n}): {w}x{h} {format:?}, mip {level} has {have} bytes, needs {need}; drawn plain instead"
+        );
+    }
+}
+
+/// Validate every provided level before touching the GPU. A partially uploaded mip chain
+/// must never be used in a material: its missing levels can display undefined colours.
+fn first_short_mip(data: &omsi_texture::TextureData) -> Option<(usize, usize, usize)> {
+    let (mut w, mut h) = (data.width.max(1), data.height.max(1));
+    for (level, bytes) in data.levels.iter().enumerate() {
+        let need = data.format.level_bytes(w, h);
+        if bytes.len() < need {
+            return Some((level, bytes.len(), need));
+        }
+        w = (w / 2).max(1);
+        h = (h / 2).max(1);
+    }
+    None
+}
 
 /// `device.create_texture` where its failure can be seen: None when the card is out of
 /// memory (or refuses the texture). Made unchecked, such a texture was invalid, and so was
@@ -75,8 +118,7 @@ pub(crate) fn try_create_texture(device: &wgpu::Device, desc: &wgpu::TextureDesc
     let Some(e) = out_of_memory.or(invalid) else {
         return Some(texture);
     };
-    static FAILED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let n = FAILED_TEXTURE_CREATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if n < 5 || n % 1000 == 0 {
         log::warn!(
             "texture {}x{} ({:?}, {} levels) could not be made, drawn plain instead (#{}): {e}",
@@ -170,6 +212,10 @@ pub fn prepare_texture(
     {
         return None;
     }
+    if let Some((level, have, need)) = first_short_mip(data) {
+        report_short_mip(w, h, data.format, level, have, need);
+        return Some(PreparedTexture(stand_in_texture(device, queue)));
+    }
     let levels = data.levels.len() as u32;
     let size = wgpu::Extent3d {
         width: w,
@@ -201,14 +247,6 @@ pub fn prepare_texture(
             depth_or_array_layers: 1,
         };
         let need = ((phys.width / bw) * (phys.height / bh) * block) as usize;
-        if bytes.len() < need {
-            log::warn!(
-                "texture level {l} of {w}x{h} {:?} has {} bytes, not {need}",
-                data.format,
-                bytes.len()
-            );
-            break;
-        }
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -336,7 +374,7 @@ pub(crate) fn upload_texture_format(
             img.height,
             mip_count,
         ),
-        gen: next_gen(),
+        generation: next_gen(),
     }
 }
 
@@ -450,20 +488,51 @@ impl Renderer {
         scene.textures.len() - 1
     }
 
-    pub fn add_blank_texture(&self, scene: &mut Scene, width: u32, height: u32) -> TextureId {
+    /// A transparent texture for a vehicle's displays; `mipmaps`: with the levels its text is drawn into.
+    pub fn add_blank_texture(&self, scene: &mut Scene, width: u32, height: u32, mipmaps: bool) -> TextureId {
         let (width, height) = fit_size(width.max(1), height.max(1), self.device.limits().max_texture_dimension_2d);
+        let mipmaps = mipmaps && width > 1 && height > 1;
         // A newly allocated GPU texture has undefined contents. Script displays may be
         // sampled before their first `STUnlock`, so initialise them as transparent rather
         // than briefly showing arbitrary solid pixels on new or AI vehicles.
-        let image = omsi_texture::Image {
-            width,
-            height,
-            rgba: vec![0; (width * height * 4) as usize],
-            has_alpha: true,
+        // (cleared on the GPU where it can: uploading the zeros was 10-35 ms per articulated AI bus)
+        let texture = if self.device.features().contains(wgpu::Features::CLEAR_TEXTURE) {
+            self.cleared_texture(width, height, mipmaps)
+        } else {
+            let image = omsi_texture::Image { width, height, rgba: vec![0; (width * height * 4) as usize], has_alpha: true };
+            if mipmaps { self.upload_texture_gpu_mips(&image) } else { upload_texture(&self.device, &self.queue, &image, false) }
         };
-        let texture = upload_texture(&self.device, &self.queue, &image, false);
         scene.textures.push(texture);
         scene.textures.len() - 1
+    }
+
+    /// An sRGB texture cleared to transparent on the GPU, made as `upload_texture` (`upload_texture_gpu_mips`) makes it.
+    fn cleared_texture(&self, width: u32, height: u32, mipmaps: bool) -> GpuTexture {
+        let mip_count = if mipmaps { (32 - width.max(height).leading_zeros()).max(1) } else { 1 };
+        let usage = if mipmaps {
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT
+        } else {
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let Some(texture) = try_create_texture(&self.device, &wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: mip_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
+        }) else {
+            return stand_in_texture(&self.device, &self.queue);
+        };
+        // (submitted now: a script's first picture, written after, then comes after the clear)
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("blank texture") });
+        encoder.clear_texture(&texture, &wgpu::ImageSubresourceRange::default());
+        self.queue.submit([encoder.finish()]);
+        let view = texture.create_view(&Default::default());
+        GpuTexture { texture, view, size: (width, height), bytes: texture_bytes(format, width, height, mip_count), generation: next_gen() }
     }
 
     /// The PBR set found beside diffuse texture `diffuse` (`omsi_texture::pbr`): its maps up
@@ -509,6 +578,12 @@ impl Renderer {
     pub(crate) fn upload_texture_data(&self, data: &omsi_texture::TextureData) -> GpuTexture {
         if let Some(small) = fit_texture(data, self.device.limits().max_texture_dimension_2d) {
             return self.upload_texture_data(&small);
+        }
+        // Also validate the RGBA single-level path, which builds its mip chain on the GPU
+        // and therefore returns None from prepare_texture.
+        if let Some((level, have, need)) = first_short_mip(data) {
+            report_short_mip(data.width.max(1), data.height.max(1), data.format, level, have, need);
+            return stand_in_texture(&self.device, &self.queue);
         }
         if let Some(t) = prepare_texture(&self.device, &self.queue, data) {
             return t.0;
@@ -561,6 +636,11 @@ impl Renderer {
     }
 
     fn upload_rgba_mips_with(&self, width: u32, height: u32, rgba: &[u8], average: MipAverage) -> GpuTexture {
+        let need = (width as usize).saturating_mul(height as usize).saturating_mul(4);
+        if rgba.len() < need {
+            report_short_mip(width, height, omsi_texture::PixelFormat::Rgba8, 0, rgba.len(), need);
+            return stand_in_texture(&self.device, &self.queue);
+        }
         let img = RgbaRef {
             width,
             height,
@@ -614,7 +694,7 @@ impl Renderer {
                 img.height,
                 mip_count,
             ),
-            gen: next_gen(),
+            generation: next_gen(),
         }
     }
 
@@ -737,7 +817,7 @@ impl Renderer {
             view,
             size: (width, height),
             bytes,
-            gen: next_gen(),
+            generation: next_gen(),
         });
         scene.textures.len() - 1
     }
@@ -860,6 +940,76 @@ impl Renderer {
             return;
         }
         scene.textures[id] = self.upload_texture_data(data);
+    }
+
+    /// Refresh a changed file in its existing slot. Reuse the GPU allocation and all
+    /// material bind groups when format, dimensions and mip count have not changed.
+    /// Returns true only when callers must rebind materials to a replacement texture.
+    /// File decoding, compression and fitting to the device limit happen on a worker.
+    pub fn refresh_texture(
+        &self,
+        scene: &mut Scene,
+        id: TextureId,
+        data: &omsi_texture::TextureData,
+    ) -> bool {
+        let Some(old) = scene.textures.get(id) else {
+            return false;
+        };
+        use omsi_texture::PixelFormat;
+        let format = match data.format {
+            PixelFormat::Rgba8 => wgpu::TextureFormat::Rgba8UnormSrgb,
+            PixelFormat::Bc1 => wgpu::TextureFormat::Bc1RgbaUnormSrgb,
+            PixelFormat::Bc2 => wgpu::TextureFormat::Bc2RgbaUnormSrgb,
+            PixelFormat::Bc3 => wgpu::TextureFormat::Bc3RgbaUnormSrgb,
+            PixelFormat::Bc7 => wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+        };
+        let generate = data.format == PixelFormat::Rgba8
+            && data.levels.len() == 1
+            && data.gpu_mips
+            && data.width > 1
+            && data.height > 1;
+        let levels = if generate {
+            (32 - data.width.max(data.height).leading_zeros()).max(1)
+        } else {
+            data.levels.len() as u32
+        };
+        if old.bytes == 0
+            || old.size != (data.width, data.height)
+            || old.texture.format() != format
+            || old.texture.mip_level_count() != levels
+        {
+            self.replace_texture(scene, id, data);
+            return true;
+        }
+        let (bw, bh) = format.block_dimensions();
+        let block = format.block_copy_size(None).unwrap_or(4);
+        for (level, bytes) in data.levels.iter().enumerate() {
+            let width = (data.width >> level).max(1).div_ceil(bw) * bw;
+            let height = (data.height >> level).max(1).div_ceil(bh) * bh;
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &old.texture,
+                    mip_level: level as u32,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width / bw * block),
+                    rows_per_image: Some(height / bh),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        if generate && levels > 1 {
+            self.generate_mip_chain(&old.texture, levels, MipAverage::ByCoverage);
+        }
+        false
     }
 
     /// Mip levels and size of a texture: (width, height, levels).
@@ -1028,4 +1178,54 @@ impl Renderer {
 pub struct LevelDrops {
     encoder: Option<wgpu::CommandEncoder>,
     count: usize,
+}
+
+#[cfg(test)]
+mod incomplete_mipmap_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_short_rgba_mips_before_upload() {
+        let mut data = omsi_texture::TextureData {
+            width: 4,
+            height: 4,
+            format: omsi_texture::PixelFormat::Rgba8,
+            levels: vec![vec![128; 64], vec![64; 15], vec![32; 4]],
+            has_alpha: true,
+            gpu_mips: false,
+        };
+        assert_eq!(first_short_mip(&data), Some((1, 15, 16)));
+        data.levels[1].push(64);
+        assert_eq!(first_short_mip(&data), None);
+        data.levels[0].truncate(63);
+        assert_eq!(first_short_mip(&data), Some((0, 63, 64)));
+    }
+
+    #[test]
+    fn compressed_levels_need_complete_blocks_even_below_four_texels() {
+        let mut data = omsi_texture::TextureData {
+            width: 8,
+            height: 8,
+            format: omsi_texture::PixelFormat::Bc1,
+            levels: vec![vec![0; 32], vec![0; 8], vec![0; 7]],
+            has_alpha: false,
+            gpu_mips: false,
+        };
+        assert_eq!(first_short_mip(&data), Some((2, 7, 8)));
+        data.levels[2].push(0);
+        assert_eq!(first_short_mip(&data), None);
+    }
+
+    #[test]
+    fn mip_size_stays_at_one_pixel_for_long_chains() {
+        let data = omsi_texture::TextureData {
+            width: 1,
+            height: 1,
+            format: omsi_texture::PixelFormat::Rgba8,
+            levels: vec![vec![0; 4]; 33],
+            has_alpha: false,
+            gpu_mips: false,
+        };
+        assert_eq!(first_short_mip(&data), None);
+    }
 }

@@ -29,6 +29,9 @@ frame's (`Rg16Float`, FSR 2's convention).
   (`shares_prepass_depth`: no MSAA, no puddles or presurfaces that frame). With the vectors on, the
   prepass is drawn even where nothing else asked for it (vanilla without SSAO): one depth pass
   more. The depth is read as a plain float texture, so OpenGL takes it too.
+- **History validity:** discard stale frames after a resize, camera cut,
+  teleport, projection change, or a stall longer than 0.5 seconds. Reuse the
+  current renderer's `inside_rotation` for pitch and bank, without duplicate state.
 - **Nothing reads the vectors yet**: the picture is unchanged. `OMSI_DEBUG_MOTION=1` (or a
   number: the pixels of motion at full colour, 8 by default) draws them over the 3D picture -
   red across, green up and down - to check them in the cab and on a turn.

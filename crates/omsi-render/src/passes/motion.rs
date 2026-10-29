@@ -37,6 +37,30 @@ pub(crate) struct MotionTarget {
     debug_bg: wgpu::BindGroup,
 }
 
+/// A single desktop view; mirrors and secondary viewports never advance its history.
+#[derive(Clone, Copy)]
+struct PreviousView {
+    vp: Mat4,
+    origin: DVec3,
+    body: Option<(DVec3, Mat4)>,
+    camera: Camera,
+    size: (u32, u32),
+    at: std::time::Instant,
+}
+
+/// Reject stale history on teleport, a camera cut, resolution change, projection edit or stall.
+fn reusable_previous(p: &PreviousView, c: &Camera, size: (u32, u32), now: std::time::Instant) -> bool {
+    p.size == size
+        && p.vp.is_finite()
+        && p.origin.is_finite()
+        && now.saturating_duration_since(p.at).as_secs_f32() < 0.5
+        && (p.camera.position - c.position).length() < 50.0
+        && p.camera.forward().dot(c.forward()) > 0.5
+        && (p.camera.fov_deg - c.fov_deg).abs() < 0.01
+        && p.camera.near == c.near
+        && p.camera.far == c.far
+}
+
 pub(crate) struct MotionVectors {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
@@ -46,7 +70,7 @@ pub(crate) struct MotionVectors {
     pub(crate) target: Option<MotionTarget>,
     /// Last frame's view-projection, render origin and player vehicle's body (position,
     /// rotation).
-    prev: Option<(Mat4, DVec3, Option<(DVec3, Mat4)>)>,
+    prev: Option<PreviousView>,
     /// Why the last frame had none (logged when it changes): "" while they are drawn.
     skipped: &'static str,
 }
@@ -118,6 +142,27 @@ impl MotionVectors {
     }
 }
 
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    #[test]
+    fn history_is_rejected_on_resizes_teleports_camera_cuts_and_stalls() {
+        let c = Camera { position: DVec3::ZERO, yaw: 0.0, pitch: 0.0, roll: 0.0, fov_deg: 60.0, near: 0.1, far: 2000.0 };
+        let now = std::time::Instant::now();
+        let p = PreviousView { vp: c.view_proj(1.5, DVec3::ZERO), origin: DVec3::ZERO, body: None, camera: c, size: (192, 128), at: now };
+        assert!(reusable_previous(&p, &c, (192, 128), now));
+        assert!(!reusable_previous(&p, &c, (256, 128), now));
+        let mut moved = c; moved.position.x += 55.0;
+        assert!(!reusable_previous(&p, &moved, (192, 128), now));
+        let mut rotated = c; rotated.yaw += 100.0;
+        assert!(!reusable_previous(&p, &rotated, (192, 128), now));
+        let mut zoomed = c; zoomed.fov_deg += 5.0;
+        assert!(!reusable_previous(&p, &zoomed, (192, 128), now));
+        assert!(!reusable_previous(&p, &c, (192, 128), now + std::time::Duration::from_secs(1)));
+    }
+}
+
 impl Renderer {
     /// The motion vectors of the window's picture (after the main pass): when they are on,
     /// for the lead view, and when the main pass's depth is the readable single-sampled one.
@@ -152,14 +197,16 @@ impl Renderer {
         let (w, h) = (f.width, f.height);
         let ro = f.ro;
         let m = self.motion.as_mut().expect("motion vectors");
-        // (no frame before: no motion; a slow one still reprojects as well as any other)
-        let (prev_vp, known) = match m.prev {
-            Some((vp, prev_ro, _)) => (vp * Mat4::from_translation((ro - prev_ro).as_vec3()), true),
-            _ => (view_proj, false),
+        // History is valid only for this camera, projection and viewport.
+        let now = std::time::Instant::now();
+        let previous = m.prev.filter(|p| reusable_previous(p, f.camera, (w, h), now));
+        let (prev_vp, known) = match previous {
+            Some(p) => (p.vp * Mat4::from_translation((ro - p.origin).as_vec3()), true),
+            None => (view_proj, false),
         };
         // (the body's transforms in this frame's render-origin coordinates)
         let body = |(o, rot): (DVec3, Mat4)| Mat4::from_translation((o - ro).as_vec3()) * rot;
-        let (to_body, from_body_prev, vehicle_box, vehicle_centre) = match (f.lighting.inside, f.lighting.inside_body, m.prev.and_then(|p| p.2)) {
+        let (to_body, from_body_prev, vehicle_box, vehicle_centre) = match (f.lighting.inside, f.lighting.inside.as_ref().zip(f.lighting.inside_rotation).map(|(b, rot)| (b.0, rot)), previous.and_then(|p| p.body)) {
             (Some((_, _, bb)), Some(now), Some(before)) => (
                 body(now).inverse(),
                 body(before),
@@ -180,7 +227,14 @@ impl Renderer {
             flags: [known as u8 as f32, debug_px, 0.0, 0.0],
         };
         self.queue.write_buffer(&m.params, 0, bytemuck::bytes_of(&params));
-        m.prev = Some((view_proj, ro, f.lighting.inside_body));
+        m.prev = Some(PreviousView {
+            vp: view_proj,
+            origin: ro,
+            body: f.lighting.inside.as_ref().zip(f.lighting.inside_rotation).map(|(b, rot)| (b.0, rot)),
+            camera: *f.camera,
+            size: (w, h),
+            at: now,
+        });
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("motion vectors"),
             layout: &m.layout,

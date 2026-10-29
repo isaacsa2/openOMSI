@@ -161,7 +161,7 @@ fn through_the_host() {
     let dir = plugins_dir("remote");
     let dll = dir.join("Demo/demo.dll");
     let host = Path::new(env!("CARGO_BIN_EXE_omsi-plugin-host"));
-    let r = Remote::spawn(None, host, &dll).expect("host starts");
+    let r = Remote::spawn(None, host, &dll, &dir).expect("host starts");
     assert!(r.procs().variable && r.procs().trigger && r.procs().system && r.procs().string && r.procs().texture && r.procs().pointer && r.procs().ticket);
     drop(r);
     // the same frames through a plugin whose library will not load here: force the host
@@ -177,14 +177,14 @@ fn through_the_host() {
 fn host_frames() {
     let dir = plugins_dir("frames");
     let host = Path::new(env!("CARGO_BIN_EXE_omsi-plugin-host"));
-    let mut r = Remote::spawn(None, host, &dir.join("Demo/demo.dll")).unwrap();
+    let mut r = Remote::spawn(None, host, &dir.join("Demo/demo.dll"), &dir).unwrap();
     let tickets = vec![
         omsi_plugin::TicketCall { person: 1, age: 40.0, stop: "Střížkov".into(), destination: "Nový Bor".into(), stop_number: 2, destination_number: 5, kind: 2, ticket: 1, price: 20.0, name: "Full fare".into() },
         omsi_plugin::TicketCall { person: 2, age: 9.0, kind: 2, ticket: 2, ..Default::default() },
         omsi_plugin::TicketCall { person: 3, age: 40.0, kind: 2, ticket: 1, ..Default::default() },
     ];
     let f = omsi_plugin::Frame { system: vec![(0, 3.0)], vars: vec![(0, 1.5)], strings: vec![(0, "0123456789ab".into())], triggers: vec![0], textures: vec![(0, 3, 2), (1, 2, 2)], pointer: vec![(0, omsi_plugin::POINTER_UP, 2.0, 1.0)], tickets };
-    let reply = r.frame(&f).unwrap();
+    let reply = r.frame(&f).unwrap().expect("the host answers");
     assert_eq!(reply.system, [None]);
     assert_eq!(reply.vars, [Some(3.0)]);
     assert_eq!(reply.strings, [Some("seen at 3".to_string())]);
@@ -200,9 +200,66 @@ fn host_frames() {
     let full = omsi_plugin::TicketAnswer { kind: 2, ticket: 1, price: 30.0, name: "Nový Bor, 3 stops".into(), voice: "Zone_3".into() };
     assert_eq!(reply.tickets, [Some(full), Some(omsi_plugin::TicketAnswer { kind: 0, ticket: 2, ..Default::default() }), None]);
     // the host keeps the buffer: the second frame counts on from the first
-    let reply = r.frame(&f).unwrap();
+    let reply = r.frame(&f).unwrap().expect("the host answers");
     assert_eq!(reply.textures[0].as_ref().unwrap()[3], 2);
     r.finalize();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A plugin busy in its own code (SuperRadio waiting on its station) holds the game only a
+/// moment: the frame goes on without it, its answer is taken whole when it comes - the horn
+/// it pressed in that frame too - and a host stuck for good is ended at once at the end.
+#[test]
+fn host_busy_in_its_own_code() {
+    let dir = plugins_dir("busy");
+    let host = Path::new(env!("CARGO_BIN_EXE_omsi-plugin-host"));
+    let mut r = Remote::spawn(None, host, &dir.join("Demo/demo.dll"), &dir).unwrap();
+    // (Time 1: the horn is down)
+    let busy = omsi_plugin::Frame { system: vec![(0, 1.0)], vars: vec![(0, -1.5)], triggers: vec![0], ..Default::default() };
+    let asked = std::time::Instant::now();
+    assert!(r.frame(&busy).unwrap().is_none(), "the game does not wait for it");
+    assert!(asked.elapsed() < std::time::Duration::from_millis(1200));
+    assert!(r.owes());
+    let late = loop {
+        if let Some(reply) = r.late().unwrap() {
+            break reply;
+        }
+        assert!(asked.elapsed() < std::time::Duration::from_secs(10), "the late answer comes");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert_eq!(late.vars, [Some(-3.0)]);
+    assert_eq!(late.triggers_active, [true]);
+    assert!(!r.owes());
+    // then it answers as before: at once, or (asked with the short wait of a plugin that
+    // was late) as a late answer a moment after
+    let quick = omsi_plugin::Frame { system: vec![(0, 2.0)], vars: vec![(0, 1.5)], triggers: vec![0], ..Default::default() };
+    let reply = match r.frame(&quick).unwrap() {
+        Some(reply) => reply,
+        None => loop {
+            if let Some(reply) = r.late().unwrap() {
+                break reply;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        },
+    };
+    assert_eq!(reply.vars, [Some(3.0)]);
+    assert_eq!(reply.triggers_active, [false]);
+    // answered within the short wait, it is waited for in full again
+    let reply = loop {
+        if let Some(reply) = r.frame(&quick).unwrap() {
+            break reply;
+        }
+        while r.late().unwrap().is_none() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    assert_eq!(reply.vars, [Some(3.0)]);
+    // stuck for good: the end does not wait for it
+    let stuck = omsi_plugin::Frame { vars: vec![(0, -60.0)], ..Default::default() };
+    assert!(r.frame(&stuck).unwrap().is_none());
+    let ending = std::time::Instant::now();
+    r.finalize();
+    assert!(ending.elapsed() < std::time::Duration::from_secs(1), "finalize waited {:?}", ending.elapsed());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -215,9 +272,9 @@ fn windows_dll_under_wine() {
     let hosts = HostConfig::detect();
     let wine = hosts.runner.clone().or_else(|| cfg!(windows).then(PathBuf::new));
     let runner = if cfg!(windows) { None } else { Some(wine.expect("wine on the path")) };
-    let mut r = Remote::spawn(runner.as_deref(), &dir.join("omsi-plugin-host.exe"), &dir.join("omsi_demo_plugin.dll")).expect("the 32-bit host starts");
+    let mut r = Remote::spawn(runner.as_deref(), &dir.join("omsi-plugin-host.exe"), &dir.join("omsi_demo_plugin.dll"), &dir).expect("the 32-bit host starts");
     let f = omsi_plugin::Frame { system: vec![(0, 5.0)], vars: vec![(0, 0.75)], strings: vec![(0, "abcdefghijk".into())], triggers: vec![0], textures: vec![(0, 2, 2)], ..Default::default() };
-    let reply = r.frame(&f).unwrap();
+    let reply = r.frame(&f).unwrap().expect("the host answers");
     assert_eq!(reply.vars, [Some(1.5)]);
     assert_eq!(reply.textures[0].as_ref().map(|p| p[..4].to_vec()), Some(vec![0, 0, 7, 1]));
     assert_eq!(reply.strings, [Some("seen at 5".to_string())]);

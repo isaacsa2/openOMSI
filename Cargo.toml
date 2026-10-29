@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/omsi-cfg",
     "crates/omsi-script",
@@ -9,6 +9,8 @@ members = [
     "crates/omsi-map",
     "crates/omsi-mapdraw",
     "crates/omsi-navigator",
+    "crates/omsi-trolley",
+    "crates/omsi-transit",
     "crates/omsi-vehicle",
     "crates/omsi-timetable",
     "crates/omsi-content",
@@ -17,7 +19,9 @@ members = [
     "crates/omsi-render",
     "crates/omsi-sim",
     "crates/omsi-htmlengine",
+    "crates/omsi-htmlpage",
     "crates/omsi-audio",
+    "crates/omsi-voice",
     "crates/omsi-net",
     "crates/omsi-plugin",
     "crates/omsi-plugin/demo",
@@ -27,6 +31,7 @@ members = [
     "crates/omsi-launcher-model",
     "crates/omsi-admin",
     "crates/omsi-lan",
+    "crates/omsi-serverlist",
     "crates/omsi-platform",
     "crates/omsi-guard",
     "crates/omsi-input",
@@ -47,7 +52,7 @@ exclude = ["launcher/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "AGPL-3.0-only"
 
 # Every dependency that more than one crate uses is declared here once, so an update (by
@@ -59,6 +64,7 @@ log = "0.4"
 env_logger = "0.11"
 encoding_rs = "0.8"
 glam = "0.30"
+spade = "2"
 rayon = "1.10"
 walkdir = "2"
 clap = { version = "4", features = ["derive"] }
@@ -75,6 +81,7 @@ wgpu-hal = "29"
 naga = "29"
 winit = "0.30"
 bytemuck = { version = "1", features = ["derive"] }
+memmap2 = "0.9"
 pollster = "1.0"
 # (every picture format a mod or a photo may come in; DDS and TGA have readers of our own)
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "tga", "dds", "jpeg", "webp", "gif", "tiff", "hdr", "exr", "pnm", "qoi", "ico", "ff"] }
@@ -82,12 +89,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zip = { version = "9.0", default-features = false, features = ["deflate"] }
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# (an address read as a browser reads it, WHATWG's URL standard: ureq's own)
+url = "2"
 sha2 = "0.11"
 # the LAN mods' encryption (X25519, HKDF, ChaCha20-Poly1305) and omsi-net's signatures
 ring = "0.17"
 flate2 = "1"
 # players' buses go over the wire packed with it (`lan_mods::pieces`)
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.14.3", default-features = false }
 ab_glyph = "0.2"
 rfd = "0.15"
 libc = "0.2"

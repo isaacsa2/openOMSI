@@ -211,8 +211,10 @@ impl App {
             return;
         }
         if let Some(previous) = self.xr.vr_cursor_physical {
-            self.input.cursor.0 += x - previous.0;
-            self.input.cursor.1 += y - previous.1;
+            let (dx, dy) = (x - previous.0, y - previous.1);
+            self.input.cursor.0 += dx;
+            self.input.cursor.1 += dy;
+            self.accumulate_cockpit_drag(dx, dy);
         }
         self.xr.vr_cursor_physical = Some((x, y));
         self.html_move();
@@ -266,6 +268,14 @@ impl App {
             return false;
         }
         self.input.cursor = (x, y);
+        if !self.input.buttons_held.0 {
+            self.menus.hud_resize = None;
+        }
+        if let Some((k, size0, at, w0)) = self.menus.hud_resize {
+            let grow = ((x - at[0]) + (y - at[1])) * 0.5;
+            self.settings.hud_sizes[k] = crate::ui::window_size((size0 * (w0 + grow) / w0 * 20.0).round() / 20.0);
+            return true;
+        }
         // the navigator held by the mouse follows it
         if let Some(n) = self.menus.navigator.as_mut() {
             if n.panel_move(x, y) {
@@ -388,16 +398,27 @@ impl App {
         // why the parking brake could not be pulled with the mouse. The movement is
         // collected here and handed to the script once a frame (`App::drag_frame`).
         if self.input.dragging {
+            self.accumulate_cockpit_drag(
+                self.input.cursor.0 - last.0,
+                self.input.cursor.1 - last.1,
+            );
+        }
+        true
+    }
+
+    /// Both desktop and VR mouse paths deliver logical pixels to the same held
+    /// control. Head movement and cursor-recentering events must not enter here.
+    fn accumulate_cockpit_drag(&mut self, dx: f32, dy: f32) {
+        if self.input.dragging {
             let scale = self
                 .window
                 .as_ref()
                 .map(|w| w.scale_factor() as f32)
                 .unwrap_or(1.0)
                 .max(0.1);
-            self.input.drag_delta.0 += (self.input.cursor.0 - last.0) / scale;
-            self.input.drag_delta.1 += (self.input.cursor.1 - last.1) / scale;
+            self.input.drag_delta.0 += dx / scale;
+            self.input.drag_delta.1 += dy / scale;
         }
-        true
     }
 
     pub(crate) fn on_left(&mut self, pressed: bool) {
@@ -412,9 +433,41 @@ impl App {
         if self.menus.game_menu.is_none() && self.editor_mouse(pressed) {
             return;
         }
+        // the MileZero card: its buttons, and a press on it goes no further
+        if pressed && self.settings.milezero {
+            let (x, y) = self.input.cursor;
+            let at = |r: Option<[f32; 4]>| r.is_some_and(|r| x >= r[0] && x < r[2] && y >= r[1] && y < r[3]);
+            let (play, request, card) = self.ui.as_ref().map_or((false, false, false), |u| (at(u.mz.play), at(u.mz.request), at(u.mz.rect)));
+            if play {
+                self.sound.milezero.want_play = !self.sound.milezero.want_play;
+                return;
+            } else if request {
+                self.sound.milezero.typing = Some(String::new());
+                return;
+            } else if card {
+                return;
+            }
+        }
+        // a trolleybus's pole in the mouse's hand: let go, or taken (see `trolley_mouse`)
+        if pressed && self.menus.game_menu.is_none() && self.trolley_mouse_click() {
+            return;
+        }
         // the city map: a click on the navigator opens it; while it is open the mouse is
         // the map's (a click outside closes it)
         let (x, y) = self.input.cursor;
+        if !pressed {
+            if let Some((k, ..)) = self.menus.hud_resize.take() {
+                crate::game_lists::remember_setting(crate::ui::SIZE_KEYS[k], &format!("{:.2}", self.settings.hud_sizes[k]));
+                return;
+            }
+        }
+        if pressed && self.menus.game_menu.is_none() {
+            if let Some((k, w0, shown)) = self.ui.as_ref().and_then(|u| u.grip_at(x, y)) {
+                self.settings.hud_sizes[k] = shown;
+                self.menus.hud_resize = Some((k, shown, [x, y], w0));
+                return;
+            }
+        }
         let vr_active = self.vr_active();
         if let Some(n) = self.menus.navigator.as_mut() {
             if n.map_open() {
@@ -430,7 +483,11 @@ impl App {
                     }
                 } else if pressed {
                     n.map_press(x, y);
-                } else if n.map_release() && self.menus.teleport_pick {
+                } else if n.map_release() {
+                    if !self.menus.teleport_pick {
+                        n.map_destination(x, y);
+                        return;
+                    }
                     // after Esc → Move the bus the map is dragged to the place as ever, and
                     // the click that lets go where it was pressed puts the bus there (the
                     // press used to put it at once, so only what the map showed could be
@@ -522,6 +579,7 @@ impl App {
             }
             return;
         }
+        let precise_release = self.vr_active() && matches!(self.view.as_str(), "driver" | "pax");
         let ray = self.camera.as_ref().zip(self.gfx.surface.as_ref())
             .map(|(cam, s)| self.cockpit_cursor_ray(cam, (s.config.width, s.config.height)));
         if let (Some(p), Some((o, d, spread))) = (
@@ -545,16 +603,20 @@ impl App {
                     self.input.dragging = false;
                     return;
                 }
-                // a coin of the change on the tray: picked up again
-                if let Some((m, k)) = self.session.humans.as_mut().and_then(|h| h.sim.money.as_mut()).and_then(|m| crate::money::change_hit(m, o, d, &p.vehicle).map(|k| (m, k))) {
-                    log::info!("a coin of the change picked up again");
+                // A piece of money on the desk/change tray: picked up by the driver.
+                if let Some((m, k)) = self.session.humans.as_mut().and_then(|h| h.sim.money.as_mut()).and_then(|m| crate::money::money_hit(m, o, d, &p.vehicle).map(|k| (m, k))) {
+                    log::info!("a piece of money picked up");
+                    let coin_count = m.currency.as_ref().map(|currency| currency.coins.len()).unwrap_or(0);
+                    let is_coin = m.placed.get(k).is_some_and(|piece| piece.2 < coin_count);
                     m.take_coin(k);
+                    if is_coin {
+                        p.vehicle.host.fired_triggers.push("ev_ticketsale_takemoney".into());
+                    }
                     self.input.dragging = false;
                     return;
                 }
-                self.input.dragging = p
-                    .click(o, d, spread)
-                    .is_some();
+                self.input.dragging = if precise_release { p.click_precise(o, d, spread) } else { p
+                    .click(o, d, spread) }.is_some();
             } else {
                 if let Some((page, u, v)) = self.input.html_pressed.take() {
                     let (u, v) = p.html_hit(o, d, &self.integrations.plugin_pointer).filter(|h| h.0 == page).map_or((u, v), |h| (h.1, h.2));
@@ -570,6 +632,8 @@ impl App {
                 }
                 if self.input.dragging && self.input.buttons_held.1 {
                     p.release_keeping();
+                } else if precise_release {
+                    p.release_precise();
                 } else {
                     p.release();
                 }
@@ -656,6 +720,7 @@ impl App {
         }
         self.input.drag_delta = (0.0, 0.0);
         w.scenery_object_click(&mut self.session.scenery, hit.map_id, &hit.event);
+        crate::plugin_io::object::clicked(self, hit.map_id, &hit.event);
         self.input.pressed_scenery_object = Some((hit.map_id, hit.event));
         self.input.dragging = true;
         true
@@ -716,6 +781,17 @@ const HTML_OBJECT_REACH: f32 = 4.0;
 
 /// Degrees the view turns per (logical) pixel of the cursor's way while looking round:
 /// Omsi.exe's fov / 78.75 (TForm_main.Panel1MouseMove 0x82c5f8).
+impl App {
+    /// A finger dragged over the photo (physical pixels): the photo camera turns.
+    pub(crate) fn photo_look_touch(&mut self, dx: f32, dy: f32) {
+        let scale = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0).max(0.1);
+        let k = self.photo.as_ref().map(|ph| look_deg_per_px(ph.cam.fov_deg)).unwrap_or(0.0) * self.settings.look_sens * 1.6;
+        if let Some(ph) = self.photo.as_mut() {
+            ph.look(dx / scale * k, dy / scale * k);
+        }
+    }
+}
+
 fn look_deg_per_px(fov_deg: f32) -> f32 {
     fov_deg / 78.75
 }
@@ -755,5 +831,74 @@ mod reach_tests {
         assert!(part_in_reach(eye, DVec3::new(0.0, -12.0, 0.0), 0.0, Some(rear)));
         // (the box's centre turns with the part: heading 180, the rear is ahead)
         assert!(part_in_reach(DVec3::new(-2.0, 17.0, 1.7), DVec3::new(0.0, 12.0, 0.0), 180.0, Some(rear)));
+    }
+}
+
+impl App {
+    /// A key pressed while a MileZero song request is being typed: true when it was taken.
+    pub(crate) fn milezero_typing(&mut self, event: &winit::event::KeyEvent) -> bool {
+        use winit::keyboard::{Key, NamedKey};
+        let mz = &mut self.sound.milezero;
+        if event.state != ElementState::Pressed || mz.typing.is_none() {
+            return false;
+        }
+        match &event.logical_key {
+            Key::Named(NamedKey::Enter) => mz.submit(),
+            Key::Named(NamedKey::Escape) => mz.typing = None,
+            Key::Named(NamedKey::Backspace) => {
+                if let Some(t) = mz.typing.as_mut() {
+                    t.pop();
+                }
+            }
+            _ => {
+                if let (Some(t), Some(text)) = (mz.typing.as_mut(), event.text.as_deref()) {
+                    if t.chars().count() < 200 {
+                        t.extend(text.chars().filter(|c| !c.is_control()));
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+
+#[cfg(all(test, windows))]
+mod vr_drag_tests {
+    use super::*;
+    use clap::Parser;
+
+    fn app() -> App {
+        crate::assemble_app(crate::Args::parse_from(["openomsi"]), Default::default())
+    }
+
+    #[test]
+    fn headset_mouse_moves_reach_the_held_control() {
+        let mut app = app();
+        app.input.cursor = (400.0, 300.0);
+        app.input.dragging = true;
+        app.xr.vr_cursor_physical = Some((100.0, 100.0));
+        app.on_vr_cursor_moved(102.0, 97.0);
+        assert_eq!(app.input.cursor, (402.0, 297.0));
+        assert_eq!(app.input.drag_delta, (2.0, -3.0));
+        // Multiple moves before the frame are accumulated, never replaced.
+        app.on_vr_cursor_moved(103.0, 98.0);
+        assert_eq!(app.input.drag_delta, (3.0, -2.0));
+    }
+
+    #[test]
+    fn cursor_warp_does_not_turn_the_control_or_move_the_virtual_pointer() {
+        let mut app = app();
+        app.input.cursor = (400.0, 300.0);
+        app.input.dragging = true;
+        app.xr.vr_cursor_physical = Some((990.0, 700.0));
+        app.xr.vr_cursor_warp_pending = Some((500.0, 400.0));
+        app.on_vr_cursor_moved(500.0, 400.0);
+        assert_eq!(app.input.cursor, (400.0, 300.0));
+        assert_eq!(app.input.drag_delta, (0.0, 0.0));
+        app.on_vr_cursor_moved(503.0, 398.0);
+        assert_eq!(app.input.drag_delta, (3.0, -2.0));
+        app.input.dragging = false;
+        app.on_vr_cursor_moved(506.0, 399.0);
+        assert_eq!(app.input.drag_delta, (3.0, -2.0));
     }
 }

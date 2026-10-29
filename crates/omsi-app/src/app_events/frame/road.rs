@@ -63,6 +63,9 @@ pub(super) fn traffic(cx: TrafficCx, dt: f32) {
             cx.perf.profile.add(crate::profile_keys::ProfKey::TrafficPopulate, __t5.elapsed().as_secs_f64());
         }
         if let Some(s) = cx.traffic.schedule.as_mut() {
+            if let Some(blocks) = s.poll_transit() {
+                t.sim.set_blocks(blocks);
+            }
             s.tick_t -= dt;
             // (the first look goes with the first population: the trips under way are put
             // out at the start)
@@ -103,6 +106,7 @@ pub(super) fn traffic(cx: TrafficCx, dt: f32) {
         };
         let capture = cx.net.lan.as_ref().is_some_and(|lan| lan.role == omsi_net::Role::Host);
         for c in &mut t.sim.cars { c.vehicle.host.capture_sound_triggers = capture; }
+        t.table_on = capture;
         let signals = steps::traffic_tick(t, w, &mut *cx.world.scenery, step_dt, *cx.clock.paused, cx.player.player.as_ref(), &cx.net.remotes, &cx.player.placed, rail);
         cx.perf.profile.add(crate::profile_keys::ProfKey::TrafficTickSignals, signals);
         cx.perf.profile.add(crate::profile_keys::ProfKey::TrafficTick, __t2.elapsed().as_secs_f64());

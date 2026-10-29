@@ -39,7 +39,7 @@ pub(crate) fn install() {
 pub(crate) fn showroom_options(settings: &crate::settings::Settings) -> omsi_render::RenderOptions {
     let enhanced = showroom_enhanced(settings);
     let render_scale = if settings.render_scale > 0.0 { settings.render_scale } else { 1.0 };
-    omsi_render::RenderOptions { msaa: settings.msaa.clamp(1, 4), ssao: false, shadow_size: settings.shadow_size.min(1024), render_scale, preview_only: !enhanced, no_enhanced: !enhanced, ray_tracing: false, ..settings.render_options() }
+    omsi_render::RenderOptions { msaa: settings.msaa.clamp(1, 4), ssao: false, shadow_size: settings.shadow_size.min(if cfg!(any(target_os = "android", target_os = "ios")) { 512 } else { 1024 }), render_scale, preview_only: !enhanced, no_enhanced: !enhanced, ray_tracing: false, fsr1: false, ..settings.render_options() }
 }
 
 pub(crate) fn showroom_enhanced(settings: &crate::settings::Settings) -> bool {
@@ -57,6 +57,9 @@ impl Host for AppHost {
     }
     fn mt_protect(&self, texts: &mut dyn Iterator<Item = &str>) {
         crate::mt::protect(texts);
+    }
+    fn tr(&self, text: &str) -> String {
+        omsi_ui::tr(text).into_owned()
     }
     #[cfg(target_os = "android")]
     fn previous_run_crash(&self) -> Option<(String, String)> {
@@ -107,7 +110,7 @@ mod tests {
     #[test]
     fn the_preview_follows_the_quality_preset() {
         let options = |preset: &str| {
-            let (_, p) = omsi_launcher_lib::graphics_presets_for("vanilla_plus").into_iter().find(|(name, _)| *name == preset).unwrap();
+            let (_, p) = omsi_launcher_lib::graphics_presets().into_iter().find(|(name, _)| *name == preset).unwrap();
             let mut s = omsi_launcher_lib::settings_from_text(None);
             for (k, v) in p.as_object().unwrap() {
                 s[k] = v.clone();
@@ -117,7 +120,7 @@ mod tests {
         let low = options("Low");
         assert_eq!((low.msaa, low.render_scale, low.anisotropy), (1, 0.75, 2));
         let medium = options("Medium");
-        assert_eq!((medium.msaa, medium.render_scale), (2, 1.0));
+        assert_eq!((medium.msaa, medium.render_scale), (4, 1.0));
         let ultra = options("Ultra");
         assert_eq!((ultra.msaa, ultra.render_scale, ultra.shadow_size, ultra.ssao), (4, 1.0, 1024, false));
     }

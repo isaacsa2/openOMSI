@@ -25,6 +25,9 @@ pub(crate) struct RailDrive {
     trail: std::collections::VecDeque<(f64, DVec3)>,
     /// Distance travelled along the track (forward positive).
     u: f64,
+    /// The body on its springs (see `omsi_sim::rail::Body`) and the heading of the last frame.
+    body: omsi_sim::rail::Body,
+    last_heading: Option<f64>,
 }
 
 /// How much trail is kept behind the vehicle (m): a long train's length.
@@ -56,7 +59,7 @@ const NEAR_TRACK: f64 = 100.0;
 /// two apart, so the nearest one is as often the one going the opposite way, and the whole
 /// consist is then laid out along it facing back the way it came.
 pub(crate) fn attach(p: &mut Player, net: &Network, reach: f64) -> Option<RailDrive> {
-    let pos = p.vehicle.position;
+    let pos = search_point(p.vehicle.position, p.rail_placed_z);
     let heading = p.vehicle.heading;
     let (lane, s, dist) = track_for(net, pos, heading, reach)?;
     let (_, h) = net.lanes[lane].at(s);
@@ -69,7 +72,7 @@ pub(crate) fn attach(p: &mut Player, net: &Network, reach: f64) -> Option<RailDr
             pos.y
         );
     }
-    let mut r = RailDrive { lane, s, along: diff.abs() <= 90.0, trail: Default::default(), u: 0.0 };
+    let mut r = RailDrive { lane, s, along: diff.abs() <= 90.0, trail: Default::default(), u: 0.0, body: omsi_sim::rail::Body::new(lane as u64 + 7), last_heading: None };
     // the track behind it, for its coupled parts: walked backwards from where it stands
     let mut back = r.clone();
     let mut points = Vec::new();
@@ -84,6 +87,15 @@ pub(crate) fn attach(p: &mut Player, net: &Network, reach: f64) -> Option<RailDr
     r.trail = points.into_iter().rev().chain(std::iter::once((0.0, here))).collect();
     log::info!("rail: {} stands on rail lane {lane} at {s:.1} m ({dist:.1} m away) at ({:.1}, {:.1})", p.vehicle.ty.def.path.display(), net.lanes[lane].at(s).0.x, net.lanes[lane].at(s).0.y);
     Some(r)
+}
+
+fn search_point(at: DVec3, placed_z: f64) -> DVec3 {
+    DVec3::new(at.x, at.y, placed_z)
+}
+
+pub(crate) fn placed(p: &mut Player, z: f64) {
+    p.rail_placed_z = z;
+    p.rail = None;
 }
 
 /// The rail lane to put a vehicle at `pos` on: the nearest one within `reach` that runs
@@ -117,30 +129,91 @@ fn nearest_rail(net: &Network, p: DVec3, heading: f64, reach: f64, within: Optio
 }
 
 /// The trail's point at travelled distance `u` (between its samples; None beyond its ends).
-pub(crate) fn point_at(trail: &std::collections::VecDeque<(f64, DVec3)>, u: f64) -> Option<DVec3> {
-    if trail.is_empty() {
-        return None;
-    }
-    if u <= trail.front().unwrap().0 {
-        return Some(trail.front().unwrap().1);
-    }
-    if u >= trail.back().unwrap().0 {
-        return Some(trail.back().unwrap().1);
-    }
-    let i = trail.iter().position(|(v, _)| *v >= u)?;
-    if i == 0 {
-        return Some(trail[0].1);
-    }
-    let (a, b) = (trail[i - 1], trail[i]);
-    let t = ((u - a.0) / (b.0 - a.0).max(1e-6)).clamp(0.0, 1.0);
-    Some(a.1 + (b.1 - a.1) * t)
+/// `head` is where the vehicle is right now, `(u, position)`: the trail is only sampled every
+/// 10 cm of travel, so its newest sample lags behind the vehicle by up to that much (at a
+/// walking pace most of the time), and a coupled part asked for a place just behind the vehicle
+/// got the stale sample while one asked for a place just ahead got the exact one - the cars
+/// jumped back and forth by a few centimetres as they crossed from one answer to the other.
+pub(crate) fn point_at(trail: &std::collections::VecDeque<(f64, DVec3)>, head: Option<(f64, DVec3)>, u: f64) -> Option<DVec3> {
+    let mut at = |u: f64| -> Option<DVec3> {
+        if trail.is_empty() {
+            return head.map(|h| h.1);
+        }
+        let newest = *trail.back().unwrap();
+        if let Some((hu, hp)) = head.filter(|h| h.0 > newest.0 + 1e-9 && u > newest.0) {
+            let t = ((u - newest.0) / (hu - newest.0)).clamp(0.0, 1.0);
+            return Some(newest.1 + (hp - newest.1) * t);
+        }
+        if u <= trail.front().unwrap().0 {
+            return Some(trail.front().unwrap().1);
+        }
+        if u >= newest.0 {
+            return Some(newest.1);
+        }
+        let i = trail.iter().position(|(v, _)| *v >= u)?;
+        if i == 0 {
+            return Some(trail[0].1);
+        }
+        let (a, b) = (trail[i - 1], trail[i]);
+        let t = ((u - a.0) / (b.0 - a.0).max(1e-6)).clamp(0.0, 1.0);
+        Some(a.1 + (b.1 - a.1) * t)
+    };
+    at(u)
 }
 
 fn angle_diff(a: f64, b: f64) -> f64 {
     (a - b + 540.0).rem_euclid(360.0) - 180.0
 }
 
+/// The height of the contact wire over the rails (m): the standard one of the vehicle's class,
+/// kept within what its pantograph reaches (a wire it cannot touch would strand it on a map
+/// that draws none).
+fn wire_height(class: Option<omsi_sim::rail::RailClass>, shape: &omsi_trolley::PantoShape) -> f32 {
+    use omsi_sim::rail::RailClass;
+    let standard = match class {
+        Some(RailClass::Train) => 5.6,
+        _ => 5.7,
+    };
+    let (lo, hi) = (shape.height_at(0.15), shape.height_at(0.92));
+    if (lo..=hi).contains(&standard) { standard } else { shape.height_at(0.6) }
+}
+
+/// How rough the wire is for the head: more in the wet, and in frost with ice on it.
+fn wire_roughness(wet: f32, temperature: f32) -> f32 {
+    let cold = temperature < 0.0 && wet > 0.05;
+    1.3 + 0.5 * wet.clamp(0.0, 2.0) + if cold { 1.5 } else { 0.0 }
+}
+
 impl RailDrive {
+    /// A copy to look ahead along the track with: the position only, not the trail kept for the
+    /// coupled parts (about 100 KB).
+    fn probe(&self) -> RailDrive {
+        RailDrive { lane: self.lane, s: self.s, along: self.along, trail: Default::default(), u: self.u, body: omsi_sim::rail::Body::default(), last_heading: None }
+    }
+
+    /// The contact wire above the track at the pantograph: at the standard height of the
+    /// vehicle's class, kept within what its pantograph reaches (a wire it cannot touch would
+    /// strand it on a map that draws none), staggered across the track as a real wire is so
+    /// that the strip wears evenly, hard where the track forks or crosses, rougher in the wet.
+    pub(crate) fn catenary(&self, net: &Network, v: &omsi_sim::VehicleInstance) -> Option<omsi_sim::vehicle::Catenary> {
+        let g = v.pantograph()?;
+        let shape = g.shape()?;
+        use omsi_sim::rail::RailClass;
+        let height = wire_height(RailClass::of(&v.ty.def), shape);
+        // the stagger: a zigzag of 20 cm either side, 60 m to the swing
+        let lateral = 0.2 * (self.u * std::f64::consts::TAU / 60.0).sin() as f32;
+        // the pantograph's head is ahead of or behind the origin: look where it is on the lane
+        let mut probe = self.probe();
+        probe.step(net, None, shape.head[1], 0);
+        let lane = &net.lanes[probe.lane];
+        let to_end = (lane.length() - probe.s).min(probe.s);
+        let junction = (probe.s < lane.length() * 0.5 && net.prev.get(probe.lane).is_some_and(|p| p.len() > 1))
+            || (probe.s >= lane.length() * 0.5 && lane.next.len() > 1);
+        let hard = if junction { (1.0 - to_end / 4.0).clamp(0.0, 1.0) } else { 0.0 };
+        let roughness = wire_roughness(v.host.street_cond, v.host.temperature);
+        Some(omsi_sim::vehicle::Catenary { height, lateral, live: true, hard, roughness })
+    }
+
     /// Move `ds` metres (forward along the vehicle, negative backwards) and put the
     /// vehicle there. `blinker`: 1 left, 2 right (the branch at the next fork).
     pub(crate) fn advance(&mut self, p: &mut Player, net: &Network, world: &World, scenery: &mut omsi_sim::scenery::SceneryState, dt: f32, ds: f32, blinker: u8) {
@@ -245,6 +318,24 @@ impl RailDrive {
         v.heading = heading;
         v.pitch = pitch;
         v.bank = 0.0;
+        // the body rides on its springs: it leans out of bends, dips under braking and feels the
+        // rails' unevenness, instead of being nailed to the line between the bogies
+        if let (Some(class), true) = (omsi_sim::rail::RailClass::of(&v.ty.def), dt > 0.0 && omsi_sim::rail::realistic()) {
+            let span = bogie_dist.map_or(8.0, |l| l * 2.0);
+            let yaw = self.last_heading.map_or(0.0, |h| angle_diff(heading, h).to_radians() / dt as f64) as f32;
+            let a_long = v.rail_outcome().map_or(0.0, |o| o.accel);
+            let params = omsi_sim::rail::BodyParams::of(class, span);
+            let out = self.body.step(&params, dt, v.physics.speed, a_long, yaw.clamp(-1.0, 1.0));
+            v.pitch += out.pitch_deg;
+            v.bank = out.roll_deg;
+            v.position.z += out.heave as f64;
+            v.set_engine_var("rail_body_roll", out.roll_deg);
+            v.set_engine_var("rail_body_pitch", out.pitch_deg);
+            v.set_engine_var("rail_body_heave", out.heave);
+            v.set_engine_var("rail_accel_side", out.a_side);
+            v.set_engine_var("rail_accel_vert", out.a_vert);
+        }
+        self.last_heading = Some(heading);
         // the track steers: the wheel stays straight
         let mut c = v.physics.controls;
         c.steering = 0.0;
@@ -273,7 +364,8 @@ impl RailDrive {
             };
             // (a part may run ahead of the vehicle's origin - a bogie frame under its front
             // end - where the trail, which holds on to its newest point, has nothing yet)
-            v.retrail(dt, &|d| if d < 0.0 { probe(d) } else { point_at(trail, u - d).or_else(|| probe(d)) });
+            let head = Some((u, track_pos));
+            v.retrail(dt, &|d| if d < 0.0 { probe(d) } else { point_at(trail, head, u - d).or_else(|| probe(d)) });
         }
     }
 
@@ -322,6 +414,29 @@ impl RailDrive {
             }
         }
         true
+    }
+
+    /// What the track under the vehicle is like for its dynamics: the grade in the direction
+    /// the vehicle faces, the radius of the curve and whether it is in a tunnel.
+    pub(crate) fn env(&self, net: &Network, supply: (Option<omsi_transit::Supply>, Option<omsi_transit::Supply>)) -> omsi_sim::vehicle::RailEnv {
+        let lane = &net.lanes[self.lane];
+        let len = lane.length();
+        // the rise over 10 m of this lane (the two ends of a lane are joined by `step`, so a
+        // short lane just looks at what it has)
+        let (s0, s1) = ((self.s - 5.0).max(0.0), (self.s + 5.0).min(len));
+        let (p0, p1) = (lane.at(s0).0, lane.at(s1).0);
+        let run = (p1.truncate() - p0.truncate()).length();
+        let along_slope = if run > 0.5 { ((p1.z - p0.z) / run) as f32 } else { 0.0 };
+        let grade = if self.along { along_slope } else { -along_slope };
+        let k = lane.curvature_at(self.s).abs();
+        let name = lane.name.to_ascii_lowercase();
+        omsi_sim::vehicle::RailEnv {
+            grade: grade.clamp(-0.2, 0.2),
+            radius: if k > 1e-4 { 1.0 / k } else { f32::INFINITY },
+            in_tunnel: lane.track.is_some_and(|t| t.tunnel) || ["tunnel", "tunel", "subway", "ubahn", "u-bhf", "u_bhf", "metro"].iter().any(|t| name.contains(t)),
+            wire: supply.0,
+            third_rail: supply.1,
+        }
     }
 
     /// The next (or previous) rail lane among `candidates`: the indicator's branch, else
@@ -389,36 +504,21 @@ pub(crate) fn frame(p: &mut Player, net: Option<&Network>, world: &World, scener
         }
         return;
     }
-    // A vehicle whose scripts give no drive to a driver (the stock trains are scripted for
-    // the AI only) is driven by a plain traction and brake of its own: a locomotive's
-    // pull (up to 300 kN, 4 MW) and 1.2 m/s² of brake at full pedal.
-    let total_mass = p.vehicle.physics.mass_kg.max(1000.0)
-        + p.vehicle.trailers.iter().map(|t| {
-            let m = t.ty.def.mass;
-            if m < 100.0 { m * 1000.0 } else { m }
-        }).sum::<f32>();
-
-    let c = p.vehicle.physics.controls;
-    let scripted = p.vehicle.var("M_Wheel").is_some_and(|m| m.abs() > 1.0) || p.vehicle.var("Brakeforce").is_some_and(|b| b > 1.0);
-    if !scripted {
-        let m = total_mass;
-        let v = p.vehicle.physics.speed;
-        let reverse = p.vehicle.var("rail_reverse").is_some_and(|r| r > 0.5);
-        let pull = (c.throttle.clamp(0.0, 1.0) * 300_000.0).min(4.0e6 / v.abs().max(1.0)).min(0.15 * m * 9.81) * if reverse { -1.0 } else { 1.0 };
-        let brake = c.brake.clamp(0.0, 1.0) * 1.2 * m;
-        let resist = 0.002 * m * 9.81 + 5.0 * v * v;
-        let mut dv = (pull / m) * dt;
-        let stop = ((brake + resist) / m) * dt;
-        let nv = v + dv;
-        dv = if nv.abs() <= stop && c.throttle < 0.05 { -v } else { dv - stop * nv.signum() };
-        p.vehicle.set_speed(v + dv);
-    } else if !p.vehicle.trailers.is_empty() {
-        let ratio = p.vehicle.physics.mass_kg / total_mass;
-        if ratio < 0.99 && dt > 0.0 {
-            let last_a = p.vehicle.physics.accel.y;
-            let excess_a = last_a * (1.0 - ratio);
-            let new_v = p.vehicle.physics.speed - excess_a * dt;
-            p.vehicle.set_speed(new_v);
+    // The track's grade and curve go to the vehicle's own dynamics (`omsi_sim::rail`): its
+    // drive and brakes - the scripts', or a class's typical ones for a vehicle scripted for the
+    // AI only - against the resistance of the rails, the weight on the slope and the adhesion
+    // of wheel on rail. The speed they make is the distance covered below.
+    if let Some(r) = p.rail.as_ref() {
+        // where the current is, when the map's `transport` folder says (a pantograph under the
+        // vehicle's middle, a shoe at its side)
+        let at = p.vehicle.position;
+        let place = [at.x, at.y, at.z];
+        let supply = (world.transit.catenary.as_ref().and_then(|e| e.supply_at(place)), world.transit.third_rail.as_ref().and_then(|e| e.supply_at(place)));
+        let env = r.env(net, supply);
+        p.vehicle.set_rail_env(Some(env));
+        if omsi_sim::rail::realistic() {
+            let wire = r.catenary(net, &p.vehicle);
+            p.vehicle.set_catenary(wire);
         }
     }
     let ds = p.vehicle.physics.speed * dt;
@@ -433,6 +533,33 @@ pub(crate) fn frame(p: &mut Player, net: Option<&Network>, world: &World, scener
 mod tests {
     use super::*;
 
+    fn shape(top: f32) -> omsi_trolley::PantoShape {
+        omsi_trolley::PantoShape { heights: (0..=32).map(|i| 3.3 + (top - 3.3) * i as f32 / 32.0).collect(), head: [0.0, 0.0], half_width: 0.5 }
+    }
+
+    #[test]
+    fn the_wire_is_the_standard_height_where_the_pantograph_reaches_it() {
+        use omsi_sim::rail::RailClass;
+        assert_eq!(wire_height(Some(RailClass::Tram), &shape(6.5)), 5.7);
+        assert_eq!(wire_height(Some(RailClass::Train), &shape(6.5)), 5.6);
+    }
+
+    #[test]
+    fn a_wire_beyond_the_reach_is_brought_within_it() {
+        use omsi_sim::rail::RailClass;
+        let s = shape(4.6);
+        let h = wire_height(Some(RailClass::Tram), &s);
+        assert!(h <= s.top() && h >= s.bottom(), "{h}");
+    }
+
+    #[test]
+    fn the_wire_is_rougher_in_the_wet_and_in_frost() {
+        let dry = wire_roughness(0.0, 15.0);
+        assert!(wire_roughness(1.0, 15.0) > dry);
+        assert!(wire_roughness(1.0, -5.0) > wire_roughness(1.0, 15.0));
+        assert_eq!(wire_roughness(0.0, -5.0), dry, "dry frost is not ice");
+    }
+
     #[test]
     fn point_at_interpolates_properly() {
         let mut trail = std::collections::VecDeque::new();
@@ -440,14 +567,32 @@ mod tests {
         trail.push_back((10.0, DVec3::new(10.0, 0.0, 0.0)));
         trail.push_back((20.0, DVec3::new(20.0, 10.0, 5.0)));
 
-        let p0 = point_at(&trail, 0.0).unwrap();
+        let p0 = point_at(&trail, None, 0.0).unwrap();
         assert!((p0 - DVec3::new(0.0, 0.0, 0.0)).length() < 1e-4);
 
-        let p5 = point_at(&trail, 5.0).unwrap();
+        let p5 = point_at(&trail, None, 5.0).unwrap();
         assert!((p5 - DVec3::new(5.0, 0.0, 0.0)).length() < 1e-4);
 
-        let p15 = point_at(&trail, 15.0).unwrap();
+        let p15 = point_at(&trail, None, 15.0).unwrap();
         assert!((p15 - DVec3::new(15.0, 5.0, 2.5)).length() < 1e-4);
+    }
+
+    /// The trail is sampled every 10 cm; a place just behind the vehicle is the same distance
+    /// from where it is whichever way it is asked: a stale newest sample made it jump.
+    #[test]
+    fn the_newest_place_follows_the_vehicle_not_the_last_sample() {
+        let mut trail = std::collections::VecDeque::new();
+        trail.push_back((0.0, DVec3::new(0.0, 0.0, 0.0)));
+        trail.push_back((10.0, DVec3::new(10.0, 0.0, 0.0)));
+        // 7 cm further on, not yet sampled
+        let head = Some((10.07, DVec3::new(10.07, 0.0, 0.0)));
+        let behind = point_at(&trail, head, 10.07 - 0.02).unwrap();
+        assert!((behind.x - 10.05).abs() < 1e-6, "{behind:?}");
+        assert!((point_at(&trail, head, 10.07).unwrap().x - 10.07).abs() < 1e-6);
+        // the samples older than the newest are unchanged
+        assert!((point_at(&trail, head, 5.0).unwrap().x - 5.0).abs() < 1e-6);
+        // without a head the newest sample is the end
+        assert_eq!(point_at(&trail, None, 10.05).unwrap().x, 10.0);
     }
 
     #[test]
@@ -482,6 +627,8 @@ mod tests {
             along: true,
             trail: Default::default(),
             u: 0.0,
+            body: Default::default(),
+            last_heading: None,
         };
         let mut f_north = r_north.clone();
         f_north.step(&net, None, l, 0);
@@ -500,6 +647,8 @@ mod tests {
             along: false,
             trail: Default::default(),
             u: 0.0,
+            body: Default::default(),
+            last_heading: None,
         };
         let mut f_south = r_south.clone();
         f_south.step(&net, None, l, 0);
@@ -552,5 +701,16 @@ mod tests {
         assert!(track_for(&net, DVec3::new(500.0, 50.0, 0.0), 0.0, 0.5).is_none());
     }
 
+    #[test]
+    fn the_track_is_looked_for_at_the_height_the_vehicle_was_placed_at() {
+        use omsi_sim::traffic::LaneBuilder;
+        let level = |z: f64| LaneBuilder::polyline(vec![DVec3::new(0.0, 0.0, z), DVec3::new(0.0, 100.0, z)], LaneKind::Rail, 1.435);
+        let net = Network { lanes: vec![level(0.0), level(20.0)], ..Default::default() };
+        let lifted = DVec3::new(0.0, 50.0, 50005.0);
+        assert!(track_for(&net, lifted, 0.0, 3000.0).is_none());
+        let (lane, ..) = track_for(&net, search_point(lifted, 0.0), 0.0, 3000.0).unwrap();
+        assert_eq!(lane, 0);
+        let (lane, ..) = track_for(&net, search_point(lifted, 20.0), 0.0, 3000.0).unwrap();
+        assert_eq!(lane, 1);
+    }
 }
-

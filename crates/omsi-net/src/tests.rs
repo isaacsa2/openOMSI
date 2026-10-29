@@ -2,6 +2,7 @@
 
 use super::*;
 mod bus_info;
+mod freetex;
 
 fn pose(x: f64) -> Pose {
     Pose {
@@ -1514,3 +1515,5 @@ fn a_player_without_a_bus_sends_a_heartbeat() {
 mod connections;
 
 mod lifecycle;
+mod traffic;
+mod voice;

@@ -194,11 +194,21 @@ impl Offscreen<'_> {
             ref camera,
             ref mut scene,
             ref spray,
+            ref settings,
             ..
         } = *self;
         {
             let vehicles = steps::light_vehicles(player_ref.as_ref(), traffic.as_ref(), remotes_off);
-            world_lights(renderer, world, scene, weather, daylight, camera.position, &vehicles);
+            world_lights(renderer, world, scene, weather, daylight, camera.position, &vehicles, &settings.vehicle_smoke, player_ref.is_some());
+            if omsi_cfg::flags::OMSI_FLASHLIGHT.is_set() {
+                lights::flashlight_ahead(scene, &camera);
+            }
+            if let Some(p) = player_ref.as_ref() {
+                if let Some(tv) = p.trolley_view.as_ref() {
+                    tv.push_effects(scene, &p.vehicle);
+                }
+                p.panto_fx.push_effects(scene);
+            }
             let (kind, rate) = precip_of(weather);
             let mut rn = rain::Rain::new();
             rn.set(kind, rate, world.settings.rain_quality());
@@ -311,8 +321,9 @@ impl Offscreen<'_> {
                 nav.schedule = omsi_cfg::flags::OMSI_NAV_SCHEDULE.is_set();
                 nav.show_ai = settings.nav_ai;
                 nav.show_surface = settings.nav_surface;
-                nav.light = settings.nav_light;
+                nav.light = settings.is_light_theme();
                 nav.show_3d = settings.nav_3d;
+                nav.classic_2d = settings.nav_classic_2d;
                 nav.widget = settings.nav_widget;
                 nav.size = settings.nav_size;
                 if omsi_cfg::flags::OMSI_NAV_2D.is_set() {
@@ -430,13 +441,56 @@ impl Offscreen<'_> {
                 view_formats: &[],
             });
             let view = target.create_view(&Default::default());
+            let stereo = omsi_cfg::flags::OMSI_BENCH_STEREO.is_set();
+            let right = stereo.then(|| {
+                renderer.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("stereo bench right"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: renderer.format(),
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+            });
+            let right_view = right.as_ref().map(|t| t.create_view(&Default::default()));
+            let mut cameras = [camera.clone(), camera.clone()];
+            for (eye, offset) in cameras.iter_mut().zip([-0.032, 0.032]) {
+                eye.position += camera.right().as_dvec3() * offset;
+                eye.fov_deg = 100.0;
+            }
+            let projections = cameras.each_ref().map(|c| {
+                glam::Mat4::perspective_rh(
+                    c.fov_deg.to_radians(),
+                    w as f32 / h as f32,
+                    c.far,
+                    c.near,
+                )
+            });
+            if stereo {
+                renderer.prepare_xr_eye_pipelines();
+                log::info!(
+                    "bench stereo: {w}x{h} per eye, symmetric vertical FOV 100, IPD 64 mm; fixed scene, no runtime or desktop pacing"
+                );
+            }
             let (mut cpu, mut gpu) = (Vec::with_capacity(n), Vec::with_capacity(n));
             for k in 0..n {
                 let t = Instant::now();
                 if let Some(p) = player_ref.as_ref() {
-                    render_mirrors(renderer, scene, world, p, lighting, MirrorPick::Turn(k, &[]), None);
+                    render_mirrors(renderer, scene, world, p, lighting, MirrorPick::Turn(k, &[]), None, &[]);
                 }
-                renderer.render(scene, &view, w, h, camera, lighting);
+                if let Some(right) = &right_view {
+                    for (eye, target) in [&view, right].into_iter().enumerate() {
+                        renderer.render_xr_eye(scene, target, w, h, &cameras[eye], lighting, projections[eye], eye == 1);
+                    }
+                } else {
+                    renderer.render(scene, &view, w, h, camera, lighting);
+                }
                 let drawn = t.elapsed().as_secs_f64();
                 let t = Instant::now();
                 let _ = omsi_render::wait_gpu(&renderer.device, None);
@@ -512,8 +566,25 @@ impl Offscreen<'_> {
         world.finish_texture_upgrades(renderer, scene);
         // OMSI_WARM_FRAMES=n: n frames drawn before the picture, for what reads the frame
         // before it (the rain on the glass looks through the last picture)
-        for _ in 0..omsi_cfg::flags::OMSI_WARM_FRAMES.parse::<usize>().unwrap_or(0) {
-            let _ = renderer.render_to_image(scene, w, h, camera, lighting)?;
+        // OMSI_CAM_SWEEP=yaw[,jump]: the warm frames come from a camera that turns `yaw`
+        // degrees a frame and ends in the picture's pose (so the picture follows frames of a
+        // pan, for what reads the last frame: the bounced light), or, with `jump` metres,
+        // from a place that far to the side (a cut)
+        let sweep = omsi_cfg::flags::OMSI_CAM_SWEEP.var().map(|v| {
+            let mut it = v.split(',').map(|x| x.trim().parse::<f64>().unwrap_or(0.0));
+            (it.next().unwrap_or(0.0), it.next().unwrap_or(0.0))
+        });
+        let warm = omsi_cfg::flags::OMSI_WARM_FRAMES.parse::<usize>().unwrap_or(0);
+        for k in 0..warm {
+            let mut cam = *camera;
+            if let Some((yaw, jump)) = sweep {
+                let behind = (warm - k) as f64;
+                cam.yaw -= (yaw * behind) as f32;
+                if jump != 0.0 && k + 1 < warm {
+                    cam.position.x += jump;
+                }
+            }
+            let _ = renderer.render_to_image(scene, w, h, &cam, lighting)?;
         }
         Ok(())
     }
@@ -533,7 +604,7 @@ impl Offscreen<'_> {
         } = *self;
         let t0 = Instant::now();
         if let Some(p) = player_ref.as_ref() {
-            render_mirrors(renderer, scene, world, p, lighting, MirrorPick::All(&[]), None);
+            render_mirrors(renderer, scene, world, p, lighting, MirrorPick::All(&[]), None, &[]);
         }
         if let Some(p) = player_ref.as_ref() {
             let mode = omsi_cfg::flags::OMSI_MIRROR_HUD.parse::<u8>().unwrap_or(settings.mirror_hud);

@@ -1,21 +1,22 @@
 //! Static spline batching and the GPU cache of meshes, textures and materials.
 use super::*;
+use crate::spline_layers::SplineLayer;
 
 /// Short static spline segments with matching materials share a mesh within a 48 m cell.
 /// Their coordinates, material order, terrain mapping and shadow flag stay intact; long segments retain
 /// their own culling bounds. The original meshes remain in the staging/collision data.
 pub(super) fn batch_static_splines(
-    splines: Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3)>,
-) -> Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3)> {
+    splines: Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3, SplineLayer)>,
+) -> Vec<(Arc<MeshData>, Arc<SplineType>, bool, DVec3, SplineLayer)> {
     if omsi_cfg::flags::OMSI_NO_SPLINE_BATCHING.is_set() {
         return splines;
     }
-    let mut groups: Vec<(Vec<Arc<MeshData>>, Arc<SplineType>, bool, DVec3)> = Vec::new();
+    let mut groups: Vec<(Vec<Arc<MeshData>>, Arc<SplineType>, bool, DVec3, SplineLayer)> = Vec::new();
     let mut cells = HashMap::new();
     let mut signatures = HashMap::new();
     let mut type_materials = HashMap::new();
     let material_batching = !omsi_cfg::flags::OMSI_NO_MATERIAL_SPLINE_BATCHING.is_set();
-    for (mesh, ty, casts, sort_origin) in splines {
+    for (mesh, ty, casts, sort_origin, level) in splines {
         let (lo, hi) = mesh.positions.iter().fold(
             (glam::Vec3::splat(f32::INFINITY), glam::Vec3::splat(f32::NEG_INFINITY)),
             |(lo, hi), &p| (lo.min(p), hi.max(p)),
@@ -49,26 +50,28 @@ pub(super) fn batch_static_splines(
                 casts,
                 mesh.one_sided,
                 slots,
+                // (a layer on another spline or on a surface object keeps its depth apart)
+                level,
             );
             *cells.entry(key).or_insert_with(|| {
                 let i = groups.len();
-                groups.push((Vec::new(), ty.clone(), casts, sort_origin));
+                groups.push((Vec::new(), ty.clone(), casts, sort_origin, level));
                 i
             })
         } else {
             let i = groups.len();
-            groups.push((Vec::new(), ty, casts, sort_origin));
+            groups.push((Vec::new(), ty, casts, sort_origin, level));
             i
         };
         groups[group].0.push(mesh);
     }
-    groups.into_iter().map(|(mut meshes, ty, casts, sort_origin)| {
+    groups.into_iter().map(|(mut meshes, ty, casts, sort_origin, level)| {
         let mesh = if meshes.len() == 1 {
             meshes.pop().unwrap()
         } else {
             Arc::new(MeshData::merge_static(&meshes.iter().map(AsRef::as_ref).collect::<Vec<_>>()))
         };
-        (mesh, ty, casts, sort_origin)
+        (mesh, ty, casts, sort_origin, level)
     }).collect()
 }
 
@@ -185,7 +188,7 @@ impl GpuCache {
     }
 
     pub(super) fn add_blank(&mut self, renderer: &Renderer, scene: &mut Scene, width: u32, height: u32) -> TextureId {
-        let id = renderer.add_blank_texture(scene, width, height);
+        let id = renderer.add_blank_texture(scene, width, height, false);
         self.take_texture_slot(renderer, scene, id)
     }
 
@@ -193,18 +196,8 @@ impl GpuCache {
     /// viewed much smaller than their authored pixel size; without lower levels the sampler
     /// minifies level zero directly and thin glyph strokes break into unstable pixels.
     pub(super) fn add_blank_mips(&mut self, renderer: &Renderer, scene: &mut Scene, width: u32, height: u32) -> TextureId {
-        let (width, height) = (width.max(1), height.max(1));
-        self.add_image(
-            renderer,
-            scene,
-            &Image {
-                width,
-                height,
-                rgba: vec![0; (width * height * 4) as usize],
-                has_alpha: true,
-            },
-            true,
-        )
+        let id = renderer.add_blank_texture(scene, width, height, true);
+        self.take_texture_slot(renderer, scene, id)
     }
 
     pub(super) fn take_texture_slot(

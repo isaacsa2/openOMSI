@@ -244,6 +244,13 @@ every `[stamper]` of every section, and a passenger with a ticket to stamp uses 
 nearest the door they came in by. Write one `[stamper]` block per validator (path point,
 then x, y, z of the device, as usual); OMSI 2 still takes the last of them.
 
+The validators count from 0 in the order the cabin file writes them. A stamp fires the
+sound trigger `ev_Stamper` (as in OMSI 2) and also `ev_StamperN` for validator N, so each
+one can have its own placed sound, and the script triggers `PAX_Stamper_Used` and
+`PAX_StamperN_Used` (for animations or ticket systems). OMSI 2 fires only `ev_Stamper`; a
+bus that gives each validator its own sound can mute the `ev_Stamper` one by a variable
+the `PAX_Stamper_Used` trigger sets.
+
 ## Scripts and plugins
 
 - Script variables and string variables have no count limit.
@@ -303,6 +310,24 @@ place in its first line and the station and song in its second.
 A map can have live weather from Tomorrow.io: add an `openomsi_weather.cfg` beside its
 `global.cfg`. See [weather areas](WEATHER_REGIONS.md) for the format, the player's setup
 and the [community config editor](https://openomsi.mxnticek.eu/weather/).
+
+## Trolleybuses: poles, drive and a wire
+
+OMSI 2 has no overhead wire of its own; its trolleybus add-ons ship a plugin DLL that reads the
+bus's place out of Omsi.exe and cannot run here. openOMSI simulates the wire itself, and a
+trolleybus add-on needs two things to use it:
+
+* in the vehicle's `.bus`, a `[trolley_pole]` for each pole (the hinge on the roof, the boom's
+  length, spring force, mass, retriever and motor) and a drive: `[trolley_rheostat]` or
+  `[trolley_async]`. A vehicle that keeps its own scripted drive just adds the poles: its driving
+  torque then works on a wire and stops without one. A model with poles of its own says
+  `visible 0` and rotates them by the game's `Trolley_Pole<k>_Elev` and `_Azim` variables;
+* for a map, a `trolley.txt` beside its `global.cfg` (or in a mod's `maps/<name>/` folder for a
+  map that has none): the wire's spans with their sag, the sections and where they are dead,
+  the insulators and the switches.
+
+Every key and variable is in [TROLLEYBUS.md](TROLLEYBUS.md); the map's masts and hangers stay
+the map's own objects.
 
 ## What stays as in OMSI 2
 

@@ -73,6 +73,9 @@ impl Renderer {
         let (full_w, full_h) = (width, height);
         let (width, height) = if with_overlays {
             self.scene_size(full_w, full_h)
+        } else if let Some(s) = self.xr_fsr_scale().filter(|_| projection.is_some()) {
+            // (a VR eye with FSR 1: drawn smaller, scaled up to the headset's image)
+            (((full_w as f32 * s).round() as u32).max(1), ((full_h as f32 * s).round() as u32).max(1))
         } else {
             (full_w, full_h)
         };
@@ -100,16 +103,17 @@ impl Renderer {
         };
         let aspect = self.texture_aspect.unwrap_or(width as f32 / height.max(1) as f32);
         let cam_rel = (camera.position - ro).as_vec3();
-        // The mirrors are drawn with the plain shading even in Enhanced: without the depth
-        // prepass (sized for the window) every layer of a mirror's picture ran the enhanced
-        // shader, 12.7 ms of GPU time for one 256-pixel mirror against 5.8 ms for the whole
-        // window; plainly shaded it is 0.6 ms, and a mirror's small picture shows no
+        // The mirrors are drawn with the plain shading even in Enhanced: a mirror has no depth
+        // prepass (sized for the window), so every layer of its picture runs the enhanced shader
+        // - 12.7 ms of GPU time for one 256-pixel mirror against 5.8 ms for the whole window on a
+        // weak card; plainly shaded it is 0.6 ms, and a mirror's small picture shows no
         // difference worth that - unless the player asks for it (`mirror_quality=enhanced`,
         // `RenderOptions::mirror_enhanced`) or `OMSI_MIRROR_ENHANCED=1`.
         // The headset's eyes are the real picture as much as the window is (#784: VR showed
         // the plain graphics with Enhanced on); the first eye is the one that moves the
         // exposure, the sky cube and the frame clock on, as the window does without VR.
         let xr_view = projection.is_some();
+        let eye_color = enhanced_view && !with_overlays && xr_view && self.hdr_eye_pass.is_some();
         let lead_view = (with_overlays || xr_view) && !second_eye;
         let enhanced_frame = lighting.enhanced && self.hdr_pass.is_some() && !env.no_enhanced && (with_overlays || xr_view || env.mirror_enhanced || self.options.mirror_enhanced);
         // the mirrors are drawn by the same path as the window (their picture graded with
@@ -127,7 +131,14 @@ impl Renderer {
             && !env.no_puddle_reflections;
         let reflection_frame = !enhanced && puddles_wanted && self.reflection_pass.is_some();
         let masked_frame = enhanced || reflection_frame;
-        let (grid, lamp_shadows) = self.prepare_lights(scene, cam_rel, enhanced_frame, lighting.lamp_shadows && with_overlays && projection.is_none() && self.shadows.shadow_pipelines.len() > 6, lighting.inside.as_ref());
+        let eye = LightEye {
+            cam_rel,
+            view_proj: projection.is_none().then(|| camera.view_proj(aspect, ro)),
+            vehicle: lighting.inside.as_ref().map(|b| (b, lighting.inside_rotation)),
+            // (the cube maps' tiles are there only if the atlas was made with them)
+            level: self.options.light_shadows.min(if self.shadows.lamp_atlas.has_cubes() { 2 } else { 1 }),
+        };
+        let (grid, lamp_shadows) = self.prepare_lights(scene, &eye, enhanced_frame, lighting.lamp_shadows && self.options.light_shadows > 0 && with_overlays && projection.is_none() && self.shadows.shadow_pipelines.len() > 6);
         self.prepare_coronas(scene, lighting.night, lighting.inside.as_ref().filter(|v| point_in_vehicle_box(camera.position, v)));
         // (the mirrors draw no smoke, see `encode_main_late`)
         if exclude_texture.is_none() {
@@ -140,24 +151,36 @@ impl Renderer {
         let ao_on = with_overlays && self.rt.is_none() && self.options.ssao && self.ssao_pipeline.is_some() && !env.no_ao;
         // the enhanced path's shading is costly: the depth prepass keeps it to the visible
         // surface (without multisampling, see `share_depth`)
-        // (the motion vectors are made from it: OMSI_MOTION_VECTORS, the window's picture)
+        // Motion vectors require readable depth on a single-sampled desktop view.
         let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none())
-            || (self.motion.is_some() && with_overlays && projection.is_none());
+            || (self.motion.is_some() && with_overlays && projection.is_none() && self.options.msaa <= 1);
         let prepass_on = ao_on || depth_wanted;
+        // the terrain's paint laid into one albedo picture first: the window's enhanced
+        // picture, single-sampled, with the camera group's slot 8 free of the AO
+        let ground_ok = with_overlays && enhanced && projection.is_none() && !second_eye && !ao_on && !rt_frame && prepass_on && self.options.msaa <= 1
+            && exclude_texture.is_none() && !env.no_ground_pass && self.ground_eligible();
         let prepass_reach = if depth_wanted || env.no_ao_reach { f32::MAX } else { AO_PREPASS_REACH };
         // (only the bind group is made again, by `upload_draw_list`: dropping the instance
         // buffers for it wrote every instance's entries again at each render-scale step)
-        if prepass_on && self.ensure_ao(width, height) {
+        if prepass_on && self.ensure_ao(width, height, crate::lighting::bounce_wanted(ao_on, enhanced_frame, self.street_light())) {
             // a new AO texture: the camera bind group must point at it
             scene.camera_bind_group = None;
             self.targets.hdr_targets.clear();
+        }
+        // (the ground albedo picture only while that pass can run)
+        if prepass_on && self.ensure_ground(width, height, self.ground_eligible()) {
+            scene.camera_bind_group = None;
+        }
+        // (slot 8 holds the AO's picture or the ground albedo's: the group is made again when that changes)
+        if prepass_on && self.ground_bound.get() != self.ground_should_bind() {
+            scene.camera_bind_group = None;
         }
         if rt_frame && self.rt.as_mut().is_some_and(|rt| rt.ensure_targets(&self.device, width, height)) {
             // the camera bind group must point at the new lighting texture
             scene.camera_bind_group = None;
         }
         if masked_frame {
-            self.hdr_targets(width, height);
+            self.hdr_targets(width, height, rt_gbuf() && !eye_color);
         }
         if glass_on {
             self.prepare_glass_behind(scene, width, height, if masked_frame { HDR_FORMAT } else { self.format });
@@ -205,6 +228,7 @@ impl Renderer {
             aspect,
             cam_rel,
             xr_view,
+            eye_color,
             lead_view,
             enhanced_frame,
             enhanced,
@@ -215,6 +239,7 @@ impl Renderer {
             lamp_shadows,
             rt_frame,
             ao_on,
+            ground_ok,
             prepass_on,
             prepass_reach,
             dt,
@@ -229,10 +254,30 @@ impl Renderer {
         let (camera, lighting, ro, cam_rel, aspect) = (f.camera, f.lighting, f.ro, f.cam_rel, f.aspect);
         let (enhanced, lead_view, rt_frame, ao_on, glass_on, shadows) = (f.enhanced, f.lead_view, f.rt_frame, f.ao_on, f.glass_on, sh.shadows);
         let lamp_shadows = &f.lamp_shadows;
+        // The lamps' matrices: the window's frame draws the tiles and keeps what it drew them
+        // with; a mirror's picture looks the same tiles up, as it looks the sun's cascades up.
+        let lamp_mats: Vec<Mat4> = if f.with_overlays && f.projection.is_none() {
+            let m: Vec<Mat4> = (0..LAMP_SHADOWS).map(|k| lamp_shadows.iter().find(|l| l.slot == k).map_or(Mat4::ZERO, |l| l.view_proj())).collect();
+            self.shadows.lamp_matrices.borrow_mut().clone_from(&m);
+            m
+        } else {
+            self.shadows.lamp_matrices.borrow().clone()
+        };
         let vp_mat = f
             .projection
             .map(|p| p * Mat4::look_to_rh((camera.position - ro).as_vec3(), camera.forward(), camera.up()))
             .unwrap_or_else(|| camera.view_proj(aspect, ro));
+        // the last frame's picture for the bounced light, found again under this frame's view
+        if lead_view {
+            let size = (f.width, f.height);
+            self.tone.bounce_reproj = if crate::lighting::bounce_wanted(ao_on, enhanced, self.street_light()) {
+                let view = Mat4::look_to_rh(cam_rel, camera.forward(), camera.up());
+                crate::lighting::bounce_history(self.tone.bounce_prev, view, ro, size, cam_rel, camera.forward(), f.dt)
+            } else {
+                (Mat4::ZERO.to_cols_array_2d(), 0.0)
+            };
+            self.tone.bounce_prev = crate::lighting::bounce_wanted(ao_on, enhanced, self.street_light()).then_some((vp_mat, ro, size, cam_rel, camera.forward()));
+        }
         // where the tile light maps lie, relative to the render origin
         {
             let (lx, ly, side) = self.lights.lm_place.get();
@@ -246,6 +291,22 @@ impl Renderer {
                 haze: [v.fog_range, v.visibility, if v.overcast { 1.0 } else { 0.0 }, ro.z as f32],
             };
             self.queue.write_buffer(&self.sky.vanilla_sky_buf, 0, bytemuck::bytes_of(&u));
+        }
+        // the snow track field: the render origin modulo its side (it wraps around the
+        // world), and how the roads' snow stands (road_snow.wgsl)
+        {
+            let side = SNOW_TRACK_SIDE;
+            let v: [f32; 8] = [
+                ro.x.rem_euclid(side) as f32,
+                ro.y.rem_euclid(side) as f32,
+                side as f32,
+                if lighting.snow_tracks { 1.0 } else { 0.0 },
+                lighting.road_snow.map(|r| r.clamp(0.0, 1.0)).unwrap_or(-1.0),
+                lighting.snow_fallen.rem_euclid(65536.0) as f32,
+                lighting.snow_ruts.clamp(0.0, 1.0),
+                0.0,
+            ];
+            self.queue.write_buffer(&self.lights.snow_track_uniform, 0, bytemuck::cast_slice(&v));
         }
         let cu = CameraUniform {
             post: [
@@ -349,8 +410,8 @@ impl Renderer {
             ],
             light_view_proj_close: sh.light_view_proj_close.to_cols_array_2d(),
             wind: [lighting.glass_wind.x, lighting.glass_wind.y, lighting.glass_wind.z, 1.0],
-            lamp_view_proj: std::array::from_fn(|k| lamp_shadows.get(k).map_or(Mat4::IDENTITY, |l| l.view_proj()).to_cols_array_2d()),
-            lamp_shadow: std::array::from_fn(|k| lamp_shadows.get(k).map_or(-1.0, lamp_shadow_code)),
+            lamp_view_proj: std::array::from_fn(|k| lamp_mats[k].to_cols_array_2d()),
+            lamp_atlas: self.shadows.lamp_atlas.uniform(),
             tree_wind: {
                 // the gusts drift with the wind: summed over the frames (the wind changes
                 // with the weather), in f64 and modulo the shaders' pattern period
@@ -377,6 +438,15 @@ impl Renderer {
                 _ => [0.0; 4],
             },
             cookies: self.lights.cookies.fields(),
+            cabin_lamps: {
+                let mut at = [-1.0f32; 16];
+                for (k, l) in lamp_shadows.iter().filter(|l| l.cabin.is_some()).take(16).enumerate() {
+                    at[k] = l.index as f32;
+                }
+                std::array::from_fn(|r| std::array::from_fn(|c| at[r * 4 + c]))
+            },
+            lod: [self.fsr_mip_bias(f), 0.0, 0.0, 0.0],
+            spot: classic_spot(scene, ro),
         };
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
@@ -419,9 +489,35 @@ impl Renderer {
                 log::info!("sky glow from the lamps: {raw:.3} (taken {:.3})", step.exp());
             }
         }
+        // the lightning goes on for every pipeline (the sound follows it); only the Enhanced one draws it
+        if lead_view {
+            self.tone.lightning.seed_once(lighting.day_seed);
+            let storm = crate::lighting::forced_storm().map_or(lighting.storm, |f| f.0).clamp(0.0, 1.0);
+            self.tone.flash = self.tone.lightning.step(storm, f.dt);
+        }
         let probe_redraw = enhanced
             && (lead_view || self.sky.sky_state.is_none())
             && self.prepare_enhanced(lighting, cam_rel, ro, f.dt);
         (vp_mat, cu, probe_redraw)
     }
+}
+
+/// The camera uniform's `spot`: the player's `[spotlight]`, the one classic spot of kind 1
+/// (the scene gives the player's alone, as Omsi.exe lights the road by it alone, 0x708acc);
+/// none while it is off or in a frame without a player's vehicle.
+fn classic_spot(scene: &Scene, ro: DVec3) -> [[f32; 4]; 4] {
+    let spot = scene.lights.iter().find_map(|l| {
+        let [range, setback, kind] = l.d3d_spot?;
+        (kind > 0.5 && l.mode == crate::LightMode::Vanilla && l.intensity > 0.0).then_some((l, range, setback))
+    });
+    let Some((l, range, setback)) = spot else { return [[0.0; 4]; 4] };
+    let at = (l.position - ro).as_vec3();
+    let d = l.direction.normalize_or_zero();
+    let c = l.color;
+    [
+        [at.x, at.y, at.z, range],
+        [d.x, d.y, d.z, l.cone[1]],
+        [c[0] * l.intensity, c[1] * l.intensity, c[2] * l.intensity, l.cone[0]],
+        [setback, 0.0, 0.0, 0.0],
+    ]
 }

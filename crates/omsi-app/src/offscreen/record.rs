@@ -101,6 +101,8 @@ impl Offscreen<'_> {
             view_sync::sync(ViewSync::traffic(t, &mut self.scenery), &mut self.sim_view, &self.world, &self.renderer, &mut self.scene);
         }
         let cam = self.camera_now();
+        let (p, view, keys) = (self.player.as_ref(), &self.sim_view.traffic, omsi_scene::road_snow::vehicles(None, self.traffic.as_deref()).iter().map(|x| x.0).chain([0]).collect::<Vec<_>>());
+        omsi_scene::road_snow::show_roofs(&self.renderer, &mut self.scene, keys, |k| if k == 0 { p.map(|p| (&p.render, &p.trailer_renders[..])) } else { view.car(k - 1).map(|c| (&c.body, &c.trailers[..])) });
         if let Some(h) = self.humans_off.as_mut() {
             view_sync::sync(ViewSync::people(h, None, cam.position), &mut self.sim_view, &self.world, &self.renderer, &mut self.scene);
         }
@@ -111,7 +113,16 @@ impl Offscreen<'_> {
         steps::world_lamps(&self.world, &self.renderer, &mut self.scene, &self.run_clock, &daylight, true, true);
         {
             let vehicles = steps::light_vehicles(self.player.as_ref(), self.traffic.as_ref(), &self.remotes_off);
-            world_lights(&mut self.renderer, &self.world, &mut self.scene, &self.weather, &daylight, cam.position, &vehicles);
+            world_lights(&mut self.renderer, &self.world, &mut self.scene, &self.weather, &daylight, cam.position, &vehicles, &self.settings.vehicle_smoke, self.player.is_some());
+            if omsi_cfg::flags::OMSI_FLASHLIGHT.is_set() {
+                lights::flashlight_ahead(&mut self.scene, &cam);
+            }
+        }
+        if let Some(p) = self.player.as_ref() {
+            if let Some(tv) = p.trolley_view.as_ref() {
+                tv.push_effects(&mut self.scene, &p.vehicle);
+            }
+            p.panto_fx.push_effects(&mut self.scene);
         }
         self.spray.sprites(cam.position, &mut self.scene.smoke);
         let lighting = self.lighting_now(&cam);

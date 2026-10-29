@@ -7,10 +7,13 @@ impl App {
     /// vehicle for each of them.
     pub(crate) fn tick_lan(&mut self, dt: f32) {
         let walker = self.walker_pose();
-        let radio_keyed = self.voice_radio_held();
+        let radio_keyed = self.voice_radio_keyed();
         let Some(lan) = self.net.lan.as_mut() else {
-            // (the session is over: the plugin is told so)
-            self.sound.voice = None;
+            self.gfx.sim_view.lan.stop_freetex();
+            // (the session is over: voice chat with it)
+            if let Some(mut v) = self.sound.voice.take() {
+                v.stop(self.sound.audio.as_ref());
+            }
             if let Some(p) = self.player.as_mut() {
                 for texture in &mut p.vehicle.host.script_textures {
                     texture.disable_network_snapshot();
@@ -20,6 +23,7 @@ impl App {
             }
             return;
         };
+        self.gfx.sim_view.lan.capture_freetex(self.player.as_ref(), &self.args.root);
         let duty = self
             .session.duty
             .as_ref()
@@ -41,8 +45,11 @@ impl App {
         let host = AppLanHost { args: &self.args, world: self.world.as_deref() };
         if lan.role == omsi_net::Role::Host {
             if let Some(t) = self.session.traffic.as_mut() {
+                // (the sounds of a car go by its id in the traffic table, as the clients know it)
                 for c in &mut t.sim.cars {
-                    self.net.remotes.publish_vehicle_sounds(lan, &mut c.vehicle, c.id, &config);
+                    if let Some(id) = t.table.id_of(c.id) {
+                        self.net.remotes.publish_vehicle_sounds(lan, &mut c.vehicle, id.raw() as u64, &config);
+                    }
                 }
             }
         }
@@ -82,6 +89,7 @@ impl App {
         );
         if let (Some(w), Some(r), Some(scene)) = (self.world.as_deref(), self.renderer.as_ref(), self.scene.as_mut()) {
             crate::view_sync::apply_lan(&mut self.net.remotes, &mut self.gfx.sim_view.lan, w, r, scene, self.sound.audio.as_ref(), &frame, dt);
+            self.gfx.sim_view.lan.sync_freetex(lan, &self.net.remotes, r, scene, &self.args.root);
         }
         for u in updates {
             self.apply_world_update(u);
@@ -91,6 +99,7 @@ impl App {
             self.lan_command(from, &text);
         }
         crate::admin_panel::tick(self);
+        crate::player_list::tick(self);
         self.tick_voice(dt);
     }
 
@@ -122,15 +131,25 @@ impl App {
                     None => log::info!("LAN: player {from} asked for switch {ev} of our bus from outside it, or for one only the driver works: ignored"),
                 }
             }
-            // the voice server of the session (`voice`): asked of the host, told by it
+            // what the session allows of voice chat: asked of the host, told by it
             Command::VoiceAsked => {
+                let range = self.settings.voice_range;
                 if let Some(l) = self.net.lan.as_mut().filter(|l| l.role == omsi_net::Role::Host) {
-                    l.command(from, &crate::voice::VoiceServer::command(crate::voice::hosted().as_ref()));
+                    let policy = l.voice_policy().with_range(range);
+                    l.set_voice_policy(policy);
+                    l.set_voice_listener(from);
+                    l.command(from, &policy.command());
                 }
             }
-            Command::Voice(server) => {
+            Command::Voice(policy) => {
                 if let Some(v) = self.sound.voice.as_mut() {
-                    v.set_server(server);
+                    v.set_policy(policy);
+                }
+            }
+            // an administrator silenced our voice chat, or allowed it again
+            Command::VoiceMuted(muted) => {
+                if let Some(v) = self.sound.voice.as_mut() {
+                    v.server_muted = muted;
                 }
             }
             command => crate::admin::carry_out(self, from, command),

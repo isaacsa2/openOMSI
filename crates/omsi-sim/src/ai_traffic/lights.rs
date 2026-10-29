@@ -147,10 +147,14 @@ impl TrafficSim {
     /// with a `[speedlimit]`) while a train's route is about to enter the track its signal
     /// route covers and no other train is on it; otherwise it shows stop (and falls back to
     /// stop behind the train that passed it).
-    pub fn signal_aspects(&self, routes: &[omsi_map::ailists::SignalRoute], player_rail: Option<(usize, bool)>) -> hashbrown::HashMap<i64, f32> {
+    pub fn signal_aspects(&mut self, routes: &[omsi_map::ailists::SignalRoute], player_rail: Option<(usize, bool)>) -> hashbrown::HashMap<i64, f32> {
         let mut out: hashbrown::HashMap<i64, f32> = hashbrown::HashMap::new();
         if routes.is_empty() {
             return out;
+        }
+        // (the signals of the map's blocks show whether their block is free)
+        for (id, a) in self.block_aspects() {
+            out.insert(id, a);
         }
         // per train: the map ids it stands on and those of its next lanes
         let mut trains: Vec<(i64, Vec<i64>)> = self
@@ -189,6 +193,20 @@ impl TrafficSim {
                 }
             }
             trains.push((here, ahead));
+        }
+        if omsi_cfg::flags::OMSI_DEBUG_SIGNALS.is_set() {
+            // where the player's train stands and which routes it is on or coming to
+            if let Some((here, ahead)) = trains.last() {
+                let on: Vec<i64> = routes.iter().filter(|r| r.entries.iter().any(|e| e[0] == *here)).map(|r| r.signal.0).collect();
+                let to: Vec<i64> = routes.iter().filter(|r| r.entries.iter().any(|e| ahead.contains(&e[0]) && e[0] != *here)).map(|r| r.signal.0).collect();
+                thread_local!(static LAST: std::cell::RefCell<(i64, Vec<i64>, Vec<i64>)> = const { std::cell::RefCell::new((i64::MIN, Vec::new(), Vec::new())) });
+                LAST.with(|l| {
+                    if *l.borrow() != (*here, on.clone(), to.clone()) {
+                        log::info!("signals: the train is on piece {here}, on the routes of signals {on:?}, coming to those of {to:?} ({} pieces ahead)", ahead.len());
+                        *l.borrow_mut() = (*here, on, to);
+                    }
+                });
+            }
         }
         for r in routes {
             let pieces: hashbrown::HashSet<i64> = r.entries.iter().map(|e| e[0]).collect();

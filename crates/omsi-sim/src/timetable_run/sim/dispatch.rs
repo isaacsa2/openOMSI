@@ -33,6 +33,7 @@ impl ScheduleSim {
         self.retry_at.clear();
         self.startup.clear();
         self.later_layover.clear();
+        self.tour_hold.clear();
         // Skip directly to the requested date, rather than rebuilding the timetable
         // once for every intervening day (hundreds of reassignments on year jumps).
         if day_time.is_finite() && day_time < self.day_base {
@@ -58,6 +59,12 @@ impl ScheduleSim {
     /// Car `id` runs no departure any more.
     pub fn forget_car(&mut self, id: u64) {
         self.car_departure.remove(&id);
+        self.tour_hold.remove(&id);
+    }
+
+    /// Car `id` stands where it set down until it drives up to its next trip's first stop.
+    pub fn tour_held(&self, id: u64, day_time: f64) -> bool {
+        self.tour_hold.get(&id).is_some_and(|&t| day_time < t)
     }
 
     /// The timetable bus on the road that runs departure `k` (not one that has been let go).
@@ -232,6 +239,7 @@ impl ScheduleSim {
                 .collect();
             for &id in &gone {
                 self.car_departure.remove(&id);
+                self.tour_hold.remove(&id);
                 self.running.retain(|r| r.car != id);
             }
             return gone;
@@ -248,11 +256,18 @@ impl ScheduleSim {
         let tod = day_time - self.day_base;
         let window = if std::mem::take(&mut self.restarted) { window.max(20.0 * 60.0) } else { window };
         let loading = window > 60.0;
+        // At the start (and after the clock was set) every trip still under way is put out,
+        // however long ago it left - yesterday's night trips before 24:00 among them, as
+        // Omsi.exe's loader places each tour's bus on its last trip begun (0x73a700): only
+        // the last 20 minutes' trips came, and a map opened in the evening never got the
+        // bus that stands on a light's detector from 20:00 to 04:00 (Städtedreieck's
+        // Bergerplatz, so its evening and night programs never ran).
+        let under_way = |d: &Departure| loading && self.times.get(d.trip).and_then(|t| t.get(d.profile)).is_some_and(|t| d.time + t.duration > tod);
         let due: Vec<usize> = self
             .departures
             .iter()
             .enumerate()
-            .filter(|(i, d)| !d.spawned && d.time <= tod && d.time > tod - window && self.runs(*i))
+            .filter(|(i, d)| !d.spawned && d.time <= tod && (d.time > tod - window || under_way(d)) && self.runs(*i))
             .map(|(i, _)| i)
             .collect();
         for i in due {
@@ -329,6 +344,7 @@ impl ScheduleSim {
         }
         // buses whose ground was unloaded under them wait for it to come back
         for id in std::mem::take(&mut traffic.removed_scheduled) {
+            self.tour_hold.remove(&id);
             if let Some(i) = self.car_departure.remove(&id) {
                 log::debug!("departure {i}: its bus left the loaded tiles, waiting for them");
                 self.waiting.push(i);
@@ -337,6 +353,7 @@ impl ScheduleSim {
         if self.car_departure.len() > 64 + traffic.cars.len() * 2 {
             let alive: std::collections::HashSet<u64> = traffic.cars.iter().map(|c| c.id).collect();
             self.car_departure.retain(|id, _| alive.contains(id));
+            self.tour_hold.retain(|id, _| alive.contains(id));
         }
         // tiles brought lanes, or half a minute went by: the waiting departures may be on
         // loaded ground now, and the routes that stopped short may go on
@@ -397,7 +414,7 @@ impl ScheduleSim {
                 self.retry_at.insert(i, day_time + 3.0);
                 self.waiting.push(i);
             }
-            Placed::Drop => {}
+            Placed::Early | Placed::Drop => {}
         }
     }
 

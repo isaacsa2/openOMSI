@@ -73,6 +73,18 @@ use omsi_sim::traffic::LaneKey;
 use omsi_sim::traffic::Lane;
 
 #[test]
+fn next_stop_distance_is_exposed_only_for_its_stop_id() {
+    let mut n = Navigator::new(true, 0.85, "bottom-left");
+    assert_eq!(n.next_stop_distance(), None);
+    n.next_dist = Some((10, 123.5));
+    assert_eq!(n.next_stop_distance(), Some(123.5));
+    assert_eq!(n.next_stop_distance_for(10), Some(123.5));
+    assert_eq!(n.next_stop_distance_for(11), None);
+    n.invalidate_next_stop_distance();
+    assert_eq!(n.next_stop_distance(), None);
+}
+
+#[test]
 fn stop_request_icon_reserves_space_only_while_active() {
     let mut atlas = Atlas::new(256);
     for scale in [0.75, 1.0, 2.0] {
@@ -485,6 +497,19 @@ fn the_map_zooms_in_for_a_turn_and_out_on_the_straight() {
     assert!(zoom_target(50.0, None, -30.0) >= 150.0);
 }
 
+/// A stop a plugin closed (`duty.set_closed_stops`) is still on the list, marked with the
+/// way round, so it is drawn struck through.
+#[test]
+fn closed_stops_stay_on_the_list_marked() {
+    use omsi_sim::timetable_run::{PlannedStop, PlannedTrip, PlayerDuty};
+    let stop = |name: &str, arr: f64| PlannedStop { object_id: 0, name: name.into(), arr, dep: arr, position: None, dir: Default::default(), stops: true, closed: None };
+    let trip = PlannedTrip { name: "5_1".into(), line: "5".into(), terminus: "Bahnhof".into(), departure: 0.0, end: 120.0, stops: vec![stop("Markt", 0.0), stop("Rathaus", 60.0), stop("Bahnhof", 120.0)] };
+    let mut d = PlayerDuty::new("5".into(), "1".into(), vec![trip], 0, 0, true);
+    d.set_closed_stops(&["rathaus".into()], "via Kirchweg");
+    let (_, _, stops, _) = duty_parts(Some(&d));
+    assert_eq!(stops.iter().map(|s| s.closed.as_deref()).collect::<Vec<_>>(), [None, Some("via Kirchweg"), None]);
+}
+
 #[test]
 fn the_heights_of_the_contours_are_made_on_a_worker_and_only_with_the_terrain_on() {
     let mut n = with_example_lines();
@@ -549,4 +574,17 @@ fn the_compass_keeps_clear_of_the_open_lines_panel() {
     let beside = orient::compass_centre(w, h, s, Some(left));
     assert!(beside.x + r <= left, "the disc ends before the panel begins: {} vs {left}", beside.x + r);
     assert_eq!(beside.y, free.y, "only moved sideways");
+}
+
+/// A plugin's panel in the whole frame puts the map where it says, kept inside the picture:
+/// what reaches past its edges is cut off, and one below it is no map at all.
+#[test]
+fn a_frame_panel_s_map_stays_inside_the_navigator() {
+    let m = |rect: [f32; 4]| FrameMap { rect, cards: false };
+    assert_eq!(framed_map(m([10.0, 80.0, 340.0, 272.0]), 360.0, 500.0), (Rect::new(10.0, 80.0, 340.0, 272.0), false));
+    assert_eq!(framed_map(m([10.0, 300.0, 400.0, 272.0]), 360.0, 500.0).0, Rect::new(10.0, 300.0, 350.0, 200.0));
+    assert_eq!(framed_map(m([10.0, 600.0, 340.0, 272.0]), 360.0, 500.0).0.h, 0.0);
+    // (no frame panel: the navigator lays itself out as ever)
+    let n = Navigator::new(true, 0.85, "bottom-left");
+    assert_eq!((n.frame_panel, n.framed, n.frame_card), (None, None, None));
 }

@@ -62,7 +62,10 @@ impl Renderer {
     pub(crate) fn roof_code(i: &Instance, ro: DVec3) -> Option<f32> {
         let roof = i.roof.filter(|_| !i.blob && !i.surface)?;
         let z = (i.origin - ro).z as f32 + i.transform.transform_point3(Vec3::new(0.0, 0.0, roof)).z;
-        Some(-(5000.0 + z.clamp(-4000.0, 4000.0)))
+        // (the snow on the roof in the code's ten thousands: 1..41 for 0..1 where the roads'
+        // built-up snow keeps it, 0 for the weather's snow - road_snow.wgsl)
+        let snow = i.roof_snow.map_or(0.0, |s| 1.0 + (s.clamp(0.0, 1.0) * 40.0).round());
+        Some(-(5000.0 + z.clamp(-4000.0, 4000.0) + 10000.0 * snow))
     }
 
     pub fn prepare(&self, scene: &mut Scene) {
@@ -291,6 +294,10 @@ impl Renderer {
         ) else {
             return;
         };
+        let ground_bound = self.ground_should_bind();
+        self.ground_bound.set(ground_bound);
+        let snow_field = self.lights.snow_track.borrow();
+        scene.snow_track_seen = self.lights.snow_track_made.get();
         let mut entries = vec![
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -319,12 +326,13 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 8,
                     // (Enhanced+: the traced lighting, full size, in place of the SSAO)
+                    // (while the AO is off the ground albedo picture is bound here, see `ground_should_bind`)
                     resource: wgpu::BindingResource::TextureView(
                         self.rt
                             .as_ref()
                             .and_then(|r| r.targets.as_ref())
                             .map(|t| &t.out)
-                            .or(self.targets.ao.as_ref().map(|a| &a.blur_view))
+                            .or(self.targets.ao.as_ref().map(|a| match self.targets.ground.as_ref().filter(|_| ground_bound) { Some((_, g)) => g, None => &a.blur_view }))
                             .unwrap_or(&self.white_texture.view),
                     ),
                 },
@@ -352,7 +360,18 @@ impl Renderer {
                     binding: 19,
                     resource: self.lights.lm_uniform.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 20,
+                    resource: snow_field.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 21,
+                    resource: self.lights.snow_track_uniform.as_entire_binding(),
+                },
         ];
+        if !road_snow_supported() {
+            entries.retain(|e| e.binding != 20);
+        }
         // (the point lights where the device has storage buffers for them)
         if array_path() != ArrayPath::NoStorage {
             entries.push(wgpu::BindGroupEntry { binding: 3, resource: light_buf.binding() });
@@ -371,6 +390,13 @@ impl Renderer {
             label: Some("camera"),
             layout: &self.camera_layout,
             entries: &entries,
+        });
+        scene.ground_camera_bind_group = ground_bound.then(|| {
+            let mut other = entries.clone();
+            if let Some(e) = other.iter_mut().find(|e| e.binding == 8) {
+                e.resource = wgpu::BindingResource::TextureView(&self.white_texture.view);
+            }
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("camera, ground albedo pass"), layout: &self.camera_layout, entries: &other })
         });
         scene.camera_bind_group = Some(bg);
         let sbg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -421,7 +447,8 @@ impl Renderer {
             let cap = (bytes.len() as u64 * 3 / 2).max(1 << 16).div_ceil(4) * 4;
             scene.draw_buf = Some(GpuArray::new(&self.device, "draw list", cap, 4, true));
             self.rebuild_camera_bind_group(scene);
-        } else if scene.camera_bind_group.is_none() || scene.shadow_bind_group.is_none() {
+        } else if scene.camera_bind_group.is_none() || scene.shadow_bind_group.is_none() || scene.snow_track_seen != self.lights.snow_track_made.get() {
+            // (made again too when the snow track field has been made in place of its token)
             self.rebuild_camera_bind_group(scene);
         }
         if let Some(b) = &scene.draw_buf {
@@ -434,8 +461,13 @@ impl Renderer {
 /// two of an object's surfaces in one plane - a dashboard and the instruments printed on it,
 /// a plate and the lines on it - the one later in the model is seen, as Omsi.exe draws a
 /// model mesh by mesh and subset by subset (0x7c32c4) with LESSEQUAL. Only a slot lying on
-/// an earlier surface of its object takes a step (`Instance::slot_levels`, at most 3);
-/// everything else, and the ground, the roads and what lies on them, keep their depth.
+/// an earlier surface of its object takes a step (`Instance::slot_levels`, at most 3), and no
+/// more than any surface lying just off its plane takes, so that the step never decides
+/// between surfaces that are apart (#2790); everything else, and the ground, the roads and
+/// what lies on them, keep their depth -
+/// but for a spline laid on an earlier spline of its tile at the same height (a red bus
+/// lane over the road, `Renderer::set_spline_layer`): Omsi.exe draws a tile's splines in
+/// order with LESSEQUAL, so it is seen over the road, where the two fought for every pixel.
 /// `OMSI_ZFIGHT_PROBE` swaps the steps of the slots that have one for a hash (1) or its
 /// reverse (2), `OMSI_NO_DRAW_ORDER_DEPTH` turns them off.
 pub(crate) fn draw_order_level(i: &Instance, slot: usize) -> f32 {
@@ -449,7 +481,8 @@ pub(crate) fn draw_order_level(i: &Instance, slot: usize) -> f32 {
         }
     });
     let level = i.slot_levels.get(slot).copied().unwrap_or(0);
-    if mode == 3 || level == 0 || i.surface || i.render_phase == crate::scene::RenderPhase::Terrain {
+    let spline = i.surface && i.render_phase == crate::scene::RenderPhase::Spline;
+    if mode == 3 || level == 0 || (i.surface && !spline) || i.render_phase == crate::scene::RenderPhase::Terrain {
         return 0.0;
     }
     let max = crate::scene::overlay::MAX_LEVEL as u64;

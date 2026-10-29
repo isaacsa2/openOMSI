@@ -3,6 +3,10 @@
 //! DLLs OMSI's plugins are; on Windows the game starts it directly, elsewhere through Wine.
 //!
 //! usage: omsi-plugin-host <library>   (then the protocol of `omsi_plugin::wire` on stdio)
+#[cfg(windows)]
+#[path = "../steam_error_dialog.rs"]
+mod steam_error_dialog;
+
 use omsi_plugin::{wire, Library};
 use std::io::{BufReader, BufWriter, Write};
 
@@ -11,6 +15,8 @@ fn main() {
         eprintln!("usage: omsi-plugin-host <library>");
         std::process::exit(2);
     };
+    #[cfg(windows)]
+    steam_error_dialog::watch(&path);
     let mut input = BufReader::new(std::io::stdin().lock());
     let mut out = BufWriter::new(std::io::stdout().lock());
     let mut lib = match Library::load(std::path::Path::new(&path)) {
@@ -66,7 +72,7 @@ fn main() {
 /// Homebrew's i686 MinGW links no unwinder the prebuilt standard library can use; built
 /// with `panic=abort` nothing unwinds, and this stands in for the one symbol it names.
 #[cfg(all(target_os = "windows", target_arch = "x86", target_env = "gnu"))]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn _Unwind_Resume() -> ! {
     std::process::abort()
 }

@@ -7,6 +7,7 @@
 use super::*;
 use crate::view_sync::people::PeopleView;
 use crate::view_sync::traffic::TrafficView;
+use omsi_sim::people::model::SaleEvent;
 
 /// The vehicles the AI traffic must see besides its own: the other LAN players' buses, the
 /// player's own and the ones the player placed - and, unless the game is paused, the
@@ -42,8 +43,20 @@ pub(crate) fn traffic_tick(
         });
         t.tick(dt, player.map(|p| player_outline(p)));
         let t0 = Instant::now();
-        world.set_switches(scenery, &t.switch_requests());
-        world.set_signals(scenery, &t.signal_aspects(&world.signal_routes, player_rail));
+        // the signals first: the switches that a clear signal locks read them
+        let aspects = t.signal_aspects(&world.signal_routes, player_rail);
+        if !t.switch_board.configured {
+            t.switch_board.configure(switch_rules(&world.transit));
+        }
+        let requests = t.switch_requests();
+        let requests = if world.transit.switches.list.is_empty() {
+            requests
+        } else {
+            let occupied = t.rail_occupied_pieces();
+            t.switch_board.decide(dt, &requests, &occupied, &aspects)
+        };
+        world.set_switches(scenery, &requests);
+        world.set_signals(scenery, &aspects);
         return t0.elapsed().as_secs_f64();
     }
     0.0
@@ -121,8 +134,8 @@ pub(crate) fn set_keep_clear(t: &mut traffic::Traffic, player: Option<&Player>, 
     );
 }
 
-/// The timetable puts out its departures: at the start the trips that left within the last
-/// 20 minutes (`first`), then those of the next moments.
+/// The timetable puts out its departures: at the start (`first`) every trip still under way
+/// and those that left within the last 20 minutes, then those of the next moments.
 pub(crate) fn schedule_tick(
     s: &mut schedule::Schedule,
     world: &World,
@@ -282,17 +295,39 @@ pub(crate) fn humans_after_step(
     let mark = Instant::now();
     crate::view_sync::apply_people(h, view, world, r, scene);
     h.tick_done(dt, world, started, mark.elapsed().as_secs_f64() * 1000.0);
-    // validators used: the bus's `ev_Stamper` sound
-    for bus in h.take_stamped() {
+    // validators used: the bus's `ev_Stamper` sound (every validator, as in OMSI 2) and
+    // `ev_StamperN` for the one used, with the script triggers `PAX_Stamper_Used` and
+    // `PAX_StamperN_Used`
+    for (bus, stamper) in h.take_stamped() {
+        let vehicle = match bus {
+            None => player.as_deref_mut().map(|p| &mut p.vehicle),
+            Some(id) => traffic.as_deref_mut().and_then(|t| t.cars.iter_mut().find(|c| c.id == id)).map(|c| &mut c.vehicle),
+        };
+        let Some(v) = vehicle else { continue };
+        v.host.fired_triggers.push("ev_Stamper".into());
+        v.trigger("PAX_Stamper_Used");
+        if let Some(k) = stamper {
+            v.host.fired_triggers.push(format!("ev_Stamper{k}").into());
+            v.trigger(&format!("PAX_Stamper{k}_Used"));
+        }
+    }
+    for (bus, event) in h.take_money_events() {
+        let trigger = match event {
+            SaleEvent::PassengerGaveMoney => "ev_ticketsale_givemoney",
+        };
+
         match bus {
             None => {
                 if let Some(p) = player.as_deref_mut() {
-                    p.vehicle.host.fired_triggers.push("ev_Stamper".into());
+                    p.vehicle.host.fired_triggers.push(trigger.into());
                 }
             }
             Some(id) => {
-                if let Some(c) = traffic.as_deref_mut().and_then(|t| t.cars.iter_mut().find(|c| c.id == id)) {
-                    c.vehicle.host.fired_triggers.push("ev_Stamper".into());
+                if let Some(c) = traffic
+                    .as_deref_mut()
+                    .and_then(|t| t.cars.iter_mut().find(|c| c.id == id))
+                {
+                    c.vehicle.host.fired_triggers.push(trigger.into());
                 }
             }
         }
@@ -340,6 +375,7 @@ pub(crate) fn duty_step(
     game_clock: Option<&omsi_sim::SimClock>,
     learn_loaded: bool,
     plugin_events: Option<&mut Vec<omsi_plugin::GameEvent>>,
+    announce: bool,
 ) {
     if let Some(stop) = p.html_next_stop.take() {
         if d.skip_to(stop) {
@@ -352,6 +388,14 @@ pub(crate) fn duty_step(
     }
     let due = (d.trip_index, d.next_stop);
     let served = d.update(&mut p.vehicle, time);
+    // (the depot file's second recording of each stop, for the maps that keep two: a stock
+    // IBIS steps on by itself only when a stop is left - see `auto_announce`)
+    if announce {
+        // (seconds of play, not the time of day: a night line runs past midnight, and a
+        // clock that wraps would hold every press back until the same time the next day)
+        let run = game_clock.unwrap_or(&p.vehicle.host.clock).run_time;
+        p.announce.step(d, &mut p.vehicle, run);
+    }
     // (also one ended between frames: the last stop skipped from the menu; a trip reopened
     // by a page counts from its start again, and its next end is told too)
     if let Some(run) = d.take_reopened() {
@@ -473,6 +517,7 @@ pub(crate) fn picture_lighting(
         Some(w) => weather_lighting(daylight, w, cloud_drift, wetness, snow_cover, settings.shadows, sky),
         None => lights::lighting_from(daylight, 50000.0),
     };
+    lighting.lamp_shadows &= settings.lamp_shadows;
     lighting.wetness = omsi_cfg::flags::OMSI_WETNESS.parse()
         .unwrap_or(wetness);
     dress_lighting(&mut lighting, world, inside, settings);
@@ -488,6 +533,7 @@ pub(crate) fn picture_lighting(
     lighting.led_mips = settings.led_mips;
     // the enhanced clouds marched in fewer steps (`Settings::cloud_quality`)
     lighting.low_clouds = settings.cloud_quality == "low";
+    omsi_scene::road_snow::light(&mut lighting, settings.road_snow);
     lighting
 }
 
@@ -500,7 +546,7 @@ pub(crate) fn dress_lighting(
     settings: &crate::settings::Settings,
 ) {
     lighting.inside = inside.and_then(|v| v.ty.def.bounding_box.map(|bb| (v.position, v.heading, bb)));
-    lighting.inside_body = inside.map(|v| (v.position, v.body_rotation()));
+    lighting.inside_rotation = inside.filter(|v| v.ty.def.bounding_box.is_some()).map(|v| v.body_rotation());
     let puddle_surface = lighting.inside.and_then(|(o, _, _)| world.and_then(|w| w.puddle_surface(o)));
     lighting.puddle_ground = puddle_surface.map(|(h, _)| h);
     lighting.puddle_normal = puddle_surface.map_or(glam::Vec3::Z, |(_, n)| n);
@@ -546,4 +592,28 @@ pub(crate) fn push_mirror_hud(
     let start = scene.overlays.len();
     hud.push(scene, world, viewport[2], viewport[3], cursor);
     scene.shift_overlays(start, viewport[0]);
+}
+
+/// The switches `switches.cfg` configures, as the traffic's board has them: their rest position,
+/// how they are operated and the signal object that locks them.
+fn switch_rules(transit: &omsi_transit::TransitData) -> Vec<omsi_sim::ai_traffic::blocks::SwitchRule> {
+    use omsi_sim::ai_traffic::blocks::{SwitchDrive, SwitchRule};
+    transit
+        .switches
+        .list
+        .iter()
+        .filter_map(|w| {
+            let object = w.object?;
+            Some(SwitchRule {
+                object,
+                default_path: w.default_path(),
+                drive: match w.drive {
+                    omsi_transit::infra::Drive::Auto => SwitchDrive::Auto,
+                    omsi_transit::infra::Drive::Manual => SwitchDrive::Manual,
+                    omsi_transit::infra::Drive::Interlocked => SwitchDrive::Interlocked,
+                },
+                locked_by: w.locked_by.as_deref().and_then(|s| transit.signals.signals.iter().find(|x| x.id.eq_ignore_ascii_case(s))).and_then(|s| s.object),
+            })
+        })
+        .collect()
 }

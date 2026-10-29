@@ -15,6 +15,7 @@ impl App {
         if self.session.duty.is_none() {
             self.session.career.no_trip();
         }
+        let announce = self.settings.auto_announce;
         if let (Some(d), Some(p), Some(w), false) = (
             self.session.duty.as_mut(),
             self.player.as_mut(),
@@ -32,6 +33,7 @@ impl App {
                 Some(&self.clock),
                 true,
                 Some(&mut self.integrations.plugin_events),
+                announce,
             );
         }
         if let Some(p) = self.player.as_mut() {
@@ -223,7 +225,6 @@ pub(super) fn humans(cx: HumansCx, dt: f32) {
                 p.vehicle.set_var("GivenTicket", -1.0);
             }
             h.give_ticket = std::mem::take(&mut p.give_ticket);
-            h.give_change_all = std::mem::take(&mut p.give_change);
             if std::mem::take(&mut p.take_change) {
                 h.take_change_tray();
             }
@@ -236,7 +237,14 @@ pub(super) fn humans(cx: HumansCx, dt: f32) {
             h.write_pax_vars(&mut p.vehicle);
             p.vehicle.host.humans_on_path_link = h.path_link_counts();
             p.vehicle.host.humans_on_seat = h.seat_counts();
-            let coins: Vec<usize> = std::mem::take(&mut p.vehicle.host.change_coins);
+            let mut coins: Vec<usize> = std::mem::take(&mut p.vehicle.host.change_coins);
+            if std::mem::take(&mut p.give_change) {
+                let owed = h.change_due.unwrap_or(0.0);
+                if let Some(m) = h.money.as_mut() {
+                    let given = m.value_of(&coins);
+                    coins.extend(m.change_left_coins(owed - given));
+                }
+            }
             h.give_change(w, r, scene, &coins);
         }
         // the view sync of the people: the coins and ticket blocks of the player's bus,

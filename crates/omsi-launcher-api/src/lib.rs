@@ -5,6 +5,7 @@
 //! window around the page can do - its events, stepping aside while a game runs, drawing with
 //! the game's renderer - it is asked through `Platform`.
 
+mod addons;
 pub mod i18n;
 mod timetable;
 mod updates;
@@ -33,6 +34,18 @@ pub trait Platform: Send + Sync {
         None
     }
     fn before_update(&self) {}
+    /// Writes the support package in this process, returning its actual path. `out` suggests
+    /// a filename; a platform may choose a user-accessible folder. There is no game program to
+    /// start for it (Android: the game is a library of the app). None: not here, the game
+    /// program writes it.
+    fn support_package(&self, _out: &Path) -> Option<Result<std::path::PathBuf, String>> {
+        None
+    }
+    /// What ended the last game run, when it crashed and no launcher was there to see it
+    /// (Android: the app itself went down with the game): what happened and the log's end.
+    fn previous_run_crash(&self) -> Option<(String, String)> {
+        None
+    }
     fn quit(&self) {}
 }
 
@@ -58,8 +71,12 @@ fn bootstrap(p: &dyn Platform) -> Answer {
     let root = core::root_dir().map(|p| p.to_string_lossy().to_string());
     let choice: Value = std::fs::read_to_string(core::data_dir().join("launcher-duty.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
     let favourites: Vec<String> = std::fs::read_to_string(core::data_dir().join("favourite-buses.txt")).map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(|l| l.replace('\\', "/").to_lowercase()).collect()).unwrap_or_default();
-    let languages: Vec<Value> = core::LANGUAGES.iter().map(|(code, name, iso, _)| json!({ "code": code, "name": name, "iso": iso })).collect();
+    let languages: Vec<Value> = core::LANGUAGES.iter().map(|(code, name, iso, _, _)| json!({ "code": code, "name": name, "iso": iso })).collect();
+    // (a crash the last run left behind with nobody to tell: shown at the start, as the
+    // game's own launcher did)
+    let crash = p.previous_run_crash().map(|(what, tail)| crash_json(&what, &tail));
     Ok(json!({
+        "crash": crash,
         "version": omsi_platform::VERSION,
         "platform": std::env::consts::OS,
         "config": config,
@@ -82,7 +99,7 @@ fn bootstrap(p: &dyn Platform) -> Answer {
 
 /// The interface texts in `lang` (the game's tables; English is the key).
 fn translations(lang: String) -> Answer {
-    to_json(crate::i18n::table(&lang))
+    to_json(&*crate::i18n::table(&lang))
 }
 
 /// The OMSI 2 folder and the game program (Setup).
@@ -286,10 +303,9 @@ fn option_presets() -> Answer {
     Ok(json!(core::option_presets().into_iter().map(|(name, v)| json!({ "name": name, "settings": v })).collect::<Vec<_>>()))
 }
 
-/// The four quality presets of a graphics mode (vanilla, enhanced ...).
-fn graphics_presets(mode: String) -> Answer {
-    let mode = core::graphics_mode(&mode);
-    Ok(json!(core::graphics_presets_for(mode).into_iter().map(|(name, v)| json!({ "name": name, "settings": v })).collect::<Vec<_>>()))
+/// The six quality presets, Low to Ultra (the mode asked for is of the days when they kept it).
+fn graphics_presets(_mode: String) -> Answer {
+    Ok(json!(core::graphics_presets().into_iter().map(|(name, v)| json!({ "name": name, "settings": v })).collect::<Vec<_>>()))
 }
 
 fn optimise_arm(target: u32) -> Answer {
@@ -354,6 +370,10 @@ fn add_hofs(files: Vec<String>) -> Answer {
     Ok(json!(core::add_shared_hofs(&files).map_err(err)?))
 }
 
+fn share_map_hofs(map: String) -> Answer {
+    Ok(json!(core::share_map_hofs(&map).map_err(err)?))
+}
+
 fn mod_set_enabled(id: String, on: bool) -> Answer {
     Ok(json!(core::mod_set_enabled(&id, on).map_err(err)?))
 }
@@ -390,11 +410,16 @@ pub fn game_ended(game: &core::instances::Instance) -> Option<(&'static str, Val
     }
     let log = std::path::Path::new(&game.log);
     if let Some(why) = core::crash::disconnect_of(log) {
-        return Some(("game-disconnected", json!({ "why": why })));
+        return Some(("game-disconnected", json!({ "why": core::i18n::tr_said(&why) })));
     }
     let (what, tail) = core::crash::crash_of(log)?;
+    Some(("game-crashed", crash_json(&what, &tail)))
+}
+
+/// A crash as the page's crash dialog takes it.
+fn crash_json(what: &str, tail: &str) -> Value {
     let silent = what.contains("closed without a word");
-    Some(("game-crashed", json!({
+    json!({
         "what": what,
         "tail": tail,
         "gap": core::crash::CRASH_TAIL_GAP,
@@ -403,7 +428,7 @@ pub fn game_ended(game: &core::instances::Instance) -> Option<(&'static str, Val
         "vulkan": silent && core::crash::died_compiling_on_vulkan(&tail),
         "version": omsi_platform::VERSION,
         "os": std::env::consts::OS,
-    })))
+    })
 }
 
 fn game_log(pid: u32, lines: Option<usize>) -> Answer {
@@ -459,6 +484,22 @@ fn server_query(address: String) -> Answer {
         "version": i.version, "icon": icon, "time": i.time, "weather": i.weather, "password": i.password,
         "vehicles": i.vehicles, "reached_at": i.reached_at,
     }))
+}
+
+/// The public server list, moderated here (a flagged name or message is covered, an icon
+/// shown only if this launcher cleared it): the page shows what this returns and nothing the
+/// service said that was not checked (`omsi-serverlist`).
+fn public_servers() -> Answer {
+    let m = omsi_serverlist::BuiltinModerator;
+    let list = omsi_serverlist::client::fetch(omsi_serverlist::DEFAULT_SERVICE, &m)?;
+    Ok(json!(list
+        .into_iter()
+        .map(|e| json!({
+            "id": e.id, "address": e.address, "name": e.name, "motd": e.motd, "map": e.map,
+            "players": e.players, "max_players": e.max_players, "version": e.version, "covered": e.covered,
+            "icon": e.icon.as_deref().map(|i| format!("data:image/png;base64,{}", base64(i))),
+        }))
+        .collect::<Vec<_>>()))
 }
 
 /// A code host's first responsive status endpoint, including its tunnel.
@@ -556,7 +597,7 @@ fn depot_add(bus: String, paint: Option<String>, number: Option<String>, name: S
 /// A depot bus's name, paint, plate or fleet number changed (its wear stays).
 fn depot_update(id: String, patch: Value) -> Answer {
     core::depot::update(|d| {
-        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!("no depot bus {id}"))?;
+        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!(core::i18n::tr("No depot bus {id}").replace("{id}", &id)))?;
         let text = |k: &str| patch.get(k).and_then(Value::as_str).map(str::to_string);
         if let Some(v) = text("name") {
             b.name = v;
@@ -582,9 +623,9 @@ fn depot_update(id: String, patch: Value) -> Answer {
 /// Refuel, wash or repair a depot bus (all of it, or one part): its next drive starts so.
 fn depot_service(id: String, kind: String) -> Answer {
     core::depot::update(|d| {
-        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!("no depot bus {id}"))?;
+        let b = d.get_mut(&id).ok_or_else(|| anyhow::anyhow!(core::i18n::tr("No depot bus {id}").replace("{id}", &id)))?;
         if !b.service(&kind) {
-            anyhow::bail!("no depot service {kind}");
+            anyhow::bail!(core::i18n::tr("No depot service {kind}").replace("{kind}", &kind));
         }
         Ok(())
     })
@@ -614,7 +655,7 @@ fn depot_group(op: &str, name: String, to: Option<String>) -> Answer {
             }
         };
         if !done {
-            anyhow::bail!("there is already a depot called {}", to.as_deref().unwrap_or(&name).trim());
+            anyhow::bail!(core::i18n::tr("There is already a depot called {name}").replace("{name}", to.as_deref().unwrap_or(&name).trim()));
         }
         Ok(d.group_names())
     })
@@ -664,12 +705,15 @@ fn preview_frame(p: &dyn Platform, w: u32, h: u32, force: bool, dx: Option<f32>,
 }
 
 /// The map with the trip's route over it (see `mapview::export` in the launcher crate).
-fn route_map(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>) -> Answer {
-    serde_json::from_slice(&route_map_bytes(p, map, date, trip, surface)?).map_err(err)
+fn route_map(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>, editor: Option<bool>, route_only: Option<bool>) -> Answer {
+    serde_json::from_slice(&route_map_bytes(p, map, date, trip, surface, editor, route_only)?).map_err(err)
 }
 
-fn route_map_bytes(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>) -> Result<Vec<u8>, String> {
-    let (_, body) = p.renderer(json!({ "cmd": "map", "map": map, "date": date, "trip": trip, "surface": surface.unwrap_or(true) }), Duration::from_secs(120))?;
+/// `editor`: the timetable editor's map, which carries every stop of the timetable too;
+/// `route_only`: the trip's route alone. A `trip` of `@stops:<id>,<id>,...` is the route a
+/// list of stops would drive.
+fn route_map_bytes(p: &dyn Platform, map: String, date: String, trip: String, surface: Option<bool>, editor: Option<bool>, route_only: Option<bool>) -> Result<Vec<u8>, String> {
+    let (_, body) = p.renderer(json!({ "cmd": "map", "map": map, "date": date, "trip": trip, "surface": surface.unwrap_or(true), "editor": editor.unwrap_or(false), "route_only": route_only.unwrap_or(false) }), Duration::from_secs(120))?;
     Ok(body)
 }
 
@@ -693,9 +737,12 @@ fn controllers(p: &dyn Platform, op: &str, mut req: Value, wait: u64) -> Answer 
 
 /// The support package (logs, settings, the machine), written by the game program into
 /// the data folder; answers where it went.
-fn support_package() -> Answer {
-    let game = core::game_binary().ok_or("the game program was not found")?;
+fn support_package(p: &dyn Platform) -> Answer {
     let out = core::data_dir().join(format!("support-{}.zip", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)));
+    if let Some(done) = p.support_package(&out) {
+        return Ok(json!(done?.to_string_lossy()));
+    }
+    let game = core::game_binary().ok_or("the game program was not found")?;
     let status = std::process::Command::new(game).arg("--export-diagnostics").arg(&out).status().map_err(err)?;
     if !status.success() || !out.exists() {
         return Err("the game could not write the support package".into());
@@ -762,6 +809,10 @@ fn list_dir(path: Option<String>, archives: bool) -> Answer {
 }
 
 pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
+    answer(cmd, args, p).map_err(|e| core::i18n::tr(&e))
+}
+
+fn answer(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
     match cmd {
         "bootstrap" => bootstrap(p),
         "translations" => translations(arg::<String>(args, "lang")?),
@@ -785,9 +836,16 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "delete_situation" => delete_situation(arg::<String>(args, "map")?, arg::<String>(args, "file")?),
         "season_date" => season_date(arg::<String>(args, "season")?, arg::<String>(args, "phase")?, arg::<String>(args, "date")?, arg::<String>(args, "map")?, arg::<bool>(args, "keep")?),
         "tutorials" => tutorials(),
+        "ai_vehicles" => to_json(core::ai_lists::vehicles(arg::<Option<bool>>(args, "refresh")?.unwrap_or(false)).map_err(err)?),
+        "ai_vehicle_paints" => to_json(core::ai_lists::paints(&arg::<String>(args, "file")?).map_err(err)?),
+        "ai_lists" => core::ai_lists::view(&arg::<String>(args, "map")?, &arg::<String>(args, "date")?).map_err(err),
+        "ai_lists_save" => core::ai_lists::save(&arg::<String>(args, "map")?, &arg::<String>(args, "date")?, &arg::<Vec<core::ai_lists::GroupJson>>(args, "groups")?, &arg::<Vec<core::ai_lists::RuleJson>>(args, "rules")?).map_err(err),
+        "ai_lists_reset" => core::ai_lists::reset(&arg::<String>(args, "map")?).map(|_| json!({})).map_err(err),
+        "addons" => addons::list(),
         "timetable" => timetable::load(arg::<String>(args, "map")?),
         "timetable_save" => timetable::save(arg::<String>(args, "map")?, arg::<Vec<timetable::LineEdit>>(args, "lines")?),
         "timetable_reset" => timetable::reset(arg::<String>(args, "map")?),
+        "timetable_trip_save" => timetable::save_trip(arg::<String>(args, "map")?, arg::<timetable::TripNew>(args, "trip")?),
         "profiles" => profiles(),
         "profile" => profile(arg::<String>(args, "name")?),
         "profile_create" => profile_create(arg::<String>(args, "name")?, arg::<String>(args, "sex")?),
@@ -802,7 +860,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "settings_patch" => settings_patch(arg::<Value>(args, "patch")?),
         "settings_defaults" => settings_defaults(),
         "option_presets" => option_presets(),
-        "graphics_presets" => graphics_presets(arg::<String>(args, "mode")?),
+        "graphics_presets" => graphics_presets(arg::<String>(args, "mode").unwrap_or_default()),
         "graphics_profiles" => graphics_profiles(),
         "graphics_profile_save" => graphics_profile_save(arg::<String>(args, "name")?, arg::<Value>(args, "settings")?),
         "graphics_profile_delete" => graphics_profile_delete(arg::<String>(args, "name")?),
@@ -819,6 +877,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "radio_stations_save" => radio_stations_save(arg::<Vec<Value>>(args, "list")?),
         "mods_status" => mods_status(),
         "add_hofs" => add_hofs(arg::<Vec<String>>(args, "files")?),
+        "share_map_hofs" => share_map_hofs(arg::<String>(args, "map")?),
         "mod_set_enabled" => mod_set_enabled(arg::<String>(args, "id")?, arg::<bool>(args, "on")?),
         "mod_remove" => mod_remove(arg::<String>(args, "id")?),
         "mod_inspect" => mod_inspect(arg::<String>(args, "path")?),
@@ -839,6 +898,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "servers_get" => servers_get(),
         "servers_save" => servers_save(arg::<Value>(args, "list")?),
         "server_query" => server_query(arg::<String>(args, "address")?),
+        "public_servers" => public_servers(),
         "choice_save" => choice_save(arg::<Value>(args, "choice")?),
         "favourites_save" => favourites_save(arg::<Vec<String>>(args, "list")?),
         "depot_get" => depot_get(),
@@ -854,7 +914,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "notes_save" => notes_save(arg::<String>(args, "key")?, arg::<String>(args, "text")?),
         "preview_look" => preview_look(p, arg::<String>(args, "bus")?, arg::<String>(args, "paint")?, arg::<String>(args, "map")?, arg::<String>(args, "weather")?, arg::<i32>(args, "time")?, arg::<String>(args, "date")?),
         "preview_warm" => preview_warm(p),
-        "route_map" => route_map(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?),
+        "route_map" => route_map(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?, arg(args, "editor")?, arg(args, "route_only")?),
         "keyboard_actions" => keyboard_actions(p, json!({ "lang": arg::<Option<String>>(args, "lang")?, "actions": arg::<Option<Vec<String>>>(args, "actions")?, "vehicles": arg::<Option<Vec<String>>>(args, "vehicles")?, "catalog": arg::<Option<bool>>(args, "catalog")?, "scan": arg::<Option<bool>>(args, "scan")?, "have": arg::<Option<String>>(args, "have")? })),
         "controllers_load" => controllers(p, "load", json!({}), 20),
         "controllers_state" => controllers(p, "state", json!({ "off": arg::<Option<Vec<String>>>(args, "off")?.unwrap_or_default() }), 5),
@@ -862,7 +922,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
         "controllers_ffb_test" => controllers(p, "ffb_test", json!({ "name": arg::<String>(args, "name")?, "axis": arg::<usize>(args, "axis")?, "strength": arg::<Option<f32>>(args, "strength")?, "token": arg::<Option<u64>>(args, "token")? }), 20),
         "controllers_release" => controllers(p, "release", json!({}), 5),
         "controllers_ffb_stop" => controllers(p, "ffb_stop", json!({ "token": arg::<Option<u64>>(args, "token")? }), 5),
-        "support_package" => support_package(),
+        "support_package" => support_package(p),
         "versions" => versions::list(),
         "version_install" => versions::install(arg::<String>(args, "version")?),
         "version_status" => versions::status(),
@@ -879,7 +939,7 @@ pub fn call(cmd: &str, args: &Value, p: &dyn Platform) -> Answer {
 pub fn call_bytes(cmd: &str, args: &Value, p: &dyn Platform) -> Result<Vec<u8>, String> {
     match cmd {
         "content_picture" => content_picture(&arg::<String>(args, "path")?).ok_or_else(|| "not found".to_string()),
-        "route_map" => route_map_bytes(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?),
+        "route_map" => route_map_bytes(p, arg::<String>(args, "map")?, arg::<String>(args, "date")?, arg::<String>(args, "trip")?, arg(args, "surface")?, arg(args, "editor")?, arg(args, "route_only")?),
         "map_ground" => {
             let mut req = args.clone();
             req["cmd"] = json!("map_ground");
@@ -901,14 +961,14 @@ mod setup_tests {
         let not_omsi = home.join("Downloads");
         std::fs::create_dir_all(&not_omsi).unwrap();
         let was = (std::env::var_os("HOME"), std::env::var_os("USERPROFILE"));
-        std::env::set_var("HOME", &home);
-        std::env::set_var("USERPROFILE", &home);
+        unsafe { std::env::set_var("HOME", &home) };
+        unsafe { std::env::set_var("USERPROFILE", &home) };
         let r = config_save(not_omsi.to_string_lossy().to_string(), String::new()).unwrap();
         let written = home.join(".openomsi").join("launcher.json").exists();
         for (k, v) in [("HOME", was.0), ("USERPROFILE", was.1)] {
             match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
+                Some(v) => unsafe { std::env::set_var(k, v) },
+                None => unsafe { std::env::remove_var(k) },
             }
         }
         assert_eq!(r["saved"], json!(false));
@@ -979,7 +1039,7 @@ mod custom_weather_tests {
     }
 }
 
-// --- the content test (Settings) -----------------------------------------------------
+// --- the model test (Troubleshooting) -------------------------------------------------
 
 /// The game program loads `path` - a vehicle, a scenery object, a spline, a human, a map, a
 /// mod's folder or zip - as it would for a drive (`openomsi --check`) and answers its
@@ -999,11 +1059,47 @@ fn content_check(path: String, deep: bool) -> Answer {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let out = cmd.output().map_err(|e| format!("{}: {e}", game.display()))?;
+    let out = cmd.output().map_err(|e| format!("the game {} cannot start: {e}", game.display()))?;
     let text = String::from_utf8_lossy(&out.stdout);
     let line = text.lines().rev().find(|l| l.trim_start().starts_with('{')).ok_or_else(|| {
         let last = String::from_utf8_lossy(&out.stderr);
         format!("the game gave no answer ({})", last.lines().last().unwrap_or("").trim())
     })?;
-    serde_json::from_str(line).map_err(err)
+    let mut v: Value = serde_json::from_str(line).map_err(err)?;
+    for f in v.get_mut("findings").and_then(Value::as_array_mut).into_iter().flatten() {
+        for k in ["text", "what"] {
+            if let Some(t) = f.get(k).and_then(Value::as_str).map(core::i18n::tr) {
+                f[k] = json!(t);
+            }
+        }
+        if let Some(t) = f.get("hint").and_then(Value::as_str).map(|h| h.split("; ").map(core::i18n::tr).collect::<Vec<_>>().join("; ")) {
+            f["hint"] = json!(t);
+        }
+    }
+    Ok(v)
+}
+
+#[cfg(test)]
+mod support_package_tests {
+    use super::*;
+
+    struct PhoneFolder;
+    impl Platform for PhoneFolder {
+        fn emit(&self, _: &str, _: Value) {}
+        fn launched(&self) {}
+        fn renderer(&self, _: Value, _: Duration) -> Result<(Value, Vec<u8>), String> { unreachable!() }
+        fn support_package(&self, suggested: &Path) -> Option<Result<std::path::PathBuf, String>> {
+            Some(Ok(Path::new("/storage/emulated/0/openOMSI").join(suggested.file_name().unwrap())))
+        }
+    }
+
+    #[test]
+    fn returns_the_platforms_actual_export_path() {
+        let actual = support_package(&PhoneFolder).unwrap();
+        let path = Path::new(actual.as_str().unwrap());
+        assert_eq!(path.parent(), Some(Path::new("/storage/emulated/0/openOMSI")));
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        assert!(filename.starts_with("support-"), "{filename}");
+        assert!(filename.ends_with(".zip"), "{filename}");
+    }
 }

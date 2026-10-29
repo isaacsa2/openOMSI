@@ -161,6 +161,9 @@ pub struct Instance {
     /// it. (Only the vehicle the camera is in was spared, by its box; every other bus showed
     /// its saloon under snow through the windows.)
     pub roof: Option<f32>,
+    /// How much snow lies on the vehicle's roof (0..1, see road_snow.wgsl `vehicle_snow`),
+    /// where the roads' built-up snow keeps it; None shows the weather's snow on it.
+    pub roof_snow: Option<f32>,
     /// Drawn with every slot in model order among the blended draws, as Omsi.exe draws a
     /// model: mesh after mesh, each material subset with its own states and depth write
     /// (0x7c32c4 -> 0x7fd6c4, DrawSubset), not its opaque parts first. Set on the models
@@ -196,6 +199,9 @@ pub struct Scene {
     pub(crate) glass_slot: Option<TextureId>,
     pub materials: Vec<Material>,
     pub instances: Vec<Instance>,
+    /// The trolleybus wire networks whose wires this scene already draws (by address: see
+    /// `omsi_scene::trolley_view`), so that each bus does not add a copy of them.
+    pub trolley_wire_drawn: Vec<usize>,
     /// World position everything is expressed relative to on the GPU (updated per frame).
     pub render_origin: DVec3,
     /// Point lights and coronas for the next frame (set by the app every frame).
@@ -228,6 +234,11 @@ pub struct Scene {
     /// The frame's draw list (see `Batch`), shared by the shadow, prepass and main passes.
     pub(crate) draw_buf: Option<GpuArray>,
     pub(crate) camera_bind_group: Option<wgpu::BindGroup>,
+    /// Which snow track field `camera_bind_group` binds (see `LightRes::snow_track_made`).
+    pub(crate) snow_track_seen: u32,
+    /// The same with slot 8 not the ground albedo picture, for the pass that draws into it
+    /// (a texture is not read and drawn into at once).
+    pub(crate) ground_camera_bind_group: Option<wgpu::BindGroup>,
     pub(crate) shadow_bind_group: Option<wgpu::BindGroup>,
     /// As `shadow_bind_group`, with the precipitation roof map's camera.
     pub(crate) precip_bind_group: Option<wgpu::BindGroup>,
@@ -299,9 +310,16 @@ pub struct Scene {
     /// kept for the next: every car's exhaust is thousands of sprites, and lists made anew
     /// each time grew by copying and went back to the system (see `grid_scratch`).
     pub(crate) smoke_scratch: (Vec<(f64, GpuCorona)>, Vec<(f64, u32)>, Vec<GpuCorona>),
-    /// The street lamps that had a shadow map last frame (their places in centimetres):
-    /// they keep it against a lamp only a little stronger (`prepare_lights`).
-    pub(crate) lamp_shadow_last: Vec<[i64; 3]>,
+    /// The world's lamps that have a shadow map and the tile of each (the places of the lamps
+    /// in centimetres): they keep it against a lamp only a little stronger (`prepare_lights`).
+    pub(crate) lamp_slots: WorldSlots,
+    /// The same for the lamps of the player's saloon (`Cabin`).
+    pub(crate) cabin_slots: CabinSlots,
+    /// The lamps that hold a cube map (`CUBE_SLOTS`).
+    pub(crate) cube_slots: CubeSlots,
+    /// Where each of `interior_lights` hangs in the player's vehicle's frame, as last taken for
+    /// its tile (`lamp_tiles`).
+    pub(crate) cabin_places: Vec<Vec3>,
     pub(crate) last_lights: Vec<u8>,
     /// Material bind groups and uniform buffers made since the last `prepare`, by what they
     /// hold: materials made in one go with the same textures and values share them (a C2's

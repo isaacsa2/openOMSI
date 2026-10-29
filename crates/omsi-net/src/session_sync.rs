@@ -2,6 +2,15 @@
 use super::*;
 
 impl LanSession {
+    pub(super) fn on_image_packet(&mut self, data: &[u8], from: SocketAddr) -> bool {
+        match data.first() {
+            Some(&scripttex::MAGIC) => self.on_script_texture(data, from),
+            Some(&freetex::MAGIC) => self.on_freetex(data, from),
+            _ => return false,
+        }
+        true
+    }
+
     /// Released surfaces of our own vehicle. The transport retains an acknowledged
     /// baseline per subscriber and sends only pixel changes after initialization.
     pub fn set_script_textures(&mut self, table: u32, images: Vec<Option<scripttex::Image>>) {
@@ -208,7 +217,7 @@ impl LanSession {
 /// Bind versioned traffic to the freshly issued connection secret. Relays unwrap and
 /// rewrap for the destination, so old sessions cannot poison a retained peer's state.
 pub(super) fn session_bound(data: &[u8]) -> bool {
-    data.first().is_some_and(|b| [sounds::MAGIC, vars::VARS_MAGIC, var_schema::MAGIC, 0xEB].contains(b))
+    data.first().is_some_and(|b| [sounds::MAGIC, voice_net::MAGIC, vars::VARS_MAGIC, var_schema::MAGIC, 0xEB].contains(b))
 }
 
 impl LanSession {

@@ -4,6 +4,9 @@ use super::*;
 pub struct World {
     pub root: PathBuf,
     pub global: GlobalCfg,
+    /// The map's `transport` folder: stations, routes, wires, switches, depots, signals (empty
+    /// for a map without one).
+    pub transit: Arc<omsi_transit::TransitData>,
     pub map_dir: PathBuf,
     /// Indexed parked car lists of the map, loaded when a parking space uses one.
     pub(super) parklist: Mutex<HashMap<usize, Vec<String>>>,
@@ -36,6 +39,7 @@ pub struct World {
     /// its whole texture set twenty times (200 ms a spawn, 1.5 fps on Spandau).
     /// (With the number of sets holding each.)
     pub(super) vehicle_textures: Arc<Mutex<HashMap<PathBuf, (TextureId, usize)>>>,
+    pub(super) freetex_reloads: Arc<FreeTextureReloads>,
     /// GPU meshes of vehicles by (bus file, mesh index), shared across paint schemes.
     pub(super) vehicle_meshes: Arc<Mutex<HashMap<(PathBuf, usize), (MeshId, usize)>>>,
     /// Vehicle meshes and textures made on a worker, until their set is uploaded.
@@ -46,7 +50,7 @@ pub struct World {
     /// The textures prepared tiles decoded for their upload, while some prepared tile
     /// still holds them (see `decode_wanted_textures`).
     pub(super) decoded_in_flight: Mutex<HashMap<PathBuf, std::sync::Weak<TextureData>>>,
-    pub(super) upgrades_done: Arc<Mutex<Vec<(PathBuf, Arc<TextureData>)>>>,
+    pub(super) upgrades_done: Arc<Mutex<Vec<crate::freetex_reload::TextureUpgrade>>>,
     /// Roller-blind pictures (`[matl_freetex]`) uploaded as RGBA, to be compressed.
     pub(super) freetex_upgrades: Arc<Mutex<Vec<PathBuf>>>,
     /// OMSI's `[texmemlimit]`: bytes the scenery and vehicle textures may take on the GPU
@@ -420,6 +424,13 @@ fn model_lights_into(
             if !(b > 0.0) || !b.is_finite() {
                 continue;
             }
+            // a light left a number short in its file (London's GarageLights.sco has one with
+            // no height) reads every value after it a line along: a 120 m size, a yellow
+            // colour - a glow tens of metres across. No lamp is that big (the largest in the
+            // stock content is under 10 m): it is not drawn
+            if l.size > MAX_LAMP_SIZE {
+                continue;
+            }
             let p = xf.transform_point3(glam::Vec3::from(l.pos)).as_dvec3() + pos;
             let dir = if l.omni {
                 glam::Vec3::ZERO
@@ -476,6 +487,9 @@ fn model_lights_into(
         o.resize(out.len() - base, seq.wrapping_sub(1));
     }
 }
+
+/// The size (m) past which a `[light_enh_2]` is a damaged one, not a lamp.
+const MAX_LAMP_SIZE: f32 = 50.0;
 
 /// An object whose top stays this low (m over its foot) is no wall for a vehicle body; with
 /// a `[collision_mesh]` it is a step the wheels climb (a traffic island).

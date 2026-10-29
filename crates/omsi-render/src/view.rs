@@ -111,6 +111,16 @@ pub struct Lighting {
     /// The roads are kept clear of the snow (the weather's "snow on road" off): no cover is
     /// laid on road surfaces.
     pub roads_clear: bool,
+    /// Snow that builds up on the carriageways (0..1, see road_snow.wgsl): replaces the
+    /// on/off `roads_clear` while it is set.
+    pub road_snow: Option<f32>,
+    /// The snow fallen since the start, in thousandths of a full road cover: a tyre track
+    /// fills as more falls on it (see `set_snow_track_rows`).
+    pub snow_fallen: f64,
+    /// How deep the ruts of the lanes' wheel tracks show in the roads' snow (0..1).
+    pub snow_ruts: f32,
+    /// The snow track field holds the area around the camera (`set_snow_track_rows`).
+    pub snow_tracks: bool,
     /// Enhanced graphics: the physically based high-range renderer (enhanced.wgsl) with its
     /// computed sky, automatic exposure, glow and tone mapping (post.wgsl).
     pub enhanced: bool,
@@ -121,10 +131,10 @@ pub struct Lighting {
     /// The player's vehicle (origin, heading in degrees, `[boundingbox]` w l h cx cy cz):
     /// no rain sheen or snow cover is shaded inside it.
     pub inside: Option<(DVec3, f64, [f32; 6])>,
-    /// The player's vehicle's body as it is drawn: its position and its rotation (model frame
-    /// to the world, its pitch and bank on the springs included). The motion vectors carry its
-    /// cab with it - by the heading alone the cab came out moving at every start and turn.
-    pub inside_body: Option<(DVec3, Mat4)>,
+    /// The player's vehicle's body rotation (pitch and roll as well as heading): the
+    /// saloon's lamps look down from the vehicle's own frame (`LampShadow::cabin`). Without
+    /// it the heading alone stands in.
+    pub inside_rotation: Option<Mat4>,
     /// Actual road height beneath the player's vehicle; independent of suspension motion.
     /// The local puddle capture is skipped when no road height is known.
     pub puddle_ground: Option<f64>,
@@ -201,6 +211,17 @@ pub struct Lighting {
     /// Ångström exponent and its layer's depth (m); without it the day's own air is drawn
     /// from the calendar (`day_air`).
     pub air: Option<[f32; 3]>,
+    /// The cumulus layer's base and top over the ground (m) as a weather model knows them
+    /// (the condensation level and where the convection stops); without it the stock layer
+    /// of 1400-2800 m.
+    pub cloud_layer: Option<[f32; 2]>,
+    /// Altocumulus cover of the layer at 2-6 km (0..1).
+    pub alto: f32,
+    /// The optical depth of the grey deck's liquid water as a weather model knows it;
+    /// without it a stratus' 15 and, in rain, up to a nimbostratus' 60.
+    pub deck_tau: Option<f32>,
+    /// Thunderstorm activity (0 none .. 1 violent): lightning flashes and the storm's cloud.
+    pub storm: f32,
     /// Simulation seconds for scene animation; standalone views use elapsed real time.
     pub animation_time: Option<f32>,
 }
@@ -256,10 +277,14 @@ impl Default for Lighting {
             wetness: 0.0,
             snow: 0.0,
             roads_clear: false,
+            road_snow: None,
+            snow_fallen: 0.0,
+            snow_ruts: 0.0,
+            snow_tracks: false,
             enhanced: false,
             classic: false,
             inside: None,
-            inside_body: None,
+            inside_rotation: None,
             puddle_ground: None,
             puddle_normal: Vec3::Z,
             puddle_parts: Vec::new(),
@@ -283,6 +308,10 @@ impl Default for Lighting {
             day_seed: 0,
             veil: 0.0,
             air: None,
+            cloud_layer: None,
+            alto: 0.0,
+            deck_tau: None,
+            storm: 0.0,
             animation_time: None,
         }
     }

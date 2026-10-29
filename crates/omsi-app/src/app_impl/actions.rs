@@ -3,8 +3,9 @@
 use super::*;
 
 impl App {
-    /// Shift+N: the navigator, the navigator with the schedule, off. True in VR (where the
-    /// key is used up).
+    /// Shift+N: the navigator, the navigator with the schedule, off (with a plugin's panel in
+    /// its whole frame, which has no lower part: on, off). True in VR (where the key is used
+    /// up).
     pub(crate) fn cycle_navigator(&mut self) -> bool {
         if self.vr_active() {
             if !self.vr_nav_profile().enabled {
@@ -19,6 +20,10 @@ impl App {
         }
         if let Some(n) = self.menus.navigator.as_mut() {
             match (n.enabled, n.schedule) {
+                (true, _) if n.frame_panel.is_some() => {
+                    n.enabled = false;
+                    n.schedule = false;
+                }
                 (true, false) => n.schedule = true,
                 (true, true) => {
                     n.enabled = false;
@@ -56,7 +61,7 @@ impl App {
             let (trip, k) = d.trip_for_ibis();
             p.ibis_to_stop(trip, k);
         }
-        self.service_msg = Some((format!("Stop skipped: {name}"), 3.0));
+        self.service_msg = Some((omsi_ui::i18n::tr_fill("Stop skipped: {name}", &[("{name}", &name)]), 3.0));
     }
 
     #[cfg(windows)]
@@ -67,8 +72,9 @@ impl App {
             if self.xr.vr.is_some() {
                 self.xr.vr = None;
                 self.service_msg = Some(("Desktop mode".into(), 2.0));
-            } else if let Some(renderer) = self.renderer.as_ref() {
-                match crate::openxr::Vr::new(renderer, self.settings.vr_scale,
+            } else if let Some(renderer) = self.renderer.as_mut() {
+                let image_scale = renderer.start_xr(self.settings.vr_scale);
+                match crate::openxr::Vr::new(renderer, image_scale,
                                              self.settings.vr_desktop_mirror) {
                     Ok(vr) => {
                         self.xr.vr = Some(vr);
@@ -76,7 +82,7 @@ impl App {
                     }
                     Err(e) => {
                         log::error!("OpenXR could not restart: {e:#}");
-                        self.service_msg = Some((format!("{}: {e}", omsi_ui::tr("Could not start VR")), 5.0));
+                        self.service_msg = Some((omsi_ui::i18n::tr_fill_words("Could not start VR ({e})", &[("{e}", &e)]), 5.0));
                     }
                 }
             }
@@ -106,6 +112,13 @@ impl App {
         true
     }
 
+    /// The flashlight on or off (Alt+F): it lights what the view looks at, in every view.
+    pub(crate) fn toggle_flashlight(&mut self) {
+        self.cam.flashlight = !self.cam.flashlight;
+        let text = if self.cam.flashlight { "Flashlight on" } else { "Flashlight off" };
+        self.service_msg = Some((text.into(), 1.5));
+    }
+
     /// One of OMSI's global key actions; false when it is not one this game does.
     pub(crate) fn game_action(&mut self, name: &str) -> bool {
         #[cfg(windows)]
@@ -132,6 +145,7 @@ impl App {
                 }
             }
             "screenshot" => self.take_screenshot(),
+            "flashlight" => self.toggle_flashlight(),
             "photo_mode" => self.enter_photo(),
             "quicksave" => self.quick_save(),
             "view_set_ego" => {
@@ -208,6 +222,10 @@ impl App {
             // (Omsi.exe's camera reset, 0x7edde4, puts back the field of view with the
             // direction: the zoom goes as well, #244)
             "view_reset_direction" => {
+                // (a Tobii tracker's middle: where the head is now)
+                if let Some(h) = self.input.headtrack.as_ref() {
+                    h.recenter();
+                }
                 // F1 eases home (look + zoom glide) from the values in place:
                 // zeroing them first would flash a frame of the destination.
                 if self.view == "driver"
@@ -351,7 +369,7 @@ impl App {
             if !p.shift_gate_to(to) {
                 return false;
             }
-            self.service_msg = Some((format!("Gear {}", match to { 0 => "N".to_string(), -1 => "R".to_string(), n => n.to_string() }), 1.5));
+            self.service_msg = Some((omsi_ui::i18n::tr_fill("Gear {gear}", &[("{gear}", &match to { 0 => "N".to_string(), -1 => "R".to_string(), n => n.to_string() })]), 1.5));
             return true;
         }
         let Some(n) = names.iter().find(|n| p.vehicle.ty.program.trigger(n).is_some()) else {
@@ -425,7 +443,7 @@ impl App {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let path = dir.join(format!("omsi_{secs}.png"));
         if !cfg!(target_os = "android") {
-            self.service_msg = Some((format!("Screenshot: {}", path.display()), 4.0));
+            self.service_msg = Some((omsi_ui::i18n::tr_fill("Screenshot: {path}", &[("{path}", &path.display().to_string())]), 4.0));
         }
         self.perf.shot = Some((path, false));
     }

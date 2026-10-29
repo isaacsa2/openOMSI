@@ -6,9 +6,12 @@ use omsi_plugin::{GameEvent, HostConfig, InfoValue, PluginIo, Plugins};
 use omsi_script::Host;
 use omsi_script::SysVar;
 
-/// Load every plugin of every content root (`OMSI_NO_PLUGINS=1` leaves them out).
-pub(crate) fn load() -> Plugins {
-    if omsi_cfg::flags::OMSI_NO_PLUGINS.is_set() {
+/// Load every plugin of every content root; a disabled session never scans those folders.
+pub(crate) fn load(disabled: bool) -> Plugins {
+    if disabled || omsi_cfg::flags::OMSI_NO_PLUGINS.is_set() {
+        if disabled {
+            log::info!("plugins disabled for this session (--no-plugins)");
+        }
         return Plugins::default();
     }
     // (never from content another machine sent: a LAN host's mods are data only)
@@ -21,7 +24,10 @@ pub(crate) fn load() -> Plugins {
     if dirs.is_empty() {
         return Plugins::default();
     }
-    Plugins::load(&dirs, &HostConfig::detect())
+    let permissions = std::sync::Arc::new(omsi_plugin::api::process::ProcessPermissions::new(
+        crate::lan::data_dir().map(|p| p.join("plugin-process-permissions.json")),
+    ));
+    Plugins::load_with_process_permissions(&dirs, &HostConfig::detect(), omsi_plugin::api::process::ProcessGrants::from_env(), permissions)
 }
 
 /// The game's side of a plugin frame: the whole game (the plugins taken out of it for the
@@ -127,6 +133,27 @@ pub(crate) struct Seen {
 }
 
 impl crate::App {
+    /// The scripts of the player's vehicle (`[vehicle_script]` in its file) run as plugins for
+    /// as long as it is the player's: another vehicle (or none) stops them and starts its own.
+    pub(crate) fn sync_vehicle_scripts(&mut self, plugins: &mut Plugins) {
+        let now = self.player.as_ref().map(|p| p.vehicle.ty.def.path.clone());
+        if now == self.integrations.vehicle_scripts_of {
+            return;
+        }
+        let files = self.player.as_ref().map(|p| p.vehicle.ty.def.script_files.clone()).unwrap_or_default();
+        if files.is_empty() && self.integrations.vehicle_scripts_of.is_none() {
+            // (nothing running, nothing to start: just remember the vehicle)
+            self.integrations.vehicle_scripts_of = now;
+            return;
+        }
+        if self.args.no_plugins || omsi_cfg::flags::OMSI_NO_PLUGINS.is_set() {
+            self.integrations.vehicle_scripts_of = now;
+            return;
+        }
+        plugins.attach_vehicle_scripts(&files);
+        self.integrations.vehicle_scripts_of = now;
+    }
+
     /// What happened that the plugins hear about but cannot see by looking: the game
     /// pausing (they hear it at once, then stand still) and going on, the menu, people
     /// getting in and out of the bus, players joining and leaving, buttons of the
@@ -318,6 +345,11 @@ pub(crate) fn game_info(app: &crate::App) -> Vec<(&'static str, InfoValue)> {
             v.push(("trip_done", Bool(d.trip_done())));
             let bus = app.player.as_ref().map(|p| p.vehicle.position);
             stop_info(&mut v, &trip.stops, d.next_stop, d.at_stop(), bus);
+            if let Some(stop) = trip.stops.get(d.next_stop) {
+                if let Some(distance) = app.menus.navigator.as_ref().and_then(|n| n.next_stop_distance_for(stop.object_id)) {
+                    v.push(("next_stop_distance_nav", Num(distance)));
+                }
+            }
         }
     }
     v
@@ -346,7 +378,7 @@ fn stop_info(v: &mut Vec<(&'static str, InfoValue)>, stops: &[crate::schedule::P
         }
     }
     // the last stop before the next one the trip calls at (passing stations left out)
-    if let Some(s) = stops.iter().take(next).rev().find(|s| s.stops) {
+    if let Some(s) = stops.iter().take(next).rev().find(|s| s.calls()) {
         v.push(("previous_stop", Text(s.name.trim().to_string())));
         v.push(("previous_stop_id", Num(s.object_id as f64)));
         if let Some(m) = distance(s) {
@@ -391,6 +423,71 @@ use crate::plugin_io::{bus as pbus, duty as pduty, world as pworld};
 use omsi_plugin as op;
 
 impl PluginIo for Io<'_> {
+    fn duty_tour(&self) -> Option<omsi_plugin::api::Value> {
+        let app = self.app()?;
+        let d = app.session.duty.as_ref()?;
+        pduty::tour(app, &d.line, &d.tour, true).ok()
+    }
+    fn timetable_tour(&self, line: &str, tour: &str) -> Result<omsi_plugin::api::Value, String> {
+        pduty::tour(self.app().ok_or("no game")?, line, tour, false)
+    }
+
+    fn hof_data(&self) -> Option<omsi_plugin::api::Value> {
+        Some(crate::plugin_io::hof::snapshot(self.veh()?.host.hof.as_deref()?))
+    }
+    fn hof_terminus(&self, identifier: &str) -> Option<omsi_plugin::api::Value> {
+        crate::plugin_io::hof::find_terminus(self.veh()?.host.hof.as_deref()?, identifier)
+    }
+    fn hof_busstop(&self, identifier: &str) -> Option<omsi_plugin::api::Value> {
+        crate::plugin_io::hof::find_busstop(self.veh()?.host.hof.as_deref()?, identifier)
+    }
+    fn data_query(&mut self, query: omsi_plugin::data::DataQuery, args: &[omsi_plugin::data::QueryValue], object: Option<i64>) -> Result<Vec<omsi_plugin::data::QueryValue>, String> {
+        if let Some(id) = object {
+            let object = self.app_mut().ok_or("no game")?.session.scenery.find_mut(id).ok_or("scripted scenery object not loaded")?;
+            let number = object.inst.str_var("number").to_owned();
+            return crate::plugin_io::data::read(&mut object.inst.host, &number, query, args);
+        }
+        crate::plugin_io::data::query(self.veh_mut().ok_or("no player vehicle")?, query, args)
+    }
+    fn object_owned_by(&self, id: i64, plugin: &str) -> bool {
+        self.app().is_some_and(|a| crate::plugin_io::object::owned_by(a, id, plugin))
+    }
+    fn object_list(&self, plugin: &str) -> Vec<i64> {
+        self.app().map(|a| crate::plugin_io::object::list(a, plugin)).unwrap_or_default()
+    }
+    fn object_info(&self, id: i64) -> Option<omsi_plugin::ObjectInfo> {
+        crate::plugin_io::object::info(self.app()?, id)
+    }
+    fn object_var(&mut self, id: i64, name: &str) -> Option<f32> {
+        crate::plugin_io::object::var(self.app_mut()?, id, name)
+    }
+    fn object_set_var(&mut self, id: i64, name: &str, v: f32) -> bool {
+        self.app_mut().is_some_and(|a| crate::plugin_io::object::set_var(a, id, name, v))
+    }
+    fn object_str(&mut self, id: i64, name: &str) -> Option<String> {
+        crate::plugin_io::object::str_var(self.app_mut()?, id, name)
+    }
+    fn object_set_str(&mut self, id: i64, name: &str, v: &str) -> bool {
+        self.app_mut().is_some_and(|a| crate::plugin_io::object::set_str(a, id, name, v))
+    }
+    fn object_trigger(&mut self, id: i64, name: &str) -> bool {
+        self.app_mut().is_some_and(|a| crate::plugin_io::object::trigger(a, id, name))
+    }
+    fn object_meshes(&self, id: i64) -> Vec<String> {
+        // (reads only: the instance is borrowed through the list)
+        let s = &self.app().map(|a| &a.session.scenery);
+        match s.and_then(|s| s.find(id).map(|i| s.get(i))) {
+            Some(o) => (0..o.inst.mesh_count()).filter_map(|i| o.inst.mesh_file(i).map(str::to_string)).collect(),
+            None => Vec::new(),
+        }
+    }
+    fn object_set_mesh(&mut self, id: i64, mesh: &str, t: Option<omsi_plugin::MeshTransform>) -> bool {
+        self.app_mut().is_some_and(|a| crate::plugin_io::object::set_mesh(a, id, mesh, t))
+    }
+    fn object_set_visible(&mut self, id: i64, mesh: &str, v: Option<bool>) -> bool {
+        self.app_mut().is_some_and(|a| crate::plugin_io::object::set_visible(a, id, mesh, v))
+    }
+
     fn system(&mut self, name: &str) -> Option<f32> {
         let v = SysVar::from_name(name)?;
         self.veh_mut().map(|veh| veh.host.sys_var(v))
@@ -753,6 +850,15 @@ impl PluginIo for Io<'_> {
     fn duty_end(&mut self) -> bool {
         self.app_mut().is_some_and(pduty::finish)
     }
+    fn duty_set_auto_ibis(&mut self, owner: u64, on: bool) -> bool {
+        self.app_mut().is_some_and(|a| pduty::set_auto_ibis(a, owner, on))
+    }
+    fn duty_type_ibis(&mut self) -> bool {
+        self.app_mut().is_some_and(pduty::type_ibis)
+    }
+    fn duty_set_closed_stops(&mut self, stops: &[String], via: &str) -> bool {
+        self.app_mut().is_some_and(|a| pduty::set_closed_stops(a, stops, via))
+    }
     fn timetable_lines(&self) -> Vec<op::Line> {
         self.app().map(pduty::lines).unwrap_or_default()
     }
@@ -957,6 +1063,16 @@ impl PluginIo for Io<'_> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn disabled_session_accepts_cli_flag_and_returns_no_plugins() {
+        use clap::Parser;
+        let normal = crate::cli::Args::try_parse_from(["openomsi"]).unwrap();
+        assert!(!normal.no_plugins);
+        let disabled = crate::cli::Args::try_parse_from(["openomsi", "--no-plugins"]).unwrap();
+        assert!(disabled.no_plugins);
+        assert!(load(disabled.no_plugins).is_empty());
+    }
+
     fn snapshot(info: Vec<(&'static str, InfoValue)>) -> Io<'static> {
         Io::snapshot(info)
     }
@@ -1024,6 +1140,7 @@ mod tests {
             position: (x >= 0.0).then_some(glam::DVec3::new(x, 0.0, 5.0)),
             dir: Default::default(),
             stops,
+            closed: None,
         };
         let stops = vec![stop(11, "A", 0.0, true), stop(12, "B", 100.0, false), stop(13, "C", -1.0, true)];
         let mut v = Vec::new();

@@ -57,12 +57,21 @@ fn fog_phase(c: f32) -> f32 {
     return 0.9 * hg_phase(c, 0.85) + 0.1 * hg_phase(c, -0.5);
 }
 const AIRLIGHT_CELLS: u32 = 16u;
-fn lamp_airlight(c: vec3<f32>, d: vec3<f32>, start: f32, len: f32, jitter: f32) -> vec3<f32> {
+
+// The clear night air's own haze, which lights a lamp's halo and a headlamp's beam as the fog's
+// droplets do, only fainter: the lowest hundred metres of a city's air hold its dust, exhaust
+// and humidity at several times the column's average aerosol extinction (`enh.fog.w`), 1-3e-4
+// per metre (a visibility of 15-40 km). A lamp then has a soft glow round it and a low beam
+// a faint cone, as in any night photograph, instead of a lit disc on a black ground.
+const GROUND_HAZE_GAIN: f32 = 8.0;
+
+// `droplets`: how much of the weather's extinction scatters like fog (see `FogLampUniform`).
+fn lamp_airlight(c: vec3<f32>, d: vec3<f32>, start: f32, len: f32, jitter: f32, droplets: f32) -> vec3<f32> {
     var sum = vec3<f32>(0.0);
-    let sigma0 = enh.fog.x;
+    let sigma0 = enh.fog.x * droplets + enh.fog.w * GROUND_HAZE_GAIN * enh.led.z;
     let cell = camera.light_grid.z;
     let side = u32(camera.light_grid.w);
-    if (sigma0 < 2e-4 || cell <= 0.0 || side == 0u || len <= start) {
+    if (sigma0 < 4e-5 || cell <= 0.0 || side == 0u || len <= start) {
         return sum;
     }
     // (past a few optical depths nothing comes back)
@@ -108,6 +117,15 @@ fn lamp_airlight(c: vec3<f32>, d: vec3<f32>, start: f32, len: f32, jitter: f32) 
                 if (h >= range) {
                     continue;
                 }
+                // A beam (a headlamp, a spot) is lit in the weather's fog only: its cone is a sliver of
+                // sixteen jittered steps at half size, which the fog's density hides and the clear
+                // air's haze shows as shimmer and soap. The lamps' halo alone has the ground haze.
+                let beam_lamp = l.extra.z != 0.0 || l.dir.w > -1.5;
+                let fog_sigma = enh.fog.x * droplets;
+                if (beam_lamp && enh.fog.x < 2e-4) {
+                    continue;
+                }
+                let s0 = select(sigma0, fog_sigma, beam_lamp);
                 var core = l.extra.y;
                 if (core <= 0.0) {
                     core = range * 0.125;
@@ -132,6 +150,7 @@ fn lamp_airlight(c: vec3<f32>, d: vec3<f32>, start: f32, len: f32, jitter: f32) 
                     // out as a coarse checker in the fog round every headlamp.)
                     let pa = atan((ta - t0) / hh);
                     let dphi = (atan((tb - t0) / hh) - pa) / 16.0;
+                    let tile_k = beam_tile(li, l);
                     for (var q = 0u; q < 16u; q = q + 1u) {
                         let tq = t0 + hh * tan(pa + (f32(q) + jitter) * dphi);
                         let to = l.pos.xyz - (c + d * tq);
@@ -142,7 +161,13 @@ fn lamp_airlight(c: vec3<f32>, d: vec3<f32>, start: f32, len: f32, jitter: f32) 
                         } else {
                             beam = smoothstep(l.dir.w, l.extra.x, dot(-ld, l.dir.xyz));
                         }
-                        acc = acc + beam * fog_phase(dot(ld, d)) * dphi;
+                        // (the map is looked at only where the beam shines at all, and only for
+                        // the few lamps that have a tile: no shadows, no tile, no tap)
+                        var reach = 1.0;
+                        if (beam > 0.002 && tile_k < 44u) {
+                            reach = beam_reaches(tile_k, c + d * tq);
+                        }
+                        acc = acc + beam * reach * fog_phase(dot(ld, d)) * dphi;
                     }
                     half = 1.0;
                 } else {
@@ -150,6 +175,7 @@ fn lamp_airlight(c: vec3<f32>, d: vec3<f32>, start: f32, len: f32, jitter: f32) 
                     let pb = atan((tb - t0) / hh);
                     half = 0.5 * (pb - pa);
                     let mid = 0.5 * (pa + pb);
+                    let tile_p = beam_tile(li, l);
                     for (var q = 0u; q < 5u; q = q + 1u) {
                         let phi = mid + half * gx[q];
                         let tq = t0 + hh * tan(phi);
@@ -159,15 +185,21 @@ fn lamp_airlight(c: vec3<f32>, d: vec3<f32>, start: f32, len: f32, jitter: f32) 
                             // (a lamp in a housing: see `lamp_light`)
                             beam = 0.05 + 0.95 * smoothstep(-0.1, 0.3, ld.z);
                         }
-                        acc = acc + gw[q] * beam * fog_phase(-sin(phi));
+                        // (a lamp with a shadow map: what stands between it and the air
+                        // keeps its light out of that air, as the headlamps' beams)
+                        var reach = 1.0;
+                        if (beam > 0.002 && tile_p < 44u) {
+                            reach = beam_reaches(tile_p, c + d * tq);
+                        }
+                        acc = acc + gw[q] * beam * reach * fog_phase(-sin(phi));
                     }
                 }
                 // a lamp's irradiance is core^2 / r^2 of its colour's (a headlamp's 1 / r^2)
                 let strength = select(core * core, 1.0, l.extra.z != 0.0);
                 let xc = c + d * tc;
-                let sigma = sigma0 * exp(-enh.fog.y * max(xc.z - enh.fog.z, 0.0));
+                let sigma = s0 * exp(-enh.fog.y * max(xc.z - enh.fog.z, 0.0));
                 let dl = distance(xc, l.pos.xyz);
-                let atten = exp(-layer_depth(sigma0, enh.fog.y, c.z - enh.fog.z, xc.z - enh.fog.z, tc - start) - sigma * dl);
+                let atten = exp(-layer_depth(s0, enh.fog.y, c.z - enh.fog.z, xc.z - enh.fog.z, tc - start) - sigma * dl);
                 sum = sum + l.color.rgb * (l.color.w * strength * acc * half / hh * sigma * atten);
             }
         }

@@ -421,15 +421,17 @@ impl App {
         // screen, not a small picture far off. The other mirrors take their turns below without
         // them. (In VR the panels are not drawn.)
         let mut panel_cams = std::mem::take(&mut self.gfx.mirror_panel_cams);
-        if self.settings.mirror_hud_every_frame && self.settings.mirror_size != 0 && !vr_active && self.cam.in_cab && self.gfx.mirror_hud.active() {
+        if self.settings.mirror_size != 0 && !vr_active && self.cam.in_cab && self.gfx.mirror_hud.active() {
             self.gfx.mirror_hud.cams_into(&mut panel_cams);
         } else {
             panel_cams.clear();
         }
-        if !panel_cams.is_empty() {
+        let every_frame = self.settings.mirror_hud_every_frame;
+        let (skip, on_screen): (&[usize], &[usize]) = if every_frame { (&panel_cams, &[]) } else { (&[], &panel_cams) };
+        if every_frame && !panel_cams.is_empty() {
             if let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) {
                 let view = (*cam, s.config.width as f32 / s.config.height.max(1) as f32);
-                render_mirrors(r, scene, w, p, lighting, MirrorPick::Only(&panel_cams), Some(view));
+                render_mirrors(r, scene, w, p, lighting, MirrorPick::Only(&panel_cams), Some(view), &[]);
             }
         }
         if self.settings.mirror_size == 0 {
@@ -440,7 +442,7 @@ impl App {
             // as through the windscreen (in turns, each picture was a step behind, and the
             // steps grew with the speed - the mirrors seemed to shake)
             self.gfx.mirror_budget = 0.0;
-            let mirror_view = if self.settings.triple.enabled || (self.gfx.mirror_hud.active() && self.cam.in_cab && panel_cams.is_empty()) {
+            let mirror_view = if self.settings.triple.enabled {
                 None
             } else {
                 Some((*cam, s.config.width as f32 / s.config.height.max(1) as f32))
@@ -448,7 +450,7 @@ impl App {
             let near = self.player.as_ref().is_some_and(|p| (p.vehicle.position - cam.position).length() < 12.0);
             if let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) {
                 if self.cam.in_cab || near {
-                    self.gfx.mirrors_seen = render_mirrors(r, scene, w, p, lighting, MirrorPick::All(&panel_cams), mirror_view);
+                    self.gfx.mirrors_seen = render_mirrors(r, scene, w, p, lighting, MirrorPick::All(skip), mirror_view, on_screen);
                 }
             }
         } else if self.settings.mirror_refresh == "off" {
@@ -461,7 +463,7 @@ impl App {
                 let next = since.max(0.0) + raw_dt.min(0.1);
                 // (and while the driver turns a mirror, so it can be aimed)
                 if since < 0.0 || (since < MIRROR_FREEZE_REDRAW && next >= MIRROR_FREEZE_REDRAW) || p.mirrors_dirty {
-                    self.gfx.mirrors_seen = render_mirrors(r, scene, w, p, lighting, MirrorPick::All(&panel_cams), None);
+                    self.gfx.mirrors_seen = render_mirrors(r, scene, w, p, lighting, MirrorPick::All(skip), None, on_screen);
                 }
                 self.gfx.frozen_mirrors = Some(FrozenMirrors { bus: p.uid, since: next });
             }
@@ -483,12 +485,9 @@ impl App {
             // its frustum can leave a mirror visible in VR uninitialised
             // (black). Refresh all bus mirrors in VR, still taking turns
             // within the configured budget; keep desktop visibility culling.
-            // (Panels taking their turns show mirrors out of the picture: all of them take
-            // turns then. Panels drawn every frame above are left out of the turns instead.)
-            let mirror_view = if vr_active
-                || self.settings.triple.enabled
-                || (self.gfx.mirror_hud.active() && self.cam.in_cab && panel_cams.is_empty())
-            {
+            // (Panels taking their turns keep their mirrors in the turns, in the picture or
+            // not. Panels drawn every frame above are left out of the turns instead.)
+            let mirror_view = if vr_active || self.settings.triple.enabled {
                 None
             } else {
                 Some((*cam, s.config.width as f32 / s.config.height.max(1) as f32))
@@ -513,7 +512,7 @@ impl App {
                 // mirrors are due, including the Every frame mode.
                 if let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) {
                     self.gfx.mirror_turn = self.gfx.mirror_turn.wrapping_add(draw_limit);
-                    self.gfx.mirrors_seen = render_mirrors(r, scene, w, p, lighting, MirrorPick::All(&panel_cams), mirror_view);
+                    self.gfx.mirrors_seen = render_mirrors(r, scene, w, p, lighting, MirrorPick::All(skip), mirror_view, on_screen);
                     drawn = draw_limit;
                 }
             }
@@ -527,8 +526,9 @@ impl App {
                     w,
                     p,
                     lighting,
-                    MirrorPick::Turn(self.gfx.mirror_turn, &panel_cams),
+                    MirrorPick::Turn(self.gfx.mirror_turn, skip),
                     mirror_view,
+                    on_screen,
                 );
             }
         }
@@ -599,7 +599,7 @@ impl App {
         // frame slept past one and waited for the next, two refreshes for one frame.
         let vsync_paces = presented
             && asked == 0
-            && self.gfx.surface.as_ref().is_some_and(|s| s.config.present_mode == wgpu::PresentMode::AutoVsync);
+            && self.gfx.surface.as_ref().is_some_and(|s| matches!(s.config.present_mode, wgpu::PresentMode::Fifo | wgpu::PresentMode::FifoRelaxed | wgpu::PresentMode::AutoVsync));
         if max_fps > 0 && !vr_active && !vsync_paces {
             let __t = Instant::now();
             pace_until(now, std::time::Duration::from_secs_f64(1.0 / max_fps as f64));
@@ -610,7 +610,7 @@ impl App {
     /// The frames counted, `--exit-after` with its statistics (true: the session ends), and
     /// the window's title once a second.
     fn frame_count(&mut self, event_loop: &ActiveEventLoop) -> bool {
-        let (Some(s), Some(r), Some(cam), Some(win)) = (
+        let (Some(_), Some(r), Some(cam), Some(win)) = (
             self.gfx.surface.as_ref(),
             self.renderer.as_mut(),
             self.camera.as_ref(),
@@ -649,57 +649,6 @@ impl App {
                     log::info!("tile streaming: {} tiles loaded now, {} loaded and {} unloaded in all, {:.1} s preparing on the worker, slowest upload {:.0} ms, streaming over 16 ms in {} frames (worst {:.0} ms); {} objects + {} trees, {} rows, {} attached ({} without parent), {} unresolved", w.loaded_tiles().len(), st.loaded_total, st.unloaded_total, st.prepare_secs, st.worst_upload_ms, st.slow_frames, st.worst_frame_ms, st.stats.objects, st.stats.trees, st.stats.rows, st.stats.attached, st.stats.unattached, st.stats.failed_objects);
                     st.stats.log_ground();
                 }
-                if omsi_cfg::flags::OMSI_PROFILE.is_set() {
-                    let n = self.perf.total_frames.max(1) as f64;
-                    for (k, v) in &self.perf.profile {
-                        log::info!("profile {k:10}: {:.1} ms/frame", v / n * 1000.0);
-                    }
-                    if let Some(h) = self.session.humans.as_ref() {
-                        log::info!(
-                            "profile people: {} ({})",
-                            h.people.len(),
-                            h.summary(&self.gfx.sim_view.people)
-                        );
-                    }
-                    for (k, v) in r.stats.borrow().iter() {
-                        log::info!(
-                            "profile render.{k:10}: {:.2} ms/frame",
-                            v / n * 1000.0
-                        );
-                    }
-                    for (k, v) in r.counts.borrow().iter() {
-                        log::info!("profile count {k}: {:.0} a frame", v / n);
-                    }
-                    if let Some(memory) = r.allocator_summary() {
-                        log::info!("profile graphics memory: {memory}");
-                    }
-                    for (pass, ms, frames) in r.gpu_pass_times() {
-                        log::info!("profile gpu pass {pass:12}: {ms:.2} ms ({frames} frames measured)");
-                    }
-                    if let (Some((c0, t0, f0)), Some(c1)) =
-                        (self.perf.cpu_mark, process_cpu_seconds())
-                    {
-                        let frames = self.perf.total_frames.saturating_sub(f0).max(1) as f64;
-                        let main = self.perf.thread_cpu_mark.zip(crate::startup::thread_cpu_seconds()).map(|(m0, m1)| format!(", {:.2} ms CPU of the frame's own thread", (m1 - m0) / frames * 1000.0)).unwrap_or_default();
-                        log::info!("profile: since 15 s {:.1} ms wall and {:.1} ms CPU (all threads) per frame{main}, {:.1} cores busy", t0.elapsed().as_secs_f64() / frames * 1000.0, (c1 - c0) / frames * 1000.0, (c1 - c0) / t0.elapsed().as_secs_f64().max(1e-3));
-                    }
-                    let (sw, sh) = r.scene_size(s.config.width, s.config.height);
-                    log::info!(
-                        "profile: window {}x{}, scene drawn at {sw}x{sh}, {}x MSAA",
-                        s.config.width,
-                        s.config.height,
-                        r.options.msaa
-                    );
-                    let frames = crate::perf_report::frame_summary(&self.perf.frame_times);
-                    log::info!("{}", crate::perf_report::log_line(&frames));
-                    if let Some(path) = omsi_cfg::flags::OMSI_PROFILE_JSON.var() {
-                        let report = crate::perf_report::report(crate::perf_report::Run { perf: &self.perf, settings: &self.settings, args: &self.args, lan: self.net.lan.is_some() }, r, (s.config.width, s.config.height), (sw, sh), frames);
-                        match serde_json::to_vec_pretty(&report).map_err(anyhow::Error::from).and_then(|b| Ok(std::fs::write(path, b)?)) {
-                            Ok(()) => log::info!("profile: the summary is in {path}"),
-                            Err(e) => log::warn!("profile: the summary could not be written to {path}: {e}"),
-                        }
-                    }
-                }
                 finish = true;
                 crate::platform::exit(event_loop);
             }
@@ -735,7 +684,73 @@ impl App {
             self.perf.frames = 0;
             self.perf.fps_t = Instant::now();
         }
+        if finish {
+            self.log_profile_summary();
+        }
         finish
+    }
+
+    /// OMSI_PROFILE's summary of the session: the stages per frame, the GPU passes, counts and
+    /// percentiles. Written once, by whichever way out comes first - `--exit-after`, or the
+    /// player closing the game (`exiting`), so a tester can play as usual and quit instead of
+    /// guessing a duration beforehand.
+    pub(crate) fn log_profile_summary(&mut self) {
+        if !omsi_cfg::flags::OMSI_PROFILE.is_set() || self.perf.profile_written {
+            return;
+        }
+        let (Some(s), Some(r)) = (self.gfx.surface.as_ref(), self.renderer.as_ref()) else {
+            return;
+        };
+        self.perf.profile_written = true;
+        let n = self.perf.total_frames.max(1) as f64;
+        for (k, v) in &self.perf.profile {
+            log::info!("profile {k:10}: {:.1} ms/frame", v / n * 1000.0);
+        }
+        if let Some(h) = self.session.humans.as_ref() {
+            log::info!(
+                "profile people: {} ({})",
+                h.people.len(),
+                h.summary(&self.gfx.sim_view.people)
+            );
+        }
+        for (k, v) in r.stats.borrow().iter() {
+            log::info!(
+                "profile render.{k:10}: {:.2} ms/frame",
+                v / n * 1000.0
+            );
+        }
+        for (k, v) in r.counts.borrow().iter() {
+            log::info!("profile count {k}: {:.0} a frame", v / n);
+        }
+        if let Some(memory) = r.allocator_summary() {
+            log::info!("profile graphics memory: {memory}");
+        }
+        for (pass, ms, frames) in r.gpu_pass_times() {
+            log::info!("profile gpu pass {pass:12}: {ms:.2} ms ({frames} frames measured)");
+        }
+        if let (Some((c0, t0, f0)), Some(c1)) =
+            (self.perf.cpu_mark, process_cpu_seconds())
+        {
+            let frames = self.perf.total_frames.saturating_sub(f0).max(1) as f64;
+            let main = self.perf.thread_cpu_mark.zip(crate::startup::thread_cpu_seconds()).map(|(m0, m1)| format!(", {:.2} ms CPU of the frame's own thread", (m1 - m0) / frames * 1000.0)).unwrap_or_default();
+            log::info!("profile: since 15 s {:.1} ms wall and {:.1} ms CPU (all threads) per frame{main}, {:.1} cores busy", t0.elapsed().as_secs_f64() / frames * 1000.0, (c1 - c0) / frames * 1000.0, (c1 - c0) / t0.elapsed().as_secs_f64().max(1e-3));
+        }
+        let (sw, sh) = r.scene_size(s.config.width, s.config.height);
+        log::info!(
+            "profile: window {}x{}, scene drawn at {sw}x{sh}, {}x MSAA",
+            s.config.width,
+            s.config.height,
+            r.options.msaa
+        );
+        let frames = crate::perf_report::frame_summary(&self.perf.frame_times);
+        log::info!("{}", crate::perf_report::log_line(&frames));
+        if let Some(path) = omsi_cfg::flags::OMSI_PROFILE_JSON.var() {
+            let report = crate::perf_report::report(crate::perf_report::Run { perf: &self.perf, settings: &self.settings, args: &self.args, lan: self.net.lan.is_some() }, r, (s.config.width, s.config.height), (sw, sh), frames);
+            match serde_json::to_vec_pretty(&report).map_err(anyhow::Error::from).and_then(|b| Ok(std::fs::write(path, b)?)) {
+                Ok(()) => log::info!("profile: the summary is in {path}"),
+                Err(e) => log::warn!("profile: the summary could not be written to {path}: {e}"),
+            }
+        }
     }
 }
 

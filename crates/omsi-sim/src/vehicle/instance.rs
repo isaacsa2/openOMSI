@@ -13,6 +13,16 @@ impl VehicleInstance {
             .unwrap_or_default()
     }
 
+    /// The license plate the scripts know as `ident` (empty for a vehicle without one).
+    pub fn ident(&self) -> String {
+        self.ty
+            .program
+            .str_var("ident")
+            .and_then(|i| self.state.str_vars.get(i as usize))
+            .cloned()
+            .unwrap_or_default()
+    }
+
     pub fn new(ty: Arc<VehicleType>, host: VehicleHost) -> VehicleInstance {
         let program = ty.program.clone();
         let mut state = State::new(&program);
@@ -88,41 +98,14 @@ impl VehicleInstance {
             };
             state.vars[id as usize] = value;
         }
-        // Model directives such as [visible] refer to vehicle variables too. Register their
-        // names before mesh properties are resolved, even when the vehicle's varlists omit
-        // them; scripts and model directives then share the same runtime variable table.
-        // A model-only variable has no script slot to initialise it: it starts at the value
-        // its meshes' [visible] ask for when they all ask for the same one (a display shown
-        // as the model means it), and at 0 when several meshes pick between values with it
-        // (a selector: the one for 0 shows, as with a declared variable nobody set).
-        let mut model_only: Vec<(String, Option<f32>)> = Vec::new();
-        for (name, value) in ty.model.meshes.iter().filter_map(|m| m.visible.as_ref()) {
-            let key = name.to_ascii_lowercase();
-            if var_index.contains_key(&key) {
-                continue;
-            }
-            match model_only.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, v)) => {
-                    if *v != Some(*value) {
-                        *v = None;
-                    }
-                }
-                None => model_only.push((key, Some(*value))),
-            }
-        }
-        // (the variables of the further conditions - a range, a negated one, the second of a
-        // mesh's `[visible]`s - start at 0)
+        let mut model_only_vars: Vec<String> = Vec::new();
         for c in ty.model.meshes.iter().flat_map(|m| m.visible_groups()).flatten() {
             let key = c.variable.to_ascii_lowercase();
-            if !var_index.contains_key(&key) && !model_only.iter().any(|(k, _)| *k == key) {
-                model_only.push((key, None));
+            if !var_index.contains_key(&key) && !model_only_vars.contains(&key) {
+                model_only_vars.push(key);
             }
         }
-        for (key, value) in model_only {
-            let id = state.vars.len() as omsi_script::VarId;
-            state.vars.push(value.unwrap_or(0.0));
-            var_index.insert(key, id);
-        }
+
         // `Axle_Springfactor_*` (varlist_roadvehicle.txt): the engine's spring scale, which
         // air-suspension scripts overwrite with their bellows pressure; a steel-sprung bus
         // never writes it and must not ride on springs of zero
@@ -145,8 +128,14 @@ impl VehicleInstance {
         if let Some(scheme) = host.paint_scheme {
             let scheme = scheme.filter(|i| *i < ty.paint_schemes.len());
             let mut put = |name: &str, v: f32| {
-                if let Some(id) = var_index.get(&name.to_ascii_lowercase()) {
-                    state.vars[*id as usize] = v;
+                let key = name.to_ascii_lowercase();
+                match var_index.get(&key) {
+                    Some(id) => state.vars[*id as usize] = v,
+                    None if model_only_vars.contains(&key) => {
+                        var_index.insert(key, state.vars.len() as omsi_script::VarId);
+                        state.vars.push(v);
+                    }
+                    None => {}
                 }
             };
             put("Colorscheme", scheme.map(|i| i as f32).unwrap_or(-1.0));
@@ -197,6 +186,9 @@ impl VehicleInstance {
                 ]
             })
             .collect();
+        let v_surface = (0..physics.wheels.len())
+            .map(|a| [v(&format!("Axle_SurfaceID_{a}_L")), v(&format!("Axle_SurfaceID_{a}_R"))])
+            .collect();
         let rest_sag: Vec<(f32, f32)> = {
             let rb = crate::rigid::RigidBody::from_definition(&ty.def, &ty.hub_heights(0));
             (0..physics.wheels.len())
@@ -228,12 +220,14 @@ impl VehicleInstance {
                 .collect();
             offs.iter().sum::<f32>() / offs.len().max(1) as f32
         };
-        VehicleInstance {
+        let trolley = TrolleyGear::for_type(&ty.def.trolley, std::ptr::addr_of!(host) as u64);
+        let mut instance = VehicleInstance {
             pending_destination: None,
             a_trans: OmsiFrames::default(),
             particles: ParticleSet::new(ty.model.particle_systems(), std::ptr::addr_of!(host) as u64 ^ 0x9e37_79b9),
             light_fade: Vec::new(),
             v_springfactor,
+            v_surface,
             rest_sag,
             ai_lift,
             contact: None,
@@ -252,6 +246,7 @@ impl VehicleInstance {
                 .flat_map(|i| [format!("PAX_Entry{i}_Req"), format!("PAX_Exit{i}_Req"), format!("PAX_Entry{i}_Busy"), format!("PAX_Exit{i}_Busy")])
                 .filter_map(|n| v(&n))
                 .collect(),
+            v_cables: control_cables(&ty),
             v_accel: [v("A_Trans_X"), v("A_Trans_Y"), v("A_Trans_Z")],
             v_wheels,
             ty,
@@ -263,6 +258,7 @@ impl VehicleInstance {
             pitch: 0.0,
             bank: 0.0,
             animators,
+            cab_wheel_rotation: 0,
             mesh_transforms: vec![Mat4::IDENTITY; n],
             mesh_props: vec![MeshProps::default(); n],
             physics,
@@ -294,14 +290,29 @@ impl VehicleInstance {
             km_started: false,
             cabin_air: None,
             ai_visuals: true,
+            ai_script_period: 0.0,
             ai_visuals_missed: 0.0,
             trailers_stepped: false,
             var_index: std::sync::Arc::new(var_index),
+            model_only_vars,
             props_plan: PropsPlan::default(),
             pax_vars: std::sync::OnceLock::new(),
             engine_ids: std::sync::OnceLock::new(),
+            cable_bus: Vec::new(),
             program_ids: std::sync::OnceLock::new(),
-        }
+            trolley,
+            rail_env: None,
+            rail_scripted: false,
+            rail_out: None,
+            rail_log: 0.0,
+            rail_brake_sys: None,
+            rail_chain: None,
+            rail_broken: false,
+            panto: None,
+        };
+        instance.declare_trolley_vars();
+        instance.init_pantograph();
+        instance
     }
 
     /// Restore a situation without running scripts against an incomplete host. Nothing is
@@ -424,14 +435,25 @@ impl VehicleInstance {
                 self.set_var(&var, v);
             }
         }
+        // the cars that run their scripts themselves wear it too
+        for part in &mut self.trailers {
+            if let Some(run) = part.run.as_deref_mut() {
+                run.apply_paint(&part.ty, scheme);
+            }
+        }
     }
 
-    /// The scheme's `[setvar]`s set again, before every frame of the scripts: Omsi.exe
-    /// writes them each frame, not once, and scripts count on it. The Ikarbus cockpit
-    /// turns `v_font` to the Cyrillic font (7) while its switch is on and leaves it there
-    /// when the switch goes off; the scheme's `v_font 0` every frame is what brings the
+    /// The scheme's `[setvar]`s set again, before every frame of the scripts and after it:
+    /// Omsi.exe writes them each frame, not once, and scripts count on it. The Ikarbus
+    /// cockpit turns `v_font` to the Cyrillic font (7) while its switch is on and leaves it
+    /// there when the switch goes off; the scheme's `v_font 0` every frame is what brings the
     /// Latin font back, which the matrix then draws at the next terminus. Set once, the
     /// display stayed Cyrillic for good.
+    /// After the scripts too, so that what is drawn is the scheme's: the Kajosoft Jelcz's
+    /// `cockpit_frame` writes `v_drzwi` from its constant (0, standard doors) every frame,
+    /// and its repaints choose the glazed doors with `[setvar] v_drzwi 1` - which Omsi.exe
+    /// shows. Set before the scripts alone, the script's 0 was drawn: the JGSP Novi Sad
+    /// Vectus had the standard doors' white frames where the original has black (#3183).
     pub(crate) fn apply_scheme_vars_each_frame(&mut self) {
         let Some(Some(i)) = self.host.paint_scheme else { return };
         if let Some(s) = self.ty.paint_schemes.get(i) {
@@ -444,4 +466,14 @@ impl VehicleInstance {
             }
         }
     }
+}
+
+pub(super) fn control_cables(ty: &VehicleType) -> Vec<(omsi_script::VarId, omsi_script::VarId)> {
+    let v = |name: &str| ty.program.var(name);
+    let mut cables: Vec<_> = ty.def.control_cable_front.iter().chain(&ty.def.control_cable_back)
+        .filter_map(|c| Some((v(c.lines.get(3)?)?, v(c.lines.get(2)?)?)))
+        .collect();
+    cables.sort_unstable();
+    cables.dedup();
+    cables
 }
