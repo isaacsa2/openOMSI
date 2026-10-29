@@ -28,7 +28,8 @@ pub fn parse_day_time(s: &str) -> f64 {
     let h: f64 = it.next().and_then(|x| x.trim().parse().ok()).unwrap_or(9.0);
     let m: f64 = it.next().and_then(|x| x.trim().parse().ok()).unwrap_or(0.0);
     let sec: f64 = it.next().and_then(|x| x.trim().parse().ok()).unwrap_or(0.0);
-    h * 3600.0 + m * 60.0 + sec
+    let time = h * 3600.0 + m * 60.0 + sec;
+    if time.is_finite() { time } else { 9.0 * 3600.0 }
 }
 
 impl SimClock {
@@ -50,6 +51,13 @@ impl SimClock {
     }
 
     pub fn advance(&mut self, dt: f32) {
+        if !dt.is_finite() {
+            self.timegap = 0.0;
+            return;
+        }
+        if !self.time.is_finite() {
+            self.time = 9.0 * 3600.0;
+        }
         self.timegap = dt;
         if !self.paused {
             self.run_time += dt as f64;
@@ -160,6 +168,24 @@ pub fn days_in_year(y: i32) -> i32 {
 #[cfg(test)]
 mod date_tests {
     use super::*;
+
+    #[test]
+    fn nonfinite_input_never_stalls_the_calendar() {
+        let mut c = SimClock::default();
+        let first = c.time;
+        c.advance(f32::INFINITY);
+        c.advance(f32::NAN);
+        assert_eq!(c.time, first);
+        assert_eq!(c.timegap, 0.0);
+        assert_eq!(parse_day_time("inf"), 9.0 * 3600.0);
+        assert_eq!(parse_day_time("NaN"), 9.0 * 3600.0);
+        c.time = f64::INFINITY;
+        c.advance(1.0);
+        assert_eq!(c.time, 9.0 * 3600.0 + 1.0);
+        c.time = 86399.0;
+        c.advance(2.0);
+        assert_eq!(c.time, 1.0);
+    }
 
     #[test]
     fn dates_from_elsewhere_stay_in_range() {
