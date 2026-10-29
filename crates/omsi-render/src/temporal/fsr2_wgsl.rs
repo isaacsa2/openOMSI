@@ -2,7 +2,7 @@
 //! Unlike the old "FSR 2 Preview", this calls the actual FFX FSR2 host
 //! algorithm and the WGSL compute passes from sp-fidelity 0.2.0.
 //! The adapter uses the application's *patched wgpu 29* types exclusively.
-//! Enabled at compile-time by default, but only creates GPU passes for compatible selected adapters.
+//! Opt-in only: old GLES/GL/Android GPUs continue on Standard/FSR1.
 
 use super::fsr2_port;
 use super::fsr2_port::FfxWgpuBackend;
@@ -20,7 +20,7 @@ struct Targets {
     output: wgpu::Texture,
     output_group: wgpu::BindGroup,
 }
-struct Fsr2Engine {
+pub(crate) struct Fsr2Wgsl {
     backend: Rc<RefCell<FfxWgpuBackend>>,
     interface: sp_fidelity::interface::FfxInterfaceRef,
     context: FfxFsr2Context,
@@ -32,7 +32,7 @@ struct Fsr2Engine {
     refused: bool,
 }
 
-impl Fsr2Engine {
+impl Fsr2Wgsl {
     pub(crate) fn required_features() -> wgpu::Features {
         fsr2_port::required_features()
     }
@@ -223,114 +223,73 @@ impl Fsr2Engine {
         self.ready=true;true
     }
 }
-impl Drop for Fsr2Engine {
+impl Drop for Fsr2Wgsl {
     fn drop(&mut self) {
         if self.targets.is_some(){let _=ffx_fsr2_context_destroy(&mut self.context);}
     }
 }
 
-/// FSR2's upstream interface is Rc<RefCell<dyn FfxInterface>>, deliberately
-/// !Send. The renderer itself must remain Send because ANGLE compiles it on
-/// a managed compiler thread and transfers it back to the game thread.
-/// Keep the SDK context on the thread performing actual FSR2 dispatches.
-/// Only Send-safe GPU handles and a unique ID live in Renderer.
+// The third-party SDK uses Rc<RefCell<_>>. Renderer must be Send (ANGLE
+// moves the renderer between threads), so keep the SDK on the render thread.
 thread_local! {
-    static THREAD_ENGINES: RefCell<std::collections::HashMap<u64, Fsr2Engine>> =
+    static BACKENDS: RefCell<std::collections::HashMap<u64, Fsr2Wgsl>> =
         RefCell::new(std::collections::HashMap::new());
 }
-static NEXT_ENGINE_ID: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(1);
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-pub(crate) struct Fsr2Wgsl {
+pub(crate) struct Fsr2Handle {
     id: u64,
-    index: u32,
-    ready_group: Option<wgpu::BindGroup>,
-    refused: bool,
+    failed: std::sync::atomic::AtomicBool,
 }
-impl Fsr2Wgsl {
-    pub(crate) fn required_features() -> wgpu::Features {
-        Fsr2Engine::required_features()
+impl Fsr2Handle {
+    pub(crate) fn new() -> Self {
+        Self { id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            failed: std::sync::atomic::AtomicBool::new(false) }
     }
-
+    pub(crate) fn required_features() -> wgpu::Features { Fsr2Wgsl::required_features() }
     pub(crate) fn available(&self) -> bool {
-        !self.refused
+        !self.failed.load(std::sync::atomic::Ordering::Relaxed)
     }
-
-    pub(crate) fn new(_device: &wgpu::Device) -> Self {
-        // Do not instantiate FfxInterface here: Renderer::build may run on
-        // ANGLE's separate compiler thread and would make Renderer !Send.
-        Self {
-            id: NEXT_ENGINE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            index: 0,
-            ready_group: None,
-            refused: false,
-        }
-    }
-
-    pub(crate) fn reset(&mut self) {
-        self.ready_group = None;
-        self.index = 0;
-        // If the SDK context has already been created on this thread, reset
-        // its temporal history too. A new thread starts with no history.
-        let _ = THREAD_ENGINES.try_with(|engines| {
-            if let Some(engine) = engines.borrow_mut().get_mut(&self.id) {
-                engine.reset();
+    pub(crate) fn with_backend<T>(
+        &self, device: &wgpu::Device, f: impl FnOnce(&mut Fsr2Wgsl) -> T,
+    ) -> Option<T> {
+        if !self.available() { return None; }
+        BACKENDS.with(|cell| {
+            let mut contexts = cell.borrow_mut();
+            if !contexts.contains_key(&self.id) {
+                let Some(backend) = crate::gpu::optional_pipeline(
+                    device, "FSR2 WGSL", || Fsr2Wgsl::new(device)
+                ) else {
+                    self.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return None;
+                };
+                contexts.insert(self.id, backend);
             }
-        });
-    }
-
-    pub(crate) fn jitter(&self, render: (u32, u32), display: (u32, u32)) -> [f32; 2] {
-        let phases = ffx_fsr2_get_jitter_phase_count(
-            render.0.max(1) as i32, display.0.max(1) as i32,
-        ).max(1);
-        ffx_fsr2_get_jitter_offset(self.index as i32, phases)
-            .map(|(x, y)| [x, y])
-            .unwrap_or([0.0, 0.0])
-    }
-
-    pub(crate) fn present(&self) -> Option<&wgpu::BindGroup> {
-        self.ready_group.as_ref()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn encode(
-        &mut self, device: &wgpu::Device, queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        layout: &wgpu::BindGroupLayout, uniform: &wgpu::Buffer,
-        sampler: &wgpu::Sampler, source: &wgpu::TextureView,
-        depth: &wgpu::Texture, motion: &wgpu::Texture,
-        render: (u32, u32), display: (u32, u32),
-        camera: &Camera, dt: f32, reset: bool, sharpness: f32,
-    ) -> bool {
-        self.ready_group = None;
-        if self.refused {
-            return false;
-        }
-        // This closure runs on the rendering thread, not on the temporary
-        // ANGLE build thread; Rc never crosses a thread boundary.
-        THREAD_ENGINES.with(|engines| {
-            let mut engines = engines.borrow_mut();
-            let engine = engines.entry(self.id).or_insert_with(|| Fsr2Engine::new(device));
-            let ok = engine.encode(
-                device, queue, encoder, layout, uniform, sampler, source,
-                depth, motion, render, display, camera, dt, reset, sharpness,
-            );
-            self.index = engine.index;
-            self.refused = engine.refused;
-            if ok {
-                self.ready_group = engine.present().cloned();
-            }
-            ok
+            contexts.get_mut(&self.id).map(f)
         })
     }
-}
-impl Drop for Fsr2Wgsl {
-    fn drop(&mut self) {
-        self.ready_group = None;
-        // try_with is safe during thread-local teardown; SDK resources
-        // are dropped on their owning thread when the renderer is released.
-        let _ = THREAD_ENGINES.try_with(|engines| {
-            engines.borrow_mut().remove(&self.id);
+    pub(crate) fn jitter(
+        &self, device: &wgpu::Device, render: (u32,u32), display: (u32,u32)
+    ) -> Option<[f32;2]> {
+        self.with_backend(device, |s| s.jitter(render, display))
+    }
+    pub(crate) fn present(&self) -> Option<wgpu::BindGroup> {
+        if !self.available() { return None; }
+        BACKENDS.with(|cell| cell.borrow().get(&self.id)
+            .and_then(|s| s.present().cloned()))
+    }
+    pub(crate) fn reset(&self) {
+        BACKENDS.with(|cell| {
+            if let Some(s) = cell.borrow_mut().get_mut(&self.id) { s.reset(); }
         });
+    }
+    pub(crate) fn mark_failed(&self) {
+        self.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.reset();
+    }
+}
+impl Drop for Fsr2Handle {
+    fn drop(&mut self) {
+        BACKENDS.with(|cell| { cell.borrow_mut().remove(&self.id); });
     }
 }
