@@ -143,9 +143,9 @@ impl App {
         let l = &net.lanes[lane];
         let (pos, heading) = l.at(s);
         let heading = heading as f64;
-        crate::admin::request_teleport(self, pos, heading);
-        // Client requests are applied only after the host has approved them.
-        self.service_event("teleport", "player", None);
+        if crate::admin::request_teleport(self, pos, heading) {
+            self.service_event("teleport", "player", None);
+        }
     }
 }
 
