@@ -625,7 +625,7 @@ impl Settings {
     fn read_upscaler(&mut self, k: &str, v: &str) {
         match k {
             "upscaler" => self.upscaler = match v.to_ascii_lowercase().as_str() {
-                "fsr1" => "fsr1", "taa" => "taa", "fsr2" => "fsr2", "fsr3" => "fsr3", _ => "default",
+                "fsr1" => "fsr1", "taa" => "taa", "fsr2" => "fsr2", "fsr3" => "fsr3", "fsr2wgsl" => "fsr2wgsl", _ => "default",
             }.into(),
             "fsr_quality" => self.fsr_quality = match v.to_ascii_lowercase().as_str() {
                 "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
@@ -1117,7 +1117,7 @@ impl Settings {
     /// The render scale the picture is drawn at: FSR 1 or temporal preview quality, or the render scale's (0:
     /// automatic, the frame-rate governor's).
     pub fn scene_render_scale(&self) -> f32 {
-        if !matches!(self.upscaler.as_str(), "fsr1" | "fsr2" | "fsr3") {
+        if !matches!(self.upscaler.as_str(), "fsr1" | "fsr2" | "fsr3" | "fsr2wgsl") {
             return self.render_scale;
         }
         let preset: f32 = match self.fsr_quality.as_str() {
@@ -1137,12 +1137,13 @@ impl Settings {
     pub fn render_options(&self) -> omsi_render::RenderOptions {
         let fsr1 = self.upscaler == "fsr1";
         let fsr3 = self.upscaler == "fsr3";
+        let fsr2_wgsl = self.upscaler == "fsr2wgsl";
         let temporal_aa = matches!(self.upscaler.as_str(), "fsr2" | "taa");
         let render_scale = self.scene_render_scale();
         // Temporal histories need a single-sampled depth buffer. The launcher also
         // persists MSAA=1 when one of these modes is selected.
-        let msaa = if temporal_aa || fsr3 { 1 } else { self.msaa };
-        omsi_render::RenderOptions { msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr3, temporal_aa, fsr_sharpness: self.fsr_sharpness, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
+        let msaa = if temporal_aa || fsr3 || fsr2_wgsl { 1 } else { self.msaa };
+        omsi_render::RenderOptions { msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr3, fsr2_wgsl, temporal_aa, fsr_sharpness: self.fsr_sharpness, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
     }
 }
 

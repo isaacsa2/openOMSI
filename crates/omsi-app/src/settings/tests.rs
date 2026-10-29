@@ -596,3 +596,14 @@ fn fsr3_settings_are_distinct_from_taa_and_preserve_fsr1() {
     assert!((o.render_scale - 0.59).abs() < 0.001);
     assert_eq!(Settings::from_text(&fsr3.to_text()).upscaler, "fsr3");
 }
+
+#[test]
+fn genuine_fsr2_wgsl_is_distinct_from_preview_and_fsr1() {
+    let settings = Settings::from_text("upscaler=fsr2wgsl\nfsr_quality=balanced\nmsaa=8\n");
+    let options = settings.render_options();
+    assert!(options.fsr2_wgsl);
+    assert!(!options.fsr1 && !options.fsr3 && !options.temporal_aa);
+    assert_eq!(options.msaa, 1);
+    assert!((options.render_scale - 0.59).abs() < 0.001);
+    assert_eq!(Settings::from_text(&settings.to_text()).upscaler, "fsr2wgsl");
+}

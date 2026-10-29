@@ -144,9 +144,9 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
                 remember_setting(key, value);
                 // The temporal modes need a single-sampled depth buffer from
                 // renderer startup. Keep persistent MSAA in sync with the choice.
-                if key == "upscaler" && matches!(value, "fsr2" | "taa" | "fsr3") {
+                if key == "upscaler" && matches!(value, "fsr2" | "taa" | "fsr3" | "fsr2wgsl") {
                     remember_setting("msaa", "1");
-                } else if key == "msaa" && value != "1" && matches!(app.settings.upscaler.as_str(), "fsr2" | "taa" | "fsr3") {
+                } else if key == "msaa" && value != "1" && matches!(app.settings.upscaler.as_str(), "fsr2" | "taa" | "fsr3" | "fsr2wgsl") {
                     remember_setting("upscaler", "default");
                 }
                 reload_settings(app);
@@ -289,6 +289,9 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
                 ("taa", "TAA (experimental, native resolution)"),
                 ("fsr2", "FSR 2 preview (TAA + upscale, not AMD SDK)"),
             ];
+            if omsi_render::fsr2_wgsl_compiled() {
+                modes.push(("fsr2wgsl", "AMD FSR 2 WGSL (experimental, actual FidelityFX)"));
+            }
             if omsi_render::fsr3_compiled() {
                 modes.push(("fsr3", "AMD FSR 3 upscaling (experimental, no frame generation)"));
             }
@@ -462,9 +465,8 @@ pub(super) fn sync_live(app: &mut App) {
     // mutually exclusive. Changes that require replacing MSAA need a restart.
     let o = app.settings.render_options();
     if let Some(r) = app.renderer.as_mut() {
-        if r.options.fsr3 && !o.fsr3 {
-            r.set_fsr3(false);
-        }
+        if r.options.fsr3 && !o.fsr3 { r.set_fsr3(false); }
+        if r.options.fsr2_wgsl && !o.fsr2_wgsl { r.set_fsr2_wgsl(false); }
         let asked = r.upscaler_asked_mode();
         let desired = (o.fsr1, o.temporal_aa, o.fsr_sharpness, o.render_scale);
         if (o.fsr1 || o.temporal_aa || asked.0 || asked.1) && desired != asked
@@ -476,6 +478,9 @@ pub(super) fn sync_live(app: &mut App) {
                 "FSR 1 does not run on this graphics driver: the standard upscaler stays"
             };
             app.service_msg = Some((omsi_ui::tr(reason).into_owned(), 6.0));
+        }
+        if o.fsr2_wgsl && !r.fsr2_wgsl_active() && !r.set_fsr2_wgsl(true) {
+            app.service_msg = Some(("FSR 2 WGSL needs an experimental build and native compute GPU; using standard scaling".into(), 6.0));
         }
         if o.fsr3 && !r.fsr3_active() && !r.set_fsr3(true) {
             app.service_msg = Some(("FSR 3 requires an experimental build and a Vulkan/DX12/Metal graphics driver; using standard scaling".into(), 6.0));

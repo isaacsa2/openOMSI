@@ -187,3 +187,27 @@ launcher labels it as requiring an experimental build. If any dependency
 or GPU driver rejects the backend, the renderer falls back to its existing
 scaler. Real GPU and performance checks are necessary before enabling
 `fsr3-wgpu` by default. This does not implement either of the FSR2 variants.
+
+## Real FSR2 via WGSL (feature gated)
+
+A complete non-native FSR2 implementation was introduced as an **optional**
+`fsr2-wgsl` feature. `sp-fidelity = 0.2.0` supplies the FSR2 SDK's actual
+CPU algorithm and WGSL compute shader permutations, with the MIT-licensed
+`sp-fidelity-wgpu` backend imported into `temporal/fsr2_port/` and
+adapted to the patched wgpu 29 API. It uses the *same GPU device* as openOMSI:
+there is no extra wgpu 30, no native FidelityFX SDK DLL and no CPU texture
+readback. FSR1's original WGSL implementation remains untouched.
+
+On compatible native GPUs, the renderer feeds current-frame colour, reverse-Z
+depth, motion vectors and matching Halton projection jitter to FSR2's compute
+passes. FSR2's output is then composited at display size with overlays on
+top. This is **not** the older `fsr2` TAA-based preview; the new settings
+identifier is `fsr2wgsl`. The in-game menu only shows it when built with
+the feature, and both interfaces clearly label it as experimental.
+
+Required features are SUBGROUP, TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+TEXTURE_ATOMIC, TEXTURE_FORMAT_16BIT_NORM and FLOAT32_FILTERABLE.
+Neither the normal release nor OpenGL/GLES/mobile drivers try to compile
+or allocate the optional backend. Compiler tests on the wgpu 29 fork and
+actual DX12/Vulkan GPU tests are still required; do not claim performance
+or image conformance from default-feature CI alone.

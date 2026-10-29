@@ -2373,7 +2373,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "vehicle_smoke" => v[&k] = json!(vehicle_smoke(val)),
             "puddles" => v[&k] = json!(puddles(val)),
             "upscaler" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
-                "fsr1" => "fsr1", "taa" => "taa", "fsr2" => "fsr2", "fsr3" => "fsr3", _ => "default",
+                "fsr1" => "fsr1", "taa" => "taa", "fsr2" => "fsr2", "fsr3" => "fsr3", "fsr2wgsl" => "fsr2wgsl", _ => "default",
             }),
             "fsr_quality" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
                 "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
@@ -2897,6 +2897,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
             Some("taa") => "taa",
             Some("fsr2") => "fsr2",
             Some("fsr3") => "fsr3",
+            Some("fsr2wgsl") => "fsr2wgsl",
             _ => "default",
         },
         match v.get("fsr_quality").and_then(|x| x.as_str()).unwrap_or("quality") {
