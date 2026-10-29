@@ -227,3 +227,15 @@ explains the GPU/MSAA requirement: on binaries without that optional backend
 or without the necessary native compute features, Standard scaling is used.
 This menu consolidation does not constitute GPU validation or enable the
 upscaler in release builds.
+
+## Independent FSR2 sharpening slider
+
+Graphics settings show the existing `fsr_sharpness` 0–100% slider **only**
+for FSR 1.0, and a separate `fsr2_sharpness` 0–100% slider **only**
+for FSR 2.0 WGSL. Both values are persisted in `settings.cfg`, included
+in graphics profiles and handled independently; existing FSR1 settings
+are not overwritten. The WGSL FSR2 SDK's dispatch consumes the latter via
+`FfxFsr2DispatchDescription.sharpness` and `enable_sharpening`.
+The FSR2 slider updates the live dispatch parameter without rebuilding
+a pipeline or invalidating temporal history. This does not imply the
+experimental backend has passed GPU/CI validation.

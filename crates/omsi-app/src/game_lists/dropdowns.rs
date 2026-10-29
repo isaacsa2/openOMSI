@@ -457,8 +457,14 @@ pub(super) fn sync_live(app: &mut App) {
     if let Some(r) = app.renderer.as_mut() {
         if r.options.fsr3 && !o.fsr3 { r.set_fsr3(false); }
         if r.options.fsr2_wgsl && !o.fsr2_wgsl { r.set_fsr2_wgsl(false); }
+        // FSR2's sharpness is an independent live parameter. Avoid resetting
+        // temporal history simply because its slider was moved.
+        if o.fsr2_wgsl && r.fsr2_wgsl_active() {
+            r.options.fsr_sharpness = o.fsr_sharpness;
+        }
         let asked = r.upscaler_asked_mode();
-        let desired = (o.fsr1, o.temporal_aa, o.fsr_sharpness, o.render_scale);
+        let desired = (o.fsr1, o.temporal_aa,
+            if o.fsr2_wgsl { asked.2 } else { o.fsr_sharpness }, o.render_scale);
         if (o.fsr1 || o.temporal_aa || asked.0 || asked.1) && desired != asked
             && !r.set_upscaler_mode(o.fsr1, o.temporal_aa, o.fsr_sharpness, o.render_scale)
         {

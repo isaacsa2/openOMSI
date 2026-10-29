@@ -591,3 +591,20 @@ fn four_upscaler_modes_survive_launcher_round_trip() {
     assert_eq!(settings_from_text(Some("upscaler=fsr3\n"))["upscaler"], "default");
     assert_eq!(settings_from_text(Some("upscaler=unknown\n"))["upscaler"], "default");
 }
+
+
+#[test]
+fn fsr2_sharpness_is_independent_and_persists_in_launcher() {
+    let mut settings = settings_from_text(None);
+    settings["upscaler"] = json!("fsr2");
+    settings["fsr_sharpness"] = json!(0.25);
+    settings["fsr2_sharpness"] = json!(0.65);
+    let saved = settings_to_text(&settings, None);
+    assert!(saved.contains("fsr_sharpness=0.25\n"));
+    assert!(saved.contains("fsr2_sharpness=0.65\n"));
+    let loaded = settings_from_text(Some(&saved));
+    assert_eq!(loaded["fsr_sharpness"], 0.25);
+    assert_eq!(loaded["fsr2_sharpness"], 0.65);
+    assert_eq!(settings_from_text(None)["fsr2_sharpness"], 0.8);
+    assert_eq!(settings_from_text(Some("fsr2_sharpness=invalid\n"))["fsr2_sharpness"], 0.8);
+}

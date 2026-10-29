@@ -2215,6 +2215,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     v["upscaler"] = json!("default");
     v["fsr_quality"] = json!("quality");
     v["fsr_sharpness"] = json!(0.8);
+    v["fsr2_sharpness"] = json!(0.8);
     v["street_light"] = json!("off");
     v["ray_tracing"] = json!(false);
     v["light_shadows"] = json!("street");
@@ -2383,7 +2384,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
                 "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
                 "custom" => "custom", "auto" => "auto", _ => "quality",
             }),
-            "fsr_sharpness" => v[&k] = json!(val.parse::<f64>().ok()
+            "fsr_sharpness" | "fsr2_sharpness" => v[&k] = json!(val.parse::<f64>().ok()
                 .filter(|x| x.is_finite()).unwrap_or(0.8).clamp(0.0, 1.0)),
             "gpu_texture_compression" => v[&k] = json!(!matches!(val.trim().to_ascii_lowercase().as_str(), "0" | "off" | "no" | "false" | "disabled")),
             "max_fps" => v[&k] = json!(val.parse::<f64>().map(|x| x as i64).unwrap_or(0)),
@@ -2587,8 +2588,8 @@ pub fn save_settings(v: &Value) -> Result<()> {
 
 /// The settings a graphics profile holds: what the Graphics tab shows, except the machine's
 /// own (fullscreen, graphics API).
-pub const GRAPHICS_PROFILE_KEYS: [&str; 42] = [
-    "graphics", "msaa", "render_scale", "upscaler", "fsr_quality", "fsr_sharpness", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "lamp_shadows", "reflections", "clouds", "cloud_quality", "street_light", "rain_quality", "vehicle_smoke", "puddles", "windy_trees", "road_snow", "ray_tracing", "light_shadows", "cloud_shadows", "light_glow",
+pub const GRAPHICS_PROFILE_KEYS: [&str; 43] = [
+    "graphics", "msaa", "render_scale", "upscaler", "fsr_quality", "fsr_sharpness", "fsr2_sharpness", "anisotropy", "shadow_size", "ssao", "shadows", "shadow_casters", "detail_textures", "night_brightness", "led_glow", "led_mips", "shadow_blobs", "lamp_shadows", "reflections", "clouds", "cloud_quality", "street_light", "rain_quality", "vehicle_smoke", "puddles", "windy_trees", "road_snow", "ray_tracing", "light_shadows", "cloud_shadows", "light_glow",
     "vsync", "max_fps", "view_distance", "max_obj_dist", "min_obj_size", "mirror_size", "mirror_refresh", "mirror_quality", "mirror_hud_every_frame", "video_memory", "texture_compression", "gpu_texture_compression",
 ];
 
@@ -2895,7 +2896,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         head_tracking_value("head_tracking_smoothing", v.get("head_tracking_smoothing").and_then(|x| x.as_f64())),
         head_tracking_value("head_tracking_dead_zone", v.get("head_tracking_dead_zone").and_then(|x| x.as_f64())),
     ));
-    text.push_str(&format!("upscaler={}\nfsr_quality={}\nfsr_sharpness={}\n",
+    text.push_str(&format!("upscaler={}\nfsr_quality={}\nfsr_sharpness={}\nfsr2_sharpness={}\n",
         match v.get("upscaler").and_then(|x| x.as_str()) {
             Some("fsr1") => "fsr1",
             Some("taa") => "taa",
@@ -2907,6 +2908,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
             "custom" => "custom", "auto" => "auto", _ => "quality",
         },
         f("fsr_sharpness", 0.8).clamp(0.0, 1.0),
+        f("fsr2_sharpness", 0.8).clamp(0.0, 1.0),
     ));
     let written: Vec<String> = text.lines().filter_map(|l| l.split_once('=')).map(|(k, _)| k.trim().to_ascii_lowercase()).collect();
     for line in old.unwrap_or("").lines() {

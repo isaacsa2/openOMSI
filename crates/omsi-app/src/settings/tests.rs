@@ -590,3 +590,21 @@ fn only_standard_taa_fsr1_and_actual_fsr2_are_public_modes() {
     assert_eq!(Settings::from_text("upscaler=fsr3\n").upscaler, "default");
     assert_eq!(Settings::from_text("upscaler=unknown\n").upscaler, "default");
 }
+
+
+#[test]
+fn fsr1_and_fsr2_sharpening_sliders_are_independent() {
+    let cfg = Settings::from_text("upscaler=fsr2\nfsr_sharpness=0.2\nfsr2_sharpness=0.65\n");
+    assert_eq!(cfg.fsr_sharpness, 0.2);
+    assert_eq!(cfg.fsr2_sharpness, 0.65);
+    assert_eq!(cfg.render_options().fsr_sharpness, 0.65);
+    assert_eq!(Settings::from_text(&cfg.to_text()).fsr2_sharpness, 0.65);
+    let fsr1 = Settings::from_text("upscaler=fsr1\nfsr_sharpness=0.2\nfsr2_sharpness=0.65\n");
+    assert_eq!(fsr1.render_options().fsr_sharpness, 0.2);
+    let off = Settings::from_text("upscaler=fsr2\nfsr2_sharpness=0\n");
+    assert_eq!(off.render_options().fsr_sharpness, 0.0);
+    let clamped = Settings::from_text("upscaler=fsr2\nfsr2_sharpness=2\n");
+    assert_eq!(clamped.fsr2_sharpness, 1.0);
+    let invalid = Settings::from_text("upscaler=fsr2\nfsr2_sharpness=NaN\n");
+    assert_eq!(invalid.fsr2_sharpness, 0.8);
+}
