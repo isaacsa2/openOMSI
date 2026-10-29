@@ -57,7 +57,7 @@ fn light() -> Lighting {
 /// body turned as `omsi-sim`'s `body_rotation` does (and pitched and banked by `tilt`, rad).
 fn bus_at(o: DVec3, heading: f64, tilt: (f32, f32)) -> Lighting {
     let rot = Mat4::from_rotation_z((-heading).to_radians() as f32) * Mat4::from_rotation_x(tilt.0) * Mat4::from_rotation_y(tilt.1);
-    Lighting { inside: Some((o, heading, [2.5, 12.0, 3.5, 0.0, 0.0, 1.75])), inside_body: Some((o, rot)), ..light() }
+    Lighting { inside: Some((o, heading, [2.5, 12.0, 3.5, 0.0, 0.0, 1.75])), inside_rotation: Some(rot), ..light() }
 }
 
 fn red(img: &[u8], w: u32, x: u32, y: u32) -> bool {
