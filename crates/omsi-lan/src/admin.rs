@@ -292,9 +292,48 @@ pub const LOCAL_ADMIN: u32 = u32::MAX;
 /// A command a player sent the dedicated server (`hub`: the administration's records, see
 /// `exec`).
 #[allow(clippy::too_many_arguments)]
+/// Dedicated-server policy. By default only authenticated admins/moderators may relocate
+/// their own bus; a server operator can opt ordinary players in with server.cfg.
+static PLAYER_TELEPORT_ALLOWED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub fn allow_player_teleport(allowed: bool) {
+    PLAYER_TELEPORT_ALLOWED.store(allowed, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Validate the entire wire request before issuing any authoritative host command.
+fn parse_self_teleport(arg: &str) -> Option<(glam::DVec3, f64)> {
+    let values = arg.split_whitespace().map(str::parse::<f64>).collect::<Result<Vec<_>, _>>().ok()?;
+    let [x, y, z, heading] = values.as_slice() else { return None };
+    // Wide enough for large OMSI maps; rejects NaN, infinities and implausible coordinates.
+    if !values.iter().all(|v| v.is_finite()) || [x, y, z].iter().any(|v| v.abs() > 10_000_000.0) {
+        return None;
+    }
+    Some((glam::DVec3::new(*x, *y, *z), *heading))
+}
+
 pub fn server_command(lan: &mut LanSession, from: u32, text: &str, adm: &mut ServerAdmin, positions: &dyn Fn(u32) -> Option<(glam::DVec3, f64)>, rules: &ServerRules, hub: Option<&Hub>) {
     let (verb, arg) = text.split_once(' ').unwrap_or((text, ""));
     match verb {
+        // A client requests a move of its OWN bus; only the host issues teleport commands.
+        // The sender is the authenticated network peer, never a player id from the payload.
+        "tp-request" => {
+            let connected = lan.peers().any(|p| p.pose.id == from && p.has_info);
+            let role = adm.admins.get(&from).copied();
+            let allowed = role.is_some() || PLAYER_TELEPORT_ALLOWED.load(std::sync::atomic::Ordering::Relaxed);
+            if !connected || !allowed {
+                lan.command(from, "admin-result 0 rejected self-teleport is disabled on this server; authenticate with /admin or ask the owner");
+                return;
+            }
+            let Some((pos, heading)) = parse_self_teleport(arg) else {
+                lan.command(from, "admin-result 0 rejected invalid teleport coordinates");
+                return;
+            };
+            lan.command(from, &format!("teleport {:.3} {:.3} {:.3} {:.3}", pos.x, pos.y, pos.z, heading));
+            if let Some(h) = hub {
+                h.note(&reply::player_label(lan, from), role, "self-teleport", "applied", &format!("x={:.1} y={:.1}", pos.x, pos.y));
+            }
+        }
         // a joining game asks what the session allows of voice chat (`omsi_net::voice_net`)
         "voice?" => {
             let policy = lan.voice_policy().command();
@@ -547,5 +586,19 @@ mod passenger_density_command_tests {
         server_command(&mut lan, 5, "admin passengers 2", &mut adm, &|_| None, &rules, None);
         assert!(adm.take_world().is_empty());
         assert_eq!(adm.passenger_density, None);
+    }
+}
+
+#[cfg(test)]
+mod self_teleport_tests {
+    use super::parse_self_teleport;
+
+    #[test]
+    fn self_teleport_wire_is_four_finite_bounded_values() {
+        let (p, h) = parse_self_teleport("100 -200 4.5 90").unwrap();
+        assert_eq!((p.x, p.y, p.z, h), (100.0, -200.0, 4.5, 90.0));
+        for invalid in ["", "1 2 3", "1 2 3 4 5", "NaN 2 3 4", "1 inf 3 4", "10000001 2 3 4", "1 2 3 ninety"] {
+            assert!(parse_self_teleport(invalid).is_none(), "{invalid}");
+        }
     }
 }
