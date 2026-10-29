@@ -239,3 +239,28 @@ are not overwritten. The WGSL FSR2 SDK's dispatch consumes the latter via
 The FSR2 slider updates the live dispatch parameter without rebuilding
 a pipeline or invalidating temporal history. This does not imply the
 experimental backend has passed GPU/CI validation.
+
+## Vendor-neutral capability detection and Windows test builds
+
+FSR 2.0/3 upscaling is not locked to AMD, NVIDIA, Intel or an RTX GPU. The
+experimental `wgpu` integrations detect the adapter's compute features
+individually, including on OpenGL/ANGLE, instead of refusing a backend by
+name. A missing subgroup, storage texture format or texture atomic feature
+still prevents a shader requiring it from compiling. We do not bypass wgpu
+validation, pretend that a TAA/FSR1 fallback is FSR2, or force the old
+Intel Vulkan driver profile known to crash in `vkCreateDevice`.
+
+The default build intentionally does **not** include either experimental
+backend. To test true FSR 2.0 WGSL on Windows:
+
+```bat
+scripts\build-fidelityfx-windows.bat fsr2
+```
+
+The `both` argument additionally compiles experimental FSR3 upscaling,
+but FSR3 remains hidden from the public graphics selector. The script
+fails if Cargo fails; a runtime shader rejection produces a diagnostic
+listing missing GPU features and uses the Standard scaler. Native GPU
+feature support, memory limits, startup stability, and correct render
+output require validation on the actual card/driver. A successful build
+alone is **not** a compatibility certification. 
