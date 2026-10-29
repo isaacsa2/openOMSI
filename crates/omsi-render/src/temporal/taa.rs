@@ -78,7 +78,7 @@ impl Taa {
 impl Renderer {
     /// Runs after tone mapping and before the spatial upscaler. HUD is drawn later
     /// and must never enter a temporal history buffer.
-    pub(crate) fn encode_temporal_aa(&mut self, enc: &mut wgpu::CommandEncoder, f: &FrameCtx) {
+    pub(crate) fn encode_temporal_aa(&mut self, enc: &mut wgpu::CommandEncoder, f: &crate::passes::FrameCtx<'_>) {
         if self.temporal_aa.is_none() { return; }
         let Some((scene_color, _)) = f.scene_target.as_ref().filter(|_| f.with_overlays && f.projection.is_none() && !f.second_eye) else {
             if let Some(taa) = self.temporal_aa.as_mut() { taa.reset(); }
