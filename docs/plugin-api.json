@@ -2016,7 +2016,7 @@
       "name": "lan.me",
       "group": "lan",
       "since": "0.2.22",
-      "doc": "This player in the session: its id (the host is 1), its name, whether it hosts.",
+      "doc": "This player in the session: its id (the host is 1), its name, whether it hosts - three values, `local id, name, host = omsi.lan.me()`, not a table. Outside a session (`omsi.lan.active()` false, as when the plugin loads before the game has joined one) it returns nothing.",
       "params": [],
       "returns": "id, name, host",
       "multi": true,

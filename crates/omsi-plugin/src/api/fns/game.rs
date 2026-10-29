@@ -56,7 +56,7 @@ pub static FNS: &[ApiFn] = &[
         Ok::<_, ApiError>(c.io().game_action(&n))
     }),
     def!("lan.active", "lan", [], "boolean", "Whether this game is in a LAN session.", NEW, None, false, |c, a| c.io().lan().is_some()),
-    def!("lan.me", "lan", [], "id, name, host", "This player in the session: its id (the host is 1), its name, whether it hosts.", NEW, None, true, |c, a| multi(c.io().lan().map(|(h, id, n)| [Value::from(id), Value::Str(n), Value::Bool(h)]))),
+    def!("lan.me", "lan", [], "id, name, host", "This player in the session: its id (the host is 1), its name, whether it hosts - three values, `local id, name, host = omsi.lan.me()`, not a table. Outside a session (`omsi.lan.active()` false, as when the plugin loads before the game has joined one) it returns nothing.", NEW, None, true, |c, a| multi(c.io().lan().map(|(h, id, n)| [Value::from(id), Value::Str(n), Value::Bool(h)]))),
     def!("lan.players", "lan", [], "list of tables", "The other players of the session: `{id, name, host, bus, line, tour, x, y, z, heading, speed, on_foot, passengers}`.", NEW, None, false, |c, a| {
         Value::List(c.io().lan_players().into_iter().map(|p| rec(vec![
             ("id", p.id.into()),

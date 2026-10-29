@@ -168,6 +168,9 @@ local settings = omsi.plugin.settings({ { key = "volume", type = "number", defau
 omsi.plugin.broadcast("delay", omsi.duty.delay())
 
 -- the LAN session
+if omsi.lan.active() then
+  local id, name, host = omsi.lan.me()  -- three values; nothing outside a session
+end
 for _, p in ipairs(omsi.lan.players()) do print(p.name, p.line) end
 omsi.lan.send(0, "hello")             -- to this plugin on every other player's game
 ```
@@ -981,7 +984,7 @@ On macOS, helpers extracted from ZIP files may need their executable bit restore
 | --- | --- | --- | --- |
 | `omsi.lan.active()` | boolean | Whether this game is in a LAN session. | 0.2.22 |
 | `omsi.lan.chat(text)` | true, or false and the reason | Says a line in the session's chat, as the player would (every player sees it; at most one a second). *Permission: `lan`.* | 0.2.22 |
-| `omsi.lan.me()` | id, name, host | This player in the session: its id (the host is 1), its name, whether it hosts. | 0.2.22 |
+| `omsi.lan.me()` | id, name, host | This player in the session: its id (the host is 1), its name, whether it hosts - three values, `local id, name, host = omsi.lan.me()`, not a table. Outside a session (`omsi.lan.active()` false, as when the plugin loads before the game has joined one) it returns nothing. | 0.2.22 |
 | `omsi.lan.players()` | list of tables | The other players of the session: `{id, name, host, bus, line, tour, x, y, z, heading, speed, on_foot, passengers}`. | 0.2.22 |
 | `omsi.lan.send(to, text)` | true, or false and the reason | Sends a short text (at most 120 characters, no `\|`) to the same plugin on another player's game (`to` its id; 0: every other player); it hears `lan_message(from, text)`. A player sends at most about ten a second; a game without the plugin ignores them. *Permission: `lan`.* | 0.2.22 |
 
