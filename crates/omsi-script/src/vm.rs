@@ -443,9 +443,11 @@ fn exec_cold(s: &mut Stacks, op: &Op, p: &Program, state: &mut State, host: &mut
         Op::PushStr(i) => s.push_str_copy(&p.strings[*i as usize]),
         Op::StackDump => host.stack_dump(s),
         Op::StrConcat => {
-            // `b a $+`: a appended to b, then a dropped
+            // `b a $+`: a appended to b, then a dropped (no further than MAX_STR: `$d $+`
+            // doubles a string, and forty of them asked for a terabyte)
             let (a, b) = s.sst.split_at_mut(1);
-            b[0].push_str(&a[0]);
+            let room = MAX_STR.saturating_sub(b[0].len());
+            b[0].push_str(&a[0][..floor_char(&a[0], room)]);
             s.drop_str();
         }
         Op::StrEq | Op::StrLt | Op::StrGt | Op::StrLe | Op::StrGe => {
@@ -524,7 +526,7 @@ fn exec_cold(s: &mut Stacks, op: &Op, p: &Program, state: &mut State, host: &mut
                 Op::StrSetLengthR => Align::Right,
                 _ => Align::Center,
             };
-            let width = omsi_round(s.top());
+            let width = omsi_round(s.top()).min(MAX_STR);
             s.sst[0] = set_length(&s.sst[0], width, align);
         }
         Op::StrIntToStr => {
@@ -586,6 +588,18 @@ fn b2f(b: bool) -> f32 {
     }
 }
 
+/// Longest string a script makes, in bytes: far beyond any display's text, short of what
+/// takes the game's memory (`$+`, `$SetLength*` and `$IntToStrEnh` stop there).
+pub const MAX_STR: usize = 1 << 17;
+
+/// The largest char boundary of `s` at or below `at`.
+fn floor_char(s: &str, at: usize) -> usize {
+    if at >= s.len() {
+        return s.len();
+    }
+    (0..=at).rev().find(|&i| s.is_char_boundary(i)).unwrap_or(0)
+}
+
 /// Delphi's `Round` of a string function's count (ties to even, as the FPU rounds), none
 /// below 0: Omsi.exe rounds the counts of `$cutBegin`, `$cutEnd`, `$SetLength*` and `$*`.
 fn omsi_round(v: f32) -> usize {
@@ -634,7 +648,7 @@ fn int_to_str_enh(v: f32, fmt: &str) -> String {
     if rest.is_empty() {
         return "ERROR".into();
     }
-    let width = rest.trim().parse::<i64>().unwrap_or(0).max(0) as usize;
+    let width = rest.trim().parse::<i64>().unwrap_or(0).clamp(0, MAX_STR as i64) as usize;
     if width == 0 {
         return String::new();
     }
@@ -953,6 +967,32 @@ mod tests {
         assert_eq!(set_length("abc", 5, Align::Left), "abc  ");
         assert_eq!(set_length("abc", 5, Align::Right), "  abc");
         assert_eq!(set_length("abcdef", 3, Align::Left), "abc");
+    }
+
+    /// A script cannot ask for more memory than [`MAX_STR`] a string: forty `$d $+` (a
+    /// terabyte), a width of a thousand million, a format of a trillion characters.
+    #[test]
+    fn strings_stay_within_their_bound() {
+        let doubling = "\"xy\" ".to_string() + &"$d $+ ".repeat(40) + "(S.$.a)";
+        let src = format!("{{init}}\n{doubling}\n\"z\" 999999999 $SetLengthL (S.$.b)\n7 \"0999999999999\" $IntToStrEnh (S.$.c)\n\"Linie \" \"12\" $+ (S.$.d)\n{{end}}\n");
+        let dir = std::env::temp_dir().join(format!("omsi_script_bound_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("t.osc"), src).unwrap();
+        std::fs::write(dir.join("s.txt"), "a\nb\nc\nd\n").unwrap();
+        let p = compile(&CompileInput { stringvarlists: vec![dir.join("s.txt")], scripts: vec![dir.join("t.osc")], ..Default::default() });
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        let mut vm = Vm::new();
+        let mut st = State::new(&p);
+        vm.run_init(&p, &mut st, &mut NullHost);
+        let get = |n: &str| st.str_vars[p.str_var(n).unwrap() as usize].clone();
+        assert_eq!(get("a").len(), MAX_STR);
+        assert!(get("a").starts_with("xyxy"));
+        assert_eq!(get("b").len(), MAX_STR);
+        assert!(get("b").starts_with('z'));
+        assert_eq!(get("c").len(), MAX_STR);
+        assert!(get("c").ends_with('7'));
+        assert_eq!(get("d"), "Linie 12");
+        assert_eq!(floor_char("aé", 2), 1);
     }
 
     /// A stray `{endif}` closes an `{if}` early; the `{else}` after it skips to the next
