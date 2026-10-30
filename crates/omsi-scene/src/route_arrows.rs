@@ -12,7 +12,7 @@ use omsi_render::{Renderer, Scene};
 #[derive(Default)]
 pub struct RouteArrows {
     /// What stands now: its key and the object.
-    placed: Vec<(u64, TileGpu)>,
+    placed: Vec<((u64, &'static str), TileGpu)>,
     /// Seconds to the next look at the route.
     wait: f32,
 }
@@ -26,6 +26,10 @@ fn sco(kind: &str) -> &'static str {
     }
 }
 
+fn spot_key(spot: &(u64, DVec3, f64, &'static str, String)) -> (u64, &'static str) {
+    (spot.0, spot.3)
+}
+
 impl RouteArrows {
     /// Twice a second: the arrows of the route ahead stand, the others go.
     pub fn tick(&mut self, dt: f32, world: &World, renderer: &Renderer, scene: &mut Scene, spots: &[(u64, DVec3, f64, &'static str, String)]) {
@@ -34,7 +38,7 @@ impl RouteArrows {
             return;
         }
         self.wait = 0.5;
-        let wanted: Vec<u64> = spots.iter().map(|s| s.0 ^ (s.3.len() as u64) << 56).collect();
+        let wanted: Vec<(u64, &'static str)> = spots.iter().map(spot_key).collect();
         // gone: behind the bus, or the route changed
         let mut kept = Vec::with_capacity(self.placed.len());
         for (k, tg) in self.placed.drain(..) {
@@ -79,5 +83,19 @@ impl RouteArrows {
             world.remove_helper_object(renderer, scene, tg);
         }
         self.wait = 0.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spot_key;
+    use glam::DVec3;
+
+    #[test]
+    fn left_and_right_arrows_with_the_same_spot_id_are_distinct() {
+        let left = (42, DVec3::ZERO, 0.0, "L", String::new());
+        let right = (42, DVec3::ZERO, 0.0, "R", String::new());
+        assert_ne!(spot_key(&left), spot_key(&right));
+        assert_eq!(spot_key(&left), spot_key(&left));
     }
 }
