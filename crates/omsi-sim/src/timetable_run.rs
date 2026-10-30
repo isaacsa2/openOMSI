@@ -24,6 +24,54 @@ pub use sim::*;
 pub use times::*;
 pub use tours::*;
 
+/// Tile hint for a timetable station. Explicit track entries take precedence; for
+/// station links, the outgoing leg begins at this stop and the final stop uses the
+/// last incoming leg. This is only a hint: a stop can be on a neighbouring tile.
+pub(crate) fn station_tile_hint(
+    steps: &[Step],
+    station_steps: &[Option<usize>],
+    station: usize,
+    track: bool,
+) -> Option<(i32, i32)> {
+    if let Some(at) = station_steps.get(station).copied().flatten() {
+        return steps.get(at).and_then(|step| step.key.map(|key| key.tile));
+    }
+    if track {
+        return None;
+    }
+    steps.iter()
+        .find(|step| step.leg == station)
+        .or_else(|| steps.iter().rev().find(|step| step.leg.checked_add(1) == Some(station)))
+        .and_then(|step| step.key.map(|key| key.tile))
+}
+
+#[cfg(test)]
+mod station_tile_hint_tests {
+    use super::*;
+
+    #[test]
+    fn uses_the_authored_track_entry_before_any_route_heuristic() {
+        let steps = vec![
+            Step { key: Some(LaneKey { tile: (10, 20), id: 1, path: 0 }), leg: 0, length: 20.0 },
+            Step { key: Some(LaneKey { tile: (11, 20), id: 2, path: 0 }), leg: 0, length: 20.0 },
+        ];
+        assert_eq!(station_tile_hint(&steps, &[Some(1)], 0, true), Some((11, 20)));
+        assert_eq!(station_tile_hint(&steps, &[None], 0, true), None);
+    }
+
+    #[test]
+    fn station_links_hint_the_outgoing_leg_and_the_final_incoming_leg() {
+        let steps = vec![
+            Step { key: Some(LaneKey { tile: (2, 3), id: 1, path: 0 }), leg: 0, length: 20.0 },
+            Step { key: Some(LaneKey { tile: (3, 3), id: 2, path: 0 }), leg: 1, length: 20.0 },
+        ];
+        assert_eq!(station_tile_hint(&steps, &[], 0, false), Some((2, 3)));
+        assert_eq!(station_tile_hint(&steps, &[], 1, false), Some((3, 3)));
+        assert_eq!(station_tile_hint(&steps, &[], 2, false), Some((3, 3)));
+        assert_eq!(station_tile_hint(&[], &[], 0, false), None);
+    }
+}
+
 /// One step of a trip's route: a lane in map terms (None when the tile index is not in the
 /// map's list) and the leg between two stations it belongs to (0 for a track).
 #[derive(Debug, Clone, Copy)]
