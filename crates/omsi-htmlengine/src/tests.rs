@@ -954,3 +954,25 @@ fn install_decoder() {
             .map_err(|e| e.to_string())
     });
 }
+
+/// A page's script cannot end the game: an array holding itself is read without locking
+/// it twice, an index of two thousand million asks for no 64 GB, and a hundred thousand
+/// `(` are refused by the reader instead of overflowing its stack. Ordinary nesting runs.
+#[test]
+fn hostile_scripts_are_refused_not_fatal() {
+    let deep = format!("<script>var z = {}1{};</script>", "(".repeat(100_000), ")".repeat(100_000));
+    let html = format!(
+        "<body><p id=o></p><p id=p></p><p id=q></p>\
+         <script>var a=[]; a.push(a); a.push(1); document.getElementById('o').textContent = (a + '') + '|' + a.join('-');</script>\
+         <script>var b=[]; b[2000000000]=1;</script>\
+         {deep}\
+         <script>document.getElementById('p').textContent = 'alive ' + b.length;</script>\
+         <script>document.getElementById('q').textContent = {}7{};</script></body>",
+        "(".repeat(40),
+        ")".repeat(40)
+    );
+    let r = EngineRenderer::new(8, 8, &html);
+    assert_eq!(r.text_of("o").as_deref(), Some(",1|-1"));
+    assert_eq!(r.text_of("p").as_deref(), Some("alive 0"));
+    assert_eq!(r.text_of("q").as_deref(), Some("7"));
+}
