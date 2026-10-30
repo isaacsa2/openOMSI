@@ -284,10 +284,11 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
         "render_scale" => vec![("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")],
         "upscaler" => vec![
             ("default", "Standard (Catmull-Rom)"),
-            ("fsr1", "AMD FSR 1 (experimental)"),
-            ("taa", "TAA (experimental, native resolution)"),
-            ("fsr2", "FSR 2 preview (TAA + upscale, not AMD SDK)"),
+            ("taa", "TAA (experimental)"),
+            ("fsr1", "AMD FSR 1.0"),
+            ("fsr2", "AMD FSR 2.0 (WGSL, experimental)"),
         ],
+        "fsr2_quality" => vec![("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("ultra_performance", "Ultra Performance (33%)")],
         "fsr_quality" => vec![("ultra", "Ultra Quality (77%)"), ("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("auto", "Automatic (keeps the frame rate)"), ("custom", "Use render scale")],
         "anisotropy" => vec![("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")],
         "shadow_size" => vec![("1024", "1024"), ("2048", "2048"), ("4096", "4096")],
@@ -451,18 +452,17 @@ pub(super) fn text_in_mode(text: &str, mode: &str) -> crate::settings::Settings 
 }
 
 pub(super) fn sync_live(app: &mut App) {
-    // FSR 1 is spatial; FSR 2 preview uses a separate TAA history followed by
-    // the existing spatial scaler (NOT the FidelityFX SDK). All choices are
-    // mutually exclusive. Changes that require replacing MSAA need a restart.
+    // FSR 1 is spatial; TAA and FSR 2 (AMD FSR 2.2.1 in WGSL) are temporal. The choices
+    // are mutually exclusive. Changes that require replacing MSAA need a restart.
     let o = app.settings.render_options();
     if let Some(r) = app.renderer.as_mut() {
         let asked = r.upscaler_asked_mode();
-        let desired = (o.fsr1, o.temporal_aa, o.fsr_sharpness, o.render_scale);
-        if (o.fsr1 || o.temporal_aa || asked.0 || asked.1) && desired != asked
-            && !r.set_upscaler_mode(o.fsr1, o.temporal_aa, o.fsr_sharpness, o.render_scale)
-        {
-            let reason = if o.temporal_aa {
-                "Temporal preview needs MSAA off and a compatible graphics driver; restart after changing MSAA"
+        let desired = omsi_render::UpscalerAsk::of(&o);
+        if (o.fsr1 || o.temporal_aa || o.fsr2 || asked.fsr1 || asked.taa || asked.fsr2) && desired != asked && !r.set_upscaling(desired) {
+            let reason = if o.fsr2 {
+                "AMD FSR 2.0 needs MSAA off and a graphics driver with compute shaders and storage textures: the standard upscaler stays"
+            } else if o.temporal_aa {
+                "TAA needs MSAA off and a compatible graphics driver; restart after changing MSAA"
             } else {
                 "FSR 1 does not run on this graphics driver: the standard upscaler stays"
             };

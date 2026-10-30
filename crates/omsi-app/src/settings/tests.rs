@@ -568,16 +568,26 @@ fn preview_and_taa_modes_preserve_fsr1_and_use_single_sample() {
     assert!(!fsr1.render_options().temporal_aa);
     assert_eq!(fsr1.render_options().msaa, 4);
 
-    let preview = Settings::from_text("upscaler=fsr2\nfsr_quality=balanced\nmsaa=4\n");
-    let options = preview.render_options();
-    assert!(options.temporal_aa);
-    assert!(!options.fsr1);
+    let fsr2 = Settings::from_text("upscaler=fsr2\nfsr2_quality=balanced\nfsr2_sharpness=0.3\nmsaa=4\n");
+    let options = fsr2.render_options();
+    assert!(options.fsr2 && !options.temporal_aa && !options.fsr1);
     assert_eq!(options.msaa, 1, "temporal reconstruction requires MSAA off");
-    assert!((options.render_scale - 0.59).abs() < 0.001);
-    assert_eq!(Settings::from_text(&preview.to_text()).upscaler, "fsr2");
+    assert!((options.render_scale - 1.0 / 1.7).abs() < 0.001, "AMD's Balanced ratio");
+    assert!((options.fsr2_sharpness - 0.3).abs() < 0.0001);
+    let again = Settings::from_text(&fsr2.to_text());
+    assert_eq!((again.upscaler.as_str(), again.fsr2_quality.as_str()), ("fsr2", "balanced"));
+    assert!((again.fsr2_sharpness - 0.3).abs() < 0.0001);
+    for (mode, scale) in [("quality", 1.0 / 1.5), ("performance", 0.5), ("ultra_performance", 1.0 / 3.0), ("nonsense", 1.0 / 1.5)] {
+        let s = Settings::from_text(&format!("upscaler=fsr2\nfsr2_quality={mode}\n"));
+        assert!((s.scene_render_scale() - scale).abs() < 0.0001, "{mode}");
+    }
+    // (FSR 1's own quality and sharpening are left as they were)
+    assert_eq!(fsr2.fsr_quality, "quality");
+    assert!((fsr2.fsr_sharpness - 0.8).abs() < 0.0001);
 
     let taa = Settings::from_text("upscaler=taa\nrender_scale=1\nmsaa=8\n");
-    assert!(taa.render_options().temporal_aa);
+    assert!(taa.render_options().temporal_aa && !taa.render_options().fsr2);
+    assert_eq!(taa.render_options().msaa, 1);
     assert!(!taa.render_options().fsr1);
     assert_eq!(taa.render_options().msaa, 1);
     assert!((taa.render_options().render_scale - 1.0).abs() < 0.001);

@@ -586,5 +586,16 @@ fn fsr1_and_temporal_preview_settings_survive_launcher_round_trip() {
     assert_eq!(settings_from_text(Some("upscaler=FSR2\n"))["upscaler"], "fsr2");
     assert_eq!(settings_from_text(Some("upscaler=taa\n"))["upscaler"], "taa");
     assert_eq!(settings_from_text(Some("upscaler=unknown\n"))["upscaler"], "default");
+    // FSR 2's own quality mode and sharpening
+    let mut settings = settings_from_text(None);
+    assert_eq!((settings["fsr2_quality"].as_str(), settings["fsr2_sharpness"].as_f64()), (Some("quality"), Some(0.8)));
+    settings["upscaler"] = json!("fsr2");
+    settings["fsr2_quality"] = json!("ultra_performance");
+    settings["fsr2_sharpness"] = json!(0.25);
+    let restored = settings_from_text(Some(&settings_to_text(&settings, None)));
+    assert_eq!((restored["fsr2_quality"].as_str(), restored["fsr2_sharpness"].as_f64()), (Some("ultra_performance"), Some(0.25)));
+    assert_eq!(settings_from_text(Some("fsr2_quality=ULTRA_PERFORMANCE\nfsr2_sharpness=7\n"))["fsr2_quality"], "ultra_performance");
+    assert_eq!(settings_from_text(Some("fsr2_sharpness=7\n"))["fsr2_sharpness"], 1.0);
+    assert_eq!(settings_from_text(Some("fsr2_quality=ultra\n"))["fsr2_quality"], "quality");
 }
 
