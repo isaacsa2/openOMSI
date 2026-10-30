@@ -32,7 +32,7 @@ pub(crate) fn pick_in(vehicle: &omsi_sim::VehicleInstance, origin: DVec3, dir: V
         if !ray_may_hit(&vehicle.ty, i, &xf, o, dir, spread * 2.2) {
             return None;
         }
-        let tris = omsi_geometry::cone_triangles(o, dir, spread * 2.0 + 1e-4, &vm.data, &xf);
+        let tris = vm.cone_triangles(o, dir, spread * 2.0 + 1e-4, &xf);
         (!tris.is_empty()).then_some((i, xf, tris))
     }).collect();
     for dirs in &rings {
@@ -200,7 +200,7 @@ pub(crate) fn pick_trailer_in(vehicle: &omsi_sim::VehicleInstance, origin: DVec3
             if !ray_may_hit(&trailer.ty, i, &xf, o, dir, spread * 2.2) {
                 return None;
             }
-            let tris = omsi_geometry::cone_triangles(o, dir, spread * 2.0 + 1e-4, &vm.data, &xf);
+            let tris = vm.cone_triangles(o, dir, spread * 2.0 + 1e-4, &xf);
             (!tris.is_empty()).then_some((ti, i, xf, tris))
         })
     }).collect();

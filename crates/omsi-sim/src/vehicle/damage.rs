@@ -263,6 +263,7 @@ mod tests {
         ty_mut.model.meshes.push(omsi_model::MeshDef { file: "body.o3d".into(), ..Default::default() });
         ty_mut.meshes.push(VehicleMesh {
             def_index: 0,
+            ray_bounds: Default::default(),
             data: MeshData::default(),
             file: PathBuf::from("body.o3d"),
             materials: Vec::new(),
@@ -297,6 +298,7 @@ mod tests {
             });
             ty_mut.meshes.push(VehicleMesh {
                 def_index,
+                ray_bounds: Default::default(),
                 data: MeshData::default(),
                 file: PathBuf::from(file),
                 materials: Vec::new(),
@@ -355,6 +357,7 @@ mod tests {
             });
             ty_mut.meshes.push(VehicleMesh {
                 def_index,
+                ray_bounds: Default::default(),
                 data: MeshData::default(),
                 file: PathBuf::from(file),
                 materials: Vec::new(),

@@ -519,6 +519,7 @@ pub(crate) struct Upscale {
     pub(crate) panel_pipeline: wgpu::RenderPipeline,
     pub(crate) upscale_layout: wgpu::BindGroupLayout,
     pub(crate) upscale_buf: wgpu::Buffer,
+    pub(crate) upscale_upload: crate::uniform_upload::UniformUpload<[f32; 4]>,
     /// The game's frame-rate governor on top of the render scale (1 = none; see
     /// `set_dynamic_scale`).
     pub(crate) dynamic_scale: std::cell::Cell<f32>,

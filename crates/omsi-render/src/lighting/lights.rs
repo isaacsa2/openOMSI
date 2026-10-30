@@ -745,5 +745,6 @@ pub(crate) struct LightRes {
     pub(crate) lm_atlas: wgpu::Texture,
     pub(crate) lm_atlas_view: wgpu::TextureView,
     pub(crate) lm_uniform: wgpu::Buffer,
+    pub(crate) lm_upload: crate::uniform_upload::UniformUpload<[f32; 4]>,
     pub(crate) lm_place: std::cell::Cell<(f64, f64, f64)>,
 }

@@ -82,7 +82,7 @@ impl Player {
             if !self.vehicle.mesh_props[i].visible || self.is_mesh_glass(None, i) { continue; }
             let transform = self.vehicle.mesh_local_transform(i);
             if !ray_may_hit(&self.vehicle.ty, i, &transform, o, dir, 0.0) { continue; }
-            if let Some(t) = omsi_geometry::ray_mesh(o, dir, &mesh.data, &transform) {
+            if let Some(t) = mesh.ray_distance(o, dir, &transform) {
                 if t > 0.02 && t < nearest { nearest = t; }
             }
         }
@@ -92,7 +92,7 @@ impl Player {
                 if !trailer.mesh_props[i].visible || self.is_mesh_glass(Some(ti), i) { continue; }
                 let transform = trailer.mesh_local_transform(i);
                 if !ray_may_hit(&trailer.ty, i, &transform, o, dir, 0.0) { continue; }
-                if let Some(t) = omsi_geometry::ray_mesh(o, dir, &mesh.data, &transform) {
+                if let Some(t) = mesh.ray_distance(o, dir, &transform) {
                     if t > 0.02 && t < nearest { nearest = t; }
                 }
             }
@@ -137,7 +137,7 @@ impl Player {
             if !vehicle.mesh_props[i].visible { continue; }
             let transform = vehicle.mesh_local_transform(i);
             if !ray_may_hit(&vehicle.ty, i, &transform, o, dir, 0.0) { continue; }
-            if let Some(t) = omsi_geometry::ray_mesh(o, dir, &mesh.data, &transform) {
+            if let Some(t) = mesh.ray_distance(o, dir, &transform) {
                 if t > 0.02 {
                     if t < nearest { nearest = t; }
                     if vehicle.ty.model.meshes[mesh.def_index].mouse_event.is_some()
@@ -151,7 +151,7 @@ impl Player {
                 if !trailer.mesh_props[i].visible { continue; }
                 let transform = trailer.mesh_local_transform(i);
                 if !ray_may_hit(&trailer.ty, i, &transform, o, dir, 0.0) { continue; }
-                if let Some(t) = omsi_geometry::ray_mesh(o, dir, &mesh.data, &transform) {
+                if let Some(t) = mesh.ray_distance(o, dir, &transform) {
                     if t > 0.02 {
                         if t < nearest { nearest = t; }
                         if trailer.ty.model.meshes[mesh.def_index].mouse_event.is_some()
@@ -204,7 +204,7 @@ impl Player {
             if !ray_may_hit(&self.vehicle.ty, i, &xf, o, dir, 0.0) {
                 continue;
             }
-            if let Some(t) = omsi_geometry::ray_mesh(o, dir, &vm.data, &xf) {
+            if let Some(t) = vm.ray_distance(o, dir, &xf) {
                 if best.map(|(bt, _)| t < bt).unwrap_or(true) {
                     best = Some((t, i));
                 }
