@@ -8,6 +8,25 @@ use super::*;
 /// way onto one of them): Omsi.exe starts every trip at its beginning.
 pub const TOUR_ENTRY_LANES: usize = 4;
 
+/// The timetable's departures are sorted by local departure time. Normal ticks only
+/// need the (usually tiny) due window, rather than scanning the entire day's
+/// timetable. On initial load or a clock restart, older trips may still be under
+/// way and must remain eligible, so include everything up to `tod`.
+fn due_departure_range(
+    departures: &[Departure],
+    tod: f64,
+    window: f64,
+    loading: bool,
+) -> std::ops::Range<usize> {
+    let end = departures.partition_point(|d| d.time <= tod);
+    let start = if loading {
+        0
+    } else {
+        departures[..end].partition_point(|d| d.time <= tod - window)
+    };
+    start..end
+}
+
 /// Where on the next trip's route `section` the tour's bus standing on `lane` takes it on:
 /// only on one of its first lanes. A tour repeating the same trip leaves its bus on the
 /// route's last lane, and taken on there the trip was over at once - the bus stood at the
@@ -263,12 +282,13 @@ impl ScheduleSim {
         // bus that stands on a light's detector from 20:00 to 04:00 (Städtedreieck's
         // Bergerplatz, so its evening and night programs never ran).
         let under_way = |d: &Departure| loading && self.times.get(d.trip).and_then(|t| t.get(d.profile)).is_some_and(|t| d.time + t.duration > tod);
-        let due: Vec<usize> = self
-            .departures
-            .iter()
-            .enumerate()
-            .filter(|(i, d)| !d.spawned && d.time <= tod && (d.time > tod - window || under_way(d)) && self.runs(*i))
-            .map(|(i, _)| i)
+        let due_window = due_departure_range(&self.departures, tod, window, loading);
+        let first_future = due_window.end;
+        let due: Vec<usize> = due_window
+            .filter(|&i| {
+                let d = &self.departures[i];
+                !d.spawned && (d.time > tod - window || under_way(d)) && self.runs(i)
+            })
             .collect();
         for i in due {
             self.departures[i].spawned = true;
@@ -297,8 +317,7 @@ impl ScheduleSim {
         // stop (#2595), and at a stop other lines use only a minute before leaving (#2593).
         let mut early: Vec<usize> = Vec::new();
         // departures are sorted by time: only the ones within a layover from now
-        let start = self.departures.partition_point(|d| d.time <= tod);
-        for i in start..self.departures.len() {
+        for i in first_future..self.departures.len() {
             let d = &self.departures[i];
             if d.time > tod + TOUR_LAYOVER_MAX {
                 break;
@@ -594,5 +613,42 @@ impl ScheduleSim {
     /// Departure `i`'s bus is out.
     pub fn started(&mut self, i: usize) {
         self.startup.remove(&i);
+    }
+}
+
+#[cfg(test)]
+mod due_range_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_due_window_matches_full_scan_at_boundaries_and_after_clock_changes() {
+        let times = [-86_400.0, -100.0, 0.0, 30.0, 60.0, 60.0, 90.0, 1_200.0, 86_400.0];
+        let departures: Vec<Departure> = times.iter().map(|&time| Departure {
+            time,
+            trip: 0,
+            profile: 0,
+            line: String::new(),
+            ai_group: String::new(),
+            tour: String::new(),
+            mask: 0,
+            spawned: false,
+            yesterday: false,
+        }).collect();
+        // Include the loading/restart behavior: a trip already underway from
+        // before the due window must still be considered.
+        for (tod, window) in [(60.0, 0.0), (60.0, 2.0), (60.0, 60.0), (60.0, 1_200.0),
+                              (90.0, 20.0), (-50.0, 2.0), (86_400.0, 1_200.0)] {
+            let loading = window > 60.0;
+            let eligible = |i: usize| {
+                let d = &departures[i];
+                d.time <= tod && (d.time > tod - window
+                    || (loading && d.time + 3_600.0 > tod))
+            };
+            let old: Vec<usize> = (0..departures.len()).filter(|&i| eligible(i)).collect();
+            let new: Vec<usize> = due_departure_range(&departures, tod, window, loading)
+                .filter(|&i| eligible(i))
+                .collect();
+            assert_eq!(new, old, "at time {tod} with window {window}");
+        }
     }
 }
