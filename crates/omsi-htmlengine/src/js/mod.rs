@@ -136,6 +136,28 @@ pub(crate) fn fmt_num(n: f64) -> String {
     }
 }
 
+/// Most elements an array gets by an assignment past its end.
+pub(crate) const MAX_ARRAY: usize = 1 << 20;
+
+/// An array's elements as text, joined by `sep`. An array met again inside itself is empty
+/// text, as in a browser (`a.push(a); String(a)`), and its lock is let go before the
+/// elements are converted: holding it while an element that is the array itself was read
+/// locked it a second time on the same thread, and the game stopped.
+pub(crate) fn array_text(a: &ArrRef, sep: &str) -> String {
+    thread_local! {
+        static OPEN: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let key = Arc::as_ptr(a) as *const () as usize;
+    if OPEN.with(|o| o.borrow().contains(&key)) {
+        return String::new();
+    }
+    let items = a.lock().unwrap().clone();
+    OPEN.with(|o| o.borrow_mut().push(key));
+    let text = items.iter().map(to_str).collect::<Vec<_>>().join(sep);
+    OPEN.with(|o| o.borrow_mut().pop());
+    text
+}
+
 pub(crate) fn to_str(v: &Val) -> String {
     match v {
         Val::Undef => "undefined".into(),
@@ -143,7 +165,7 @@ pub(crate) fn to_str(v: &Val) -> String {
         Val::Bool(b) => b.to_string(),
         Val::Num(n) => fmt_num(*n),
         Val::Str(s) => s.clone(),
-        Val::Arr(a) => a.lock().unwrap().iter().map(to_str).collect::<Vec<_>>().join(","),
+        Val::Arr(a) => array_text(a, ","),
         Val::Obj(_) | Val::Elem(_) | Val::Style(_) | Val::ClassList(_) => "[object Object]".into(),
         Val::Func(_) | Val::Nat(_) => "function".into(),
     }

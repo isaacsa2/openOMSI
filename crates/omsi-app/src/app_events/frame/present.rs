@@ -620,8 +620,9 @@ impl App {
         };
         let mut finish = false;
         self.perf.frames += 1;
-        // (a second of play drawn: this session started well, see omsi-guard)
-        if self.perf.frames == 60 {
+        // The guard needs 60 presented frames, even on hardware below 60 FPS.
+        // perf.frames resets every second; total_frames does not.
+        if self.perf.total_frames == 59 {
             omsi_guard::healthy(omsi_guard::journal::Kind::Game);
         }
         let profiling = omsi_cfg::flags::OMSI_PROFILE.is_set();
