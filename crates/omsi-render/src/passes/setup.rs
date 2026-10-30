@@ -84,6 +84,7 @@ impl Renderer {
         // texture of the window's size and smoothed on its way to the window, the HUD after
         let vanilla_fxaa = with_overlays
             && self.temporal_aa.is_none()
+            && self.fsr2.is_none()
             && (width, height) == (full_w, full_h)
             && self.options.fxaa
             && self.options.msaa <= 1
@@ -310,6 +311,9 @@ impl Renderer {
             ];
             self.queue.write_buffer(&self.lights.snow_track_uniform, 0, bytemuck::cast_slice(&v));
         }
+        // (FSR 2: the scene drawn through this frame's jitter; everything else here, the motion
+        // vectors included, works without it)
+        let raster_vp = self.raster_view_proj(f, vp_mat);
         let cu = CameraUniform {
             post: [
                 if enhanced { 1.0 } else { 0.0 },
@@ -320,7 +324,7 @@ impl Renderer {
                 // shadow map's share of its half of the atlas)
                 self.options.shadow_size.min(SHADOW_CLOSE_MAX) as f32 / self.options.shadow_size.max(1) as f32,
             ],
-            view_proj: vp_mat.to_cols_array_2d(),
+            view_proj: raster_vp.to_cols_array_2d(),
             cam_pos: cam_rel.extend(lighting.reflection_strength.clamp(0.0, 1.0)).to_array(),
             // (modulo the shaders' PATTERN_PERIOD, 1000 m: the patterns repeat with it, and
             // the whole map coordinate has no precision left for them in 32 bits)

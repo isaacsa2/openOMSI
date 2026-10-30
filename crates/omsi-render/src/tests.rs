@@ -1455,6 +1455,7 @@ mod bundles;
 mod coplanar;
 mod fog;
 mod fsr;
+mod fsr2;
 mod instance_layout;
 mod lamp_shadows;
 mod light_grid;

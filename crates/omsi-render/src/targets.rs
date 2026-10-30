@@ -610,7 +610,7 @@ pub(crate) struct Upscale {
     pub(crate) fsr_refused: bool,
     /// What `set_upscaler` was last asked for (at the start: the settings'), FSR 1, its
     /// sharpening and the render scale: see `Renderer::upscaler_asked`.
-    pub(crate) upscaler_asked: (bool, bool, f32, f32),
+    pub(crate) upscaler_asked: crate::UpscalerAsk,
     /// OMSI_FSR_RAW_INPUT: the scene picture it was made for and the bind group reading it
     /// through a view that is not sRGB (made again only for a new picture, not each frame).
     pub(crate) fsr_raw_bg: std::cell::RefCell<Option<(wgpu::Texture, wgpu::BindGroup)>>,

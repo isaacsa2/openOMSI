@@ -61,6 +61,7 @@ impl Renderer {
         // (a mirror's small picture goes without FXAA)
         let fxaa = with_overlays
             && self.temporal_aa.is_none()
+            && self.fsr2.is_none()
             && self.options.fxaa
             && self.options.msaa <= 1
             && !f.env.no_fxaa;
@@ -195,7 +196,18 @@ impl Renderer {
     /// its part, and the picture it gives is unchanged.)
     pub(crate) fn fsr_mip_bias(&self, f: &FrameCtx) -> f32 {
         let off = omsi_cfg::flags::OMSI_NO_FSR_MIP_BIAS.is_set() || self.scale.fsr_mip_bias_off.get();
-        if !off && self.fsr_draws(f) { (f.width as f32 / f.full_w.max(1) as f32).log2().clamp(-1.0, 0.0) } else { 0.0 }
+        let ratio = f.width as f32 / f.full_w.max(1) as f32;
+        if off {
+            0.0
+        } else if self.fsr_draws(f) {
+            ratio.log2().clamp(-1.0, 0.0)
+        } else if self.fsr2_view(f) && f.width < f.full_w {
+            // (FSR 2: AMD's log2(render / display) - 1, the jitter bringing back what the
+            // sharper mips alias)
+            (ratio.log2() - 1.0).clamp(-3.0, 0.0)
+        } else {
+            0.0
+        }
     }
 
     // --- the smaller picture scaled up to the window, the HUD on top at full size;
@@ -203,6 +215,37 @@ impl Renderer {
     pub(crate) fn encode_upscale(&self, encoder: &mut wgpu::CommandEncoder, scene: &Scene, f: &FrameCtx, timers: &mut PassTimers) {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
+        if self.fsr2_drawn.get() {
+            if let Some(bg) = self.fsr2.as_ref().and_then(|s| s.present.as_ref()) {
+                // FSR 2's picture is already the window's size: copied as it is, the HUD on top
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("FSR2 present"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: f.target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: pass_timer(timers.set.as_ref(), &mut timers.timed, "FSR2 present"),
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.scale.copy_pipeline);
+                pass.set_bind_group(0, bg, &[]);
+                pass.draw(0..3, 0..1);
+                if !overlays.is_empty() {
+                    pass.set_pipeline(&self.overlay_pipeline_1x);
+                    for (k, _) in overlays.iter().enumerate() {
+                        if let Some((_, _, bg, _)) = scene.overlay_res.get(k) {
+                            pass.set_bind_group(0, bg, &[]);
+                            pass.draw(0..6, 0..1);
+                        }
+                    }
+                }
+                return;
+            }
+        }
         if let Some((_, bg)) = &f.scene_target {
             // TAA's resolved history replaces the scene input, never the HUD.
             let taa_bg = self.temporal_aa.as_ref().and_then(|taa| taa.present())

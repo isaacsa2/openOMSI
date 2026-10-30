@@ -791,9 +791,8 @@ impl Renderer {
         self.encode_motion_debug(&mut enc.picture, &f);
         // Standalone opt-in TAA tests motion/history before eventual official FSR 2 dispatch.
         self.encode_temporal_aa(&mut enc.picture, &f);
-        // Establish an SDK-ready frame contract, without attempting native FSR 2.
-        // The optional inputs are borrowed only for this frame; no readback occurs.
-        let _fsr2_inputs = self.fsr2_frame_inputs(&f);
+        // AMD FSR 2 (WGSL): the picture resolved and upscaled, presented below
+        self.encode_fsr2(&mut enc.picture, &f, &mut timers);
         self.encode_upscale(&mut enc.picture, scene, &f, &mut timers);
         clock.stage(self, "encode", "mirror.encode");
         self.finish_and_submit(enc, main_parts, big, with_overlays, &mut clock, timers);
