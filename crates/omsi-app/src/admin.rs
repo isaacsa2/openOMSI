@@ -254,6 +254,9 @@ pub(crate) fn teleport(app: &mut App, at: glam::DVec3, heading: f64) {
         }
         log::info!("teleported to ({:.1}, {:.1}) heading {heading:.0}", at.x, at.y);
     }
+    if let Some(renderer) = app.renderer.as_mut() {
+        renderer.reset_motion_history();
+    }
 }
 
 /// What another game's command asks of ours (`omsi_lan::commands::Command`, read there),

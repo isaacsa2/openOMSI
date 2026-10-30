@@ -83,6 +83,8 @@ impl Renderer {
         // edges (the Enhanced path has it in its post passes): the picture is drawn into a
         // texture of the window's size and smoothed on its way to the window, the HUD after
         let vanilla_fxaa = with_overlays
+            && self.temporal_aa.is_none()
+            && self.fsr2.is_none()
             && (width, height) == (full_w, full_h)
             && self.options.fxaa
             && self.options.msaa <= 1
@@ -95,7 +97,8 @@ impl Renderer {
             && scene.glass_slot.is_some()
             && (lighting.rain > 0.001 || lighting.wetness > 0.02)
             && !env.no_glass_picture;
-        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view);
+        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view)
+            || (self.temporal_aa.is_some() && with_overlays && projection.is_none());
         let scene_target: Option<(wgpu::TextureView, wgpu::BindGroup)> = if scaled {
             Some(self.scale_target(width, height))
         } else {
@@ -151,7 +154,9 @@ impl Renderer {
         let ao_on = with_overlays && self.rt.is_none() && self.options.ssao && self.ssao_pipeline.is_some() && !env.no_ao;
         // the enhanced path's shading is costly: the depth prepass keeps it to the visible
         // surface (without multisampling, see `share_depth`)
-        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none());
+        // Motion vectors require readable depth on a single-sampled desktop view.
+        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none())
+            || (self.motion.is_some() && with_overlays && projection.is_none() && self.options.msaa <= 1);
         let prepass_on = ao_on || depth_wanted;
         // the terrain's paint laid into one albedo picture first: the window's enhanced
         // picture, single-sampled, with the camera group's slot 8 free of the AO
@@ -306,6 +311,9 @@ impl Renderer {
             ];
             self.queue.write_buffer(&self.lights.snow_track_uniform, 0, bytemuck::cast_slice(&v));
         }
+        // (FSR 2: the scene drawn through this frame's jitter; everything else here, the motion
+        // vectors included, works without it)
+        let raster_vp = self.raster_view_proj(f, vp_mat);
         let cu = CameraUniform {
             post: [
                 if enhanced { 1.0 } else { 0.0 },
@@ -316,7 +324,7 @@ impl Renderer {
                 // shadow map's share of its half of the atlas)
                 self.options.shadow_size.min(SHADOW_CLOSE_MAX) as f32 / self.options.shadow_size.max(1) as f32,
             ],
-            view_proj: vp_mat.to_cols_array_2d(),
+            view_proj: raster_vp.to_cols_array_2d(),
             cam_pos: cam_rel.extend(lighting.reflection_strength.clamp(0.0, 1.0)).to_array(),
             // (modulo the shaders' PATTERN_PERIOD, 1000 m: the patterns repeat with it, and
             // the whole map coordinate has no precision left for them in 32 bits)

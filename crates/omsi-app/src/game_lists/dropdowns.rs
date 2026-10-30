@@ -142,7 +142,17 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
             if let Some((key, value)) = arg.split_once(' ') {
                 let before = app.settings.mirror_hud;
                 remember_setting(key, value);
+                // The temporal modes need a single-sampled depth buffer from
+                // renderer startup. Keep persistent MSAA in sync with the choice.
+                if key == "upscaler" && matches!(value, "fsr2" | "taa") {
+                    remember_setting("msaa", "1");
+                } else if key == "msaa" && value != "1" && matches!(app.settings.upscaler.as_str(), "fsr2" | "taa") {
+                    remember_setting("upscaler", "default");
+                }
                 reload_settings(app);
+                if key == "upscaler" && matches!(value, "fsr2" | "taa") && app.renderer.as_ref().is_some_and(|r| r.options.msaa > 1) {
+                    app.service_msg = Some(("Restart the game to switch MSAA off for temporal upscaling".into(), 6.0));
+                }
                 if key == "light_shadows" && value == "all" && app.renderer.as_ref().is_some_and(|r| !r.lamp_cube_maps()) {
                     app.service_msg = Some((omsi_ui::tr("Takes effect when the game starts the next time").into_owned(), 5.0));
                 }
@@ -272,7 +282,13 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
         "light_shadows" => vec![("off", "Off"), ("street", "Street lamps and vehicles"), ("all", "Every light")],
         "msaa" => vec![("1", "Off"), ("2", "2x MSAA"), ("4", "4x MSAA"), ("8", "8x MSAA")],
         "render_scale" => vec![("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")],
-        "upscaler" => vec![("default", "Standard (Catmull-Rom)"), ("fsr1", "AMD FSR 1 (experimental)")],
+        "upscaler" => vec![
+            ("default", "Standard (Catmull-Rom)"),
+            ("taa", "TAA (experimental)"),
+            ("fsr1", "AMD FSR 1.0"),
+            ("fsr2", "AMD FSR 2.0 (WGSL, experimental)"),
+        ],
+        "fsr2_quality" => vec![("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("ultra_performance", "Ultra Performance (33%)")],
         "fsr_quality" => vec![("ultra", "Ultra Quality (77%)"), ("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("auto", "Automatic (keeps the frame rate)"), ("custom", "Use render scale")],
         "anisotropy" => vec![("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")],
         "shadow_size" => vec![("1024", "1024"), ("2048", "2048"), ("4096", "4096")],
@@ -436,15 +452,21 @@ pub(super) fn text_in_mode(text: &str, mode: &str) -> crate::settings::Settings 
 }
 
 pub(super) fn sync_live(app: &mut App) {
-    // (the upscaler and its sharpening at once, FSR 1 built when first asked for; and the
-    // render scale with them, FSR's quality being one. Only when one of them changed and FSR
-    // was or is asked for: without it the render scale stays for the next start, as its row
-    // says)
+    // FSR 1 is spatial; TAA and FSR 2 (AMD FSR 2.2.1 in WGSL) are temporal. The choices
+    // are mutually exclusive. Changes that require replacing MSAA need a restart.
     let o = app.settings.render_options();
     if let Some(r) = app.renderer.as_mut() {
-        let asked = r.upscaler_asked();
-        if (o.fsr1 || asked.0) && (o.fsr1, o.fsr_sharpness, o.render_scale) != asked && !r.set_upscaler(o.fsr1, o.fsr_sharpness, o.render_scale) {
-            app.service_msg = Some((omsi_ui::tr("FSR 1 does not run on this graphics driver: the standard upscaler stays").into_owned(), 6.0));
+        let asked = r.upscaler_asked_mode();
+        let desired = omsi_render::UpscalerAsk::of(&o);
+        if (o.fsr1 || o.temporal_aa || o.fsr2 || asked.fsr1 || asked.taa || asked.fsr2) && desired != asked && !r.set_upscaling(desired) {
+            let reason = if o.fsr2 {
+                "AMD FSR 2.0 needs MSAA off and a graphics driver with compute shaders and storage textures: the standard upscaler stays"
+            } else if o.temporal_aa {
+                "TAA needs MSAA off and a compatible graphics driver; restart after changing MSAA"
+            } else {
+                "FSR 1 does not run on this graphics driver: the standard upscaler stays"
+            };
+            app.service_msg = Some((omsi_ui::tr(reason).into_owned(), 6.0));
         }
     }
     // (the street light takes effect at once: the renderer reads it every frame)

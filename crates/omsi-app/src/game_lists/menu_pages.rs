@@ -579,14 +579,17 @@ mod tests {
 }
 
 /// The upscaler's rows of the graphics page (after the render scale's): the upscaler, and
-/// FSR 1's quality and sharpening while it is chosen.
+/// the quality and sharpening of FSR 1 or FSR 2 while it is chosen.
 fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
     let fsr = app.settings.upscaler == "fsr1";
+    let fsr2 = app.settings.upscaler == "fsr2";
     let pct = |v: f32| format!("{:.0} %", v * 100.0);
     [
-        select_row(file, "upscaler", "Upscaling", "Standard Catmull-Rom or experimental FSR 1; changes show at once"),
+        select_row(file, "upscaler", "Upscaling", "Standard Catmull-Rom, TAA, AMD FSR 1.0 or AMD FSR 2.0; the temporal ones (TAA, FSR 2) need MSAA off"),
         select_row(file, "fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| fsr),
         slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength", &pct).filter(|_| fsr),
+        select_row(file, "fsr2_quality", "FSR 2 quality", &fsr_size(app)).filter(|_| fsr2),
+        slider_row(app, "fsr2_sharpness", "FSR 2 sharpness", "RCAS sharpening after FSR 2; 0 % leaves it out", &pct).filter(|_| fsr2),
     ]
     .into_iter()
     .flatten()

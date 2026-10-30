@@ -709,6 +709,7 @@ impl Renderer {
         clock.stage(self, "shadow items", "mirror.shadow items");
         let visible = self.cull_view(scene, &f, &mut clock);
         let mut plan = self.batch_draws(scene, &f, &visible, Vec::new());
+        self.unjitter_unresolvable(&f, &plan, vp_mat);
         if plan.ground.active() {
             // (the frame's uniform was written with the flag off: the base is lit from the ground picture)
             let lod = [self.fsr_mip_bias(&f), 1.0, 0.0, 0.0];
@@ -771,6 +772,7 @@ impl Renderer {
         self.encode_sky_cube(&mut enc.prepass, scene, &f, probe_redraw, &mut timers);
         self.encode_probe(&mut enc.prepass, scene, probe_redraw, &mut timers);
         let mut main_parts = self.encode_main_pass(&mut enc.picture, scene, &f, &plan, &main_bundles, &mut timers);
+        self.encode_motion(&mut enc.picture, &f, &plan, vp_mat, &mut timers);
         // Turning the recorded passes into Metal commands is the costliest CPU step of a
         // frame (wgpu checks every draw): the shadow maps, the prepass, the main pass and
         // the passes after it are finished side by side on helper threads and this one.
@@ -787,6 +789,11 @@ impl Renderer {
         if f.enhanced {
             self.encode_post(&mut enc.picture, scene, &f, puddles_on, &mut timers);
         }
+        self.encode_motion_debug(&mut enc.picture, &f);
+        // Standalone opt-in TAA tests motion/history before eventual official FSR 2 dispatch.
+        self.encode_temporal_aa(&mut enc.picture, &f);
+        // AMD FSR 2 (WGSL): the picture resolved and upscaled, presented below
+        self.encode_fsr2(&mut enc.picture, &f, &mut timers);
         self.encode_upscale(&mut enc.picture, scene, &f, &mut timers);
         clock.stage(self, "encode", "mirror.encode");
         self.finish_and_submit(enc, main_parts, big, with_overlays, &mut clock, timers);

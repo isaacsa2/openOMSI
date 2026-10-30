@@ -368,6 +368,10 @@ impl Opened {
         // process a shared one asked another's)
         if let Ok(r) = made.as_mut() {
             r.adapter = Some(adapter.clone());
+            // (FSR 2 asks the adapter's format table: built once it is known)
+            if r.options.fsr2 {
+                r.options.fsr2 = r.ensure_fsr2();
+            }
         }
         // A driver whose shader compiler fails on a pipeline answers "out of memory" or an
         // unknown error, and wgpu takes that as the device lost: on phones (Adreno, Mali)
@@ -562,7 +566,7 @@ impl Renderer {
         let fsr_refused = (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr.is_none();
         // (OMSI_FSR1: FSR 1 from the start whatever the settings say - the menu can still turn
         // it off; what the settings asked for is kept, so that only a change of theirs does)
-        let upscaler_asked = (options.fsr1, options.fsr_sharpness, options.render_scale);
+        let upscaler_asked = crate::UpscalerAsk::of(&options);
         let options = RenderOptions { fsr1: (options.fsr1 || crate::fsr1_enabled()) && upscale.fsr.is_some(), ..options };
         let gpu_timers = std::array::from_fn(|_| GpuTimers::new(&device));
         // GLES cannot reliably read the depth buffer (the same limitation as SSAO).
@@ -570,6 +574,15 @@ impl Renderer {
             puddles::Pipelines::new(&device, &scene.shader, &scene.camera_layout, &scene.material_layout)
         });
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
+        let temporal_aa = ((options.temporal_aa || omsi_cfg::flags::OMSI_TAA.is_set())
+            && !options.fsr1 && options.msaa <= 1 && !options.preview_only)
+            .then(|| crate::gpu::optional_pipeline(&device, "experimental TAA", || crate::temporal::Taa::new(&device, format)))
+            .flatten();
+        let motion = (omsi_cfg::flags::OMSI_MOTION_VECTORS.is_set() || temporal_aa.is_some())
+            .then(|| crate::gpu::optional_pipeline(&device, "motion vectors", || crate::passes::motion::MotionVectors::new(&device, format)))
+            .flatten();
+        // A temporal pass without its motion source must not be presented as active.
+        let temporal_aa = temporal_aa.filter(|_| motion.is_some());
         let cookie_atlas = cookies::CookieAtlas::new();
         Renderer {
             targets: Targets {
@@ -771,6 +784,10 @@ impl Renderer {
             pending_meshes: Default::default(),
             freed: std::cell::OnceCell::new(),
             rt,
+            motion,
+            temporal_aa,
+            fsr2: None,
+            fsr2_drawn: Default::default(),
             mesh_pages: false,
         }
     }

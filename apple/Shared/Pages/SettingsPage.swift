@@ -106,11 +106,14 @@ struct SettingsPage: View {
             }
             PresetRow(mode: mode)
             OptimiseBlock()
-            SettingSelect(label: "Anti-aliasing", key: "msaa", options: Choices.msaa, heavy: { $0 == "8" && !traced })
-            SettingSelect(label: "Upscaling", key: "upscaler", options: [("default", "Standard (Catmull-Rom)"), ("fsr1", "AMD FSR 1 (experimental)")])
+            TemporalUpscalerRows(traced: traced)
             if store.setting("upscaler")?.string == "fsr1" {
                 SettingSelect(label: "FSR quality", key: "fsr_quality", options: [("ultra", "Ultra Quality (77%)"), ("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("auto", "Automatic (keeps the frame rate)"), ("custom", "Use render scale")])
                 SettingSlider(label: "FSR sharpness", key: "fsr_sharpness", range: 0 ... 1, step: 0.05, fallback: 0.8) { "\(Int($0 * 100))%" }
+            }
+            if store.setting("upscaler")?.string == "fsr2" {
+                SettingSelect(label: "FSR 2 quality", key: "fsr2_quality", options: [("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("ultra_performance", "Ultra Performance (33%)")])
+                SettingSlider(label: "FSR 2 sharpness", key: "fsr2_sharpness", range: 0 ... 1, step: 0.05, fallback: 0.8) { "\(Int($0 * 100))%" }
             }
             SettingSelect(label: "Render scale", key: "render_scale", options: Choices.renderScale)
             SettingSelect(label: "Anisotropic", key: "anisotropy", options: [("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")])
@@ -634,5 +637,47 @@ struct GraphicsProfiles: View {
     private func reload() {
         names = ((try? Bridge.get([String: JSON].self, "graphics_profiles")) ?? [:]).keys.sorted()
         if !names.contains(selected) { selected = names.first ?? "" }
+    }
+}
+
+
+// The Apple launcher writes settings one at a time. Keep the temporal upscalers and MSAA
+// mutually exclusive, just as the desktop launcher and the in-game menu do.
+private struct TemporalUpscalerRows: View {
+    @Environment(LauncherStore.self) private var store
+    var traced: Bool
+
+    var body: some View {
+        let upscaler = store.setting("upscaler")?.string ?? "default"
+        let msaa = store.setting("msaa")?.string ?? "4"
+        let temporal = upscaler == "taa" || upscaler == "fsr2"
+        let warning: String? = temporal && msaa != "1"
+            ? NSLocalizedString("Temporal upscaling requires MSAA off; choose this upscaler again to apply it.", comment: "")
+            : msaa == "8" && !traced
+                ? NSLocalizedString("Heavy: can cost many frames per second on most graphics cards", comment: "")
+                : nil
+        VStack(alignment: .leading, spacing: 12) {
+            LabeledRow("Anti-aliasing", warn: warning) {
+                SelectField(options: Choices.msaa.map { (value: $0.0, label: NSLocalizedString($0.1, comment: "")) }, selection: msaa, onChange: { value in
+                    if value != "1" && temporal {
+                        store.set("upscaler", "default")
+                    }
+                    store.set("msaa", Int(value) ?? 1)
+                })
+            }
+            LabeledRow("Upscaling", detail: NSLocalizedString("TAA and FSR 2 require MSAA off; changing MSAA needs a game restart.", comment: "")) {
+                SelectField(options: [
+                    ("default", NSLocalizedString("Standard (Catmull-Rom)", comment: "")),
+                    ("taa", NSLocalizedString("TAA (experimental)", comment: "")),
+                    ("fsr1", NSLocalizedString("AMD FSR 1.0", comment: "")),
+                    ("fsr2", NSLocalizedString("AMD FSR 2.0 (WGSL, experimental)", comment: ""))
+                ], selection: upscaler, onChange: { value in
+                    if value == "taa" || value == "fsr2" {
+                        store.set("msaa", 1)
+                    }
+                    store.set("upscaler", value)
+                })
+            }
+        }
     }
 }

@@ -16,6 +16,7 @@ pub(super) fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "led_glow" => s.led_glow as f32,
         "night_brightness" => s.night_brightness,
         "fsr_sharpness" => s.fsr_sharpness,
+        "fsr2_sharpness" => s.fsr2_sharpness,
         "reflections" => s.reflections,
         "led_mips" => s.led_mips,
         "ctrl_deadzone" => s.ctrl_deadzone,
@@ -123,6 +124,10 @@ pub(super) fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option
         "fsr_sharpness" => {
             app.settings.fsr_sharpness = v.clamp(0.0, 1.0);
             Some(("fsr_sharpness", app.settings.fsr_sharpness.to_string()))
+        }
+        "fsr2_sharpness" => {
+            app.settings.fsr2_sharpness = v.clamp(0.0, 1.0);
+            Some(("fsr2_sharpness", app.settings.fsr2_sharpness.to_string()))
         }
         "reflections" => {
             app.settings.reflections = v.clamp(0.0, 1.0);
