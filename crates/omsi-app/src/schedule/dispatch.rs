@@ -98,23 +98,23 @@ impl Schedule {
         day_time: f64,
         window: f64,
     ) {
-        // Attribute long timetable frames to the step that held them. A single
-        // TrafficSchedule aggregate cannot tell a slow scheduler from GPU uploads
-        // or a bus spawn. Only report under OMSI_PROFILE; no gameplay is changed.
-        let started = std::time::Instant::now();
+        // These are CPU-side wall-clock intervals, not GPU execution timestamps.
+        // Do not read the clock at all unless OMSI_PROFILE is enabled.
+        let started = omsi_cfg::flags::OMSI_PROFILE.is_set().then(std::time::Instant::now);
+        let elapsed = || started.map(|t| t.elapsed()).unwrap_or_default();
         let Some(loading) = self.tick_due(world, traffic, day_time, window) else {
             return;
         };
-        let due = started.elapsed();
+        let due = elapsed();
         crate::view_sync::apply_traffic(traffic, view, world, renderer, scene);
-        let sync_before = started.elapsed();
+        let sync_before = elapsed();
         self.fleet(world, traffic, renderer, scene, day_time);
-        let fleet = started.elapsed();
+        let fleet = elapsed();
         self.tick_spawn(world, traffic, day_time, loading);
-        let spawn = started.elapsed();
+        let spawn = elapsed();
         crate::view_sync::apply_traffic(traffic, view, world, renderer, scene);
-        let done = started.elapsed();
-        if omsi_cfg::flags::OMSI_PROFILE.is_set() && done >= std::time::Duration::from_millis(40) {
+        let done = elapsed();
+        if started.is_some() && done >= std::time::Duration::from_millis(40) {
             let ms = |t: std::time::Duration| t.as_secs_f64() * 1000.0;
             log::warn!(
                 "timetable tick: {:.1} ms (queue {:.1}, sync-before {:.1}, fleet {:.1}, spawn {:.1}, sync-after {:.1}); pending {}",
