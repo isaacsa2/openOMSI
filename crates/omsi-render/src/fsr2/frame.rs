@@ -6,11 +6,10 @@ use crate::passes::{FrameCtx, PassTimers};
 use crate::*;
 
 /// FSR 2 needs the main view's readable, single-sampled prepass depth to reconstruct
-/// temporal history. The motion-vector pass also refuses puddle frames, since their
-/// reflection path does not share that depth. Do not jitter a frame that must be
-/// presented by the spatial upscaler instead.
-fn fsr2_depth_usable(msaa: u32, prepass_on: bool, puddles_wanted: bool) -> bool {
-    msaa <= 1 && prepass_on && !puddles_wanted
+/// temporal history (wet roads included: `motion_depth_ready`). Do not jitter a frame that
+/// must be presented by the spatial upscaler instead.
+fn fsr2_depth_usable(msaa: u32, prepass_on: bool) -> bool {
+    msaa <= 1 && prepass_on
 }
 
 impl Renderer {
@@ -56,7 +55,7 @@ impl Renderer {
             && f.with_overlays
             && f.projection.is_none()
             && !f.second_eye
-            && fsr2_depth_usable(self.options.msaa, f.prepass_on, f.puddles_wanted)
+            && fsr2_depth_usable(self.options.msaa, f.prepass_on)
             && f.scene_target.is_some()
             && self.device_lost().is_none()
     }
@@ -97,7 +96,7 @@ impl Renderer {
         self.fsr2_drawn.set(false);
         if !self.fsr2_view(f) {
             // A main view that temporarily cannot supply temporal inputs (for example,
-            // rain puddles) is presented with the spatial scaler. It must not reuse the
+            // no depth prepass) is presented with the spatial scaler. It must not reuse the
             // stale FSR 2 history when a valid depth prepass returns. Mirrors and XR
             // views must never reset the main picture's temporal history.
             if f.with_overlays && f.projection.is_none() && !f.second_eye {
@@ -158,12 +157,10 @@ mod frame_fallback_tests {
     use super::fsr2_depth_usable;
 
     #[test]
-    fn wet_roads_or_missing_depth_use_the_non_jittered_fallback() {
-        assert!(fsr2_depth_usable(1, true, false));
+    fn missing_depth_or_msaa_use_the_non_jittered_fallback() {
         // The same condition gates both the scene's projection jitter and dispatch.
-        assert!(!fsr2_depth_usable(1, true, true));
-        assert!(!fsr2_depth_usable(1, false, false));
-        assert!(!fsr2_depth_usable(4, true, false));
-        assert!(!fsr2_depth_usable(8, true, true));
+        assert!(fsr2_depth_usable(1, true));
+        assert!(!fsr2_depth_usable(1, false));
+        assert!(!fsr2_depth_usable(4, true));
     }
 }

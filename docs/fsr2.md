@@ -210,10 +210,13 @@ Measuring needs real GPUs. The per-pass GPU time is in the performance overlay, 
   ghost.
 - The motion pass gives no per-instance motion yet to animated traffic, hands, wipers and
   passengers (`docs/temporal-upscaling.md`). They can smear.
-- Wet-road puddle frames cannot reuse the main depth prepass for motion vectors yet. FSR 2
-  intentionally falls back to the standard spatial scaler **without projection jitter** on
-  those frames and resets its temporal history; a future wet-road motion pass is needed
-  before FSR 2 can stay active continuously during rain.
+- On wet roads with puddles, the main pass draws into a depth buffer of its own, so that
+  its depth-writing glass does not cover the road the puddles reflect. The motion vectors
+  and FSR 2 read the prepass's depth instead: the opaque surfaces, which is what AMD asks
+  for. FSR 2 stays on in the rain. Glass then moves with what lies behind it, as it does
+  without a reactive mask anyway.
+- A frame with a presurface (an excavation) in it, or without a depth prepass, goes to the
+  standard upscaler without the projection jitter, and the history starts afresh.
 - HDR input (`HDR_COLOR_INPUT 1`) is wired as a pipeline constant but not used: the picture
   is tone-mapped before FSR 2.
 - MSAA must be off, and turning it off takes a restart.

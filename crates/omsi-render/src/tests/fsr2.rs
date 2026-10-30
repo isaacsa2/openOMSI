@@ -106,3 +106,25 @@ fn fsr2_turned_off_and_resized() {
     assert!(!r.fsr2_drawn.get());
     assert!(difference(&before, &after) < 0.01, "the standard picture back: {}", difference(&before, &after));
 }
+
+/// A wet road with puddles: the main pass draws into a depth of its own there, but the
+/// prepass's (the opaque surfaces) still gives the motion vectors, so FSR 2 resolves the
+/// frame instead of leaving it to the standard upscaler.
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn fsr2_resolves_wet_roads_with_puddles() {
+    let scale = 1.0 / 1.5;
+    let mut r = renderer(scale);
+    let mut s = scene(&mut r);
+    for m in s.materials.iter_mut() {
+        m.uniform.params2[2] = 1.0;
+    }
+    let wet = Lighting { wetness: 1.0, puddles: 2, ..light() };
+    assert!(r.puddles.is_some(), "puddle reflections on this device");
+    assert!(fsr2(&mut r, scale));
+    for _ in 0..6 {
+        r.render_to_image(&mut s, 240, 160, &camera(), &wet).unwrap();
+        assert!(r.fsr2_drawn.get(), "FSR 2 resolved the wet frame");
+    }
+    assert!(r.targets.hdr_targets.values().any(|h| h.puddles.is_some()), "the puddles were drawn");
+}

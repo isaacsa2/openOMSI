@@ -25,8 +25,9 @@ frame's (`Rg16Float`, FSR 2's convention).
 - **Not yet in it:** what moves by itself - the traffic, the people, the bus's own wipers, doors
   and needles, the articulated bus's bellows. They need each instance's transform of the last
   frame (step 4).
-- **Where it runs:** where the main pass's depth is the single-sampled one of the prepass
-  (`shares_prepass_depth`: no MSAA, no puddles or presurfaces that frame). With the vectors on, the
+- **Where it runs:** where there is a single-sampled prepass depth of the picture's size
+  (`motion_depth_ready`: no MSAA, no presurface that frame; with puddles the prepass's depth
+  is read, though the main pass draws into its own). With the vectors on, the
   prepass is drawn even where nothing else asked for it (vanilla without SSAO): one depth pass
   more. The depth is read as a plain float texture, so OpenGL takes it too.
 - **History validity:** discard stale frames after a resize, camera cut,

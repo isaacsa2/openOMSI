@@ -4,7 +4,7 @@
 //! When no temporal upscaler or debug flag requests them, this pass is not created.
 //!
 //! Worked out from the depth of the main pass where it is single-sampled and readable (the
-//! prepass's, shared with the main pass: `shares_prepass_depth`), read as a plain float texture
+//! prepass's: `motion_depth_ready`), read as a plain float texture
 //! so that OpenGL takes it too. The world is taken as still and the camera as moving, except
 //! the player's own vehicle, carried back with it (so the cab does not smear).
 
@@ -172,10 +172,14 @@ mod history_tests {
 impl Renderer {
     /// The motion vectors of the window's picture (after the main pass): when they are on,
     /// for the lead view, and when the main pass's depth is the readable single-sampled one.
-    /// Whether this frame's motion vectors can be worked out: the prepass's depth, of the
-    /// picture's size, shared with the main pass (`encode_motion` and FSR 2 ask the same).
+    /// Whether this frame's motion vectors can be worked out: a single-sampled prepass depth
+    /// of the picture's size (`encode_motion` and FSR 2 ask the same). With puddles the main
+    /// pass draws into a depth of its own (`shares_prepass_depth`: its depth-writing glass
+    /// must not cover the road the puddles reflect), but the prepass's is whole: the opaque
+    /// surfaces, which is the depth FSR 2 asks for. A presurface's below-ground faces are not
+    /// in it, so that frame goes without.
     pub(crate) fn motion_depth_ready(&self, f: &FrameCtx, plan: &DrawPlan) -> bool {
-        self.targets.ao.as_ref().is_some_and(|a| a.size == (f.width, f.height)) && self.shares_prepass_depth(f, plan)
+        f.prepass_on && self.options.msaa <= 1 && !plan.has_presurface && self.targets.ao.as_ref().is_some_and(|a| a.size == (f.width, f.height))
     }
 
     pub(crate) fn encode_motion(&mut self, encoder: &mut wgpu::CommandEncoder, f: &FrameCtx, plan: &DrawPlan, view_proj: Mat4, timers: &mut PassTimers) {
@@ -189,8 +193,6 @@ impl Renderer {
             // (no readable depth this frame: the next one starts afresh; and the log says why)
             let why = if self.options.msaa > 1 {
                 "MSAA is on (turn it off)"
-            } else if f.puddles_wanted {
-                "puddles are in the picture"
             } else if plan.has_presurface {
                 "a presurface (an excavation) is in the picture"
             } else {
