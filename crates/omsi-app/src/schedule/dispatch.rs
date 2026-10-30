@@ -98,13 +98,35 @@ impl Schedule {
         day_time: f64,
         window: f64,
     ) {
+        // These are CPU-side wall-clock intervals, not GPU execution timestamps.
+        // Do not read the clock at all unless OMSI_PROFILE is enabled.
+        let started = omsi_cfg::flags::OMSI_PROFILE.is_set().then(std::time::Instant::now);
+        let elapsed = || started.map(|t| t.elapsed()).unwrap_or_default();
         let Some(loading) = self.tick_due(world, traffic, day_time, window) else {
             return;
         };
+        let due = elapsed();
         crate::view_sync::apply_traffic(traffic, view, world, renderer, scene);
+        let sync_before = elapsed();
         self.fleet(world, traffic, renderer, scene, day_time);
+        let fleet = elapsed();
         self.tick_spawn(world, traffic, day_time, loading);
+        let spawn = elapsed();
         crate::view_sync::apply_traffic(traffic, view, world, renderer, scene);
+        let done = elapsed();
+        if started.is_some() && done >= std::time::Duration::from_millis(40) {
+            let ms = |t: std::time::Duration| t.as_secs_f64() * 1000.0;
+            log::warn!(
+                "timetable tick: {:.1} ms (queue {:.1}, sync-before {:.1}, fleet {:.1}, spawn {:.1}, sync-after {:.1}); pending {}",
+                ms(done),
+                ms(due),
+                ms(sync_before - due),
+                ms(fleet - sync_before),
+                ms(spawn - fleet),
+                ms(done - spawn),
+                self.pending(),
+            );
+        }
     }
 
     /// The timetable's tick up to the vehicle sets (see [`Schedule::tick`]), without the
