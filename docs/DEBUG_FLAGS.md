@@ -181,6 +181,12 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_FLEET_AHEAD` | num | FLEET_AHEAD | use | app | Minutes ahead the timetable fleet is planned (for tests). |
 | `OMSI_FLEET_IDLE` | num | FLEET_IDLE | use | app | Seconds a fleet vehicle idles (shortened for tests). |
 | `OMSI_FOLLOW_CAM` | text | - | use | app | right,ahead,up,yaw,pitch: a camera in the followed car's frame. |
+| `OMSI_FSR2_REFERENCE` | text | - | test | render | Path to AMD FidelityFX FSR 2.2.1 reference shaders for the GPU output comparison test. |
+| `OMSI_FSR2_REFERENCE_DETAIL` | bool | off | test | render | Log each intermediate resource when comparing WGSL FSR 2 against AMD's reference. |
+| `OMSI_FSR2_REFERENCE_ONLY` | text | - | test | render | port or reference: run only one implementation as a negative control in the FSR 2 comparison test. |
+| `OMSI_FSR2_REFERENCE_PATCH` | text | - | test | render | file\|from\|to;;...: patch a test copy of AMD's reference shaders to inspect an intermediate calculation. |
+| `OMSI_FSR2_REFERENCE_SIZE` | text | - | test | render | rw,rh,dw,dh: override the render and display dimensions in the FSR 2 reference comparison test. |
+| `OMSI_FSR2_REFERENCE_UPTO` | num | - | test | render | Run only the first N reference passes in the FSR 2 GPU comparison test. |
 | `OMSI_GLASS_WIND` | num | - | use | app | Offscreen: the rain on the glass as met at this speed in m/s. |
 | `OMSI_GPU_LIMITS` | text | - | use | render | default or downlevel: request only the WebGPU default (or downlevel) limits. Set by the small_chip test. |
 | `OMSI_GROUND_SAMPLE` | text | - | use | app | Offscreen CSV: what the wheels stand on every metre along the lanes near the start. |
@@ -281,7 +287,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_LIGHT_GRID_SQUARES` | bool | off | frame | render | A light goes into every cell of the light grid's square round its range, the corners its range misses too (A/B). |
 | `OMSI_MIRROR_ENHANCED` | bool | off | frame | app, render | Draw the mirrors with the enhanced shading again. |
 | `OMSI_MOTION_VECTORS` | bool | off | use | render | Experimental: per-pixel motion vectors, the groundwork of temporal upscaling (the picture is unchanged). |
-| `OMSI_TAA` | bool | off | use | render | Standalone temporal history filter for FSR 2 input testing; requires MSAA off and FSR 1 disabled. Not AMD FSR 2. |
 | `OMSI_NOZCHECK_BIAS` | bool | off | use | scene | The old reading of [matl_noZcheck] (A/B). |
 | `OMSI_NO_ANIMPARENT` | bool | off | use | sim | Every mesh animated on its own, without [animparent] (A/B). |
 | `OMSI_NO_AO` | bool | off | frame | render | No ambient occlusion pass. |
@@ -361,6 +366,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SHADOW_NEAR_EVERY_FRAME` | bool | off | frame | render | Redraw the near shadow map every frame. |
 | `OMSI_SIM_THREAD` | text | the setting | use | sim | Window: the AI traffic's, the people's and the scenery scripts' steps on a thread of their own while the picture is drawn (one frame later): 0 / false / off / no: on the main thread, anything else: on their thread, over the `sim_thread` setting (off by default); the offscreen run ignores it. |
 | `OMSI_SKY_CUBE_EVERY_FRAME` | bool | off | frame | render | Enhanced: redraw a slice of the sky cube every frame again, not at most 60 a second (A/B). |
+| `OMSI_TAA` | bool | off | use | render | Experimental standalone temporal accumulation (NOT FSR 2). Requires MSAA off; disabled with FSR 1. |
 | `OMSI_TERRAIN_ALIGN` | bool | off | use | scene | Align the terrain to the splines again at load (A/B; Omsi.exe does not). |
 | `OMSI_TEXTURE_RAIN` | bool | off | use | scene | OMSI 2's own texture rain on the glass instead of the drops. |
 | `OMSI_TRACKIR_NATIVE` | text | on | use | input | 0 turns the native TrackIR interface off. |

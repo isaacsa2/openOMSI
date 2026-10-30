@@ -293,6 +293,12 @@ flags! {
     OMSI_FORCE_OPAQUE: Bool, Switch, Use, "off", "Draw transmap-masked materials opaque.";
     OMSI_FRAME_ORDER: Bool, Debug, Once, "off", "Log the window's frame and the offscreen run's step as their ordered stages (phase, what each reads and writes, its profile key), once at start.";
     OMSI_FSR1: Text, Switch, Once, "off", "Experimental FSR 1 spatial upscaling (EASU + RCAS) for scaled window views: 1, true or on enables it; off by default; requires restart.";
+    OMSI_FSR2_REFERENCE: Text, Test, Test, "-", "Path to AMD FidelityFX FSR 2.2.1 reference shaders for the GPU output comparison test.";
+    OMSI_FSR2_REFERENCE_DETAIL: Bool, Test, Test, "off", "Log each intermediate resource when comparing WGSL FSR 2 against AMD's reference.";
+    OMSI_FSR2_REFERENCE_ONLY: Text, Test, Test, "-", "port or reference: run only one implementation as a negative control in the FSR 2 comparison test.";
+    OMSI_FSR2_REFERENCE_PATCH: Text, Test, Test, "-", "file|from|to;;...: patch a test copy of AMD's reference shaders to inspect an intermediate calculation.";
+    OMSI_FSR2_REFERENCE_SIZE: Text, Test, Test, "-", "rw,rh,dw,dh: override the render and display dimensions in the FSR 2 reference comparison test.";
+    OMSI_FSR2_REFERENCE_UPTO: Num, Test, Test, "-", "Run only the first N reference passes in the FSR 2 GPU comparison test.";
     OMSI_FSR_RAW_INPUT: Bool, Switch, Use, "off", "FSR 1 reads the scene through a view that is not sRGB: no square roots in EASU (not on OpenGL) - to measure.";
     OMSI_FULL_GPU: Bool, Switch, Use, "off", "Keep the requested settings on a small or shared graphics chip, and 8x MSAA with Enhanced+.";
     OMSI_GLASS_WIND: Num, Test, Use, "-", "Offscreen: the rain on the glass as met at this speed in m/s.";
@@ -343,7 +349,6 @@ flags! {
     OMSI_MIRROR_HUD: Num, Tuning, Use, "settings", "Mirror HUD mode (number).";
     OMSI_MOBILE: Bool, Test, Use, "off", "The phone layout on a computer (screen cut-outs).";
     OMSI_MOTION_VECTORS: Bool, Switch, Use, "off", "Experimental: per-pixel motion vectors, the groundwork of temporal upscaling (the picture is unchanged).";
-    OMSI_TAA: Bool, Switch, Use, "off", "Experimental standalone temporal accumulation (NOT FSR2). Requires MSAA off; stays disabled when FSR1 is enabled.";
     OMSI_MUTE: Bool, Test, Use, "off", "Mix everything as usual but play nothing.";
     OMSI_NAV_2D: Bool, Test, Use, "off", "Navigator pictures with flat houses (the nav_3d setting off).";
     OMSI_NAV_CONTOURS: Bool, Test, Use, "off", "Offscreen: the city map in its terrain view (contour lines and their heights, when the map's package has them).";
@@ -487,6 +492,7 @@ flags! {
     OMSI_SURFACE_FLUSH: Num, Tuning, Once, "0.12", "Height in metres under which a surface counts as flush with the road.";
     OMSI_SUSP_TRACE: Text, Debug, Use, "-", "Offscreen CSV: body height and each wheel's travel and load every frame.";
     OMSI_SUSP_TRACE_WINDOW: Text, Debug, Use, "-", "Window CSV: each wheel's travel every frame.";
+    OMSI_TAA: Bool, Switch, Use, "off", "Experimental standalone temporal accumulation (NOT FSR 2). Requires MSAA off; disabled with FSR 1.";
     OMSI_TERRAIN_ALIGN: Bool, Switch, Use, "off", "Align the terrain to the splines again at load (A/B; Omsi.exe does not).";
     OMSI_TEST_AVATAR: Text, Test, Test, "-", "Test only: an avatar FBX for the avatar loading test (`cargo test -p omsi-sim a_rocketbox_avatar_loads -- --ignored`).";
     OMSI_TEST_CONTENT: Text, Test, Test, "-", "Content root for tests that need real OMSI content.";
