@@ -98,13 +98,35 @@ impl Schedule {
         day_time: f64,
         window: f64,
     ) {
+        // Attribute long timetable frames to the step that held them. A single
+        // TrafficSchedule aggregate cannot tell a slow scheduler from GPU uploads
+        // or a bus spawn. Only report under OMSI_PROFILE; no gameplay is changed.
+        let started = std::time::Instant::now();
         let Some(loading) = self.tick_due(world, traffic, day_time, window) else {
             return;
         };
+        let due = started.elapsed();
         crate::view_sync::apply_traffic(traffic, view, world, renderer, scene);
+        let sync_before = started.elapsed();
         self.fleet(world, traffic, renderer, scene, day_time);
+        let fleet = started.elapsed();
         self.tick_spawn(world, traffic, day_time, loading);
+        let spawn = started.elapsed();
         crate::view_sync::apply_traffic(traffic, view, world, renderer, scene);
+        let done = started.elapsed();
+        if omsi_cfg::flags::OMSI_PROFILE.is_set() && done >= std::time::Duration::from_millis(40) {
+            let ms = |t: std::time::Duration| t.as_secs_f64() * 1000.0;
+            log::warn!(
+                "timetable tick: {:.1} ms (queue {:.1}, sync-before {:.1}, fleet {:.1}, spawn {:.1}, sync-after {:.1}); pending {}",
+                ms(done),
+                ms(due),
+                ms(sync_before - due),
+                ms(fleet - sync_before),
+                ms(spawn - fleet),
+                ms(done - spawn),
+                self.pending(),
+            );
+        }
     }
 
     /// The timetable's tick up to the vehicle sets (see [`Schedule::tick`]), without the
