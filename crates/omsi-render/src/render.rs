@@ -709,6 +709,7 @@ impl Renderer {
         clock.stage(self, "shadow items", "mirror.shadow items");
         let visible = self.cull_view(scene, &f, &mut clock);
         let mut plan = self.batch_draws(scene, &f, &visible, Vec::new());
+        self.unjitter_unresolvable(&f, &plan, vp_mat);
         if plan.ground.active() {
             // (the frame's uniform was written with the flag off: the base is lit from the ground picture)
             let lod = [self.fsr_mip_bias(&f), 1.0, 0.0, 0.0];

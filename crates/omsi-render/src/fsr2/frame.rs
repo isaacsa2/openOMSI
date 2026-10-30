@@ -75,6 +75,22 @@ impl Renderer {
         crate::temporal::jittered_view_projection(vp, j, render)
     }
 
+    /// Once the frame's draws are known: when FSR 2 jittered the projection but the motion
+    /// vectors cannot be worked out this frame (a presurface in the picture, no depth of the
+    /// picture's size - what `fsr2_view` cannot see before the draw plan), the camera is
+    /// written again without the jitter, so the standard upscaler shows a steady picture.
+    pub(crate) fn unjitter_unresolvable(&mut self, f: &FrameCtx, plan: &crate::passes::DrawPlan, vp: Mat4) {
+        let jittered = self.fsr2.as_ref().is_some_and(|s| s.frame_jitter.is_some());
+        if !jittered || !self.fsr2_view(f) || self.motion_depth_ready(f, plan) {
+            return;
+        }
+        let at = std::mem::offset_of!(crate::CameraUniform, view_proj) as u64;
+        self.queue.write_buffer(&self.camera_buf, at, bytemuck::bytes_of(&vp.to_cols_array_2d()));
+        if let Some(fsr2) = self.fsr2.as_mut() {
+            fsr2.frame_jitter = None;
+        }
+    }
+
     /// Resolve the frame with FSR 2 (after the post passes, before the present). False when
     /// it did not run: the standard upscaler presents the picture then.
     pub(crate) fn encode_fsr2(&mut self, encoder: &mut wgpu::CommandEncoder, f: &FrameCtx, timers: &mut PassTimers) -> bool {

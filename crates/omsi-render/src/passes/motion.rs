@@ -172,14 +172,20 @@ mod history_tests {
 impl Renderer {
     /// The motion vectors of the window's picture (after the main pass): when they are on,
     /// for the lead view, and when the main pass's depth is the readable single-sampled one.
+    /// Whether this frame's motion vectors can be worked out: the prepass's depth, of the
+    /// picture's size, shared with the main pass (`encode_motion` and FSR 2 ask the same).
+    pub(crate) fn motion_depth_ready(&self, f: &FrameCtx, plan: &DrawPlan) -> bool {
+        self.targets.ao.as_ref().is_some_and(|a| a.size == (f.width, f.height)) && self.shares_prepass_depth(f, plan)
+    }
+
     pub(crate) fn encode_motion(&mut self, encoder: &mut wgpu::CommandEncoder, f: &FrameCtx, plan: &DrawPlan, view_proj: Mat4, timers: &mut PassTimers) {
         // A mirror, XR eye or offscreen thumbnail may share the renderer but
         // must never advance the desktop's motion history.
         if self.motion.is_none() || !f.with_overlays || f.projection.is_some() || f.second_eye {
             return;
         }
-        let depth = self.targets.ao.as_ref().filter(|a| a.size == (f.width, f.height)).map(|a| a.depth_view.clone());
-        let Some(depth) = depth.filter(|_| self.shares_prepass_depth(f, plan)) else {
+        let depth = self.targets.ao.as_ref().map(|a| a.depth_view.clone());
+        let Some(depth) = depth.filter(|_| self.motion_depth_ready(f, plan)) else {
             // (no readable depth this frame: the next one starts afresh; and the log says why)
             let why = if self.options.msaa > 1 {
                 "MSAA is on (turn it off)"
