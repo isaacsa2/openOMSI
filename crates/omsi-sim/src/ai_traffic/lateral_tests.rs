@@ -282,6 +282,45 @@ fn cars_on_a_two_lane_road_do_not_swing_from_lane_to_lane() {
 }
 
 /// Lane 0 north (150 m, then 1 its way on), lane 2 beside it on the right (150 m, then 3).
+/// Regression #3058 / #1994: a route names a lane that starts beside this one,
+/// then branches across the median. Missing its earlier merge must never force
+/// a late sideways jump just because the bus has waited for twelve seconds.
+#[test]
+fn a_late_route_merge_never_crosses_diverged_lanes() {
+    let f = Fixture::new();
+    let straight = LaneBuilder::polyline(
+        vec![DVec3::new(0.0, 0.0, 0.0), DVec3::new(0.0, 80.0, 0.0)],
+        LaneKind::Street, 3.0,
+    );
+    let fork = LaneBuilder::polyline(
+        vec![DVec3::new(3.5, 0.0, 0.0), DVec3::new(3.5, 30.0, 0.0), DVec3::new(18.0, 60.0, 0.0)],
+        LaneKind::Street, 3.0,
+    );
+    let net = net_of(vec![straight, fork], &[(0, 1)]);
+    assert!(net.parallel(0, 1), "the route legitimately asks for a lane change");
+    assert!(net.route_change_locally_possible(0, 1, 10.0));
+    assert!(!net.route_change_locally_possible(0, 1, 43.0));
+
+    let mut t = traffic(&f, net);
+    let id = add_car(&mut t, &f, 0, 43.0, 0x3058, Some(0.0));
+    set_route(&mut t, id, vec![0, 1], 43.0);
+    car_mut(&mut t, id).sideways.signalled = lateral::LATE_CHANGE_AFTER + 1.0;
+    for _ in 0..(2.0 / DT) as usize {
+        t.tick(DT, None);
+        let c = car(&t, id).expect("the bus must stay present while waiting");
+        assert_eq!(c.state.lane, 0, "the route jumped to a diverged lane");
+        assert!(c.state.change.is_none(), "late waiting started a geometrically impossible lane change");
+        assert!(c.state.lateral.abs() < 0.3, "the bus steered into the median");
+    }
+
+    // A normal merge earlier on the same pair of lanes is still allowed.
+    let id2 = add_car(&mut t, &f, 0, 10.0, 0x3059, Some(0.0));
+    set_route(&mut t, id2, vec![0, 1], 10.0);
+    t.tick(DT, None);
+    let c = car(&t, id2).expect("the second bus is present");
+    assert!(c.state.change.is_some(), "a valid merge was disabled");
+}
+
 fn route_fork() -> Network {
     let lanes = vec![street(0.0, 0.0, 0.0, 150.0), street(0.0, 150.0, 0.0, 300.0), street(3.5, 0.0, 0.0, 150.0), street(3.5, 150.0, 0.0, 300.0)];
     net_of(lanes, &[(0, 2)])
