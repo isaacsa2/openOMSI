@@ -75,17 +75,33 @@ impl ScheduleSim {
             // For duplicate map object IDs, prefer the stop on the timetable's
             // own route tile, not whichever duplicate happened to load last.
             let station_ids = trip_stations(trip);
-            let (route_steps, track) = self.steps_of(&trip.name, &station_ids);
-            let station_steps = trip_station_steps(trip, track, route_steps.len());
+            // Most trips have no ambiguous stop IDs. Avoid repeatedly building
+            // their station-link routes just to resolve already unique objects.
+            let route = station_ids
+                .iter()
+                .any(|id| world.object_positions().has_duplicate(*id))
+                .then(|| {
+                    let (steps, track) = self.steps_of(&trip.name, &station_ids);
+                    let station_steps = trip_station_steps(trip, track, steps.len());
+                    (steps, track, station_steps)
+                });
             let stops = station_ids
                 .iter()
                 .enumerate()
                 .map(|(i, id)| {
                     let name = self.station_name(trip, i, *id);
-                    let position = station_tile_hint(&route_steps, &station_steps, i, track)
-                        .and_then(|tile| world.object_positions().dup(tile, *id))
-                        .or_else(|| world.object_positions().get(id))
-                        .map(|p| p.0);
+                    let position = match &route {
+                        Some((steps, track, station_steps)) => route_stop_place(
+                            world.object_positions(),
+                            steps,
+                            station_steps,
+                            i,
+                            *track,
+                            *id,
+                        ),
+                        None => world.object_positions().get(id),
+                    }
+                    .map(|p| p.0);
                     let (arr, dep) = times.stations[i];
                     PlannedStop {
                         object_id: *id,

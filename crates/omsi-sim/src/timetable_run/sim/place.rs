@@ -178,10 +178,15 @@ impl ScheduleSim {
             }
             // A map may reuse an object ID in several tiles. Project the stop
             // associated with this trip's tile, not the last globally loaded one.
-            let found = station_tile_hint(&steps, &station_steps, si, track)
-                .and_then(|tile| world.object_positions().dup(tile, *sid))
-                .or_else(|| world.object_positions().get(sid))
-                .copied();
+            let found = route_stop_place(
+                world.object_positions(),
+                &steps,
+                &station_steps,
+                si,
+                track,
+                *sid,
+            )
+            .copied();
             // An authored entry behind the spawn position is already passed.
             if station_steps[si].is_some_and(|entry| entry < at) {
                 served[si] = true;
