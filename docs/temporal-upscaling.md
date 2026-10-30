@@ -61,10 +61,9 @@ sequence, and reset signals. The motion-pass now tracks whether it produced inpu
 this frame and whether it has a previous valid view. Its GPU resources can be
 borrowed for an actual FSR 2 dispatch once an AMD FidelityFX backend exists.
 
-**There is no AMD FidelityFX SDK/context or FSR 2 output in this branch yet.**
-Do not expose an "FSR 2 active" menu item until a backend compiles, dispatches
-and passes image/performance tests on real Vulkan/DX12 devices. Do not enable
-jitter without a temporal resolver: an image without reconstruction would shake.
+FSR 2 itself is in [fsr2.md](fsr2.md): a WGSL port of AMD FidelityFX FSR 2.2.1 that
+reads these resources and jitters the projection it is drawn with. Do not enable jitter
+without a temporal resolver: an image without reconstruction would shake.
 
 - Temporal algorithms are mutually exclusive. FSR 1 must not combine with a
   standalone TAA or a temporal upscaler; an unavailable FSR 2 / DLSS may fall
@@ -78,8 +77,7 @@ jitter without a temporal resolver: an image without reconstruction would shake.
 - Reactive and transparency/composition masks are currently unavailable.
   Before enabling production FSR 2, generate them for rain, glass, smoke and
   moving semitransparent surfaces and validate with real modded buses.
-- Native Vulkan/DX12 access, resource-state transitions, official SDK linkage,
-  temporal output and full in-game performance validation remain required.
+- In-game performance on real GPUs is still to be measured (fsr2.md).
 
 ## Experimental temporal AA test consumer (not AMD FSR 2)
 
@@ -108,34 +106,26 @@ original vectors directly; disable the flags to restore the existing pipeline.
 After the 3D tone mapping and motion pass, `Renderer::fsr2_frame_inputs` now
 validates and borrows actual motion/depth/color texture views and the render
 and output dimensions. It refuses offscreen mirrors, XR eyes, stale motion,
-device-loss or absent scaled scene buffers. This is a private staging API,
-not an AMD SDK context, and does not perform a native FSR 2 dispatch.
+device-loss or absent scaled scene buffers. `Renderer::encode_fsr2` hands them to
+the FSR 2 port (fsr2.md).
 
 The experimental TAA conservatively lowers its history contribution when rain
 or wet glass is present; it does not invent a per-pixel reactive mask. Switching
 back to FSR 1 releases TAA and its motion pass when no independent motion-vector
 debugging flag was requested, avoiding an unnecessary per-frame GPU cost.
 
-## Select temporal preview through the menu
+## Select the upscaler through the menu
 
-The Launcher and in-game Graphics → Upscaling menu now offer four distinct modes:
+The launcher and the in-game Graphics → Upscaling menu offer four modes:
 
-- **Standard** (unchanged).
-- **AMD FSR 1**: the existing spatial EASU/RCAS implementation is retained.
+- **Standard (Catmull-Rom)**: unchanged.
 - **TAA (experimental)**: standalone motion-driven history at the current render scale.
-- **FSR 2 Preview (TAA-based, not AMD FidelityFX)**: selects the quality
-  scale (Ultra/Quality/Balanced/Performance) and processes the reduced-resolution
-  picture with the experimental TAA history, then the existing spatial scaler.
-  **This is a playable temporal *prototype*, not genuine AMD FSR 2**.
+- **AMD FSR 1.0**: the existing spatial EASU/RCAS implementation, unchanged.
+- **AMD FSR 2.0 (WGSL, experimental)**: AMD FSR 2.2.1 ported to WGSL (fsr2.md), with AMD's
+  quality modes and its own RCAS sharpness.
 
-FSR 1, TAA and the FSR 2 preview are mutually exclusive. Selecting a temporal
-option also stores MSAA=Off (required for the current motion-vector pass); selecting
-MSAA 2x/4x/8x while one is selected switches the upscaler to Standard. Existing
-FSR 1 settings, shader compilation, and quality presets remain available.
-Temporal settings are saved in `settings.cfg`, and switching the upscaler in-game
-attempts to update the active renderer without forcing a restart (switching the
-actual multisample render target still requires a restart).
-
-For testing, compare unchanged Standard vs FSR 1 vs Preview at the same quality
-and weather. The preview lacks real AMD SDK dispatch, jittered scene rendering,
-reactive masks, and animated-instance motion; it can ghost, so it is opt-in.
+They are mutually exclusive. Selecting a temporal option (TAA, FSR 2) also stores
+MSAA=Off, which the motion-vector pass requires. Selecting MSAA 2x/4x/8x while one is
+selected switches the upscaler to Standard. The settings are saved in `settings.cfg`, and
+switching the upscaler in-game updates the running renderer without a restart. Switching the
+multisampled render target itself still needs a restart.
