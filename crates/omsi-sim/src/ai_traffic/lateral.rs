@@ -40,8 +40,8 @@ pub const TURN_LANE_LOOK: f32 = 150.0;
 /// (`AiState::start_change`), and one that is not over where the car's own way ends
 /// finishes with a jump sideways.
 pub const CHANGE_ROOM: f32 = 13.0;
-/// Seconds a car whose route moves it over a lane waits for its gap before it moves over
-/// even where the two lanes no longer run side by side.
+/// After this long waiting for a route-required lane change, log the reason it
+/// cannot proceed (with OMSI_DEBUG_TRAFFIC). Waiting must never override road geometry.
 pub const LATE_CHANGE_AFTER: f32 = 12.0;
 
 /// Is the box (with its heights) in a scenery object's way? See `TrafficSim::scenery_probe`.
@@ -382,14 +382,20 @@ impl TrafficSim {
             return None;
         };
         let st = &self.cars[i].state;
-        // (a route's change is made where the two lanes still run side by side; a bus that
-        // waited for its gap until they parted - or came to the change too late to wait for
-        // it - stood at the end of its lane for good, the street behind it with it: after
-        // `LATE_CHANGE_AFTER` s of waiting it moves over wherever it is, finishing the move
-        // with a jump sideways at the end of its lane, as the module notes say)
+        // Timetable routes can name two lanes that began side by side but have since
+        // diverged across a median or a fork. A long wait for a merge gap must *not*
+        // override the geometric check: starting here would bend across the divider or
+        // end with a jump to the distant branch. Hold on the current lane instead.
         let possible = r.need != Need::Route
-            || self.net.route_change_locally_possible(st.lane, to, st.s)
-            || self.cars[i].sideways.signalled > LATE_CHANGE_AFTER;
+            || self.net.route_change_locally_possible(st.lane, to, st.s);
+        if !possible && ts.debug && self.cars[i].sideways.signalled <= LATE_CHANGE_AFTER
+            && self.cars[i].sideways.signalled + ts.dt > LATE_CHANGE_AFTER
+        {
+            log::warn!(
+                "t={:.1}: car {} still needs route lane {} -> {} after {:.0} s, but the lanes no longer run beside one another at s {:.1}; unsafe late change refused",
+                self.time, self.cars[i].id, st.lane, to, LATE_CHANGE_AFTER, st.s,
+            );
+        }
         if possible && self.try_change(i, to, dir, ChangeKind::Required(r.need), ts, None) {
             if ts.debug {
                 log::info!("t={:.1}: car {} moves over to lane {to} ({:?})", self.time, self.cars[i].id, r.need);
