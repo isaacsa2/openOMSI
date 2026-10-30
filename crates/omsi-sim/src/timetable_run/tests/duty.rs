@@ -379,6 +379,32 @@ fn a_stop_placed_only_once_its_tile_loads_is_reached() {
 }
 
 #[test]
+fn route_specific_stop_is_not_moved_to_a_duplicate_on_another_tile() {
+    let trip = planned(0.0, &[(0.0, 0.0, 0.0), (500.0, 100.0, 100.0)]);
+    let mut duty = PlayerDuty::new("5".into(), "1".into(), vec![trip], 0, 0, true);
+    let mut positions = crate::world_data::ObjectPlaces::default();
+    positions.add_index(
+        [(1, (glam::DVec3::new(900.0, 0.0, 0.0), [0.0; 3]))],
+        [
+            (((2, 3), 1), (glam::DVec3::new(500.0, 0.0, 0.0), [0.0; 3])),
+            (((20, 30), 1), (glam::DVec3::new(900.0, 0.0, 0.0), [0.0; 3])),
+        ],
+    );
+    assert_eq!(positions.dup((2, 3), 1).map(|p| p.0), Some(glam::DVec3::new(500.0, 0.0, 0.0)));
+    duty.learn_loaded(&positions);
+    assert_eq!(
+        duty.trips[0].stops[1].position,
+        Some(glam::DVec3::new(500.0, 0.0, 0.0)),
+        "the timetable-selected stop must not jump to the duplicate at x=900",
+    );
+
+    // Unknown stops still learn their positions from the loaded map.
+    duty.trips[0].stops[1].position = None;
+    duty.learn_loaded(&positions);
+    assert_eq!(duty.trips[0].stops[1].position, Some(glam::DVec3::new(900.0, 0.0, 0.0)));
+}
+
+#[test]
 fn the_next_trip_starts_at_its_first_stop_though_the_last_one_was_missed() {
     // trip 1 ends at x = 1000 (a stop object the bus never comes within 25 m of: it
     // stands at x = 1040, where trip 2 leaves from)

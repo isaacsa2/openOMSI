@@ -176,7 +176,17 @@ impl ScheduleSim {
             if !track && (si < leg || (si == leg && frac > 0.0)) {
                 served[si] = true;
             }
-            let found = world.object_positions().get(sid).copied();
+            // A map may reuse an object ID in several tiles. Project the stop
+            // associated with this trip's tile, not the last globally loaded one.
+            let found = route_stop_place(
+                world.object_positions(),
+                &steps,
+                &station_steps,
+                si,
+                track,
+                *sid,
+            )
+            .copied();
             // An authored entry behind the spawn position is already passed.
             if station_steps[si].is_some_and(|entry| entry < at) {
                 served[si] = true;

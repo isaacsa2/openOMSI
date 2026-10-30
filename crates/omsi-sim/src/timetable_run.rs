@@ -24,6 +24,181 @@ pub use sim::*;
 pub use times::*;
 pub use tours::*;
 
+/// Tile hint for a timetable station. Explicit track entries take precedence; for
+/// station links, the outgoing leg begins at this stop and the final stop uses the
+/// last incoming leg. This is only a hint: a stop can be on a neighbouring tile.
+pub(crate) fn station_tile_hint(
+    steps: &[Step],
+    station_steps: &[Option<usize>],
+    station: usize,
+    track: bool,
+) -> Option<(i32, i32)> {
+    if let Some(at) = station_steps.get(station).copied().flatten() {
+        return steps.get(at).and_then(|step| step.key.map(|key| key.tile));
+    }
+    if track {
+        return None;
+    }
+    steps
+        .iter()
+        .filter(|step| step.leg == station)
+        .find_map(|step| step.key.map(|key| key.tile))
+        .or_else(|| {
+            steps
+                .iter()
+                .rev()
+                .filter(|step| step.leg.checked_add(1) == Some(station))
+                .find_map(|step| step.key.map(|key| key.tile))
+        })
+}
+
+/// Resolve a stop ID relative to its trip. Non-duplicate IDs retain the original
+/// constant-time global lookup. Only uniquely matching neighboring tiles are used:
+/// otherwise the old global fallback is safer than guessing between candidates.
+pub(crate) fn route_stop_place<'a>(
+    positions: &'a crate::world_data::ObjectPlaces,
+    steps: &[Step],
+    station_steps: &[Option<usize>],
+    station: usize,
+    track: bool,
+    id: i64,
+) -> Option<&'a crate::world_data::Place> {
+    if !positions.has_duplicate(id) {
+        return positions.get(&id);
+    }
+    let Some(tile) = station_tile_hint(steps, station_steps, station, track) else {
+        return positions.get(&id);
+    };
+    if let Some(place) = positions.dup(tile, id) {
+        return Some(place);
+    }
+    let mut neighbor = None;
+    for dx in -1..=1 {
+        for dy in -1..=1 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let (Some(x), Some(y)) = (tile.0.checked_add(dx), tile.1.checked_add(dy)) else {
+                continue;
+            };
+            if let Some(place) = positions.dup((x, y), id) {
+                if neighbor.is_some() {
+                    return positions.get(&id);
+                }
+                neighbor = Some(place);
+            }
+        }
+    }
+    neighbor.or_else(|| positions.get(&id))
+}
+
+#[cfg(test)]
+mod station_tile_hint_tests {
+    use super::*;
+
+    #[test]
+    fn uses_the_authored_track_entry_before_any_route_heuristic() {
+        let steps = vec![
+            Step { key: Some(LaneKey { tile: (10, 20), id: 1, path: 0 }), leg: 0, length: 20.0 },
+            Step { key: Some(LaneKey { tile: (11, 20), id: 2, path: 0 }), leg: 0, length: 20.0 },
+        ];
+        assert_eq!(station_tile_hint(&steps, &[Some(1)], 0, true), Some((11, 20)));
+        assert_eq!(station_tile_hint(&steps, &[None], 0, true), None);
+    }
+
+    #[test]
+    fn station_links_hint_the_outgoing_leg_and_the_final_incoming_leg() {
+        let steps = vec![
+            Step { key: Some(LaneKey { tile: (2, 3), id: 1, path: 0 }), leg: 0, length: 20.0 },
+            Step { key: Some(LaneKey { tile: (3, 3), id: 2, path: 0 }), leg: 1, length: 20.0 },
+        ];
+        assert_eq!(station_tile_hint(&steps, &[], 0, false), Some((2, 3)));
+        assert_eq!(station_tile_hint(&steps, &[], 1, false), Some((3, 3)));
+        assert_eq!(station_tile_hint(&steps, &[], 2, false), Some((3, 3)));
+        assert_eq!(station_tile_hint(&[], &[], 0, false), None);
+    }
+
+    #[test]
+    fn missing_link_keys_do_not_hide_later_valid_tiles_or_terminals() {
+        let steps = vec![
+            Step {
+                key: None,
+                leg: 0,
+                length: 20.0,
+            },
+            Step {
+                key: Some(LaneKey {
+                    tile: (7, 8),
+                    id: 1,
+                    path: 0,
+                }),
+                leg: 0,
+                length: 20.0,
+            },
+            Step {
+                key: None,
+                leg: 1,
+                length: 20.0,
+            },
+            Step {
+                key: Some(LaneKey {
+                    tile: (8, 8),
+                    id: 2,
+                    path: 0,
+                }),
+                leg: 1,
+                length: 20.0,
+            },
+        ];
+        assert_eq!(station_tile_hint(&steps, &[], 0, false), Some((7, 8)));
+        assert_eq!(station_tile_hint(&steps, &[], 1, false), Some((8, 8)));
+        assert_eq!(station_tile_hint(&steps, &[], 2, false), Some((8, 8)));
+    }
+
+    #[test]
+    fn adjacent_tile_is_only_used_when_its_duplicate_is_unambiguous() {
+        use glam::DVec3;
+
+        let steps = [Step {
+            key: Some(LaneKey {
+                tile: (2, 3),
+                id: 1,
+                path: 0,
+            }),
+            leg: 0,
+            length: 20.0,
+        }];
+        let mut positions = crate::world_data::ObjectPlaces::default();
+        let place = |x| (DVec3::new(x, 0.0, 0.0), [0.0; 3]);
+        positions.add_index(
+            [(42, place(900.0))],
+            [
+                (((3, 3), 42), place(100.0)),
+                (((20, 30), 42), place(900.0)),
+            ],
+        );
+        assert_eq!(
+            route_stop_place(&positions, &steps, &[], 0, false, 42).map(|p| p.0),
+            Some(DVec3::new(100.0, 0.0, 0.0)),
+        );
+
+        // Another nearby candidate is genuinely ambiguous: keep the old fallback.
+        positions.add_index([], [(((2, 4), 42), place(300.0))]);
+        assert_eq!(
+            route_stop_place(&positions, &steps, &[], 0, false, 42).map(|p| p.0),
+            Some(DVec3::new(900.0, 0.0, 0.0)),
+        );
+
+        // An exact tile always beats all neighboring candidates.
+        positions.add_index([], [(((2, 3), 42), place(10.0))]);
+        assert_eq!(
+            route_stop_place(&positions, &steps, &[], 0, false, 42).map(|p| p.0),
+            Some(DVec3::new(10.0, 0.0, 0.0)),
+        );
+        assert!(route_stop_place(&positions, &steps, &[], 0, false, 99).is_none());
+    }
+}
+
 /// One step of a trip's route: a lane in map terms (None when the tile index is not in the
 /// map's list) and the leg between two stations it belongs to (0 for a track).
 #[derive(Debug, Clone, Copy)]

@@ -290,7 +290,17 @@ impl PlayerDuty {
         for trip in self.trips[from..].iter_mut().take(2) {
             let mut changed = false;
             for s in &mut trip.stops {
-                if let Some((p, _)) = positions.get(&s.object_id) {
+                // The tour planner may have chosen this stop from its route tile.
+                // A different tile that happens to reuse the ID must not make it
+                // jump back to the global (last-loaded) object position.
+                let global = positions.get(&s.object_id);
+                if s.position.is_some()
+                    && positions.has_duplicate(s.object_id)
+                    && global.is_some_and(|(p, _)| Some(*p) != s.position)
+                {
+                    continue;
+                }
+                if let Some((p, _)) = global {
                     if s.position != Some(*p) {
                         s.position = Some(*p);
                         changed = true;

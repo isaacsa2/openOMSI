@@ -91,6 +91,9 @@ pub struct ObjectPlaces {
     base: Arc<HashMap<i64, Place>>,
     layers: Vec<Arc<HashMap<i64, Place>>>,
     dups: Arc<HashMap<((i32, i32), i64), Place>>,
+    /// Fast membership test: a route-aware stop should not be replaced later by
+    /// the position of a different object carrying the same ID.
+    duplicate_ids: Arc<HashSet<i64>>,
 }
 
 /// More placing layers than this are merged into one.
@@ -113,6 +116,11 @@ impl ObjectPlaces {
         self.dups.get(&(tile, id))
     }
 
+    /// Whether more than one tile owns this map object ID.
+    pub fn has_duplicate(&self, id: i64) -> bool {
+        self.duplicate_ids.contains(&id)
+    }
+
     /// The map index's objects and duplicates: those not known yet are added (an object
     /// already known keeps its place).
     pub fn add_index(&mut self, objects: impl IntoIterator<Item = (i64, Place)>, dups: impl IntoIterator<Item = (((i32, i32), i64), Place)>) {
@@ -123,7 +131,9 @@ impl ObjectPlaces {
         let mut dups = dups.into_iter().peekable();
         if dups.peek().is_some() {
             let d = Arc::make_mut(&mut self.dups);
+            let ids = Arc::make_mut(&mut self.duplicate_ids);
             for (k, p) in dups {
+                ids.insert(k.1);
                 d.entry(k).or_insert(p);
             }
         }
@@ -244,6 +254,8 @@ mod tests {
         assert_eq!(o.get(&2), Some(&at(21.0)));
         assert_eq!(o.dup((1, 0), 2), Some(&at(21.0)));
         assert_eq!(o.dup((0, 0), 2), Some(&at(2.0)));
+        assert!(o.has_duplicate(2));
+        assert!(!o.has_duplicate(1));
         // a rebuilt index adds what is new and keeps what is known
         o.add_index([(1, at(100.0)), (4, at(4.0))], []);
         assert_eq!(o.get(&1), Some(&at(1.0)));
