@@ -90,7 +90,10 @@ fn LoadInputDepth(iPxPos: vec2<i32>) -> f32 {
 }
 
 fn StoreDilatedReactiveMasks(iPxPos: vec2<i32>, fDilatedReactiveMasks: vec2<f32>) {
-    if (!InTexture(iPxPos, textureDimensions(rw_dilated_reactive_masks))) {
+    // (the size of the prepared input colour, which the reactive masks have: see
+    // StoreLumaHistory in accumulate.wgsl - DXC refuses the RGBA8 texture's size helper next
+    // to the RGBA16F one's)
+    if (!InTexture(iPxPos, textureDimensions(rw_prepared_input_color))) {
         return;
     }
     textureStore(rw_dilated_reactive_masks, iPxPos, vec4<f32>(fDilatedReactiveMasks, 0.0, 0.0));

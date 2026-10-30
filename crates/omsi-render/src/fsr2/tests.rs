@@ -34,6 +34,14 @@ fn the_shaders_validate_and_translate_for_every_backend() {
         naga::back::hlsl::Writer::new(&mut hlsl, &naga::back::hlsl::Options { shader_model: naga::back::hlsl::ShaderModel::V5_1, ..Default::default() }, &Default::default())
             .write(&module, &info, None)
             .unwrap_or_else(|e| panic!("{name} HLSL: {e:?}"));
+        // DXC takes `RWTexture2D<unorm float4>` and `RWTexture2D<float4>` for the same type: a
+        // helper naga writes for both is a redefinition there (the size of an RGBA8 and an
+        // RGBA16F storage texture in one module)
+        let mut helpers: Vec<String> = hlsl.lines().filter(|l| l.starts_with("uint2 Naga") || l.starts_with("uint3 Naga")).map(|l| l.replace("unorm ", "").replace("snorm ", "")).collect();
+        let n = helpers.len();
+        helpers.sort();
+        helpers.dedup();
+        assert_eq!(helpers.len(), n, "{name}: an HLSL helper defined twice for DXC");
         let mut glsl = String::new();
         let options = naga::back::glsl::Options { version: naga::back::glsl::Version::Embedded { version: 310, is_webgl: false }, ..Default::default() };
         let pipeline = naga::back::glsl::PipelineOptions { shader_stage: naga::ShaderStage::Compute, entry_point: entry.to_string(), multiview: None };

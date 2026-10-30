@@ -61,7 +61,10 @@ fn LoadHistory(iPxHistory: vec2<i32>) -> vec4<f32> {
 }
 
 fn StoreLumaHistory(iPxPos: vec2<i32>, fLumaHistory: vec4<f32>) {
-    if (!InTexture(iPxPos, textureDimensions(rw_luma_history))) {
+    // (the size of the history, which the luma history has: naga's HLSL defines a helper for
+    // the size of each kind of storage texture, and DXC takes an RGBA8 and an RGBA16F one for
+    // the same overload - so only the RGBA16F textures are asked)
+    if (!InTexture(iPxPos, textureDimensions(rw_internal_upscaled_color))) {
         return;
     }
     textureStore(rw_luma_history, iPxPos, fLumaHistory);
