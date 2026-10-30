@@ -25,6 +25,8 @@ pub enum CodePage {
     Windows1250,
     Windows1251,
     Windows1252,
+    /// Turkish ANSI text and paths (İ, ı, Ş, ş, Ğ, ğ).
+    Windows1254,
     /// CP936, simplified Chinese.
     Gbk,
     /// CP950, traditional Chinese.
@@ -42,6 +44,7 @@ impl CodePage {
             CodePage::Windows1250 => encoding_rs::WINDOWS_1250,
             CodePage::Windows1251 => encoding_rs::WINDOWS_1251,
             CodePage::Windows1252 => encoding_rs::WINDOWS_1252,
+            CodePage::Windows1254 => encoding_rs::WINDOWS_1254,
             CodePage::Gbk => encoding_rs::GBK,
             CodePage::Big5 => encoding_rs::BIG5,
             CodePage::ShiftJis => encoding_rs::SHIFT_JIS,
@@ -62,7 +65,8 @@ impl CodePage {
     }
 }
 
-/// The system's ANSI code page when it is a double-byte one or Windows-1250 (Windows only).
+/// The system's ANSI code page when it is a double-byte one, Windows-1250 or
+/// Windows-1254 (Windows only).
 fn system_code_page() -> Option<CodePage> {
     #[cfg(windows)]
     {
@@ -73,7 +77,11 @@ fn system_code_page() -> Option<CodePage> {
         static ACP: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
         // SAFETY: GetACP takes nothing and only returns a number.
         let acp = *ACP.get_or_init(|| unsafe { GetACP() });
-        CodePage::double_byte(acp).or((acp == 1250).then_some(CodePage::Windows1250))
+        match acp {
+            1250 => Some(CodePage::Windows1250),
+            1254 => Some(CodePage::Windows1254),
+            _ => CodePage::double_byte(acp),
+        }
     }
     #[cfg(not(windows))]
     {
@@ -230,6 +238,12 @@ fn detect_on(bytes: &[u8], system: Option<CodePage>) -> CodePage {
     if system == Some(CodePage::Windows1250) {
         return CodePage::Windows1250;
     }
+    // Turkish ANSI files are ambiguous with 1252 when they contain only one
+    // accented filename. Honour the system code page, as OMSI 2 does there;
+    // on other systems filename fallbacks still try Turkish spellings.
+    if system == Some(CodePage::Windows1254) {
+        return CodePage::Windows1254;
+    }
     CodePage::Windows1252
 }
 
@@ -306,12 +320,14 @@ pub fn name_variants(name: &str) -> Vec<String> {
         Single::Enc(encoding_rs::WINDOWS_1252),
         Single::Enc(encoding_rs::WINDOWS_1250),
         Single::Enc(encoding_rs::WINDOWS_1251),
+        Single::Enc(encoding_rs::WINDOWS_1254),
     ];
     let written_in = [
         Single::Enc(encoding_rs::IBM866),
         Single::Enc(encoding_rs::WINDOWS_1251),
         Single::Enc(encoding_rs::WINDOWS_1250),
         Single::Enc(encoding_rs::WINDOWS_1252),
+        Single::Enc(encoding_rs::WINDOWS_1254),
         Single::Table(&CP437_HIGH),
         Single::Enc(encoding_rs::EUC_KR),
         Single::Enc(encoding_rs::GBK),
@@ -339,7 +355,7 @@ pub fn char_variants(c: char) -> Vec<char> {
     if c.is_ascii() {
         return Vec::new();
     }
-    let pages = [encoding_rs::WINDOWS_1251, encoding_rs::WINDOWS_1252, encoding_rs::WINDOWS_1250];
+    let pages = [encoding_rs::WINDOWS_1251, encoding_rs::WINDOWS_1252, encoding_rs::WINDOWS_1250, encoding_rs::WINDOWS_1254];
     let mut buf = [0u8; 4];
     let s: &str = c.encode_utf8(&mut buf);
     let mut out = Vec::new();
@@ -442,6 +458,24 @@ mod tests {
         // a Russian file on a Chinese system is not GBK
         let ru = cp1251("[station]\r\nУлица Ленина\r\nМетро Сокол\r\n");
         assert_eq!(detect_on(&ru, CodePage::double_byte(936)), CodePage::Windows1251);
+    }
+
+    #[test]
+    fn turkish_ansi_names_and_texture_paths_are_resolved() {
+        let src = "Vehicles\\\\Otobüs\\\\İstanbul Şehir İçi\\\\göğüs_ışık.bmp";
+        let encoded = encoding_rs::WINDOWS_1254.encode(src).0.into_owned();
+        assert_eq!(detect_on(&encoded, Some(CodePage::Windows1254)), CodePage::Windows1254);
+        assert_eq!(CodePage::Windows1254.encoding().decode_without_bom_handling(&encoded).0, src);
+        // A texture file may have been unpacked as ANSI 1252 while its .cfg
+        // still gives the original Turkish filename, or vice versa.
+        let tr = "İstanbul_ışık.bmp";
+        let encoded = encoding_rs::WINDOWS_1254.encode(tr).0.into_owned();
+        let wrong = encoding_rs::WINDOWS_1252.decode_without_bom_handling(&encoded).0.into_owned();
+        assert_ne!(tr, wrong);
+        assert!(name_variants(tr).contains(&wrong));
+        assert!(name_variants(&wrong).contains(&tr.to_string()));
+        // Existing common Western and Cyrillic lookups remain available.
+        assert_eq!(detect_on(&cp1252("Straße Köln"), None), CodePage::Windows1252);
     }
 
     #[test]
