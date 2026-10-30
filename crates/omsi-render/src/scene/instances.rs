@@ -77,6 +77,7 @@ impl Renderer {
             cabin_places: Vec::new(),
             last_lights: Vec::new(),
             bind_groups: HashMap::new(),
+            uniform_pages: Default::default(),
             looks: hashbrown::HashMap::new(),
             pbr_maps: HashMap::new(),
             snow_textures: Default::default(),

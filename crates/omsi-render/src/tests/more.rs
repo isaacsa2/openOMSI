@@ -1484,3 +1484,55 @@ fn the_rain_and_snow_shaders_translate_to_glsl_with_a_float_roof_map() {
         glsl_of(&roof_as_float(src)).unwrap();
     }
 }
+
+/// The uniform values of the materials share pages: many materials, a few buffers, and every
+/// material still draws with its own values (its slice, not a neighbour's).
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn materials_share_uniform_pages_and_each_draws_with_its_own_values() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let mut renderer = pollster::block_on(Renderer::new_with(
+        &instance,
+        None,
+        Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        RenderOptions { msaa: 1, ssao: false, shadow_size: 1024, fxaa: false, render_scale: 1.0, ..Default::default() },
+    ))
+    .expect("test renderer");
+    let mut scene = renderer.new_scene();
+    let mesh = renderer.add_mesh(&mut scene, &MeshData {
+        positions: vec![Vec3::new(-1000.0, -1000.0, 0.0), Vec3::new(1000.0, -1000.0, 0.0), Vec3::new(1000.0, 1000.0, 0.0), Vec3::new(-1000.0, 1000.0, 0.0)],
+        normals: vec![Vec3::Z; 4],
+        uvs: vec![glam::Vec2::ZERO; 4],
+        ranges: vec![(0, 6, 0)],
+        indices: vec![0, 1, 2, 0, 2, 3],
+        one_sided: false,
+    });
+    const N: usize = 70;
+    let before = scene.uniform_pages.made;
+    let reds: Vec<_> = (0..N).map(|i| renderer.add_material(&mut scene, None, AlphaMode::Opaque, [i as f32 / (N - 1) as f32, 0.0, 0.0, 1.0], true)).collect();
+    let (pages, slices) = (scene.uniform_pages.made.0 - before.0, scene.uniform_pages.made.1 - before.1);
+    let per_page = (16 * 1024 / crate::resources::uniform_stride(renderer.device.limits().min_uniform_buffer_offset_alignment)) as u32;
+    assert_eq!(slices as usize, N, "one slice per material of its own values");
+    assert_eq!(pages, (N as u32).div_ceil(per_page.max(1)).max(1), "{per_page} slices to a page");
+    assert!(pages < N as u32 / 4, "far fewer buffers than materials: {pages}");
+    // two of the same values in the same frame are one material's bind group, as before
+    let again = renderer.add_material(&mut scene, None, AlphaMode::Opaque, [0.0, 0.0, 0.0, 1.0], true);
+    assert_eq!(scene.materials[again].buf.offset, scene.materials[reds[0]].buf.offset);
+
+    let inst = renderer.add_instance(&mut scene, mesh, DVec3::ZERO, Mat4::IDENTITY, vec![reds[0]]);
+    let camera = Camera { position: DVec3::new(0.0, 0.0, 5.0), yaw: 0.0, pitch: -89.0, roll: 0.0, fov_deg: 60.0, near: 0.1, far: 100.0 };
+    let lighting = Lighting { shadows: false, fog_density: 0.0, ..Default::default() };
+    let mut seen = Vec::new();
+    for &m in &reds {
+        scene.instances[inst].materials = vec![m];
+        scene.dirty = true;
+        let rgba = renderer.render_to_image(&mut scene, 16, 16, &camera, &lighting).unwrap();
+        let p = &rgba[(8 * 16 + 8) * 4..][..3];
+        assert!(p[1] < 8 && p[2] < 8, "only red: {p:?}");
+        seen.push(p[0]);
+    }
+    assert!(seen.windows(2).all(|w| w[0] <= w[1]), "each material's own red, in order: {seen:?}");
+    let distinct = seen.iter().collect::<std::collections::BTreeSet<_>>().len();
+    assert!(distinct >= 55, "{distinct} distinct reds of {N}: {seen:?}");
+    assert!(seen[0] < 8 && *seen.last().unwrap() > 245, "{seen:?}");
+}

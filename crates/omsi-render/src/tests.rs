@@ -841,11 +841,8 @@ fn terrain_paint_fast_path_preserves_composition() {
             if water {
                 for &mat in &paint_materials {
                     scene.materials[mat].uniform.ambient[3] = 2.0;
-                    renderer.queue.write_buffer(
-                        &scene.materials[mat].buf,
-                        0,
-                        bytemuck::bytes_of(&scene.materials[mat].uniform),
-                    );
+                    let slot = &scene.materials[mat].buf;
+                    renderer.queue.write_buffer(&slot.buffer, slot.offset, bytemuck::bytes_of(&scene.materials[mat].uniform));
                 }
             }
             let lighting = Lighting {

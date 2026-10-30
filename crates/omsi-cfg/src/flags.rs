@@ -416,6 +416,7 @@ flags! {
     OMSI_NO_TEXCOMPRESS: Bool, Switch, Use, "off", "No runtime texture compression.";
     OMSI_NO_TEXTURE_CACHE: Bool, Switch, Once, "off", "Compress every texture at each start (no ~/.openomsi/cache/textures).";
     OMSI_NO_TUNNEL: Bool, Switch, Use, "off", "LAN: no tunnel.";
+    OMSI_NO_UNIFORM_PAGES: Bool, Switch, Use, "off", "A GPU buffer of its own for the uniform values of every material (no pages shared by many).";
     OMSI_NO_UPDATE: Bool, Switch, Use, "off", "No update check.";
     OMSI_NO_VAR_SYNC: Bool, Switch, Use, "off", "LAN: no variable sync.";
     OMSI_NO_WHEEL_SLIP: Bool, Switch, Use, "off", "Every wheel grips, as before wheels turned on their own (A/B).";
