@@ -213,5 +213,6 @@ Measuring needs real GPUs. The per-pass GPU time is in the performance overlay, 
 - HDR input (`HDR_COLOR_INPUT 1`) is wired as a pipeline constant but not used: the picture
   is tone-mapped before FSR 2.
 - MSAA must be off, and turning it off takes a restart.
-- The Apple settings page does not offer FSR 2 yet. Metal runs the same WGSL, but it has not
-  been tried.
+- The Apple settings page offers FSR 2 and its quality/sharpness settings, along with
+  TAA. Metal uses the WGSL port, but real Apple GPU performance/compatibility has not
+  yet been measured. Selecting a temporal mode also disables MSAA for the next launch.

@@ -1,8 +1,8 @@
-//! Vendor-neutral frame contract for AMD FSR 2 and future temporal reconstruction.
+//! Vendor-neutral frame contract for temporal reconstruction.
 //!
-//! This is an input/staging contract, not the AMD FidelityFX SDK implementation.
-//! The current renderer has no FSR 2 backend and must not label its spatial scaler
-//! or its independent diagnostics as working FSR 2. No native SDK is loaded here.
+//! This supplies the engine's color/depth/motion inputs to the AMD FSR 2.2.1 WGSL
+//! implementation in `fsr2/`, alongside the standalone experimental TAA path.
+//! It does not load or initialize a native FidelityFX SDK.
 
 use glam::{Mat4, Vec2, Vec3};
 
@@ -57,8 +57,8 @@ pub fn halton(mut index: u32, base: u32) -> f32 {
     result
 }
 
-/// A stable 8-frame baseline, separately scoped per main view. Future FSR 2
-/// backends may choose a longer phase count for higher upscaling ratios.
+/// A stable 8-frame baseline for the experimental TAA path. FSR 2 uses AMD's
+/// ratio-dependent phase count in `fsr2::params` instead.
 pub fn jitter_pixels(frame: u64) -> [f32; 2] {
     let phase = (frame % 8) as u32 + 1;
     [halton(phase, 2) - 0.5, halton(phase, 3) - 0.5]
@@ -81,8 +81,8 @@ pub fn motion_uv_to_pixels(uv: Vec2, render: (u32, u32)) -> Vec2 {
     uv * Vec2::new(render.0 as f32, render.1 as f32)
 }
 
-/// FSR 2 dispatch metadata. Color/depth/motion are produced by the renderer;
-/// this does not claim an SDK context or infer an active backend.
+/// Shared frame metadata. Color/depth/motion are produced by the renderer;
+/// actual FSR 2 availability is checked by the WGSL backend per GPU.
 #[derive(Debug, Clone, Copy)]
 pub struct FrameInfo {
     pub render_size: (u32, u32),
@@ -117,8 +117,8 @@ impl FrameInfo {
 
 /// Actual per-frame GPU resources, borrowed only for the duration of the render.
 /// Alpha-blended reactive content and pre-exposure are not currently implemented.
-/// Returning None for these optional fields is honest; a future FSR 2 backend can
-/// supply them while maintaining the same frame contract.
+/// FSR 2 currently receives zero reactive and transparency defaults; a future
+/// patch can supply per-pixel masks without changing this frame contract.
 pub struct FrameTextures<'a> {
     pub color: &'a wgpu::TextureView,
     pub depth: &'a wgpu::TextureView,
@@ -131,8 +131,8 @@ pub struct FrameTextures<'a> {
 
 impl crate::Renderer {
     /// Borrow the real color/depth/motion textures of the completed desktop 3D frame.
-    /// Not a working FSR 2 integration: these are inputs for a future official SDK
-    /// dispatch. We deliberately do not claim GPU support from its availability.
+    /// `fsr2::frame::encode_fsr2` dispatches the WGSL port only when these inputs exist;
+    /// this handoff does not imply that every GPU can run its compute shaders.
     pub(crate) fn fsr2_frame_inputs<'a>(
         &'a self,
         f: &'a crate::passes::FrameCtx<'_>,
@@ -149,8 +149,8 @@ impl crate::Renderer {
         let color = &f.scene_target.as_ref()?.0;
         let render = (f.width, f.height);
         let display = (f.full_w, f.target.texture().height());
-        // No projection jitter is applied yet. Passing invented nonzero jitter
-        // to FSR 2 would be worse than rejecting the dispatch.
+        // FSR 2's actual projection jitter is recorded by `fsr2::Fsr2::next_jitter`
+        // and consumed by its dispatch. Do not manufacture a second jitter here.
         let info = FrameInfo::new(render, display, [0.0, 0.0], motion.frame_reset, f.dt)?;
         Some(FrameTextures {
             color,

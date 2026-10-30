@@ -1,12 +1,12 @@
-# Temporal upscaling (towards FSR 2), step by step
+# Temporal upscaling (TAA and FSR 2), step by step
 
 FSR 1 (`docs/fsr1-experiment.md`) is *spatial*: it scales up one picture at a time. FSR 2 and
 any temporal anti-aliasing build each picture from several: they need, for every pixel, where it
 was in the last picture (motion vectors), a camera that moves by a fraction of a pixel from one
 picture to the next (jitter), the depth, and to know what cannot be followed (glass, rain,
-particles). None of that existed. It is added in steps, each its own pull request, each off by
-default and testable on its own; FSR 1 stays as it is beside it, and the upscaler setting will
-offer FSR 2 as another choice, never in its place.
+particles). The renderer now implements motion vectors, experimental TAA, and a WGSL port
+of AMD FSR 2.2.1, each opt-in and testable on its own. FSR 1 stays available beside
+these modes, not replaced by them.
 
 ## Step 1: motion vectors (`OMSI_MOTION_VECTORS=1`)
 
@@ -32,34 +32,33 @@ frame's (`Rg16Float`, FSR 2's convention).
 - **History validity:** discard stale frames after a resize, camera cut,
   teleport, projection change, or a stall longer than 0.5 seconds. Reuse the
   current renderer's `inside_rotation` for pitch and bank, without duplicate state.
-- **Nothing reads the vectors yet**: the picture is unchanged. `OMSI_DEBUG_MOTION=1` (or a
-  number: the pixels of motion at full colour, 8 by default) draws them over the 3D picture -
-  red across, green up and down - to check them in the cab and on a turn.
+- **Consumers:** FSR 2 and standalone TAA read these vectors when selected.
+  `OMSI_DEBUG_MOTION=1` (or a number: pixels of motion at full colour, 8 by default)
+  draws them over the 3D picture - red across, green up and down - for testing.
 - **Tests** (on a graphics adapter, `--ignored`): a still camera has no motion; after a step and
   a turn, more than 99 % of a rail's pixels lead back along their vector to within a pixel of
   the rail in the picture before (where staying put would miss for over 40 %), and the sky moved
   by the turn; a dashboard inside the vehicle that moves with the camera has no motion while the
   road outside does. And the shader makes GLSL.
 
-## Next steps
+## Progress and remaining work
 
-2. **Jitter**: the projection moved by a sub-pixel offset each frame (a Halton sequence), and
-   the offset handed on - off unless asked for, as it shakes a picture nothing accumulates.
-3. **TAA**: a temporal anti-aliasing pass on top - the history reprojected along the vectors,
-   clamped to the neighbourhood, rejected by depth - to prove the vectors right in practice
-   before anything bigger rests on them.
-4. **Moving objects**: each instance's transform of the last frame, so the traffic, the people
-   and the cab's moving parts get vectors of their own.
-5. **FSR 2** itself (or the TAA upscaling the picture), as a choice of the upscaler setting next
-   to the standard upscaler and FSR 1, with a reactive mask for glass, rain and particles.
+2. **Jitter - implemented for FSR 2:** AMD's Halton sequence shifts the main picture's
+   projection only when FSR 2 is selected; motion vectors remain unjittered.
+3. **TAA - implemented as an experimental standalone option:** the history is reprojected
+   along motion vectors and clamped, without FSR 2's AMD reconstruction.
+4. **Moving objects - pending:** per-instance transforms are still needed for traffic,
+   passengers, doors, wipers and other animated geometry.
+5. **FSR 2 - implemented experimentally:** AMD FSR 2.2.1 is ported to WGSL and selectable
+   beside Standard, TAA and FSR 1. Reactive and transparency masks remain pending.
 
 ## FSR 2 backend handoff (staged)
 
 `crates/omsi-render/src/temporal.rs` defines a vendor-neutral frame contract, including
 the reversed-Z depth flag, render and presentation extents, motion scaling, jitter
-sequence, and reset signals. The motion-pass now tracks whether it produced input
-this frame and whether it has a previous valid view. Its GPU resources can be
-borrowed for an actual FSR 2 dispatch once an AMD FidelityFX backend exists.
+sequence, and reset signals. The motion pass tracks whether it produced valid input this frame and whether it
+has a usable previous view. Its GPU resources are borrowed by the existing WGSL
+FSR 2 dispatch, which also checks device capability and resets history when needed.
 
 FSR 2 itself is in [fsr2.md](fsr2.md): a WGSL port of AMD FidelityFX FSR 2.2.1 that
 reads these resources and jitters the projection it is drawn with. Do not enable jitter
@@ -75,8 +74,8 @@ without a temporal resolver: an image without reconstruction would shake.
   at render resolution and the same view projection. Currently animated
   traffic, hands, wipers and passengers still need per-instance motion.
 - Reactive and transparency/composition masks are currently unavailable.
-  Before enabling production FSR 2, generate them for rain, glass, smoke and
-  moving semitransparent surfaces and validate with real modded buses.
+  Before treating FSR 2 as production-ready, generate them for rain, glass,
+  smoke and moving semitransparent surfaces and validate with real modded buses.
 - In-game performance on real GPUs is still to be measured (fsr2.md).
 
 ## Experimental temporal AA test consumer (not AMD FSR 2)
@@ -116,7 +115,7 @@ debugging flag was requested, avoiding an unnecessary per-frame GPU cost.
 
 ## Select the upscaler through the menu
 
-The launcher and the in-game Graphics → Upscaling menu offer four modes:
+The launcher, Apple settings page and in-game Graphics → Upscaling menu offer four modes:
 
 - **Standard (Catmull-Rom)**: unchanged.
 - **TAA (experimental)**: standalone motion-driven history at the current render scale.

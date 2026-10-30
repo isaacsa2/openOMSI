@@ -1,7 +1,7 @@
 //! Motion vectors (OMSI_MOTION_VECTORS, experimental): for every pixel of the window's 3D
-//! picture, where it was on the screen a frame ago (motion.wgsl) - the first step towards a
-//! temporal upscaler (FSR 2) or anti-aliasing, which take it with the depth and the colour.
-//! Nothing reads it yet but the debug view (OMSI_DEBUG_MOTION): the picture is unchanged.
+//! picture, where it was on the screen a frame ago (motion.wgsl). Used by the temporal
+//! FSR 2.2.1 WGSL upscaler and standalone TAA; OMSI_DEBUG_MOTION visualizes the vectors.
+//! When no temporal upscaler or debug flag requests them, this pass is not created.
 //!
 //! Worked out from the depth of the main pass where it is single-sampled and readable (the
 //! prepass's, shared with the main pass: `shares_prepass_depth`), read as a plain float texture
