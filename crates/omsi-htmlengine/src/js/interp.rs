@@ -185,7 +185,7 @@ impl Interp {
     }
 
     pub(crate) fn run(&mut self, src: &str) -> Result<(), String> {
-        let prog = Parser { t: lex(src)?, i: 0 }.program()?;
+        let prog = Parser { t: lex(src)?, i: 0, depth: 0 }.program()?;
         self.steps = 0;
         let env = self.global.clone();
         self.exec_block(&prog, &env).map(|_| ())
@@ -510,6 +510,10 @@ impl Interp {
             Val::Arr(a) => {
                 if let Ok(i) = key.parse::<usize>() {
                     let mut a = a.lock().unwrap();
+                    if i >= a.len() && i >= MAX_ARRAY {
+                        // (`a[2000000000] = 1` asked for 64 GB at once: the game aborted)
+                        return Err(format!("array index {i} is too large"));
+                    }
                     if i >= a.len() {
                         a.resize(i + 1, Val::Undef);
                     }
@@ -642,7 +646,7 @@ impl Interp {
                 }
                 "join" => {
                     let sep = if args.is_empty() { ",".to_string() } else { arg_s(0) };
-                    Some(Val::Str(a.lock().unwrap().iter().map(to_str).collect::<Vec<_>>().join(&sep)))
+                    Some(Val::Str(array_text(a, &sep)))
                 }
                 "forEach" | "map" | "filter" => {
                     let f = args.first().cloned().unwrap_or(Val::Undef);
