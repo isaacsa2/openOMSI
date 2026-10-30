@@ -585,12 +585,8 @@ fn show_looks(renderer: &Renderer, scene: &mut Scene, snap: &FrameSnapshot, part
     for u in &looks.script_uploads {
         let Some(Some(tex)) = render.script_textures.get(u.index) else { continue };
         let img = Image { width: u.width, height: u.height, rgba: u.rgba.clone(), has_alpha: true };
-        if u.mipmaps {
-            if renderer.update_texture_mips(scene, *tex, &img) {
-                rebound.push(*tex);
-            }
-        } else {
-            renderer.update_texture(scene, *tex, &img);
+        if renderer.update_script_texture(scene, *tex, &img, u.mipmaps) == omsi_render::ScriptWrite::Replaced {
+            rebound.push(*tex);
         }
     }
     renderer.rebind_textures(scene, &rebound);

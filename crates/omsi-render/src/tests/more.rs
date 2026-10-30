@@ -1484,3 +1484,76 @@ fn the_rain_and_snow_shaders_translate_to_glsl_with_a_float_roof_map() {
         glsl_of(&roof_as_float(src)).unwrap();
     }
 }
+
+/// A script that draws the picture it drew the frame before costs the GPU nothing; a picture
+/// that differs, a texture made again, and a slot let go of and given out again are written.
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn a_script_texture_is_written_only_when_its_picture_changed() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let renderer = pollster::block_on(Renderer::new_with(
+        &instance,
+        None,
+        Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        RenderOptions { msaa: 1, ssao: false, shadow_size: 1024, fxaa: false, render_scale: 1.0, ..Default::default() },
+    ))
+    .expect("test renderer");
+    let mut scene = renderer.new_scene();
+    let tex = renderer.add_blank_texture(&mut scene, 8, 4);
+    // (the texture the scene makes cannot be read back: the same, with COPY_SRC, in its place)
+    let readable = renderer.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("script texture under test"),
+        size: wgpu::Extent3d { width: 8, height: 4, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = readable.create_view(&Default::default());
+    scene.textures[tex] = GpuTexture { texture: readable, view, size: (8, 4), bytes: 0, gen: crate::resources::next_gen() };
+    let pic = |v: u8| omsi_texture::Image { width: 8, height: 4, rgba: vec![v; 8 * 4 * 4], has_alpha: true };
+    // (what the texture holds, level 0: a copy to a buffer, waited for on the whole queue)
+    let held = |scene: &Scene| {
+        let t = &scene.textures[tex].texture;
+        let (w, h) = (t.width(), t.height());
+        let bpr = (w * 4).div_ceil(256) * 256;
+        let buf = renderer.device.create_buffer(&wgpu::BufferDescriptor { label: Some("readback"), size: (bpr * h) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut enc = renderer.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: t, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        renderer.queue.submit([enc.finish()]);
+        let slice = buf.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |r| r.expect("map"));
+        renderer.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+        let data = slice.get_mapped_range();
+        (0..h).flat_map(|row| data[(row * bpr) as usize..(row * bpr + w * 4) as usize].to_vec()).collect::<Vec<u8>>()
+    };
+
+    assert_eq!(renderer.update_script_texture(&mut scene, tex, &pic(10), false), ScriptWrite::Written);
+    assert!(held(&scene).iter().all(|&b| b == 10), "the picture is on the GPU");
+    // the same picture again, as a script that redraws every frame does: nothing is written
+    assert_eq!(renderer.update_script_texture(&mut scene, tex, &pic(10), false), ScriptWrite::Unchanged);
+    assert!(held(&scene).iter().all(|&b| b == 10));
+    // one byte different is a picture that differs
+    let mut dot = pic(10);
+    dot.rgba[37] = 11;
+    assert_eq!(renderer.update_script_texture(&mut scene, tex, &dot, false), ScriptWrite::Written);
+    assert_eq!(held(&scene)[37], 11);
+    assert_eq!(renderer.update_script_texture(&mut scene, tex, &dot, false), ScriptWrite::Unchanged);
+    // the same bytes shown another way (STFilter: mip levels) make the texture again
+    assert_eq!(renderer.update_script_texture(&mut scene, tex, &dot, true), ScriptWrite::Replaced);
+    assert_eq!(renderer.update_script_texture(&mut scene, tex, &dot, true), ScriptWrite::Unchanged);
+    // something else wrote into the texture's slot (it is a new texture now): the picture is
+    // written again although its bytes are the ones sent last
+    let before = scene.textures[tex].gen;
+    renderer.free_texture(&mut scene, tex);
+    assert_ne!(scene.textures[tex].gen, before);
+    assert_ne!(renderer.update_script_texture(&mut scene, tex, &dot, true), ScriptWrite::Unchanged, "a freed slot holds nothing of what was sent");
+    // a texture that is not there is no error
+    assert_ne!(renderer.update_script_texture(&mut scene, 999, &dot, false), ScriptWrite::Unchanged);
+}

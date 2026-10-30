@@ -8,6 +8,7 @@ impl Renderer {
         Scene {
             meshes: Vec::new(),
             textures: Vec::new(),
+            script_sent: Default::default(),
             glass_slot: None,
             materials: Vec::new(),
             trolley_wire_drawn: Vec::new(),

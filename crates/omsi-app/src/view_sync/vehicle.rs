@@ -502,19 +502,20 @@ pub fn sync_vehicle_textures(
                     continue;
                 }
                 let Some(rgba) = st.take_upload() else { continue };
-                *budget = budget.saturating_sub(rgba.len());
+                let bytes = rgba.len();
                 let img = Image {
                     width: st.width,
                     height: st.height,
                     rgba,
                     has_alpha: true,
                 };
-                if st.mipmaps {
-                    if renderer.update_texture_mips(scene, *tex, &img) {
-                        rebound.push(*tex);
-                    }
-                } else {
-                    renderer.update_texture(scene, *tex, &img);
+                // (the picture a script drew again: nothing goes up, no budget spent)
+                let wrote = renderer.update_script_texture(scene, *tex, &img, st.mipmaps);
+                if wrote != omsi_render::ScriptWrite::Unchanged {
+                    *budget = budget.saturating_sub(bytes);
+                }
+                if wrote == omsi_render::ScriptWrite::Replaced {
+                    rebound.push(*tex);
                 }
             }
         }
