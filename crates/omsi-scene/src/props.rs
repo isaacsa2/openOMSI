@@ -513,6 +513,7 @@ impl World {
 
     /// What the loaded tiles hold, for the streaming statistics.
     pub fn gpu_summary(&self, scene: &Scene) -> String {
+        let residency = self.texture_residency_summary(scene);
         let (vehicle_tex, vehicle_formats) = {
             let v = self.vehicle_textures.lock();
             let mut f: std::collections::BTreeMap<String, (usize, u64)> =
@@ -644,7 +645,7 @@ impl World {
             tile_formats,
             mesh_all as f64 / 1e6,
             other_all as f64 / 1e6
-        )
+        ) + &format!("; {residency}")
     }
 
     /// What the loaded map holds in memory on the CPU side (MB, estimated from the sizes of
