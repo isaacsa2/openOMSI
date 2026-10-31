@@ -1,4 +1,5 @@
 use super::*;
+use crate::receive_budget::{receive_budget_reached, RECEIVE_PACKET_LIMIT, RECEIVE_TIME_BUDGET};
 
 #[test]
 fn players_without_a_bus_stay_in_the_session() {
