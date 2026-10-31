@@ -137,6 +137,16 @@ fn read(root: &Path, path: &Path, paint: &str) -> State {
     };
     let t1 = Instant::now();
     let scheme = if paint.is_empty() { None } else { ty.paint_schemes.iter().position(|s| s.name.eq_ignore_ascii_case(paint)) };
+    if !paint.is_empty() && scheme.is_none() {
+        // A remotely announced paint can be absent from a local fallback bus or
+        // a partial/mismatched mount. Without this diagnostic it silently draws
+        // the default scheme (often the plain white repaint).
+        let available: Vec<&str> = ty.paint_schemes.iter().take(8).map(|s| s.name.as_str()).collect();
+        log::warn!(
+            "LAN: requested repaint {:?} is missing from {} ({} schemes, first available: {:?}); using default paint, check mod fingerprint and download status",
+            paint, path.display(), ty.paint_schemes.len(), available
+        );
+    }
     let prefetcher = PREFETCHER.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if let Some(p) = prefetcher {
         // (a picture that would stop the reader leaves it to the frame's upload, as before)
