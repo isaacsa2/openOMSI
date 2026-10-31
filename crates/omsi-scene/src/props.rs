@@ -1042,6 +1042,7 @@ impl World {
             .iter()
             .map(|(p, e)| (near.get(&e.id).copied().unwrap_or(f64::MAX), p.clone()))
             .collect();
+        let visible = renderer.last_main_view_texture_ids(scene);
         let mut shrunk: Vec<TextureId> = Vec::new();
         let mut restoring = 0usize;
         let mut cut_short = false;
@@ -1066,15 +1067,20 @@ impl World {
             }
         }
         if usage > limit {
-            entries.sort_by(|a, b| b.0.total_cmp(&a.0));
+            // Reduce mips for off-camera materials before those the main view drew.
+            entries.sort_by(|a, b| {
+                let shown = |path: &PathBuf| gpu.textures.get(path).is_some_and(|e| visible.contains(&e.id));
+                shown(&a.1).cmp(&shown(&b.1)).then_with(|| b.0.total_cmp(&a.0))
+            });
             let mut over = usage - limit;
             let mut drops = renderer.begin_level_drops();
             for (d, p) in &entries {
                 // (96 a second: at 16 a map's first tiles stayed over a small card's budget
                 // for a minute and a half)
-                if over == 0 || shrunk.len() >= 96 || *d < NEAR {
+                if over == 0 || shrunk.len() >= 96 {
                     break;
                 }
+                if *d < NEAR { continue; }
                 if std::time::Instant::now() >= budget_end {
                     cut_short = true;
                     break;
@@ -1145,12 +1151,11 @@ impl World {
             }
             let pending = self.upgrades_pending.lock();
             for (d, p) in &entries {
-                if *d > RESTORE || restoring >= 16 {
-                    break;
-                }
-                let Some(e) = gpu.textures.get(p) else {
-                    continue;
-                };
+                if restoring >= 16 { break; }
+                let Some(e) = gpu.textures.get(p) else { continue };
+                // A texture recently visible can regain its detail even beyond the
+                // distance-based restore radius, as long as there is memory headroom.
+                if *d > RESTORE && !visible.contains(&e.id) { continue; }
                 if e.dropped == 0 || pending.contains(p) {
                     continue;
                 }
