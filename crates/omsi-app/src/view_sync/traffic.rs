@@ -12,7 +12,7 @@
 
 use crate::scene::{VehicleRender, World};
 use crate::traffic::Traffic;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use omsi_sim::traffic::TrafficLightController;
 use omsi_sim::view_events::{CarLooks, FrameSnapshot, LookLimits, PartFrame, TrafficEvent};
 use omsi_sim::VehicleType;
@@ -190,11 +190,11 @@ impl Traffic {
         let snap = &self.snapshot;
         let Some(eye) = snap.drivers_eye() else { return };
         let dt = snap.drivers_dt().max(1.0 / 120.0);
-        let mut keep: Vec<u64> = Vec::new();
+        let mut keep: HashSet<u64> = HashSet::new();
         for bus in snap.driver_buses() {
             let car = crate::driver::SnapshotBus { snap, bus };
             let d = (bus.position - eye).length();
-            keep.push(bus.id);
+            keep.insert(bus.id);
             if !view.drivers.contains_key(&bus.id) {
                 if d > DRIVER_NEAR {
                     continue;
