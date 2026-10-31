@@ -26,7 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["rust", "javascript-typescript", "actions"]' || '["javascript-typescript", "actions"]') }}
+        # Keep the same analysis categories on PRs and main so Rust alerts can be compared.
+        language: [rust, javascript-typescript, actions]
     steps:
       - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v4
