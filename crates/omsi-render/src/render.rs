@@ -273,7 +273,6 @@ impl Renderer {
         // Release render targets before building their replacements. Keeping the old
         // targets alive while the new renderer is built can turn a recoverable OOM into
         // another allocation failure.
-        self.targets.depth = None;
         self.targets.msaa_targets.clear();
         self.targets.ao = None;
         self.targets.hdr_targets.clear();
