@@ -201,14 +201,7 @@ const SOUND_RATE: (f32, f32) = (512.0, 2048.0);
 use voice_net::VOICE_RATE;
 const MESSAGE_RATE: (f32, f32) = (10.0, 20.0);
 const CHAT_RATE: (f32, f32) = (1.0, 3.0);
-// Defer bursts to later simulation ticks rather than monopolizing the game thread.
-const RECEIVE_PACKET_LIMIT: usize = 1024;
-const RECEIVE_TIME_BUDGET: Duration = Duration::from_millis(4);
-const RECEIVE_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(30);
-
-fn receive_budget_reached(packets: usize, elapsed: Duration) -> bool {
-    packets >= RECEIVE_PACKET_LIMIT || elapsed >= RECEIVE_TIME_BUDGET
-}
+mod receive_budget;
 // ---------------------------------------------------------------------------------------
 // session codes
 
@@ -2544,20 +2537,7 @@ impl LanSession {
         let started = Instant::now();
         let mut packets = 0usize;
         loop {
-            if receive_budget_reached(packets, started.elapsed()) {
-                self.recv_budget_hits = self.recv_budget_hits.saturating_add(1);
-                if self.recv_budget_last_log.is_none_or(|at| at.elapsed() >= RECEIVE_DIAGNOSTIC_INTERVAL) {
-                    log::warn!(
-                        "LAN: receive budget reached {} time(s) since last report; last batch {} datagrams in {:.2} ms (limit {} / {} ms); queued datagrams deferred to next tick",
-                        self.recv_budget_hits,
-                        packets,
-                        started.elapsed().as_secs_f64() * 1000.0,
-                        RECEIVE_PACKET_LIMIT,
-                        RECEIVE_TIME_BUDGET.as_millis()
-                    );
-                    self.recv_budget_last_log = Some(Instant::now());
-                    self.recv_budget_hits = 0;
-                }
+            if self.receive_budget_yield(packets, started) {
                 break;
             }
             let (n, from) = match self.socket.recv_from(&mut self.buf) {
