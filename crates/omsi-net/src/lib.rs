@@ -1134,6 +1134,7 @@ enum PeerTraffic {
     Voice,
     Tack,
     Message,
+    Chat,
 }
 
 /// A token bucket: `rate` a second, at most `burst` at once.
@@ -1189,7 +1190,7 @@ pub struct Peer {
     /// Datagrams of this player the host threw away (too many at once).
     pub dropped: u32,
     /// Rate-limit rejections by PeerTraffic category (no payloads stored).
-    drop_counts: [u32; 8],
+    drop_counts: [u32; 9],
     /// The nonce of the player's hellos (host side).
     nonce: Option<u64>,
     secret: [u8; 16],
@@ -1233,7 +1234,7 @@ impl Peer {
             messages: Bucket::new(MESSAGE_RATE.1),
             chat: Bucket::new(CHAT_RATE.1),
             dropped: 0,
-            drop_counts: [0; 8],
+            drop_counts: [0; 9],
             history: std::collections::VecDeque::new(),
             nonce: None,
             secret: admission::random_bytes(),
@@ -2298,7 +2299,7 @@ impl LanSession {
                 continue;
             };
             log::warn!(
-                "LAN: player {id} timed out after {:.1} s without an accepted datagram (loading={}, rate-limited total={}, state={}, variables={}, animations={}, textures={}, sounds={}, voice={}, tack={}, messages={})",
+                "LAN: player {id} timed out after {:.1} s without an accepted datagram (loading={}, rate-limited total={}, state={}, variables={}, animations={}, textures={}, sounds={}, voice={}, tack={}, messages={}, chat={})",
                 now.duration_since(p.last_seen).as_secs_f32(),
                 !p.has_pose,
                 p.dropped,
@@ -2309,7 +2310,8 @@ impl LanSession {
                 p.drop_counts[4],
                 p.drop_counts[5],
                 p.drop_counts[6],
-                p.drop_counts[7]
+                p.drop_counts[7],
+                p.drop_counts[8]
             );
             gone.push(id);
             self.gone_lately.push((p.nonce, p.pose.name.clone(), id, now));
@@ -2850,6 +2852,7 @@ impl LanSession {
             PeerTraffic::Voice => peer.voice.take(rate),
             PeerTraffic::Tack => peer.tacks.take(rate),
             PeerTraffic::Message => peer.messages.take(rate),
+            PeerTraffic::Chat => peer.chat.take(rate),
         };
         if !ok {
             peer.dropped = peer.dropped.saturating_add(1);
@@ -3008,7 +3011,15 @@ impl LanSession {
             return;
         }
         if !peer.chat.take(CHAT_RATE) {
-            peer.dropped += 1;
+            peer.dropped = peer.dropped.saturating_add(1);
+            let chat_drops = &mut peer.drop_counts[PeerTraffic::Chat as usize];
+            *chat_drops = chat_drops.saturating_add(1);
+            if chat_drops.is_power_of_two() {
+                log::warn!(
+                    "LAN: player {id} exceeded Chat rate ({:.0}/s, burst {:.0}); {} Chat datagram(s) dropped, {} total",
+                    CHAT_RATE.0, CHAT_RATE.1, chat_drops, peer.dropped
+                );
+            }
             return;
         }
         let name = peer.label();
