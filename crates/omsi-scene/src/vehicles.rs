@@ -20,7 +20,6 @@ impl World {
         self.mirror_aspect.lock().clear();
         self.mirror_glass.lock().clear();
         let set = self.upload_vehicle(renderer, scene, vt, scheme, true);
-        // Protect this driven vehicle's static textures from budget downscaling.
         protect_vehicle_textures(&mut self.player_texture_paths.lock(), &set.textures, true);
         let mut render = self.instantiate_vehicle(renderer, scene, vt, &set, None, None, false);
         own_skinned_meshes(renderer, scene, vt, &mut render);
@@ -921,8 +920,7 @@ impl World {
             if only.as_deref().is_some_and(|f| !matches(f, &def.file))
                 || hide.as_deref().is_some_and(|f| matches(f, &def.file))
             {
-                // keep instance numbering stable: an empty placeholder mesh
-                let id = renderer.add_mesh(scene, &MeshData::default());
+                        let id = renderer.add_mesh(scene, &MeshData::default());
                 up.instances.push((id, vec![]));
                 continue;
             }
