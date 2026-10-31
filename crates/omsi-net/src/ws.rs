@@ -312,10 +312,16 @@ pub fn query(target: &str, with_icon: bool) -> Result<ServerInfo, String> {
 /// `HEAD_WAIT` (and one source has its own ceiling, `PER_SOURCE`).
 const MAX_CONNECTIONS: usize = MAX_ORDINARY + MAX_TUNNELS;
 
-/// At most 64 player WebSockets, plus 8 shared slots for short HTTP status/admin
-/// requests. The request and session slots are shared, so this is headroom rather
-/// than a guarantee when all 72 are occupied. Mod streams have separate slots.
-const MAX_ORDINARY: usize = if cfg!(test) { 3 } else { 72 };
+/// At most 64 player WebSockets plus 16 shared slots for HTTP/admin requests.
+/// Admission is scaled to the configured player count. Mod streams stay separate.
+const MAX_ORDINARY: usize = if cfg!(test) { 3 } else { 80 };
+const GATEWAY_HEADROOM: usize = 16;
+
+/// Shared slots are not a hard HTTP reservation: a short request can still be
+/// refused if too many ordinary connections are open at the same time.
+fn ordinary_slots(players: usize) -> usize {
+    players.clamp(1, 64) + GATEWAY_HEADROOM
+}
 
 /// Mod streams (`/tcp`) carried at once, apart from the players' places; one more is told
 /// the mods server's `ERR busy` and its game asks again in a moment. With 64 for
@@ -608,10 +614,15 @@ fn serve(stream: TcpStream, slot: Option<SourceSlot>, target: SocketAddr, info: 
     let _place = if tunnel {
         None
     } else {
-        match admission.ordinary.take(MAX_ORDINARY) {
+        let slots = if cfg!(test) {
+            MAX_ORDINARY
+        } else {
+            ordinary_slots(info.lock().unwrap_or_else(|e| e.into_inner()).max_players)
+        };
+        match admission.ordinary.take(slots) {
             Some(place) => Some(place),
             None => {
-                log::debug!("ws gateway: {source}: {MAX_ORDINARY} players and requests carried already; one more told to come back");
+                log::debug!("ws gateway: {source}: {slots} player and request connections open; one more told to come back");
                 refuse(stream, "503 Service Unavailable", "Retry-After: 2\r\n");
                 return Ok(());
             }
@@ -1021,6 +1032,15 @@ impl WsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_keeps_sixteen_spare_slots_above_configured_capacity() {
+        assert_eq!(ordinary_slots(1), 17);
+        assert_eq!(ordinary_slots(16), 32);
+        assert_eq!(ordinary_slots(32), 48);
+        assert_eq!(ordinary_slots(64), 80);
+        assert_eq!(ordinary_slots(256), 80);
+    }
 
     #[test]
     fn status_round_trip() {
