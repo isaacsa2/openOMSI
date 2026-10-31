@@ -2537,9 +2537,7 @@ impl LanSession {
         let started = Instant::now();
         let mut packets = 0usize;
         loop {
-            if self.receive_budget_yield(packets, started) {
-                break;
-            }
+            if self.receive_budget_yield(packets, started) { break; }
             let (n, from) = match self.socket.recv_from(&mut self.buf) {
                 Ok(x) => x,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
@@ -2579,9 +2577,7 @@ impl LanSession {
                     self.host_seen = Instant::now();
                 }
             }
-            if n == 0 || n > MAX_DATAGRAM {
-                continue;
-            }
+            if n == 0 || n > MAX_DATAGRAM { continue; }
             let mut data = self.buf[..n].to_vec();
             if data[0] == 0xEA {
                 let expected = match self.role {
@@ -2602,9 +2598,7 @@ impl LanSession {
                 }
                 continue;
             }
-            if self.on_table_or_voice(&data, from) {
-                continue;
-            }
+            if self.on_table_or_voice(&data, from) { continue; }
             if data[0] == world::WORLD_MAGIC {
                 // a client takes the world from its host (above); a host takes the people of
                 // a client's own from that client (within its rate)
