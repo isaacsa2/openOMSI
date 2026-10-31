@@ -448,8 +448,9 @@ impl World {
                 scene.texture_bytes_of(id) as f64 / 1e6
             );
         }
-        // on the GPU now: the decoded copy can go
-        self.textures.release(&path);
+        // Retain compressed data in a bounded RAM LRU for a later vehicle re-spawn;
+        // uncompressed staging data is dropped as before.
+        self.textures.cache_uploaded_vehicle(&path, &img);
         attach_pbr(renderer, scene, &path, id);
         tex_ids.insert(path.clone(), (id, 1));
         held.push(path);
