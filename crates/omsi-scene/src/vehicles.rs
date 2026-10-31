@@ -19,6 +19,9 @@ impl World {
         self.mirror_aspect.lock().clear();
         self.mirror_glass.lock().clear();
         let set = self.upload_vehicle(renderer, scene, vt, scheme, true);
+        // This player render set is not in the AI fleet cache; remember its texture paths
+        // explicitly so the global memory budget can distinguish them from AI vehicles.
+        protect_vehicle_textures(&mut self.player_texture_paths.lock(), &set.textures, true);
         let mut render = self.instantiate_vehicle(renderer, scene, vt, &set, None, None, false);
         own_skinned_meshes(renderer, scene, vt, &mut render);
         render
@@ -37,6 +40,8 @@ impl World {
         lead: &VehicleRender,
     ) -> VehicleRender {
         let set = self.upload_vehicle(renderer, scene, vt, scheme, false);
+        // Coupled player sections need the same priority as the leading vehicle.
+        protect_vehicle_textures(&mut self.player_texture_paths.lock(), &set.textures, false);
         let shared = if vt.def.script_share || vt.model.script_textures.is_empty() {
             Some(lead.script_textures.as_slice())
         } else {
@@ -340,6 +345,7 @@ impl World {
                 if e.1 == 0 {
                     let id = e.0;
                     tex_ids.remove(&p);
+                    self.reduced_vehicle_paths.lock().remove(&p);
                     renderer.free_texture(scene, id);
                     gpu.free_textures.push(id);
                     textures += 1;
@@ -1579,4 +1585,32 @@ struct VehicleUpload<'a> {
     only: Option<String>,
     variants: Vec<VariantSlot>,
     dyn_slots: Vec<DynSlot>,
+}
+
+/// Replace the pin list when changing the driven bus; extend it for its articulated
+/// sections. AI vehicles never call this helper.
+fn protect_vehicle_textures(pinned: &mut hashbrown::HashSet<PathBuf>, held: &[PathBuf], replace: bool) {
+    if replace { pinned.clear(); }
+    pinned.extend(held.iter().cloned());
+}
+
+#[cfg(test)]
+mod player_texture_priority_tests {
+    use super::*;
+
+    #[test]
+    fn protected_player_textures_include_coupled_sections_and_reset_on_change() {
+        let mut pinned = hashbrown::HashSet::new();
+        let main = PathBuf::from("player/body.dds");
+        let rear = PathBuf::from("player/rear.dds");
+        protect_vehicle_textures(&mut pinned, std::slice::from_ref(&main), true);
+        protect_vehicle_textures(&mut pinned, &[main.clone(), rear.clone()], false);
+        assert_eq!(pinned.len(), 2);
+        assert!(pinned.contains(&main) && pinned.contains(&rear));
+        let next = PathBuf::from("next/body.dds");
+        protect_vehicle_textures(&mut pinned, std::slice::from_ref(&next), true);
+        assert_eq!(pinned.len(), 1);
+        assert!(pinned.contains(&next));
+        assert!(!pinned.contains(&main));
+    }
 }
