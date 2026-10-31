@@ -6,6 +6,7 @@ use crate::*;
 mod instances;
 pub(crate) mod overlay;
 mod upload;
+mod texture_visibility;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct InstanceBounds {
