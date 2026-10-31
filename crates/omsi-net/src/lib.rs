@@ -203,6 +203,14 @@ const SOUND_RATE: (f32, f32) = (512.0, 2048.0);
 use voice_net::VOICE_RATE;
 const MESSAGE_RATE: (f32, f32) = (10.0, 20.0);
 const CHAT_RATE: (f32, f32) = (1.0, 3.0);
+// Defer bursts to later simulation ticks rather than monopolizing the game thread.
+const RECEIVE_PACKET_LIMIT: usize = 1024;
+const RECEIVE_TIME_BUDGET: Duration = Duration::from_millis(4);
+const RECEIVE_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(30);
+
+fn receive_budget_reached(packets: usize, elapsed: Duration) -> bool {
+    packets >= RECEIVE_PACKET_LIMIT || elapsed >= RECEIVE_TIME_BUDGET
+}
 // ---------------------------------------------------------------------------------------
 // session codes
 
@@ -1180,6 +1188,8 @@ pub struct Peer {
     chat: Bucket,
     /// Datagrams of this player the host threw away (too many at once).
     pub dropped: u32,
+    /// Rate-limit rejections by PeerTraffic category (no payloads stored).
+    drop_counts: [u32; 8],
     /// The nonce of the player's hellos (host side).
     nonce: Option<u64>,
     secret: [u8; 16],
@@ -1223,6 +1233,7 @@ impl Peer {
             messages: Bucket::new(MESSAGE_RATE.1),
             chat: Bucket::new(CHAT_RATE.1),
             dropped: 0,
+            drop_counts: [0; 8],
             history: std::collections::VecDeque::new(),
             nonce: None,
             secret: admission::random_bytes(),
@@ -1342,6 +1353,8 @@ pub struct LanSession {
     /// Bytes sent and received so far.
     sent: Cell<u64>,
     pub received: u64,
+    recv_budget_hits: u32,
+    recv_budget_last_log: Option<Instant>,
     /// The shared world (see `world`): frames, descriptions and handed-over passengers
     /// the host sent (client), and what the clients asked for (host).
     world_in: Vec<(Instant, world::WorldFrame)>,
@@ -1486,6 +1499,8 @@ impl LanSession {
             buf: vec![0; 8192],
             sent: Cell::new(0),
             received: 0,
+            recv_budget_hits: 0,
+            recv_budget_last_log: None,
             world_in: Vec::new(),
             traffic: Default::default(),
             var_sender: vars::VarSender::default(),
@@ -2282,7 +2297,20 @@ impl LanSession {
             let Some(p) = self.peers.remove(&id) else {
                 continue;
             };
-            log::info!("LAN: player {id} timed out");
+            log::warn!(
+                "LAN: player {id} timed out after {:.1} s without an accepted datagram (loading={}, rate-limited total={}, state={}, variables={}, animations={}, textures={}, sounds={}, voice={}, tack={}, messages={})",
+                now.duration_since(p.last_seen).as_secs_f32(),
+                !p.has_pose,
+                p.dropped,
+                p.drop_counts[0],
+                p.drop_counts[1],
+                p.drop_counts[2],
+                p.drop_counts[3],
+                p.drop_counts[4],
+                p.drop_counts[5],
+                p.drop_counts[6],
+                p.drop_counts[7]
+            );
             gone.push(id);
             self.gone_lately.push((p.nonce, p.pose.name.clone(), id, now));
             if self.role == Role::Host {
@@ -2294,7 +2322,10 @@ impl LanSession {
             && self.connected
             && now.duration_since(self.host_seen) > self.timeout
         {
-            log::warn!("LAN: the host has gone quiet; trying to reach it again");
+            log::warn!(
+                "LAN: the host has gone quiet for {:.1} s; trying to reach it again",
+                now.duration_since(self.host_seen).as_secs_f32()
+            );
             self.events.push(LanEvent::Notice(
                 "the host has gone quiet; trying to reach it again".into(),
             ));
@@ -2480,7 +2511,25 @@ impl LanSession {
     }
 
     fn receive(&mut self, gone: &mut Vec<u32>) {
+        let started = Instant::now();
+        let mut packets = 0usize;
         loop {
+            if receive_budget_reached(packets, started.elapsed()) {
+                self.recv_budget_hits = self.recv_budget_hits.saturating_add(1);
+                if self.recv_budget_last_log.is_none_or(|at| at.elapsed() >= RECEIVE_DIAGNOSTIC_INTERVAL) {
+                    log::warn!(
+                        "LAN: receive budget reached {} time(s) since last report; last batch {} datagrams in {:.2} ms (limit {} / {} ms); queued datagrams deferred to next tick",
+                        self.recv_budget_hits,
+                        packets,
+                        started.elapsed().as_secs_f64() * 1000.0,
+                        RECEIVE_PACKET_LIMIT,
+                        RECEIVE_TIME_BUDGET.as_millis()
+                    );
+                    self.recv_budget_last_log = Some(Instant::now());
+                    self.recv_budget_hits = 0;
+                }
+                break;
+            }
             let (n, from) = match self.socket.recv_from(&mut self.buf) {
                 Ok(x) => x,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
@@ -2494,6 +2543,7 @@ impl LanSession {
                 }
                 Err(_) => break,
             };
+            packets += 1;
             self.received += n as u64;
             // the bridge's own datagrams (a STUN answer, a punch): not the game's
             if bridge::is_bridge_packet(&self.buf[..n]) {
@@ -2802,11 +2852,14 @@ impl LanSession {
             PeerTraffic::Message => peer.messages.take(rate),
         };
         if !ok {
-            peer.dropped += 1;
-            if peer.dropped.is_power_of_two() {
+            peer.dropped = peer.dropped.saturating_add(1);
+            let category_drops = &mut peer.drop_counts[traffic as usize];
+            *category_drops = category_drops.saturating_add(1);
+            let category_count = *category_drops;
+            if category_count.is_power_of_two() {
                 log::warn!(
-                    "LAN: player {id} sends too much; {} datagram(s) dropped so far",
-                    peer.dropped
+                    "LAN: player {id} exceeded {traffic:?} rate ({:.0}/s, burst {:.0}); {} {traffic:?} datagram(s) dropped, {} total",
+                    rate.0, rate.1, category_count, peer.dropped
                 );
             }
             return None;
