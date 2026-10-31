@@ -73,6 +73,7 @@ pub fn gpu_mesh_of(vt: &omsi_sim::VehicleType, i: usize) -> Option<omsi_geometry
     pane_uv::gpu_mesh(vt, i).map(std::borrow::Cow::into_owned)
 }
 mod vehicles;
+mod player_texture_priority;
 mod lanes;
 mod season_looks;
 pub mod host;

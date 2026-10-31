@@ -954,19 +954,7 @@ impl World {
         let generation = self.tiles_generation.load(std::sync::atomic::Ordering::Relaxed);
         let states = self.tile_state.lock();
         let mut gpu = self.gpu.lock();
-        // A bus can become the player vehicle after its textures were reduced as AI.
-        // Request full-resolution data through the existing background upgrade pipeline;
-        // reusing its TextureId keeps all material bindings valid after the swap.
-        let protected = self.player_texture_paths.lock();
-        {
-            let reduced = self.reduced_vehicle_paths.lock();
-            let pending = self.upgrades_pending.lock();
-            for path in protected.iter() {
-                if reduced.contains(path) && !pending.contains(path) && !gpu.wants_restore.contains(path) {
-                    gpu.wants_restore.push(path.clone());
-                }
-            }
-        }
+        self.schedule_player_texture_restores(&mut gpu);
         let (scenery_bytes, any_dropped) = gpu
             .textures
             .values()

@@ -4,6 +4,7 @@ use super::*;
 pub(crate) mod lods;
 mod night_coverage;
 use night_coverage::{load_night, night_coverage, static_diffuse};
+use crate::player_texture_priority::protect_vehicle_textures;
 
 impl World {
     /// Upload a vehicle type's meshes and create render instances for one vehicle (the
@@ -1587,30 +1588,3 @@ struct VehicleUpload<'a> {
     dyn_slots: Vec<DynSlot>,
 }
 
-/// Replace the pin list when changing the driven bus; extend it for its articulated
-/// sections. AI vehicles never call this helper.
-fn protect_vehicle_textures(pinned: &mut hashbrown::HashSet<PathBuf>, held: &[PathBuf], replace: bool) {
-    if replace { pinned.clear(); }
-    pinned.extend(held.iter().cloned());
-}
-
-#[cfg(test)]
-mod player_texture_priority_tests {
-    use super::*;
-
-    #[test]
-    fn protected_player_textures_include_coupled_sections_and_reset_on_change() {
-        let mut pinned = hashbrown::HashSet::new();
-        let main = PathBuf::from("player/body.dds");
-        let rear = PathBuf::from("player/rear.dds");
-        protect_vehicle_textures(&mut pinned, std::slice::from_ref(&main), true);
-        protect_vehicle_textures(&mut pinned, &[main.clone(), rear.clone()], false);
-        assert_eq!(pinned.len(), 2);
-        assert!(pinned.contains(&main) && pinned.contains(&rear));
-        let next = PathBuf::from("next/body.dds");
-        protect_vehicle_textures(&mut pinned, std::slice::from_ref(&next), true);
-        assert_eq!(pinned.len(), 1);
-        assert!(pinned.contains(&next));
-        assert!(!pinned.contains(&main));
-    }
-}
