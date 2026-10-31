@@ -1111,6 +1111,7 @@ impl World {
             // filled 5 GB of textures on a graphics chip with 0.5 GB of its own until the
             // device was lost (#1463).
             if over > 0 && shrunk.len() < 96 && !cut_short {
+                let protected = self.player_texture_paths.lock();
                 let mut own: Vec<(PathBuf, TextureId, u64)> = self
                     .vehicle_textures
                     .lock()
