@@ -35,6 +35,10 @@ use crate::ws_http::{header, last_header, peek_head, read_body, read_head, refus
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket};
 
+// Give both directions and the keepalive timer a chance under sustained traffic.
+// Unlike a per-second rate limit, this only shares work between loop iterations.
+const WS_PUMP_BURST: usize = 128;
+
 /// What a server tells about itself (`GET /status`, and the launcher's list).
 #[derive(Debug, Clone, Default)]
 pub struct ServerInfo {
@@ -711,14 +715,22 @@ fn html(s: &str) -> String {
 
 /// Carry datagrams both ways between a WebSocket and a UDP socket until either side goes.
 /// `send` hands a message from the WebSocket to the UDP side.
+fn flush_ws<S: Read + Write>(ws: &mut WebSocket<S>) -> Result<(), String> {
+    match ws.flush() {
+        Ok(()) => Ok(()),
+        Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => Ok(()),
+        Err(e) => Err(format!("WebSocket flush failed: {e}")),
+    }
+}
+
 fn pump<S: Read + Write>(ws: &mut WebSocket<S>, udp: &UdpSocket, mut send: impl FnMut(&UdpSocket, &[u8]) -> std::io::Result<()>, stop: &AtomicBool) -> Result<(), String> {
     let mut buf = vec![0u8; 2048];
     let mut last_in = Instant::now();
     let mut last_ping = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let mut idle = true;
-        // WebSocket → UDP
-        loop {
+        // WebSocket → UDP. Stop before starving UDP responses or pings.
+        for _ in 0..WS_PUMP_BURST {
             match ws.read() {
                 Ok(Message::Binary(d)) => {
                     last_in = Instant::now();
@@ -732,8 +744,8 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, udp: &UdpSocket, mut send: impl 
                 Err(e) => return Err(e.to_string()),
             }
         }
-        // UDP → WebSocket
-        loop {
+        // UDP → WebSocket. Bound the reverse direction as well.
+        for _ in 0..WS_PUMP_BURST {
             match udp.recv_from(&mut buf) {
                 Ok((n, _)) => {
                     idle = false;
@@ -748,7 +760,7 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, udp: &UdpSocket, mut send: impl 
                 Err(e) => return Err(e.to_string()),
             }
         }
-        let _ = ws.flush();
+        flush_ws(ws)?;
         // (proxies close a WebSocket that stays quiet for a minute or two)
         if last_ping.elapsed() > Duration::from_secs(20) {
             last_ping = Instant::now();
@@ -913,7 +925,8 @@ impl WsClient {
                     let r: Result<(), String> = (|| {
                         while !st.load(Ordering::Relaxed) {
                             let mut idle = true;
-                            loop {
+                            // Share time fairly between incoming WS traffic and outgoing UDP.
+                            for _ in 0..WS_PUMP_BURST {
                                 match ws.read() {
                                     Ok(Message::Binary(d)) => {
                                         last_in = Instant::now();
@@ -929,7 +942,7 @@ impl WsClient {
                                     Err(e) => return Err(e.to_string()),
                                 }
                             }
-                            loop {
+                            for _ in 0..WS_PUMP_BURST {
                                 match udp.recv_from(&mut buf) {
                                     Ok((n, from)) => {
                                         idle = false;
@@ -945,7 +958,7 @@ impl WsClient {
                                     Err(e) => return Err(e.to_string()),
                                 }
                             }
-                            let _ = ws.flush();
+                            flush_ws(&mut ws)?;
                             if last_ping.elapsed() > Duration::from_secs(20) {
                                 last_ping = Instant::now();
                                 let _ = ws.send(Message::Ping(Vec::new().into()));
