@@ -3,7 +3,19 @@
 use crate::traffic::Traffic;
 use glam::DVec3;
 use hashbrown::HashMap;
+use std::borrow::Cow;
 use std::sync::Arc;
+
+/// A local audio preference: omit only the AI horn trigger, preserving all other vehicle sounds.
+/// The simulation and its honk events remain untouched for multiplayer determinism.
+fn audible_ai_triggers(triggers: &[String], ai_horns: bool) -> Cow<'_, [String]> {
+    if ai_horns || !triggers.iter().any(|t| t.eq_ignore_ascii_case("ev_AI_Horn")) {
+        Cow::Borrowed(triggers)
+    } else {
+        Cow::Owned(triggers.iter().filter(|t| !t.eq_ignore_ascii_case("ev_AI_Horn")).cloned().collect())
+    }
+}
+
 
 /// A vehicle definition's `[sound_ai]` (else `[sound]`) configuration, the folder its clips
 /// are named from, and those clips' files.
@@ -63,8 +75,9 @@ impl Traffic {
         muffled: bool,
         riding: Option<u64>,
         volume: f32,
+        ai_horns: bool,
     ) {
-        self.update_riding_audio(audio, riding, volume);
+        self.update_riding_audio(audio, riding, volume, ai_horns);
         let freed = audio.trim_clips(std::time::Duration::from_secs(60));
         if freed > 0 && omsi_cfg::flags::OMSI_PROFILE.is_set() {
             log::info!(
@@ -123,10 +136,12 @@ impl Traffic {
                     let vals = &c.fired_vars.iter().rev().find(|(k, _)| k.eq_ignore_ascii_case(t))?.1;
                     c.var_slot(n).and_then(|i| vals.get(i).copied())
                 };
-                ss.update_fired(audio, &var, &xf, &c.fired, &at_fire);
+                let fired = audible_ai_triggers(&c.fired, ai_horns);
+                ss.update_fired(audio, &var, &xf, &fired, &at_fire);
                 let parts = frame.parts(c);
-                ss.update_parts(audio, &var, &|i| parts.get(i).copied(), &c.fired, &at_fire);
+                ss.update_parts(audio, &var, &|i| parts.get(i).copied(), &fired, &at_fire);
                 for (t, f) in &c.fired_files {
+                    if !ai_horns && t.eq_ignore_ascii_case("ev_AI_Horn") { continue; }
                     ss.play_file_trigger(audio, t, f, &var, &xf);
                 }
             }
@@ -135,7 +150,9 @@ impl Traffic {
         for (id, t) in triggers {
             self.sim.set_sound_triggers(id, t);
         }
-        self.play_horns(audio, &frame, listener, muffled, volume);
+        if ai_horns {
+            self.play_horns(audio, &frame, listener, muffled, volume);
+        }
         self.sound_frame = frame;
     }
 
@@ -176,7 +193,7 @@ impl Traffic {
     /// The AI bus ridden in on foot: its full `[sound]` set from inside ([viewpoint] 2, the
     /// outside sounds through what it has open - its own `Snd_OutsideVol`), instead of its
     /// `[sound_ai]` heard as from the street (#1286: a passenger heard next to nothing).
-    fn update_riding_audio(&mut self, audio: &omsi_audio::AudioEngine, riding: Option<u64>, volume: f32) {
+    fn update_riding_audio(&mut self, audio: &omsi_audio::AudioEngine, riding: Option<u64>, volume: f32, ai_horns: bool) {
         if self.riding_sounds.as_ref().map(|r| r.0) != riding {
             if let Some((_, mut s)) = self.riding_sounds.take() {
                 s.stop_all(audio);
@@ -213,7 +230,8 @@ impl Traffic {
             self.riding_sounds = Some((id, ss));
         }
         if let Some((_, ss)) = self.riding_sounds.as_mut() {
-            let fired = std::mem::take(&mut c.vehicle.host.fired_triggers);
+            let mut fired = std::mem::take(&mut c.vehicle.host.fired_triggers);
+            if !ai_horns { fired.retain(|t| !t.eq_ignore_ascii_case("ev_AI_Horn")); }
             let fired_vars = std::mem::take(&mut c.vehicle.host.fired_trigger_vars);
             let fired_files = std::mem::take(&mut c.vehicle.host.fired_file_triggers);
             let v = &c.vehicle;
@@ -229,8 +247,23 @@ impl Traffic {
             };
             ss.update_fired(audio, &|n| v.var(n), &xf, &fired, &at_fire);
             for (t, f) in &fired_files {
+                if !ai_horns && t.eq_ignore_ascii_case("ev_AI_Horn") { continue; }
                 ss.play_file_trigger(audio, t, f, &|n| v.var(n), &xf);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod ai_horn_option_tests {
+    use super::audible_ai_triggers;
+
+    #[test]
+    fn disabled_ai_horns_filter_only_the_horn_trigger() {
+        let input = vec!["ev_door_open".to_string(), "ev_AI_Horn".to_string(), "ev_ai_horn".to_string(), "ev_engine_start".to_string()];
+        let muted = audible_ai_triggers(&input, false);
+        assert_eq!(muted.as_ref(), &["ev_door_open".to_string(), "ev_engine_start".to_string()]);
+        assert_eq!(audible_ai_triggers(&input, true).as_ref(), input.as_slice());
+        assert_eq!(input.len(), 4, "the audio preference must not modify simulation events");
     }
 }
