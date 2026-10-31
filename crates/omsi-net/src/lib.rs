@@ -174,7 +174,7 @@ pub const INFO_MIN_GAP: f32 = 0.25;
 /// Seconds between two CLOCK messages of the host.
 pub const CLOCK_EVERY: f32 = 5.0;
 /// At most this many other players: a host turns away the next one, a client ignores more.
-pub const MAX_PEERS: usize = 32;
+pub const MAX_PEERS: usize = 64;
 /// At most this many players may be loading at the same time (joined, no state yet).
 pub const MAX_JOINING: usize = 8;
 /// How far around the requested spawn a host lists the vehicles standing there (m).
@@ -1297,6 +1297,7 @@ pub struct LanSession {
     /// keeps its time up to date with `set_clock`).
     pub world: WorldInfo,
     peers: HashMap<u32, Peer>,
+    max_peers: usize,
     next_id: u32,
     send_acc: f32,
     hello_acc: f32,
@@ -1459,6 +1460,7 @@ impl LanSession {
             strangers_told: false,
             world,
             peers: HashMap::new(),
+            max_peers: MAX_PEERS,
             next_id: 2,
             send_acc: 0.0,
             hello_acc: 1.0,
@@ -1762,6 +1764,12 @@ impl LanSession {
 
     /// Our world after the game took over the host's (a client): only what still differs
     /// is warned about.
+    /// Host: cap remote players independently of the protocol's hard ceiling.
+    /// Dedicated servers use server.cfg's max_players; reconnects of existing peers remain allowed.
+    pub fn set_peer_limit(&mut self, players: usize) {
+        if self.role == Role::Host { self.max_peers = players.clamp(1, MAX_PEERS); }
+    }
+
     pub fn set_world(&mut self, world: WorldInfo) {
         self.world = world;
         if let Some(w) = self.welcome.as_ref().map(|w| w.world.clone()) {
@@ -3118,11 +3126,11 @@ impl LanSession {
                 }
                 (id, None)
             }
-            None if self.peers.len() >= MAX_PEERS => {
-                log::warn!("LAN: '{name}' at {from} wants to join, but {MAX_PEERS} players are here already; turned away");
+            None if self.peers.len() >= self.max_peers => {
+                log::warn!("LAN: '{name}' at {from} wants to join, but {} players are here already; turned away", self.max_peers);
                 self.reject(
                     from,
-                    &format!("the session is full ({} players)", MAX_PEERS + 1),
+                    &format!("the session is full ({} players)", self.max_peers),
                 );
                 return;
             }
