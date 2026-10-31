@@ -2212,6 +2212,7 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
 
 pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     let mut v = json!({ "msaa": 4, "anisotropy": 8, "ssao": true, "shadows": true, "shadow_size": 2048, "navigator": true, "ui_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "video_memory": 0, "texture_compression": true, "gpu_texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "cloud_quality": "high", "rain_quality": "high", "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "ambient": true, "vol_ambient": 0.8, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
+    v["ai_horns"] = json!(true);
     v["upscaler"] = json!("default");
     v["fsr_quality"] = json!("quality");
     v["fsr_sharpness"] = json!(0.8);
@@ -2403,7 +2404,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "voice_volume" | "voice_volume_nearby" | "voice_volume_radio" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 2.0)).unwrap_or(1.0)),
             "voice_threshold_db" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(-80.0, -10.0).round() as i64).unwrap_or(-45)),
             "voice_range" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(5.0, 1000.0).round() as i64).unwrap_or(75)),
-            "voice_enabled" | "voice_talker_list" | "voice_all_off" => v[&k] = json!(b(val)),
+            "ai_horns" | "voice_enabled" | "voice_talker_list" | "voice_all_off" => v[&k] = json!(b(val)),
             "resolution" | "window_size" => v["resolution"] = json!(resolution_text(val)),
             "graphics_api" => v[&k] = json!(match val.to_ascii_lowercase().as_str() { "vulkan" => "vulkan", "dx12" => "dx12", "gl" => "gl", "angle" => "angle", _ => "auto" }),
             "shadow_casters" => v[&k] = json!(if val.eq_ignore_ascii_case("omsi") { "omsi" } else { "all" }),
@@ -2701,7 +2702,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         },
     );
     let ui_theme = if v.get("ui_theme").and_then(|x| x.as_str()).is_some_and(|x| x.eq_ignore_ascii_case("light")) { "light" } else { "dark" };
-    let text = format!("{text}ui_theme={ui_theme}\n");
+    let text = format!("{text}ui_theme={ui_theme}\nai_horns={}\n", b("ai_horns", true));
     // OMSI's own options (options.cfg): maintenance ([wear_lifespan]), the AI counts and
     // the share of random traffic, the real clock and calendar, collisions, head movement
     let text = format!(

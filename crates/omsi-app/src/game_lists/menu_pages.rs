@@ -171,6 +171,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
     let sound: Vec<(String, String)> = vec![
         slider_row(app, "volume", "Volume", "Set how loud the game should be", &pct),
         slider_row(app, "vol_ai", "Traffic", "How loud the other vehicles are", &pct),
+        switch_row(app, "ai_horns", "AI traffic horns", "Allow AI vehicles to sound their horns without muting their engines or other traffic sounds"),
         switch_row(app, "ambient", "Ambience", "The place, the weather, the birds of the season and the town's life, from real recordings"),
         slider_row(app, "vol_ambient", "Ambience volume", "How loud the ambience is", &pct),
         slider_row(app, "vol_scenery", "Surroundings", "How loud the sounds of the scenery are", &pct),

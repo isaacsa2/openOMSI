@@ -137,7 +137,7 @@ pub(super) fn traffic(cx: TrafficCx, dt: f32) {
                 Some((omsi_sim::people::BusId::Ai(id), _)) => Some(id),
                 _ => None,
             });
-            t.update_audio(a, ear, street, muffled || riding.is_some(), riding, cx.common.settings.vol_ai);
+            t.update_audio(a, ear, street, muffled || riding.is_some(), riding, cx.common.settings.vol_ai, cx.common.settings.ai_horns);
         }
         cx.perf.profile.add(crate::profile_keys::ProfKey::TrafficAudio, __t3.elapsed().as_secs_f64());
         let __t4 = Instant::now();

@@ -322,6 +322,7 @@ const sound = {
       rows: [
         vol('volume', 'Volume', 0.6),
         vol('vol_ai', 'Traffic', 1),
+        { type: 'toggle', key: 'ai_horns', label: 'AI traffic horns', def: true, help: 'Mute only horns from AI-driven vehicles. Their engines and other traffic sounds remain audible.' },
         vol('vol_scenery', 'Surroundings', 1),
         { type: 'toggle', key: 'doppler', label: 'Doppler effect' },
         { type: 'toggle', key: 'ambient', label: 'Ambience (places, weather, nature, town)' },

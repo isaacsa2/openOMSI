@@ -348,6 +348,7 @@ struct SettingsPage: View {
         Card("Volume") {
             volume("Volume", "volume", 0.6)
             volume("Traffic", "vol_ai", 1)
+            SettingToggle(label: "AI traffic horns", key: "ai_horns", fallback: true)
             volume("Surroundings", "vol_scenery", 1)
             SettingToggle(label: "Doppler effect", key: "doppler", fallback: true)
             SettingToggle(label: "Ambience (places, weather, nature, town)", key: "ambient", fallback: true)

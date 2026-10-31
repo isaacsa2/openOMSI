@@ -469,6 +469,7 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "vr" => s.vr,
         "vr_desktop_mirror" => s.vr_desktop_mirror,
         "doppler" => s.doppler,
+        "ai_horns" => s.ai_horns,
         "steering_linear" => s.steering_linear,
         "pad_steer_linear" => s.pad_steer_linear,
         "pad_buttons" => s.pad_buttons,
@@ -778,6 +779,7 @@ fn toggle_set_graphics_and_controls(app: &mut App, id: &str, on: bool, bit: Stri
         "mirror_shadows" => { app.settings.mirror_shadows = on; Some(("mirror_shadows", bit)) }
         "mirror_particles" => { app.settings.mirror_particles = on; Some(("mirror_particles", bit)) }
         "ambient" => { app.settings.ambient = on; Some(("ambient", bit)) }
+        "ai_horns" => { app.settings.ai_horns = on; Some(("ai_horns", bit)) }
         "fullscreen" => {
             app.settings.fullscreen = on;
             if app.gfx.spanned {
