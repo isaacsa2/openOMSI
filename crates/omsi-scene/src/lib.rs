@@ -59,6 +59,7 @@ mod cut_terrain;
 mod upload;
 mod place_step;
 mod props;
+mod texture_residency;
 mod lightmaps;
 mod scripted;
 pub use scripted::DayKind;
