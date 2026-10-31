@@ -538,35 +538,10 @@ impl Renderer {
         true
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn ensure_depth(&mut self, w: u32, h: u32) {
-        if let Some((_, _, dw, dh)) = &self.targets.depth {
-            if *dw == w && *dh == h {
-                return;
-            }
-        }
-        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("depth"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let view = tex.create_view(&Default::default());
-        self.targets.depth = Some((tex, view, w, h));
-    }
 }
 
 /// The size-keyed targets (see targets.rs): made on first use, let go of when unused.
 pub(crate) struct Targets {
-    pub(crate) depth: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
     /// Multisampled colour and depth targets per size (the window, each mirror).
     pub(crate) msaa_targets: HashMap<(u32, u32), (Option<wgpu::TextureView>, wgpu::TextureView)>,
     /// Screen-space ambient occlusion: depth prepass and AO textures of the window's size.
