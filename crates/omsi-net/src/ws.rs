@@ -312,9 +312,10 @@ pub fn query(target: &str, with_icon: bool) -> Result<ServerInfo, String> {
 /// `HEAD_WAIT` (and one source has its own ceiling, `PER_SOURCE`).
 const MAX_CONNECTIONS: usize = MAX_ORDINARY + MAX_TUNNELS;
 
-/// Players, status requests and the icon carried at once: the 64 the hardening set for
-/// everything. One more is answered `503`. Mod streams never take one of these places.
-const MAX_ORDINARY: usize = if cfg!(test) { 3 } else { 64 };
+/// At most 64 player WebSockets, plus 8 shared slots for short HTTP status/admin
+/// requests. The request and session slots are shared, so this is headroom rather
+/// than a guarantee when all 72 are occupied. Mod streams have separate slots.
+const MAX_ORDINARY: usize = if cfg!(test) { 3 } else { 72 };
 
 /// Mod streams (`/tcp`) carried at once, apart from the players' places; one more is told
 /// the mods server's `ERR busy` and its game asks again in a moment. With 64 for
