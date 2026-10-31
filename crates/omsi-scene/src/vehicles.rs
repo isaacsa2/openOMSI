@@ -20,15 +20,14 @@ impl World {
         self.mirror_aspect.lock().clear();
         self.mirror_glass.lock().clear();
         let set = self.upload_vehicle(renderer, scene, vt, scheme, true);
-        // This player render set is not in the AI fleet cache; remember its texture paths
-        // explicitly so the global memory budget can distinguish them from AI vehicles.
+        // Protect this driven vehicle's static textures from budget downscaling.
         protect_vehicle_textures(&mut self.player_texture_paths.lock(), &set.textures, true);
         let mut render = self.instantiate_vehicle(renderer, scene, vt, &set, None, None, false);
         own_skinned_meshes(renderer, scene, vt, &mut render);
         render
     }
 
-    /// A part coupled behind the player's vehicle (the rear section of an articulated bus).
+    /// An articulated rear section shares script textures with its leading vehicle.
     /// With `[scriptshare]` it has no scripts of its own: its matrix displays (`\S:n`,
     /// `[useScriptTexture] n`) are the leading vehicle's script textures, which is why the
     /// O530G's rear section declares no `[scripttexture]` at all.
@@ -41,7 +40,6 @@ impl World {
         lead: &VehicleRender,
     ) -> VehicleRender {
         let set = self.upload_vehicle(renderer, scene, vt, scheme, false);
-        // Coupled player sections need the same priority as the leading vehicle.
         protect_vehicle_textures(&mut self.player_texture_paths.lock(), &set.textures, false);
         let shared = if vt.def.script_share || vt.model.script_textures.is_empty() {
             Some(lead.script_textures.as_slice())
