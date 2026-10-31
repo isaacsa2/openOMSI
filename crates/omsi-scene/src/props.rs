@@ -821,6 +821,10 @@ impl World {
                 continue;
             }
             renderer.replace_texture(scene, id, &data);
+            if vid.is_some() {
+                // A player-selected texture may have been shrunk while this bus was AI.
+                self.reduced_vehicle_paths.lock().remove(&path);
+            }
             if self.freetex_reloads.snapshot(id).is_some() {
                 self.freetex_reloads.remember(id, data.clone());
             }
@@ -950,6 +954,7 @@ impl World {
         let generation = self.tiles_generation.load(std::sync::atomic::Ordering::Relaxed);
         let states = self.tile_state.lock();
         let mut gpu = self.gpu.lock();
+        self.schedule_player_texture_restores(&mut gpu);
         let (scenery_bytes, any_dropped) = gpu
             .textures
             .values()
@@ -1106,14 +1111,16 @@ impl World {
             // filled 5 GB of textures on a graphics chip with 0.5 GB of its own until the
             // device was lost (#1463).
             if over > 0 && shrunk.len() < 96 && !cut_short {
-                let mut own: Vec<(TextureId, u64)> = self
+                let protected = self.player_texture_paths.lock();
+                let mut own: Vec<(PathBuf, TextureId, u64)> = self
                     .vehicle_textures
                     .lock()
-                    .values()
-                    .map(|(t, _)| (*t, scene.texture_bytes_of(*t)))
+                    .iter()
+                    .map(|(path, (t, _))| (path.clone(), *t, scene.texture_bytes_of(*t)))
+                    .filter(|(path, _, _)| !protected.contains(path))
                     .collect();
-                own.sort_by(|a, b| b.1.cmp(&a.1));
-                for (id, before) in own {
+                own.sort_by(|a, b| b.2.cmp(&a.2));
+                for (path, id, before) in own {
                     if over == 0 || shrunk.len() >= 96 {
                         break;
                     }
@@ -1126,6 +1133,7 @@ impl World {
                         continue;
                     }
                     if renderer.drop_top_levels_in(&mut drops, scene, id, 1) {
+                        self.reduced_vehicle_paths.lock().insert(path);
                         over = over.saturating_sub(before.saturating_sub(scene.texture_bytes_of(id)));
                         shrunk.push(id);
                     }

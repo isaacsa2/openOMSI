@@ -166,6 +166,8 @@ impl World {
             data,
             vehicle_gpu: Mutex::new(HashMap::new()),
             vehicle_textures: Default::default(),
+            player_texture_paths: Default::default(),
+            reduced_vehicle_paths: Default::default(),
             freetex_reloads: Default::default(),
             vehicle_meshes: Default::default(),
             vehicle_ready: Default::default(),

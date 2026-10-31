@@ -4,6 +4,7 @@ use super::*;
 pub(crate) mod lods;
 mod night_coverage;
 use night_coverage::{load_night, night_coverage, static_diffuse};
+use crate::player_texture_priority::protect_vehicle_textures;
 
 impl World {
     /// Upload a vehicle type's meshes and create render instances for one vehicle (the
@@ -19,12 +20,13 @@ impl World {
         self.mirror_aspect.lock().clear();
         self.mirror_glass.lock().clear();
         let set = self.upload_vehicle(renderer, scene, vt, scheme, true);
+        protect_vehicle_textures(&mut self.player_texture_paths.lock(), &set.textures, true);
         let mut render = self.instantiate_vehicle(renderer, scene, vt, &set, None, None, false);
         own_skinned_meshes(renderer, scene, vt, &mut render);
         render
     }
 
-    /// A part coupled behind the player's vehicle (the rear section of an articulated bus).
+    /// An articulated rear section shares script textures with its leading vehicle.
     /// With `[scriptshare]` it has no scripts of its own: its matrix displays (`\S:n`,
     /// `[useScriptTexture] n`) are the leading vehicle's script textures, which is why the
     /// O530G's rear section declares no `[scripttexture]` at all.
@@ -37,6 +39,7 @@ impl World {
         lead: &VehicleRender,
     ) -> VehicleRender {
         let set = self.upload_vehicle(renderer, scene, vt, scheme, false);
+        protect_vehicle_textures(&mut self.player_texture_paths.lock(), &set.textures, false);
         let shared = if vt.def.script_share || vt.model.script_textures.is_empty() {
             Some(lead.script_textures.as_slice())
         } else {
@@ -340,6 +343,7 @@ impl World {
                 if e.1 == 0 {
                     let id = e.0;
                     tex_ids.remove(&p);
+                    self.reduced_vehicle_paths.lock().remove(&p);
                     renderer.free_texture(scene, id);
                     gpu.free_textures.push(id);
                     textures += 1;
@@ -916,8 +920,7 @@ impl World {
             if only.as_deref().is_some_and(|f| !matches(f, &def.file))
                 || hide.as_deref().is_some_and(|f| matches(f, &def.file))
             {
-                // keep instance numbering stable: an empty placeholder mesh
-                let id = renderer.add_mesh(scene, &MeshData::default());
+                        let id = renderer.add_mesh(scene, &MeshData::default());
                 up.instances.push((id, vec![]));
                 continue;
             }
@@ -1580,3 +1583,4 @@ struct VehicleUpload<'a> {
     variants: Vec<VariantSlot>,
     dyn_slots: Vec<DynSlot>,
 }
+
