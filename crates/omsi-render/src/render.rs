@@ -767,7 +767,9 @@ impl Renderer {
         // and HUD output paths are untouched. Only the primary desktop view
         // owns temporal history: mirrors, VR, photos and triple panels do not.
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        if with_overlays && projection.is_none() && !second_eye && f.lead_view {
+        if with_overlays && projection.is_none() && !second_eye && f.lead_view
+            && (self.dlss_frame_active
+                || omsi_cfg::env::var("OMSI_DLSS_MOTION_DEBUG").ok().as_deref() == Some("1")) {
             if let Some(motion) = self.temporal_gpu.as_mut() {
                 motion.encode(
                     &self.device, &self.queue, &mut enc.prepass,
