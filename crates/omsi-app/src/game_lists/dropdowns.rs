@@ -140,9 +140,26 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
         }
         "pick" => {
             if let Some((key, value)) = arg.split_once(' ') {
+                // Never accept a stale GPU dropdown selection from a non-DX12 session.
+                if key == "dlss" && !(app.settings.graphics_api == "dx12"
+                    && app.renderer.as_ref().is_some_and(|r| r.dlss_supported_backend())
+                    && !app.vr_active() && !app.settings.triple.enabled) {
+                    return;
+                }
                 let before = app.settings.mirror_hud;
                 remember_setting(key, value);
+                if key == "dlss" && value != "off" {
+                    remember_setting("upscaler", "default");
+                } else if key == "upscaler" && value == "fsr1" {
+                    remember_setting("dlss", "off");
+                }
                 reload_settings(app);
+                if key == "dlss" {
+                    app.service_msg = Some((
+                        omsi_ui::tr("Takes effect when the game starts the next time").into_owned(),
+                        5.0,
+                    ));
+                }
                 if key == "light_shadows" && value == "all" && app.renderer.as_ref().is_some_and(|r| !r.lamp_cube_maps()) {
                     app.service_msg = Some((omsi_ui::tr("Takes effect when the game starts the next time").into_owned(), 5.0));
                 }
@@ -273,6 +290,11 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
         "msaa" => vec![("1", "Off"), ("2", "2x MSAA"), ("4", "4x MSAA"), ("8", "8x MSAA")],
         "render_scale" => vec![("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")],
         "upscaler" => vec![("default", "Standard (Catmull-Rom)"), ("fsr1", "AMD FSR 1 (experimental)")],
+        "dlss" => vec![
+            ("off", "Off"), ("dlaa", "DLAA (native resolution)"),
+            ("quality", "DLSS Quality"), ("balanced", "DLSS Balanced"),
+            ("performance", "DLSS Performance"), ("ultra_performance", "DLSS Ultra Performance"),
+        ],
         "fsr_quality" => vec![("ultra", "Ultra Quality (77%)"), ("quality", "Quality (67%)"), ("balanced", "Balanced (59%)"), ("performance", "Performance (50%)"), ("auto", "Automatic (keeps the frame rate)"), ("custom", "Use render scale")],
         "anisotropy" => vec![("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")],
         "shadow_size" => vec![("1024", "1024"), ("2048", "2048"), ("4096", "4096")],
