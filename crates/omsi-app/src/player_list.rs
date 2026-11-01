@@ -132,7 +132,8 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                     (tr("Voice chat: audible. Mute them"), format!("vmute {}", t.tag()))
                 },
             ];
-            // A local text mute: never sends anything to the host or retains an identifier.
+            // A local text mute: only stores this session's player id in memory,
+            // never sending a mute command or player data to the host.
             if text_muted {
                 out.push((tr("Text chat: hidden. Show their messages"), format!("tunmute {}", t.tag())));
             } else {
