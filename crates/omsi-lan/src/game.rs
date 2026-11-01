@@ -228,6 +228,9 @@ pub struct RemoteChanges {
 #[derive(Default)]
 pub struct Chat {
     pub lines: Vec<String>,
+    /// Player ids whose text this client chose not to receive. Session-local;
+    /// this never changes the server's moderation policy or other clients.
+    pub muted_text_ids: hashbrown::HashSet<u32>,
     /// The line being typed: '/' or a click on the chat opens it, Enter sends it, Escape
     /// drops it.
     pub typing: Option<String>,
@@ -244,6 +247,10 @@ pub struct Chat {
 }
 
 impl Chat {
+    fn accepts_event(&self, event: &LanEvent) -> bool {
+        !matches!(event, LanEvent::Chat { id, mine: false, .. } if self.muted_text_ids.contains(id))
+    }
+
     fn push(&mut self, line: String) {
         self.lines.push(line);
         let over = self.lines.len().saturating_sub(CHAT_KEEP);
@@ -2307,6 +2314,9 @@ pub fn tick_receive(
         }
     }
     for e in lan.take_events() {
+        if !game.chat.accepts_event(&e) {
+            continue;
+        }
         if let LanEvent::Chat { name, text, .. } = &e {
             // (for the plugins' `lan_chat`, a few kept while nobody takes them)
             if game.plugin_chat.len() < 32 {
@@ -2328,6 +2338,7 @@ pub fn tick_receive(
         return updates;
     }
     for id in gone {
+        game.chat.muted_text_ids.remove(&id);
         lan.unsubscribe_script_textures(id);
         if let Some(rv) = game.remotes.remove(&id) {
             log::info!("LAN: no longer drawing player {id} '{}'", rv.name);
@@ -2802,3 +2813,23 @@ pub use tag::tag_text;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod text_chat_mute_tests {
+    use super::*;
+
+    #[test]
+    fn local_text_mute_filters_only_that_peer_and_never_local_messages() {
+        let mut chat = Chat::default();
+        chat.muted_text_ids.insert(7);
+        let msg = |id, mine| LanEvent::Chat {
+            id, name: "Driver".into(), text: "test".into(), mine,
+        };
+        assert!(!chat.accepts_event(&msg(7, false)));
+        assert!(chat.accepts_event(&msg(7, true)));
+        assert!(chat.accepts_event(&msg(8, false)));
+        assert!(chat.accepts_event(&LanEvent::Notice("joined".into())));
+        chat.muted_text_ids.remove(&7);
+        assert!(chat.accepts_event(&msg(7, false)));
+    }
+}
