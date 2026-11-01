@@ -271,6 +271,10 @@ pub struct Renderer {
     dlss_beta: Option<dlss_beta::DlssBeta>,
     #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
     dlss_frame_active: bool,
+    /// Internal scene pixels divided by the final window pixels, for DLSS
+    /// texture LOD only (1.0 for DLAA and when the DLSS pass is inactive).
+    #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+    dlss_render_scale: f32,
 }
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
