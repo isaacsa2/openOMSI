@@ -12,7 +12,7 @@ default = ["test-hooks"]
 test-hooks = []
 # The public MIT Streamline adapter is staged for the current renderer; disabled by default.
 # Activating this does not yet enable DLSS in the game (see docs/NVIDIA_DLSS.md).
-nvidia-dlss-experimental = ["dep:wgpu-hal"]
+nvidia-dlss-experimental = ["dep:wgpu-hal", "dep:windows-core"]
 
 [dependencies]
 omsi-cfg = { path = "../omsi-cfg" }
@@ -31,6 +31,7 @@ winit.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Direct3D12", "Win32_Foundation", "Win32_System_LibraryLoader"] }
 wgpu-hal = { workspace = true, features = ["dx12"], optional = true }
+windows-core = { version = "0.62", optional = true }
 # (the same glow as wgpu's GL backend, to turn ANGLE's parallel shader compiles off)
 glow = "0.17"
 
