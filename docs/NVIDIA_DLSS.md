@@ -1,6 +1,6 @@
 # NVIDIA DLSS Super Resolution / DLAA (integration work in progress)
 
-Status: **experimental adapter and standalone motion-vector generation — NOT playable DLSS**.
+Status: **opt-in Windows/DX12 beta implementation present — native RTX runtime and image quality NOT verified yet**.
 
 This branch is dedicated to DLSS Super Resolution and DLAA only. It does not implement DLSS Frame Generation, NVIDIA Reflex or neural rendering. No NVIDIA DLLs, model weights, proprietary headers or binaries are included in this repository.
 
@@ -18,6 +18,10 @@ This branch is dedicated to DLSS Super Resolution and DLAA only. It does not imp
 - `temporal_motion.rs` maintains camera/model history keyed by (scene ID, instance draw order, material slot), preserving identity across GPU entry reordering and resetting after teleports, turns, FOV/resolution changes and new maps.
 - `temporal_motion.wgsl` reproduces the PR's camera + moving-model vectors and sky reprojection with the current `vs_depth`, material cutout and transmap logic.
 - `temporal_gpu.rs` generates a separate RG32Float motion texture and depth attachment using the current modular batches. It runs ONLY on Windows with the experimental feature and an explicit diagnostic flag, and does not alter any player's picture.
+- `dlss_beta.rs` now provides the opt-in experimental desktop SR/DLAA presentation path: select `OMSI_DLSS_BETA=quality|balanced|performance|ultra_performance|dlaa`, load the user-provided **official** Streamline runtime, render the 3D scene at Streamline's requested size, evaluate native D3D12 and compose the full-resolution output with the unscaled HUD. This path uses a temporal projection jitter; the motion and camera matrices remain unjittered.
+- `dlss_present.wgsl` presents NVIDIA's full-size output without running it through the ordinary spatial upscaler. When initialization or evaluation fails, the game renders the ordinary picture; the experimental path remains off for that session.
+- `.github/workflows/dlss-beta-windows.yml` packages a Windows game executable and beta-test instructions **without** any NVIDIA DLLs. See `docs/NVIDIA_DLSS_BETA_TEST.md`.
+
 - The application now accepts and round-trips `dlss=off|dlaa|quality|balanced|performance|ultra_performance` in `settings.cfg`. The value is intentionally **not yet wired to the renderer** and has no effect on the image. This preserves existing graphics settings while the integration is developed.
 - `.github/workflows/dlss-adapter.yml` compiles the Windows-only native feature and exercises portable mode tests on Linux; failures from those jobs are treated as blockers, not ignored.
 - The Windows/D3D12 Streamline adapter from the MIT PR is kept behind the **off-by-default** Cargo feature `nvidia-dlss-experimental`. It has **not** yet been integrated with the current renderer and **must not** be described as working DLSS.
@@ -25,10 +29,10 @@ This branch is dedicated to DLSS Super Resolution and DLAA only. It does not imp
 
 ## Remaining work before a playable implementation
 
-1. **Motion-vector milestone implemented for diagnostic verification:** evaluate the RG32Float output in a compatible GPU, compare moving buses and a rotating camera, and test how tree sway and transparent surfaces behave. The jitter Halton calculation is implemented, but still needs to be applied to the actual camera projection when DLSS is running.
-2. Integrate the diagnostic motion/depth textures with the DLSS Streamline evaluation and D3D12 command submission *after* the 3D scene but *before* HUD overlays; verify wgpu queue ordering, texture states, lifetime, command allocator reuse and GPU fences. Audit all unsafe sections.
+1. Motion vectors and Halton jitter have been integrated into the opt-in beta frame; **verify them on a real RTX GPU** (moving buses, camera pans, trees, alpha-cutouts, rain and reflections). No real-GPU execution has been proven.
+2. The opt-in beta has Streamline evaluation and HUD composition in source; **validate** wgpu/D3D12 queue ordering, texture state restoration, lifetime, command allocator reuse and GPU fences. Audit all unsafe sections before upstream.
 3. Add a separate DLSS output texture and an sRGB-correct final pass; do not apply standard upscaling, FSR, FXAA, or MSAA concurrently with DLSS.
-4. Wire settings and launcher/game menus **only when the native integration is functioning**, with the default `off`, RTX/DX12 capability detection, and localised help/diagnostics.
+4. Wire the validated beta into user-facing settings and launcher/game menus after native runtime validation. The `settings.cfg` `dlss=` preference is currently stored but **not active**; beta selection is via environment variable only.
 5. Ensure fallback reinstates the previous complete graphics path (MSAA, FXAA, scale and any required pipeline state), even when a Windows/NVIDIA device fails to load the DLLs.
 6. Verify regular Windows, Linux, macOS and Android builds, shader validation on GL/Vulkan, and GPU runtime tests on compatible RTX hardware. Benchmark frametime and check ghosting, alpha cutouts, transparent objects, moving vehicles, glass, mirrors, VR and device loss.
 
@@ -46,7 +50,7 @@ Windows compile check for the experimental native adapter and motion pass (not a
 cargo check -p omsi-render --features nvidia-dlss-experimental --target x86_64-pc-windows-msvc
 ```
 
-For a Windows/DX12 **diagnostic run only** (build with `nvidia-dlss-experimental`), set `OMSI_DLSS_MOTION_DEBUG=1` before launching the game. It generates motion/depth targets in the main desktop view without changing the final image. Do not set this for ordinary gameplay.
+For a Windows/DX12 **diagnostic run only** (build with `nvidia-dlss-experimental`), set `OMSI_DLSS_MOTION_DEBUG=1` before launching the game. It generates motion/depth targets in the main desktop view without changing the final image. To test native DLSS output instead, see the dedicated beta guide.
 
 A successful build does **not** prove Streamline initialization, DLSS image quality or NVIDIA licensing compliance.
 
