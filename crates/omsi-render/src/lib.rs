@@ -18,8 +18,8 @@
 pub mod angle;
 pub mod atmosphere;
 pub mod clouds;
-// Opt-in integration workspace; no DLSS paths are active in the released renderer.
-#[cfg(feature = "nvidia-dlss-experimental")]
+// The portable DLSS mode and fallback tests are always compiled. The native
+// Streamline runtime remains behind the opt-in nvidia-dlss-experimental feature.
 pub mod nvidia_dlss;
 mod cookies;
 pub use cookies::{Cookie, COOKIE_LAYERS};
