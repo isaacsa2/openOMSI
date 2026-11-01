@@ -307,6 +307,9 @@ impl Renderer {
         }
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
         if let Some(mut beta) = self.dlss_beta.take() {
+            if self.errors.dlss_error.load(std::sync::atomic::Ordering::Relaxed) {
+                beta.disable_on_validation_error();
+            }
             let shown = beta.render(self, scene, target, width, height, camera, lighting);
             self.dlss_beta = Some(beta);
             if shown { return; }
