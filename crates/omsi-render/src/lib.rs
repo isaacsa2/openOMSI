@@ -24,6 +24,8 @@ pub mod nvidia_dlss;
 mod temporal_motion;
 #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
 mod temporal_gpu;
+#[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+mod dlss_beta;
 mod cookies;
 pub use cookies::{Cookie, COOKIE_LAYERS};
 mod gpu_memory;
@@ -265,6 +267,8 @@ pub struct Renderer {
     /// Off-by-default diagnostic GPU motion pass; no DLSS evaluation or image changes.
     #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
     temporal_gpu: Option<temporal_gpu::TemporalGpu>,
+    #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+    dlss_beta: Option<dlss_beta::DlssBeta>,
 }
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
