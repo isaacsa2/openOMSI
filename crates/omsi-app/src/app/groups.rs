@@ -58,6 +58,10 @@ pub(crate) struct NetState {
     /// LAN session, and the other players' buses (drawn and heard like AI vehicles) with the
     /// chat line.
     pub(crate) lan: Option<omsi_net::LanSession>,
+    /// The session's short code (`123-456-789`, `omsi_net::short_code`) while this game hosts
+    /// it, and when that was last looked at.
+    pub(crate) short_code: Option<omsi_net::short_code::Registration>,
+    pub(crate) short_code_checked: Option<std::time::Instant>,
     /// Negotiate once per welcome/reconnect; never poll old servers every 180 frames.
     pub(crate) speed_limit_welcome: Option<u32>,
     /// Set only by the dedicated server's teleport capability response.

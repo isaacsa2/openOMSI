@@ -70,7 +70,8 @@ function JoinByCode() {
       const check = await call('check_join', { text: asked });
       if (id !== request.current) return;
       if (!check.ok) return setResult({ code: asked, error: check.text });
-      if (!/^OMSI-/i.test(asked)) return setResult({ code: asked, validated: true });
+      // (a session code, or a short code - 123-456-789 - that leads to one: their host is asked)
+      if (!/^OMSI-/i.test(asked) && !/^[1-9]\d{2}[- ]?\d{3}[- ]?\d{3}$/.test(asked)) return setResult({ code: asked, validated: true });
       setResult({ code: asked, busy: true, validated: true });
       try {
         const host = await call('server_query', { address: asked });
@@ -105,7 +106,7 @@ function JoinByCode() {
         <div class="field">
           <label for="multiplayer-code">${t('Session code')}</label>
           <div class="row multiplayer-code-row">
-            <${Input} id="multiplayer-code" value=${code} placeholder="OMSI-XXXX-XXXX-..." onInput=${edit}
+            <${Input} id="multiplayer-code" value=${code} placeholder="123-456-789 / OMSI-XXXX-XXXX-..." onInput=${edit}
               aria-describedby="multiplayer-code-help multiplayer-code-status" aria-invalid=${!!current?.error}
               onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); confirm(); } }} />
             <${Button} kind=${host || current?.unavailable ? '' : 'primary'} label=${host ? 'Check again' : 'Confirm session'} icon="search" disabled=${!code.trim() || current?.busy} onClick=${confirm} />

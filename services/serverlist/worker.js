@@ -11,9 +11,16 @@
 //   POST /v1/unlist     {id, token}                -> 204
 //   GET  /v1/servers    -> {servers: [{id, address, name, motd, map, players, max_players, version, protocol, has_icon, age}]}
 //   GET  /v1/servers/<id>/icon.png
+//
+// Short join codes (codes.js): a game hosting a session gets nine digits for its session code.
+//   POST /v1/codes          {code}                 -> {short, token, ttl}
+//   POST /v1/codes/refresh  {short, token, code?}  -> {ttl}   (every minute while it hosts)
+//   POST /v1/codes/release  {short, token}         -> 204
+//   GET  /v1/codes/<nine digits>                   -> {code}
 
 import { DurableObject } from "cloudflare:workers";
 import { TTL_MS, MIN_BEAT_MS, REVERIFY_MS, MAX_LISTINGS, MAX_PER_SOURCE, REGISTERS_PER_HOUR, MAX_BODY, Limiter, checkRegistration, checkIcon, statusProves, sourceKey, hex } from "./logic.js";
+import { Codes, CODES_PER_HOUR, LOOKUPS_PER_MINUTE, drawShort, shortDigits } from "./codes.js";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -38,12 +45,46 @@ export class List extends DurableObject {
     this.listings = new Map();
     // (a source is kept as a hash for the limits only, and forgotten with its listings)
     this.registers = new Limiter(REGISTERS_PER_HOUR, 60 * 60 * 1000);
+    this.codes = new Codes();
+    this.codeRegisters = new Limiter(CODES_PER_HOUR, 60 * 60 * 1000);
+    this.lookups = new Limiter(LOOKUPS_PER_MINUTE, 60 * 1000);
     this.swept = 0;
   }
 
   forget(now) {
     for (const [id, l] of this.listings) if (l.beat < now - TTL_MS) this.listings.delete(id);
-    if (now - this.swept > 60000) { this.registers.sweep(now); this.swept = now; }
+    if (now - this.swept > 60000) {
+      this.registers.sweep(now);
+      this.codeRegisters.sweep(now);
+      this.lookups.sweep(now);
+      this.codes.sweep(now);
+      this.swept = now;
+    }
+  }
+
+  async codeRegister(body, ip) {
+    const now = Date.now();
+    this.forget(now);
+    if (!this.codeRegisters.allow(await sha256("code" + sourceKey(ip)), now)) return { status: 429, body: { error: "too many codes from this address: try again later" } };
+    const token = randomHex(16);
+    const r = this.codes.register(body.code, await sha256(token), now, () => drawShort(crypto.getRandomValues(new Uint32Array(1))[0]));
+    if (r.status === 201) r.body.token = token;
+    return r;
+  }
+
+  async codeRefresh(body) {
+    return this.codes.refresh(String(body.short), await sha256(String(body.token)), body.code, Date.now());
+  }
+
+  async codeRelease(body) {
+    return this.codes.release(String(body.short), await sha256(String(body.token)), Date.now());
+  }
+
+  async codeLookup(short, ip) {
+    const now = Date.now();
+    this.forget(now);
+    if (!this.lookups.allow(await sha256("look" + sourceKey(ip)), now)) return { status: 429, body: { error: "too many lookups: try again in a minute" } };
+    return this.codes.lookup(short, now);
   }
 
   async register(body, ip) {
@@ -165,6 +206,18 @@ async function handle(request, env, ctx) {
     if (!b) return json({ error: "not a JSON object (or too big)" }, 400);
     const r = url.pathname === "/v1/register" ? await list.register(b, ip) : url.pathname === "/v1/heartbeat" ? await list.heartbeat(b) : await list.unlist(b);
     return r.status === 204 ? new Response(null, { status: 204, headers: CORS }) : json(r.body, r.status);
+  }
+  const codeRoutes = { "/v1/codes": "codeRegister", "/v1/codes/refresh": "codeRefresh", "/v1/codes/release": "codeRelease" };
+  if (request.method === "POST" && codeRoutes[url.pathname]) {
+    const b = await bodyOf(request);
+    if (!b) return json({ error: "not a JSON object (or too big)" }, 400);
+    const r = await list[codeRoutes[url.pathname]](b, ip);
+    return r.status === 204 ? new Response(null, { status: 204, headers: CORS }) : json(r.body, r.status, { "Cache-Control": "no-store" });
+  }
+  const code = url.pathname.match(/^\/v1\/codes\/([0-9-]{9,11})$/);
+  if (request.method === "GET" && code && shortDigits(code[1])) {
+    const r = await list.codeLookup(shortDigits(code[1]), ip);
+    return json(r.body, r.status, { "Cache-Control": "no-store" });
   }
   if (request.method === "GET" && url.pathname === "/v1/servers") {
     // (cached at the edge for a few seconds: the launchers of everybody ask the same)

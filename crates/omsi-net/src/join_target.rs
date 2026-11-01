@@ -46,6 +46,9 @@ pub fn describe_join(text: &str) -> Result<String, String> {
             at.join(" or ")
         ));
     }
+    if let Some(d) = short_code::parse(t) {
+        return Ok(format!("a short code ({}), looked up online for the session it leads to", short_code::format(&d)));
+    }
     if t.bytes().all(|b| b.is_ascii_digit()) {
         return match t.parse::<u32>() {
             Ok(p) if (1..=65535).contains(&p) => {
@@ -117,6 +120,9 @@ pub fn parse_join(text: &str) -> Result<JoinTarget, String> {
             session: Some(c.session),
             protocol: Some(c.protocol),
         });
+    }
+    if short_code::parse(t).is_some() {
+        return Err("a short code (123-456-789) is looked up online first (official::resolve_target)".into());
     }
     if t.bytes().all(|b| b.is_ascii_digit()) {
         return match t.parse::<u32>() {

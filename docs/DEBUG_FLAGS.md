@@ -406,6 +406,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_AVATARS_DIR` | text | - | use | platform | The folder of the passenger avatars (its pack.json), instead of `avatars` beside the program or in ~/.openomsi. |
 | `OMSI_BACKEND` | text | settings | use | app | vulkan, dx12, metal, gl or angle (dx11, d3d11; Windows): the graphics API tried first (overrides the settings). Set at runtime by the launcher and on Android. |
 | `OMSI_CLOUDFLARED` | text | - | use | net | Path of the cloudflared binary for the LAN tunnel (searched after the game's folder, before the PATH). |
+| `OMSI_CODE_SERVICE` | text | - | use | net | The short join code service (https://) in place of the server list's Worker, or off: no short codes (nothing is sent; the long session code works as before). |
 | `OMSI_CONTENT` | text | beside the game | use | app, cfg, launcher-core, sim | The content folder (mods, archives, screenshots). Set at runtime on Android and iOS. |
 | `OMSI_CONTENT_ZIP` | text | - | use | cfg | Extra content archives, separated like PATH (as --content-zip). |
 | `OMSI_GUARD_STATE` | text | - | use | guard, launcher-api | Set by the start guard for the process it notes: <pid>:<its state file> (what the watcher reads). |

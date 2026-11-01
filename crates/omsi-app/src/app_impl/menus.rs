@@ -560,7 +560,10 @@ impl crate::App {
     /// Put the session's server code on the clipboard.
     pub(crate) fn copy_server_code(&mut self) {
         // (the host's code; a player or a server's join code or address as it was entered)
-        let Some(code) = self.net.lan.as_ref().and_then(|l| l.code()).map(|c| c.encode()).or_else(|| self.args.lan_join.clone()).filter(|c| !c.trim().is_empty()) else {
+        // (the short code, `123-456-789`, while the code service has given one; the long one
+        // always works)
+        let short = self.net.short_code.as_ref().and_then(|r| r.short());
+        let Some(code) = short.or_else(|| self.net.lan.as_ref().and_then(|l| l.code()).map(|c| c.encode())).or_else(|| self.args.lan_join.clone()).filter(|c| !c.trim().is_empty()) else {
             self.service_msg = Some(("No server code: not in a LAN session or on a server".into(), 3.0));
             return;
         };
