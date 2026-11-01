@@ -1,6 +1,6 @@
 # NVIDIA DLSS / DLAA — private beta-testing instructions
 
-**Experimental, not reviewed or merged.** Built from the dedicated fork PR #371.
+**Experimental, not reviewed or merged.** Built from fork PR #371. The Windows x64 package now has **one game executable**, with DLSS/DLAA compiled in but disabled by default, rather than a separate DLSS edition.
 The Windows binary includes open-source integration code, not NVIDIA DLLs or model weights.
 No implication of affiliation with or endorsement from NVIDIA.
 
@@ -8,8 +8,8 @@ No implication of affiliation with or endorsement from NVIDIA.
 
 - Windows x64, GeForce RTX hardware supported by your NVIDIA driver, and **DirectX 12** as openOMSI's selected backend.
 - NVIDIA Streamline **2.14.1**, obtained independently from official NVIDIA sources under its license. Use its matching `sl.interposer.dll`, `sl.common.dll`, `sl.dlss.dll`, and `nvngx_dlss.dll` in a local SDK runtime directory. Do not extract them from the privately distributed OmniLine build.
-- Existing, legally installed OMSI 2/openOMSI game content. The beta package contains the game and companion launchers for use with an existing, legitimate OMSI 2/openOMSI installation; it is not a complete OMSI content installation.
-- The actual Windows game binary must be compiled with `omsi-render/nvidia-dlss-experimental`.
+- Existing, legally installed OMSI 2/openOMSI game content. The standard Windows package contains the game and companion launchers for use with an existing, legitimate OMSI 2/openOMSI installation; it is not a complete OMSI content installation.
+- The **standard Windows x64 build script** (`scripts/build-windows.cmd`) already compiles the optional native DLSS adapter into `openomsi.exe`. DLSS remains disabled by default. Custom manual `cargo build` commands require `--features omsi-render/nvidia-dlss-experimental`.
 
 ## Run
 
