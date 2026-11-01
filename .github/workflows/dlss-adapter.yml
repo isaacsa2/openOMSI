@@ -49,6 +49,10 @@ jobs:
         run: cargo test --locked -p omsi-render --lib nvidia_dlss
       - name: Test motion history and jitter
         run: cargo test --locked -p omsi-render --lib temporal_motion
+      - name: Test HUD and Alt menu overlay resources after DLSS
+        run: cargo test --locked -p omsi-render --lib restored_desktop_overlays_rebuild_for_final_window_resolution
+      - name: Test DLAA native and DLSS scaled mip quality
+        run: cargo test --locked -p omsi-render --lib temporal_scene_mips_preserve_dlaa_and_improve_low_res_detail
       - name: Validate NVIDIA RTX GPU preflight classification
         run: cargo test --locked -p omsi-launcher-core dlss_gpu
       - name: Validate DLSS launcher settings round-trip
