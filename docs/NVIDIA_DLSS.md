@@ -15,6 +15,8 @@ This branch is dedicated to DLSS Super Resolution and DLAA only. It does not imp
 ## What is in the branch
 
 - `nvidia_dlss.rs` provides portable mode parsing, fallback render-size calculations, and accompanying unit tests. These compile in normal builds without NVIDIA dependencies.
+- The application now accepts and round-trips `dlss=off|dlaa|quality|balanced|performance|ultra_performance` in `settings.cfg`. The value is intentionally **not yet wired to the renderer** and has no effect on the image. This preserves existing graphics settings while the integration is developed.
+- `.github/workflows/dlss-adapter.yml` compiles the Windows-only native feature and exercises portable mode tests on Linux; failures from those jobs are treated as blockers, not ignored.
 - The Windows/D3D12 Streamline adapter from the MIT PR is kept behind the **off-by-default** Cargo feature `nvidia-dlss-experimental`. It has **not** yet been integrated with the current renderer and **must not** be described as working DLSS.
 - The runtime, when eventually connected, is intended to load NVIDIA libraries explicitly from a user-supplied location and to fail cleanly when unsupported.
 
@@ -41,4 +43,6 @@ Windows compile check for the experimental native adapter (not a runtime test):
 cargo check -p omsi-render --features nvidia-dlss-experimental --target x86_64-pc-windows-msvc
 ```
 
-A successful build does **not** prove Streamline initialization, DLSS image quality or NVIDIA licensing compliance. Do not merge this draft until the missing renderer integration and real-GPU evidence are supplied.
+A successful build does **not** prove Streamline initialization, DLSS image quality or NVIDIA licensing compliance.
+
+CI jobs: `DLSS experimental adapter checks` (Windows native feature and Linux portable tests) and the standard `Release` matrix. Keep this PR in Draft until both compile cleanly and RTX hardware validation is documented. Do not merge this draft until the missing renderer integration and real-GPU evidence are supplied.
