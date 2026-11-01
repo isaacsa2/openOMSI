@@ -6,6 +6,7 @@ use crate::*;
 pub(crate) struct ErrorFlags {
     pub gpu_error: Arc<std::sync::atomic::AtomicBool>,
     pub rt_error: Arc<std::sync::atomic::AtomicBool>,
+    pub dlss_error: Arc<std::sync::atomic::AtomicBool>,
     pub out_of_memory: Arc<std::sync::atomic::AtomicBool>,
     pub device_lost: Arc<std::sync::Mutex<Option<String>>>,
 }
@@ -24,6 +25,7 @@ pub(crate) fn install(device: &wgpu::Device, format: wgpu::TextureFormat, option
     // then every thousandth reach the log.
     let gpu_error = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let rt_error = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let dlss_error = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let out_of_memory = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let device_lost: Arc<std::sync::Mutex<Option<String>>> = Default::default();
     {
@@ -40,6 +42,7 @@ pub(crate) fn install(device: &wgpu::Device, format: wgpu::TextureFormat, option
     {
         let flag = gpu_error.clone();
         let rt_flag = rt_error.clone();
+        let dlss_flag = dlss_error.clone();
         let rt_on = options.ray_tracing;
         let oom = out_of_memory.clone();
         let count = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -70,7 +73,14 @@ pub(crate) fn install(device: &wgpu::Device, format: wgpu::TextureFormat, option
                     }
                 }
             }
-            if rt_on {
+            // A DLSS motion/presentation validation error is unrelated to the
+            // Enhanced+ ray tracer: do not disable ray tracing as collateral
+            // damage. Disable the DLSS beta on the next frame instead.
+            if text.contains("DLSS motion") || text.contains("DLSS beta") || text.contains("DLSS output") {
+                if !dlss_flag.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    log::error!("DLSS GPU validation error; disabling DLSS beta (not ray tracing): {text}");
+                }
+            } else if rt_on {
                 // (the ray tracing goes first: the likelier cause, and the dearer feature)
                 if !rt_flag.swap(true, std::sync::atomic::Ordering::Relaxed) {
                     log::error!("GPU error with ray tracing (Enhanced+ draws as Enhanced from now on): {text}");
@@ -102,5 +112,5 @@ pub(crate) fn install(device: &wgpu::Device, format: wgpu::TextureFormat, option
             view_formats: &[],
         });
     }
-    ErrorFlags { gpu_error, rt_error, out_of_memory, device_lost }
+    ErrorFlags { gpu_error, rt_error, dlss_error, out_of_memory, device_lost }
 }
