@@ -663,7 +663,11 @@ mod imp {
                 flags: FLAG_DISABLE_CL_STATE_TRACKING | FLAG_DISABLE_DEBUG_TEXT | FLAG_USE_MANUAL_HOOKING | FLAG_FRAME_BASED_TAGGING,
                 features_to_load: FEATURES.as_ptr(),
                 num_features_to_load: 1,
-                application_id: 0,
+                // NVIDIA documents an application ID for NGX-backed DLSS.
+                // Do not claim the historical placeholder UUID is registered.
+                // Testers with an authorized ID may provide it explicitly.
+                application_id: omsi_cfg::env::var("OMSI_DLSS_APPLICATION_ID")
+                    .ok().and_then(|value| value.parse::<u32>().ok()).unwrap_or(0),
                 // EngineType::eCustom, RenderAPI::eD3D12
                 engine: 0,
                 engine_version: engine_version.as_ptr().cast(),
