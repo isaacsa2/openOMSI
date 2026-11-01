@@ -14,6 +14,9 @@
   main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
   h1 { font-size: 32px; margin: 8px 0 4px; }
   h2 { font-size: 20px; margin: 32px 0 8px; }
+  li { margin: 8px 0; }
+  code { overflow-wrap: anywhere; }
+  strong { color: var(--fg); }
   p, li { color: var(--fg); }
   .muted { color: var(--muted); }
   a { color: var(--accent); }
@@ -24,38 +27,61 @@
 <main>
 <p><a href="../">openOMSI</a></p>
 <h1>Privacy</h1>
-<p class="muted">Applies to openOMSI on every platform, including the iPhone, iPad and Mac apps. Last changed 12 October 2026.</p>
+<p class="muted">Applies to the openOMSI game, launcher and project-run game services on supported platforms, including Windows, Linux, Android, iPhone, iPad and Mac. Last updated 1 November 2026.</p>
 
-<p>openOMSI has no accounts, no advertising, no analytics SDKs and no tracking. Your settings, saved games,
-screenshots and the OMSI 2 content you add stay on your device.</p>
+<p>openOMSI has no player accounts, advertising or third-party analytics SDKs. Most gameplay, settings, save files, screenshots, OMSI 2 content and diagnostics remain on your device. <strong>Some features do communicate data over the network</strong>, including the optional multiplayer features and the "Playing now" counter, which is enabled by default. This page explains the purpose, recipients, controls and known retention of those data flows. It does not cover Discord accounts, Discord servers or their bots.</p>
 
-<h2>"Playing now" counter</h2>
-<p>While a drive runs, the game tells the project's counter service every few minutes that one more copy of
-openOMSI is being played, and says goodbye when the drive ends. It sends a random id made for that session alone
-(a new one every start, not stored on your device), the game's version and the kind of system (for example
-iOS). It sends no name, no device identifier and nothing about what you play. The service forgets an id 25 minutes
-after its last message and does not store IP addresses. The website shows the resulting count. You can switch this
-off in the launcher: Settings, General, "Count me on the website's 'playing now'".</p>
+<h2>1. "Playing now" counter</h2>
+<p>While you drive, the game sends a request to the project's presence service (hosted on Cloudflare) about every ten minutes. The request contains a <strong>new random session identifier</strong> generated at each start, the openOMSI version and the operating-system family (for example Windows, Linux, macOS, Android or iOS). It does <strong>not</strong> include your name, map, vehicle, hardware identifier or a list of what you do in-game. The game sends a goodbye request on exit when possible.</p>
+<p>The service uses these data to show an approximate number of people playing, including totals by operating-system family. The service is designed not to store IP addresses; it forgets a session identifier after <strong>25 minutes</strong> without a message. The hosting network necessarily handles connection metadata, including the source IP, when delivering requests; its own processing is separate from the game's stored counter data.</p>
+<p><strong>Control:</strong> Settings &rarr; General &rarr; "Count me on the website's 'playing now'". It is <strong>on by default</strong> and can be switched off. The <code>OMSI_NO_PRESENCE=1</code> launch flag also disables it. Dedicated servers are not counted.</p>
 
-<h2>Online features you choose to use</h2>
+<h2>2. Multiplayer: information shared with hosts and players</h2>
+<p>If you host or join multiplayer, the game exchanges the information necessary to establish the connection and synchronize the simulation. Depending on the session this includes your chosen driver name, player/session identifiers, IP address or connection endpoint, vehicle and repaint information, position, movement, vehicle state, and game/session events. Other players and the session host may receive the data needed to display or interact with you. The host manages the session; <strong>player-hosted and third-party dedicated servers are operated by their respective owners</strong>, not necessarily by the openOMSI team.</p>
+<p>Connections can use direct UDP, WebSockets, local networking or Cloudflare tunnels. "Connect by Code" may use STUN (including Google and Cloudflare public servers) to discover external network endpoints, UPnP to request router port forwarding, and <a href="https://ntfy.sh/">ntfy.sh</a> as a rendezvous relay for connection addresses. These providers can receive technical connection metadata. The rendezvous service is used to find peers, not to upload the game's simulation data.</p>
+<p>In-game messages and actions are visible to the relevant participants and may be processed or logged by the host for administration. Hosts can use moderation and ban tools. We cannot specify one retention period for independently operated servers: ask the server operator about its logs, moderation records and retention.</p>
+
+<h2>3. Multiplayer machine identifier and bans</h2>
+<p>For machine bans, the client normally sends the host a <strong>128-bit identifier derived using SHA-256</strong> from an operating-system machine identifier (for example Windows MachineGuid, Linux machine-id or macOS IOPlatformUUID). Where one is unavailable, a locally stored random value can be used. The underlying machine identifier is not sent, and this mechanism does not read disk or motherboard serial numbers. However, the derived value is <strong>stable across sessions and shared with each server you join</strong>. Different hosts could therefore compare it; it should not be treated as anonymous.</p>
+<p>Server owners can keep machine-ban records, including the associated name, reason and expiry, in files on their own systems. A ban can expire or persist until an administrator removes it, depending on the action taken. The game also supports server-side administration audit logs that may include names, reasons, chat or command text after filtering; these are local to the server operator and are subject to that operator's retention practices.</p>
+<p><strong>Control:</strong> start the game with <code>OMSI_NO_HARDWARE_ID=1</code> to omit the machine identifier. A server configured to require it may then refuse the connection. See <a href="https://github.com/openOMSI-org/openOMSI/blob/main/docs/SERVER.md">Dedicated server documentation</a> for how bans work.</p>
+
+<h2>4. Multiplayer voice chat</h2>
+<p>Voice chat is <strong>off by default</strong>. When you enable it and transmit (push-to-talk, or open-microphone mode if selected), the game captures microphone audio, encodes short Opus frames and sends them through the multiplayer session to permitted listeners. Nearby voice uses player position; radio voice is session-wide. The server routes compressed frames without decoding them, and the openOMSI voice implementation does not record them to disk or log their audio content. This cannot prevent another participant or a third-party tool from recording what they hear.</p>
+<p><strong>Controls:</strong> Settings &rarr; Sound &rarr; Voice chat; push-to-talk or open mode; player mute controls. Mute preferences are stored locally in <code>~/.openomsi/voice_mutes.txt</code>. The microphone permission is managed by your operating system. For details see <a href="https://github.com/openOMSI-org/openOMSI/blob/main/docs/VOICE.md">Voice chat documentation</a>.</p>
+
+<h2>5. Public server list, server status and shared content</h2>
+<p>A dedicated server operator may opt in to the project's public server directory. In that case the directory receives server information such as its name, description, map, connection address, version, protocol, player count and capacity; it does <strong>not</strong> receive a list of players. Listings expire about <strong>three minutes</strong> after the last heartbeat. The directory uses short-lived connection information and a source-address hash for rate limiting; the server address itself is published so players can connect.</p>
+<p>A server can independently expose a status endpoint containing server and simulation information. If its operator enables <code>share_positions</code> (off by default), a separate <code>/players</code> endpoint can expose players' chosen names, vehicles and live in-game positions to visitors of that server endpoint. The project-wide directory does not turn this on.</p>
+<p>Some multiplayer servers accept or supply maps, mods, vehicles and repaint files. When a server accepts player buses (the documented dedicated-server default), files used by the selected vehicle may be transferred to the host and then to other players. Hosts keep these in their own content store; the documented default for <em>unused</em> uploaded buses is <strong>30 days after last use</strong>, but active/shared files and operator settings can affect this. Check content you share for information you did not intend to distribute. See <a href="https://github.com/openOMSI-org/openOMSI/blob/main/docs/SERVER.md">Server documentation</a>.</p>
+
+<h2>6. Updates, downloads and other online services</h2>
 <ul>
-  <li><b>Multiplayer:</b> when you host or join a session, the other players' games receive what the session needs:
-  the driver name you chose, your vehicle, its position and your network address. Sessions are run by players, not by
-  the project; finding a session may go through a public message relay (ntfy.sh) and Cloudflare tunnels.</li>
-  <li><b>Real weather and internet radio:</b> if you turn them on, the game fetches weather reports
-  (aviationweather.gov) and radio streams directly from those services. They see an ordinary request from your
-  network address.</li>
-  <li><b>Downloads:</b> mods, translation models or other files you choose to download come from the sites they are
-  hosted on (for example GitHub or Hugging Face).</li>
+  <li><strong>Updates:</strong> the launcher and game can check the openOMSI GitHub releases and download build files from GitHub. The check is enabled by default (<code>update_check</code>); automatic installation is a separate setting (<code>update_auto</code>, off by default). The app determines its platform locally to choose the correct release. Requests to GitHub expose ordinary HTTP connection data to GitHub and its delivery infrastructure.</li>
+  <li><strong>Maps, mods and other files:</strong> when you choose a download, or a feature requires its associated asset, a request goes to the relevant host. Depending on the feature, this can include GitHub, the multiplayer host or another content provider. Cached files are stored locally until removed or cleaned by the application's cache management.</li>
+  <li><strong>Machine translation:</strong> if enabled, missing interface translations are generated locally by a downloaded model. Model files come from <a href="https://huggingface.co/">Hugging Face</a>; the text being translated is processed on your machine and translations are cached locally.</li>
+  <li><strong>Real-world weather:</strong> when enabled, weather requests are made to <a href="https://aviationweather.gov/">aviationweather.gov</a>. A dedicated server may fetch weather and distribute the resulting simulation weather to connected players.</li>
+  <li><strong>Internet radio:</strong> selecting online radio connects to the chosen station/stream host, which receives the network request.</li>
+  <li><strong>Hosting assistance:</strong> a game or dedicated server may download or run Cloudflare's <code>cloudflared</code> when tunnelling is used. Cloudflare then handles the network traffic passed through that tunnel.</li>
 </ul>
+<p>External providers can process IP addresses, request metadata and other information under their own policies. We cannot promise that a third party keeps no access logs or uses the same retention period as openOMSI.</p>
+
+<h2>7. Local files, diagnostics and telemetry for external tools</h2>
+<p>Game settings, saved games, caches, content, screenshots and logs are stored locally (on desktop, typically in <code>~/.openomsi</code> and the relevant game/content folders). Logs can contain technical errors and, depending on the event, names, paths, connection details or in-game messages. <strong>Local logs are not the same as automatic uploads.</strong> Consider reviewing any raw log before posting it publicly.</p>
+<p><strong>Support packages:</strong> the game/launcher can create a privacy-filtered diagnostic ZIP containing items such as app and OS versions, graphics backend, GPU/driver, rendering settings, memory and controller information, selected map/vehicle and filtered performance/log events. The package is saved on your device and <strong>not automatically submitted</strong>. You decide whether to attach it to a GitHub issue or send it to someone else. Review it before sharing.</p>
+<p><strong>Local <code>telemetry.json</code>:</strong> the game supports an interface for other programs on your computer. It writes the file only if it already exists; creating the file opts into the feed and deleting it stops writing. While active, it can update roughly twice per second with player bus position, speed, timetable progress, passenger information and AI timetable-bus data. It is a <strong>local file, not an automatic upload to the project</strong>. Another application that reads it has its own responsibilities if it transmits the contents elsewhere.</p>
+<p><strong>Control and deletion:</strong> disable optional online features in Settings; remove local exported ZIPs, logs or caches when no longer needed. Deleting local files cannot remove copies already shared with a multiplayer host, another player or an external provider.</p>
+
+<h2>8. Retention, recipients and privacy requests</h2>
+<p>There is no single retention period for every feature. The project-operated presence counter expires session IDs after 25 minutes; public server directory entries expire after approximately three minutes without an update. Local settings and files stay until you or the application remove them. Independently operated game servers determine their own log and ban retention, and may keep uploaded content as described above. Third-party providers follow their own policies.</p>
+<p>The information described here is processed to operate requested game functions, maintain session security and moderation, provide updates and help diagnose problems when a player chooses to share a report. This explanation does not by itself establish compliance with the laws of every country, or replace any legally required controller, legal-basis or rights information. If you want to ask about information held by project-operated services or request deletion where applicable, contact the project below. For records held by another multiplayer server or a third-party platform, contact its operator.</p>
 
 <h2>Children</h2>
-<p>openOMSI does not knowingly collect personal information from anyone, children included.</p>
+<p>openOMSI does not knowingly seek personal information from children. Online features can still transmit the technical data explained above when used.</p>
 
-<h2>Contact</h2>
-<p>Questions about privacy: open an issue at
-<a href="https://github.com/openOMSI-org/openOMSI/issues">github.com/openOMSI-org/openOMSI/issues</a>
-or ask on <a href="https://discord.gg/openomsi">Discord</a>.</p>
+<h2>Contact and changes</h2>
+<p>For questions or privacy requests about the game, contact the maintainers through <a href="https://github.com/openOMSI-org/openOMSI/issues">GitHub Issues</a> or the <a href="https://discord.gg/openomsi">openOMSI Discord</a>. Do not post personal information, IP addresses, identifiers or diagnostic files in a public issue or channel; ask for an appropriate private contact method first.</p>
+<p>This page will be updated when the game's actual data flows change. For implementation details, see the <a href="https://github.com/openOMSI-org/openOMSI">openOMSI source code</a>.</p>
 
 <hr>
 <p class="muted">openOMSI is an independent project and is not affiliated with MR Software or Aerosoft.</p>
