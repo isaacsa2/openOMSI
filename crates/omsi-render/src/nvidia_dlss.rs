@@ -41,7 +41,7 @@
 //! over its result. Streamline is told the state each tagged resource is in (wgpu's legacy
 //! barriers leave it in the one of its last use) and returns it in that state.
 
-#[cfg(not(windows))]
+#[cfg(not(all(windows, feature = "nvidia-dlss-experimental")))]
 use anyhow::Result;
 
 /// DLSS quality mode: the share of the window's size the 3D picture is drawn at before DLSS
@@ -134,13 +134,13 @@ pub struct FrameConstants {
     pub reset: bool,
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
 pub use imp::Runtime;
 
-#[cfg(not(windows))]
+#[cfg(not(all(windows, feature = "nvidia-dlss-experimental")))]
 pub struct Runtime;
 
-#[cfg(not(windows))]
+#[cfg(not(all(windows, feature = "nvidia-dlss-experimental")))]
 impl Runtime {
     pub fn load(_device: &wgpu::Device, _queue: &wgpu::Queue) -> Result<Runtime> {
         anyhow::bail!("DLSS needs Windows with DirectX 12")
@@ -159,7 +159,7 @@ pub fn fallback_render_size(mode: DlssMode, (w, h): (u32, u32)) -> (u32, u32) {
     (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1))
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
 mod imp {
     use super::{fallback_render_size, DlssMode, FrameConstants, Inputs};
     use anyhow::{anyhow, bail, Context, Result};
