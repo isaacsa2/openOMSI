@@ -24,10 +24,12 @@ struct Targets {
 }
 
 impl DlssBeta {
-    pub(crate) fn requested() -> nvidia_dlss::DlssMode {
+    /// Persisted graphics configuration wins by default; the old environment
+    /// override remains available solely for reproducible development runs.
+    pub(crate) fn requested(saved: nvidia_dlss::DlssMode) -> nvidia_dlss::DlssMode {
         omsi_cfg::env::var("OMSI_DLSS_BETA").ok()
             .map(|v| nvidia_dlss::DlssMode::parse(&v))
-            .unwrap_or_default()
+            .unwrap_or(saved)
     }
 
     pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat, mode: nvidia_dlss::DlssMode) -> Self {
