@@ -2235,6 +2235,14 @@ fn fsr_quality_setting(val: &str) -> &'static str {
     }
 }
 
+fn mouse_pedal_strength_setting(val: &str) -> f64 {
+    val.parse::<f64>()
+        .ok()
+        .filter(|x| x.is_finite())
+        .unwrap_or(1.0)
+        .clamp(0.25, 4.0)
+}
+
 pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     let mut v = json!({ "msaa": 4, "anisotropy": 8, "ssao": true, "shadows": true, "shadow_size": 2048, "navigator": true, "ui_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "video_memory": 0, "texture_compression": true, "gpu_texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "cloud_quality": "high", "rain_quality": "high", "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "ambient": true, "vol_ambient": 0.8, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
     v["upscaler"] = json!("default");
@@ -2439,15 +2447,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "key_pedal_speed" => v[&k] = json!(val.parse::<f64>().unwrap_or(1.0).clamp(0.25, 2.0)),
             "touch_pedal_length" => v[&k] = json!(val.parse::<f64>().unwrap_or(1.0).clamp(0.8, 1.6)),
             "touch_pedal_deadzone" => v[&k] = json!(val.parse::<f64>().unwrap_or(0.15).clamp(0.0, 0.4)),
-            "mouse_pedal_strength" => {
-                v[&k] = json!(
-                    val.parse::<f64>()
-                        .ok()
-                        .filter(|x| x.is_finite())
-                        .unwrap_or(1.0)
-                        .clamp(0.25, 4.0)
-                )
-            }
+            "mouse_pedal_strength" => v[&k] = json!(mouse_pedal_strength_setting(val)),
             "ui_scale" | "nav_size" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).unwrap_or(1.0).clamp(if k == "ui_scale" { 0.5 } else { 0.6 }, 2.0)),
             "chat_size" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).unwrap_or(1.0).clamp(0.5, 3.0)),
             "wheel_range" => v[&k] = json!(val.parse::<f64>().unwrap_or(900.0).clamp(90.0, 2880.0)),
