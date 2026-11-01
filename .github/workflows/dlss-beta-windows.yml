@@ -1,0 +1,39 @@
+name: NVIDIA DLSS beta Windows build
+
+on:
+  push:
+    branches:
+      - feat/nvidia-dlss-streamline-opt-in
+    paths:
+      - '.github/workflows/dlss-beta-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  beta-build:
+    name: Build Windows x64 DLSS / DLAA test binary
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build beta game with optional DX12 Streamline runtime
+        shell: pwsh
+        run: cargo build --locked --release --package omsi-app --bin openomsi --features omsi-render/nvidia-dlss-experimental --target x86_64-pc-windows-msvc
+      - name: Package executable and beta-test guide (NVIDIA DLLs are never included)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dlss-beta | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/openomsi.exe dlss-beta/openomsi.exe
+          Copy-Item docs/NVIDIA_DLSS_BETA_TEST.md dlss-beta/README_DLSS_BETA.md
+          Copy-Item docs/NVIDIA_DLSS_THIRD_PARTY_NOTICES.txt dlss-beta/THIRD_PARTY_NOTICES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openOMSI-DLSS-beta-windows-x64
+          path: dlss-beta/
+          retention-days: 7
+          if-no-files-found: error
