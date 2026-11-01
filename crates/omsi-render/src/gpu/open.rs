@@ -726,6 +726,7 @@ impl Renderer {
             errors: GpuErrors {
                 gpu_error: errors.gpu_error,
                 rt_error: errors.rt_error,
+                dlss_error: errors.dlss_error,
                 out_of_memory: errors.out_of_memory,
                 device_lost: errors.device_lost,
             },
