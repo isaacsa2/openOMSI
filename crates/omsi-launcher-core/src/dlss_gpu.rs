@@ -16,6 +16,12 @@ pub fn nvidia_rtx_candidate(vendor: u32, name: &str) -> bool {
 /// the renderer must recheck the *actual* device before enabling DLSS.
 #[cfg(windows)]
 pub fn dlss_gpu_candidate() -> bool {
+    static RTX_PRESENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *RTX_PRESENT.get_or_init(enumerate_rtx_adapters)
+}
+
+#[cfg(windows)]
+fn enumerate_rtx_adapters() -> bool {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
     let Ok(factory) = (unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }) else {
         return false;
