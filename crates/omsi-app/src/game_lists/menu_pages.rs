@@ -584,11 +584,34 @@ mod tests {
 
 /// The upscaler's rows of the graphics page (after the render scale's): the upscaler, and
 /// FSR 1's quality and sharpening while it is chosen.
+/// DX12 must be both requested and confirmed by the active GPU.
+fn dlss_option_visible(api: &str, dx12_device: bool, vr_active: bool, triple_screen: bool) -> bool {
+    api == "dx12" && dx12_device && !vr_active && !triple_screen
+}
+
+#[cfg(test)]
+mod dlss_menu_tests {
+    use super::dlss_option_visible;
+
+    #[test]
+    fn dlss_selector_is_only_for_a_real_dx12_desktop_view() {
+        assert!(dlss_option_visible("dx12", true, false, false));
+        for api in ["auto", "vulkan", "gl", "angle", "metal"] {
+            assert!(!dlss_option_visible(api, true, false, false));
+        }
+        assert!(!dlss_option_visible("dx12", false, false, false));
+        assert!(!dlss_option_visible("dx12", true, true, false));
+        assert!(!dlss_option_visible("dx12", true, false, true));
+    }
+}
+
 fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
-    let dlss_available = app.settings.graphics_api == "dx12"
-        && app.renderer.as_ref().is_some_and(|r| r.dlss_supported_backend())
-        && !app.vr_active()
-        && !app.settings.triple.enabled;
+    let dlss_available = dlss_option_visible(
+        &app.settings.graphics_api,
+        app.renderer.as_ref().is_some_and(|r| r.dlss_supported_backend()),
+        app.vr_active(),
+        app.settings.triple.enabled,
+    );
     let fsr = app.settings.upscaler == "fsr1" && (!dlss_available || app.settings.dlss == "off");
     let pct = |v: f32| format!("{:.0} %", v * 100.0);
     [
