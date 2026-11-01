@@ -11,6 +11,27 @@ pub(crate) struct ErrorFlags {
     pub device_lost: Arc<std::sync::Mutex<Option<String>>>,
 }
 
+/// Distinguish NVIDIA temporal passes from the optional Enhanced+ ray tracer.
+/// Both can be enabled at once; only the subsystem which failed should fall back.
+fn is_dlss_validation_error(text: &str) -> bool {
+    ["DLSS motion", "DLSS beta", "DLSS output"]
+        .iter()
+        .any(|marker| text.contains(marker))
+}
+
+#[cfg(test)]
+mod dlss_gpu_error_tests {
+    use super::is_dlss_validation_error;
+    #[test]
+    fn temporal_sky_bind_group_error_is_not_a_ray_tracing_error() {
+        let text = "In a CommandEncoder, label = 'depth prepass' In a draw command, kind: Draw The current set RenderPipeline with 'DLSS motion sky' label expects a BindGroup to be set at index 0";
+        assert!(is_dlss_validation_error(text));
+        assert!(is_dlss_validation_error("DLSS beta output invalid resource"));
+        assert!(!is_dlss_validation_error("Enhanced+ ray tracing pipeline failed"));
+        assert!(!is_dlss_validation_error("4x MSAA unsupported"));
+    }
+}
+
 /// Errors about invalid GPU resources within five seconds that mean the device is gone: a frame
 /// with one bad texture makes one or two (60 a second); a dead device makes hundreds a second.
 const INVALID_FLOOD: u64 = 1500;
@@ -76,7 +97,7 @@ pub(crate) fn install(device: &wgpu::Device, format: wgpu::TextureFormat, option
             // A DLSS motion/presentation validation error is unrelated to the
             // Enhanced+ ray tracer: do not disable ray tracing as collateral
             // damage. Disable the DLSS beta on the next frame instead.
-            if text.contains("DLSS motion") || text.contains("DLSS beta") || text.contains("DLSS output") {
+            if is_dlss_validation_error(&text) {
                 if !dlss_flag.swap(true, std::sync::atomic::Ordering::Relaxed) {
                     log::error!("DLSS GPU validation error; disabling DLSS beta (not ray tracing): {text}");
                 }
