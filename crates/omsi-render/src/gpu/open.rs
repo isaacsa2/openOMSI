@@ -592,6 +592,8 @@ impl Renderer {
             temporal_gpu,
             #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
             dlss_beta,
+            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+            dlss_frame_active: false,
             targets: Targets {
                 scale_targets: HashMap::new(),
                 triple_targets: None,
