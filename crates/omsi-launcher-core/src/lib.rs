@@ -10,6 +10,7 @@
 pub mod ai_lists;
 pub mod crash;
 pub mod depot;
+pub mod dlss_gpu;
 pub mod index;
 pub mod install;
 pub mod instances;
