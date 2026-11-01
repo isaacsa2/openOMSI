@@ -232,10 +232,15 @@ impl TemporalGpu {
             }),
             timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
         });
+        // The sky pipeline shares the scene's pipeline layout with meshes.
+        // wgpu validates group(0) even for the fullscreen sky draw, so the
+        // active camera bind group MUST be bound before its first draw.
+        // Binding it only for the later mesh batches triggered a GPU validation
+        // error ("DLSS motion sky expects a BindGroup at index 0").
+        pass.set_bind_group(0, scene.camera_bind_group.as_ref(), &[]);
         pass.set_bind_group(3, Some(&self.bind_group), &[]);
         pass.set_pipeline(&self.sky);
         pass.draw(0..3, 0..1);
-        pass.set_bind_group(0, scene.camera_bind_group.as_ref(), &[]);
         encode_batches(&mut pass, scene, batches, |pipe| &self.pipelines[pipe as usize]);
         drop(pass);
         // This state belongs only to a *desktop main view*, never a mirror or VR eye.
