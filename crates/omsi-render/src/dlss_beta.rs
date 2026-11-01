@@ -169,12 +169,21 @@ impl DlssBeta {
         // after Streamline, at the *actual window size*.
         let overlays = std::mem::take(&mut scene.overlays);
         let overlay_res = std::mem::take(&mut scene.overlay_res);
+        // For DLSS Quality/Balanced/etc, request the source texture mip
+        // corresponding to the *output* pixels, not the lower render size.
+        // DLAA (scale 1.0) keeps the original LOD and textures are never resized.
+        renderer.dlss_render_scale = render_size.0 as f32 / width as f32;
         renderer.dlss_frame_active = true;
         renderer.render_inner(scene,&targets.color_view,render_size.0,render_size.1,camera,lighting,true,None,None,false);
         renderer.dlss_frame_active = false;
+        renderer.dlss_render_scale = 1.0;
+        // begin_frame() called from render_inner() truncated overlay_res while
+        // scene.overlays was empty. Restore the original HUD and PREPARE its
+        // GPU bind groups for the real window dimensions before final present.
         scene.overlays = overlays;
         scene.overlay_res = overlay_res;
         renderer.options = saved;
+        renderer.prepare_overlays(scene, width, height);
         let Some(motion) = renderer.temporal_gpu.as_ref() else {
             log::warn!("DLSS beta: temporal GPU resources were not initialized");
             self.failed = true;
