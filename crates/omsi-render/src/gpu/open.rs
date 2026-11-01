@@ -571,7 +571,18 @@ impl Renderer {
         });
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
         let cookie_atlas = cookies::CookieAtlas::new();
+        // Diagnostic-only motion target: inert without feature + explicit env flag.
+        // Do not enable this until NVIDIA Streamline is integrated and verified.
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        let temporal_gpu = if omsi_cfg::env::var("OMSI_DLSS_MOTION_DEBUG").ok().as_deref() == Some("1")
+            && !GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed) {
+            Some(temporal_gpu::TemporalGpu::new(&device, &scene))
+        } else {
+            None
+        };
         Renderer {
+            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+            temporal_gpu,
             targets: Targets {
                 scale_targets: HashMap::new(),
                 triple_targets: None,
