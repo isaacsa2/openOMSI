@@ -87,7 +87,6 @@ impl TrafficSim {
             };
             let gap = d - st.front;
             let comfortable = v * v / (2.0 * st.decel * 1.4) + 1.0;
-            let possible = v * v / (2.0 * MAX_BRAKE * 0.8);
             let on_its_way = amber_holds(v, gap) || (started && amber == Some((c, li)) && v > 0.3);
             let go = match TrafficLightController::aspect(ctl.state(li)) {
                 Aspect::Green | Aspect::Dark => {
@@ -111,11 +110,11 @@ impl TrafficSim {
                         false
                     }
                 }
-                // decided to go on yellow and too close to stop now, or past stopping at all
-                // (a car that stands cannot fail to stop: with its nose over the line it
-                // stays where it is)
+                // Only cars that actually committed on green or yellow may clear a red.
+                // Being too close to stop at the current speed is not permission to enter
+                // a junction that was already red when the car arrived (#818).
                 Aspect::Red | Aspect::RedYellow => {
-                    let go = (amber == Some((c, li)) && on_its_way && gap < comfortable) || (v > 1.0 && gap < possible - 0.5);
+                    let go = red_entry_allowed(amber == Some((c, li)), on_its_way, gap, comfortable);
                     if !go && amber == Some((c, li)) {
                         amber = None;
                         started = false;
@@ -460,6 +459,42 @@ pub const AMBER_KEEP_SPEED: f32 = 3.0;
 /// its way through the light rather than standing or creeping up to it.
 pub fn amber_holds(v: f32, gap: f32) -> bool {
     v >= AMBER_KEEP_SPEED || (gap < 0.0 && v > 0.3)
+}
+
+/// A red signal does not grant a new entry just because a car is too fast to stop.
+/// A car that had already committed on green or amber may still finish crossing,
+/// provided it is moving and close enough to the line.
+fn red_entry_allowed(committed: bool, on_its_way: bool, gap: f32, comfortable: f32) -> bool {
+    committed && on_its_way && gap < comfortable
+}
+
+#[cfg(test)]
+mod red_entry_tests {
+    use super::red_entry_allowed;
+
+    #[test]
+    fn approaching_a_red_fast_without_a_prior_green_does_not_grant_entry() {
+        // Previously a short gap relative to emergency braking distance bypassed
+        // a red light even without a green/yellow commitment (#818).
+        assert!(!red_entry_allowed(false, true, 1.0, 20.0));
+        assert!(!red_entry_allowed(false, true, 0.1, 20.0));
+    }
+
+    #[test]
+    fn a_green_or_yellow_commit_can_clear_a_red() {
+        assert!(red_entry_allowed(true, true, 0.5, 6.0));
+        assert!(red_entry_allowed(true, true, -0.5, 6.0));
+    }
+
+    #[test]
+    fn a_committed_car_that_stopped_must_wait_again() {
+        assert!(!red_entry_allowed(true, false, 0.2, 2.0));
+    }
+
+    #[test]
+    fn a_committed_car_far_from_the_line_does_not_skip_red() {
+        assert!(!red_entry_allowed(true, true, 10.0, 3.0));
+    }
 }
 
 /// The light that holds a car at the start of `way[k]`.
