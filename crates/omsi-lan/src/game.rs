@@ -228,6 +228,9 @@ pub struct RemoteChanges {
 #[derive(Default)]
 pub struct Chat {
     pub lines: Vec<String>,
+    /// Player ids whose text this client chose not to receive. Session-local;
+    /// this never changes the server's moderation policy or other clients.
+    pub muted_text_ids: hashbrown::HashSet<u32>,
     /// The line being typed: '/' or a click on the chat opens it, Enter sends it, Escape
     /// drops it.
     pub typing: Option<String>,
@@ -2307,6 +2310,11 @@ pub fn tick_receive(
         }
     }
     for e in lan.take_events() {
+        if let LanEvent::Chat { id, mine, .. } = &e {
+            if !mine && game.chat.muted_text_ids.contains(id) {
+                continue;
+            }
+        }
         if let LanEvent::Chat { name, text, .. } = &e {
             // (for the plugins' `lan_chat`, a few kept while nobody takes them)
             if game.plugin_chat.len() < 32 {
@@ -2328,6 +2336,7 @@ pub fn tick_receive(
         return updates;
     }
     for id in gone {
+        game.chat.muted_text_ids.remove(&id);
         lan.unsubscribe_script_textures(id);
         if let Some(rv) = game.remotes.remove(&id) {
             log::info!("LAN: no longer drawing player {id} '{}'", rv.name);
