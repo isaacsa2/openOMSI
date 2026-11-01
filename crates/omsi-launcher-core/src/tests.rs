@@ -567,3 +567,18 @@ fn comfortable_cabin_is_an_independent_opt_in_launch_flag() {
     assert!(enabled.iter().any(|a| a == "--comfortable-cabin-on-start"));
     assert!(!enabled.iter().any(|a| a == "--autostart"));
 }
+
+#[test]
+fn dlss_beta_settings_round_trip_and_unknown_mode_fallback() {
+    for mode in ["off", "dlaa", "quality", "balanced", "performance", "ultra_performance"] {
+        let parsed = super::settings_from_text(Some(&format!("graphics_api=dx12\\ndlss={mode}\\n")));
+        assert_eq!(parsed["dlss"], mode);
+        let saved = super::settings_to_text(&parsed, None);
+        assert!(saved.contains(&format!("dlss={mode}\\n")));
+        let restored = super::settings_from_text(Some(&saved));
+        assert_eq!(restored["dlss"], mode);
+    }
+    assert_eq!(super::settings_from_text(Some("dlss=invalid\n"))["dlss"], "off");
+    assert_eq!(super::settings_from_text(None)["dlss"], "off");
+    assert!(super::GRAPHICS_PROFILE_KEYS.contains(&"dlss"));
+}
