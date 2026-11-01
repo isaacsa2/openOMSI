@@ -123,6 +123,21 @@ jobs:
           }
           Copy-Item (Join-Path $dir.FullName "libEGL.dll"), (Join-Path $dir.FullName "libGLESv2.dll"), (Join-Path $dir.FullName "LICENSE-ANGLE.txt") dist/windows/
           Get-ChildItem dist/windows
+      # NVIDIA's Streamline docs explicitly require these PRODUCTION modules
+      # for applications shipping DLSS SR. Download official version-matched
+      # x64 binaries during packaging, not into the source tree. No second EXE.
+      # All four DLLs are NVIDIA-signed; the SDK ZIP is SHA-256 pinned and
+      # the NVIDIA Streamline + NGX license notices ship alongside the game.
+      - name: NVIDIA Streamline 2.14.1 (DLSS SR / DLAA, x64 only)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force streamline | Out-Null
+          gh release download v2.14.1 -R NVIDIA-RTX/Streamline --pattern "streamline-sdk-v2.14.1.zip" -D streamline
+          & scripts/windows/package-streamline.ps1 -Archive "streamline/streamline-sdk-v2.14.1.zip" -Destination "dist/windows"
+          Get-ChildItem dist/windows/*.dll | Select-Object Name,Length
       - name: ANGLE DirectX 11 startup regression (WARP)
         if: matrix.arch == 'x64' && github.event_name == 'pull_request'
         timeout-minutes: 10
