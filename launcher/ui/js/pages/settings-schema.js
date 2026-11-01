@@ -92,7 +92,7 @@ const graphics = {
           ['quality', 'DLSS Quality'], ['balanced', 'DLSS Balanced'],
           ['performance', 'DLSS Performance'], ['ultra_performance', 'DLSS Ultra Performance'],
         ], help: 'Experimental. Requires a compatible GeForce RTX, DirectX 12 and NVIDIA Streamline runtime. Takes effect after restarting the game.',
-          when: (s, p) => windows(s, p) && s.graphics_api === 'dx12' },
+          when: (s, p, boot) => windows(s, p) && s.graphics_api === 'dx12' && boot?.dlss_gpu_candidate === true },
         { type: 'select', key: 'fsr_quality', label: 'FSR quality', options: [['ultra', 'Ultra Quality (77%)'], ['quality', 'Quality (67%)'], ['balanced', 'Balanced (59%)'], ['performance', 'Performance (50%)'], ['auto', 'Automatic (keeps the frame rate)'], ['custom', 'Use render scale']], when: (s) => s.upscaler === 'fsr1' && (!s.dlss || s.dlss === 'off') },
         { type: 'slider', key: 'fsr_sharpness', label: 'FSR sharpness', help: 'RCAS sharpening strength', min: 0, max: 1, step: 0.05, def: 0.8, store: snap(0.05), format: pct, when: (s) => s.upscaler === 'fsr1' && (!s.dlss || s.dlss === 'off') },
         { type: 'select', key: 'render_scale', label: 'Render scale', options: [['auto', 'Auto'], ['1', '100%'], ['0.85', '85%'], ['0.75', '75%'], ['0.67', '67%'], ['0.5', '50%']] },
