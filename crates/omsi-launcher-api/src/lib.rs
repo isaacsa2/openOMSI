@@ -79,6 +79,8 @@ fn bootstrap(p: &dyn Platform) -> Answer {
         "crash": crash,
         "version": omsi_platform::VERSION,
         "platform": std::env::consts::OS,
+        // RTX candidate from DXGI; the renderer validates the actual GPU and Streamline.
+        "dlss_gpu_candidate": core::dlss_gpu::dlss_gpu_candidate(),
         "config": config,
         "root": root.as_ref().ok(),
         "root_error": root.as_ref().err().map(err),
