@@ -5,7 +5,28 @@ use super::*;
 impl App {
     /// LAN play, once a frame: send our bus, take in the others', and keep a drawn
     /// vehicle for each of them.
+    /// While this game hosts a session: its short code, registered and kept leading to the
+    /// session code (which changes with the address), every few seconds; released with it.
+    fn keep_short_code(&mut self) {
+        if cfg!(test) || self.net.lan.is_none() {
+            self.net.short_code = None;
+            return;
+        }
+        if self.net.short_code_checked.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(5)) {
+            return;
+        }
+        self.net.short_code_checked = Some(std::time::Instant::now());
+        match self.net.lan.as_ref().and_then(|l| l.code()).map(|c| c.encode()) {
+            Some(code) => match &self.net.short_code {
+                Some(r) => r.update(&code),
+                None => self.net.short_code = Some(omsi_net::short_code::Registration::start(code)),
+            },
+            None => self.net.short_code = None,
+        }
+    }
+
     pub(crate) fn tick_lan(&mut self, dt: f32) {
+        self.keep_short_code();
         if self.net.lan.is_none() {
             omsi_lan::commands::set_speed_limit_kmh(0);
             self.net.speed_limit_welcome = None;

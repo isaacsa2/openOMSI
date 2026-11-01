@@ -53,3 +53,20 @@ Open points for the first deploy: whether the Worker may fetch `http://<ip>:<web
 get verified, which is what most hosts have anyway; and the free plan's 100 000 requests a
 day (a server's heartbeat is one request a minute, so about 60 servers around the clock leave
 room for the launchers' reads, which the 15 s edge cache keeps small).
+
+## Short join codes
+
+The same Worker gives a game that hosts a session nine digits (`123-456-789`) for its session code (`OMSI-...`), so players can tell each other a short code (`codes.js`, tried by `node --test services/serverlist/codes.test.mjs`).
+
+- `POST /v1/codes {code}` → `{short, token, ttl}`: a fresh code that no live session holds.
+- `POST /v1/codes/refresh {short, token, code?}`: the host still hosts. A game refreshes every minute and sends its current session code, which changes with its address.
+- `POST /v1/codes/release {short, token}`: the session is over.
+- `GET /v1/codes/<nine digits>` → `{code}`, or 404 when no session holds the code.
+
+A code is forgotten three minutes after its last refresh. Only the token that registered a code can refresh or release it.
+
+Lookups are limited to 20 a minute per address, because nine digits can be guessed. Registrations are limited to 30 an hour per address.
+
+Codes live in the Durable Object's memory, like the listings. After a restart, a host's next refresh gets a 404 and the host registers a new code.
+
+The session code itself always works. A game that cannot reach this service shows and takes the session code as before. `OMSI_CODE_SERVICE` names another service, or `off` to send nothing.

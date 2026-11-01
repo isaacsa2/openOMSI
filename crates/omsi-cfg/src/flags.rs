@@ -181,6 +181,7 @@ flags! {
     OMSI_CLICK_ALL: Bool, Test, Use, "off", "Check: aim at every clickable item of the cab and report which one would actually be operated.";
     OMSI_CLOUDFLARED: Text, Setup, Use, "-", "Path of the cloudflared binary for the LAN tunnel (searched after the game's folder, before the PATH).";
     OMSI_CLOUDFLARED_OWN: Bool, Test, Use, "off", "LAN tunnel: only the game's own downloaded cloudflared, to test the download.";
+    OMSI_CODE_SERVICE: Text, Setup, Use, "-", "The short join code service (https://) in place of the server list's Worker, or off: no short codes (nothing is sent; the long session code works as before).";
     OMSI_CONDENSATION: Text, Test, Use, "-", "Offscreen: minutes,people[,engine] - the cabin air and condensation on the glass after that long.";
     OMSI_CONTENT: Text, Setup, Use, "beside the game", "The content folder (mods, archives, screenshots). Set at runtime on Android and iOS.";
     OMSI_CONTENT_ZIP: Text, Setup, Use, "-", "Extra content archives, separated like PATH (as --content-zip).";

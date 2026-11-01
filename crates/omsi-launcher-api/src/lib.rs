@@ -476,6 +476,8 @@ fn servers_save(list: Value) -> Answer {
 
 /// A server's or a session code's status: name, map, players, its buses.
 fn server_query(address: String) -> Answer {
+    // (a short code, `123-456-789`: the session code it leads to now)
+    let address = if omsi_net::short_code::parse(&address).is_some() { omsi_net::short_code::resolve(&address)? } else { address };
     let info = if omsi_net::looks_like_code(&address) { host_status(&address) } else { omsi_net::ws::query(&address, true) };
     let i = info?;
     let icon = (!i.icon.is_empty()).then(|| format!("data:image/png;base64,{}", base64(&i.icon)));

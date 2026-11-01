@@ -94,6 +94,9 @@ pub fn resolve() -> Result<String, String> {
 pub fn resolve_target(target: &str) -> Result<String, String> {
     if is_alias(target) {
         resolve()
+    } else if crate::short_code::parse(target).is_some() {
+        // (a short code, `123-456-789`: the session code it leads to now)
+        crate::short_code::resolve(target)
     } else {
         Ok(target.to_string())
     }

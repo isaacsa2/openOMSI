@@ -110,6 +110,7 @@ pub mod ws_api;
 mod ws_http;
 pub mod tunnel;
 pub mod official;
+pub mod short_code;
 pub mod hostkey;
 mod host_ports;
 mod discovery;
