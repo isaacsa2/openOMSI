@@ -247,6 +247,10 @@ pub struct Chat {
 }
 
 impl Chat {
+    fn accepts_event(&self, event: &LanEvent) -> bool {
+        !matches!(event, LanEvent::Chat { id, mine: false, .. } if self.muted_text_ids.contains(id))
+    }
+
     fn push(&mut self, line: String) {
         self.lines.push(line);
         let over = self.lines.len().saturating_sub(CHAT_KEEP);
@@ -2310,10 +2314,8 @@ pub fn tick_receive(
         }
     }
     for e in lan.take_events() {
-        if let LanEvent::Chat { id, mine, .. } = &e {
-            if !mine && game.chat.muted_text_ids.contains(id) {
-                continue;
-            }
+        if !game.chat.accepts_event(&e) {
+            continue;
         }
         if let LanEvent::Chat { name, text, .. } = &e {
             // (for the plugins' `lan_chat`, a few kept while nobody takes them)
@@ -2811,3 +2813,23 @@ pub use tag::tag_text;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod text_chat_mute_tests {
+    use super::*;
+
+    #[test]
+    fn local_text_mute_filters_only_that_peer_and_never_local_messages() {
+        let mut chat = Chat::default();
+        chat.muted_text_ids.insert(7);
+        let msg = |id, mine| LanEvent::Chat {
+            id, name: "Driver".into(), text: "test".into(), mine,
+        };
+        assert!(!chat.accepts_event(&msg(7, false)));
+        assert!(chat.accepts_event(&msg(7, true)));
+        assert!(chat.accepts_event(&msg(8, false)));
+        assert!(chat.accepts_event(&LanEvent::Notice("joined".into())));
+        chat.muted_text_ids.remove(&7);
+        assert!(chat.accepts_event(&msg(7, false)));
+    }
+}
