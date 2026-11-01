@@ -33,3 +33,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Test portable DLSS modes
         run: cargo test --locked -p omsi-render --lib nvidia_dlss
+      - name: Test motion history and jitter
+        run: cargo test --locked -p omsi-render --lib temporal_motion
