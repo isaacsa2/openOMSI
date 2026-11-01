@@ -8,6 +8,9 @@ on:
       - 'Cargo.lock'
       - 'Cargo.toml'
       - 'crates/omsi-render/**'
+      - 'crates/omsi-app/**'
+      - 'crates/omsi-launcher-core/**'
+      - 'launcher/ui/js/pages/settings*'
       - '.github/workflows/dlss-adapter.yml'
   workflow_dispatch:
 
@@ -24,6 +27,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Check Windows DX12 Streamline adapter (no proprietary binaries)
         run: cargo check --locked -p omsi-render --features nvidia-dlss-experimental --target x86_64-pc-windows-msvc
+      - name: Check game with DX12-only DLSS settings
+        run: cargo check --locked -p omsi-app --features omsi-render/nvidia-dlss-experimental --target x86_64-pc-windows-msvc
   linux-portable-tests:
     name: Portable DLSS modes / Linux
     runs-on: ubuntu-latest
@@ -35,3 +40,9 @@ jobs:
         run: cargo test --locked -p omsi-render --lib nvidia_dlss
       - name: Test motion history and jitter
         run: cargo test --locked -p omsi-render --lib temporal_motion
+      - name: Validate DLSS launcher settings round-trip
+        run: cargo test --locked -p omsi-launcher-core dlss_beta_settings_round_trip
+      - name: Validate non-DX12 mode restrictions
+        run: cargo test --locked -p omsi-app --lib dlss
+      - name: Check registered environment variables
+        run: cargo test --locked -p omsi-cfg flags
