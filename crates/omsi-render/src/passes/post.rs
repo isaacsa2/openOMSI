@@ -366,13 +366,13 @@ impl Renderer {
 
 /// Only the optional temporal scene reconstruction uses this LOD correction.
 /// A 1.0 input/output ratio (DLAA) must leave texture detail unchanged.
-#[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+#[cfg(any(test, all(windows, feature = "nvidia-dlss-experimental")))]
 pub(crate) fn dlss_texture_mip_bias(scale: f32) -> f32 {
     if !scale.is_finite() || scale <= 0.0 { return 0.0; }
     scale.log2().clamp(-1.0, 0.0)
 }
 
-#[cfg(all(test, windows, feature = "nvidia-dlss-experimental"))]
+#[cfg(test)]
 mod dlss_mip_tests {
     #[test]
     fn temporal_scene_mips_preserve_dlaa_and_improve_low_res_detail() {
