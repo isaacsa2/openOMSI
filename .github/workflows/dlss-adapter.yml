@@ -10,6 +10,7 @@ on:
       - 'crates/omsi-render/**'
       - 'crates/omsi-app/**'
       - 'crates/omsi-launcher-core/**'
+      - 'crates/omsi-launcher-api/**'
       - 'launcher/ui/js/pages/settings*'
       - '.github/workflows/dlss-adapter.yml'
   workflow_dispatch:
@@ -48,6 +49,8 @@ jobs:
         run: cargo test --locked -p omsi-render --lib nvidia_dlss
       - name: Test motion history and jitter
         run: cargo test --locked -p omsi-render --lib temporal_motion
+      - name: Validate NVIDIA RTX GPU preflight classification
+        run: cargo test --locked -p omsi-launcher-core dlss_gpu
       - name: Validate DLSS launcher settings round-trip
         run: cargo test --locked -p omsi-launcher-core dlss_beta_settings_round_trip
       - name: Validate non-DX12 mode restrictions
