@@ -2218,6 +2218,23 @@ fn passenger_defaults(v: &mut Value) {
     v["passenger_full_bus_reaction"] = json!(false);
 }
 
+/// Sanitize the optional NVIDIA mode at the launcher boundary (off by default).
+/// The renderer also checks the active backend before using this preference.
+fn dlss_mode_setting(val: &str) -> &'static str {
+    match val.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "dlaa" => "dlaa", "quality" => "quality", "balanced" => "balanced",
+        "performance" => "performance", "ultra_performance" => "ultra_performance",
+        _ => "off",
+    }
+}
+
+fn fsr_quality_setting(val: &str) -> &'static str {
+    match val.to_ascii_lowercase().as_str() {
+        "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
+        "custom" => "custom", "auto" => "auto", _ => "quality",
+    }
+}
+
 pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     let mut v = json!({ "msaa": 4, "anisotropy": 8, "ssao": true, "shadows": true, "shadow_size": 2048, "navigator": true, "ui_opacity": 0.85, "navigator_corner": "bottom-left", "boarding": "auto", "detail_textures": true, "exact_fare": true, "enhanced": false, "graphics": "vanilla_plus", "fullscreen": false, "vsync": true, "volume": 0.6, "drive_keys": "simple", "render_scale": "auto", "view_distance": "auto", "language": "ENG", "video_memory": 0, "texture_compression": true, "gpu_texture_compression": true, "chat": true, "tooltips": true, "name_tags": true, "show_fps": false, "clouds": true, "cloud_quality": "high", "rain_quality": "high", "pax_density": 1.0, "vol_ai": 1.0, "vol_scenery": 1.0, "ambient": true, "vol_ambient": 0.8, "mirror_size": 256, "doppler": true, "driver": true, "max_fps": 0, "min_obj_size": 0.013, "max_obj_dist": "auto" });
     v["upscaler"] = json!("default");
@@ -2384,15 +2401,8 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "vehicle_smoke" => v[&k] = json!(vehicle_smoke(val)),
             "puddles" => v[&k] = json!(puddles(val)),
             "upscaler" => v[&k] = json!(if val.eq_ignore_ascii_case("fsr1") { "fsr1" } else { "default" }),
-            "dlss" => v[&k] = json!(match val.trim().to_ascii_lowercase().replace('-', "_").as_str() {
-                "dlaa" => "dlaa", "quality" => "quality", "balanced" => "balanced",
-                "performance" => "performance", "ultra_performance" => "ultra_performance",
-                _ => "off",
-            }),
-            "fsr_quality" => v[&k] = json!(match val.to_ascii_lowercase().as_str() {
-                "ultra" => "ultra", "balanced" => "balanced", "performance" => "performance",
-                "custom" => "custom", "auto" => "auto", _ => "quality",
-            }),
+            "dlss" => v[&k] = json!(dlss_mode_setting(val)),
+            "fsr_quality" => v[&k] = json!(fsr_quality_setting(val)),
             "fsr_sharpness" => v[&k] = json!(val.parse::<f64>().ok()
                 .filter(|x| x.is_finite()).unwrap_or(0.8).clamp(0.0, 1.0)),
             "gpu_texture_compression" => v[&k] = json!(!matches!(val.trim().to_ascii_lowercase().as_str(), "0" | "off" | "no" | "false" | "disabled")),
