@@ -10,6 +10,8 @@ ureq.workspace = true
 flate2.workspace = true
 sha2.workspace = true
 ring.workspace = true
+# Host-authoritative censorship uses the same dictionary as the in-game chat.
+rustrict = "0.7"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 
 [target.'cfg(unix)'.dependencies]

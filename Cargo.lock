@@ -4146,6 +4146,7 @@ dependencies = [
  "log",
  "omsi-cfg",
  "ring",
+ "rustrict",
  "sha2",
  "tungstenite",
  "ureq",

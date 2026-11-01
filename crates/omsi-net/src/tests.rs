@@ -1521,3 +1521,18 @@ mod traffic;
 mod voice;
 
 mod join_rejections;
+
+
+#[test]
+fn chat_moderation_cleans_protocol_and_masks_words() {
+    let incoming = "Hello|fuck\nworld";
+    let moderated = moderate_chat(incoming);
+    assert!(!moderated.contains('|'));
+    assert!(!moderated.contains('\n'));
+    assert_ne!(moderate_chat("fuck"), "fuck");
+    assert!(moderated.chars().count() <= MAX_CHAT);
+
+    // This boundary applies to all callers, including a modified LAN client.
+    let long = "x".repeat(MAX_CHAT + 100);
+    assert_eq!(moderate_chat(&long).chars().count(), MAX_CHAT);
+}

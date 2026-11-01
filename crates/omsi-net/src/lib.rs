@@ -188,6 +188,15 @@ pub const MAX_DATAGRAM: usize = 1400;
 /// Longest player name, chat line, text field (characters).
 pub const MAX_NAME: usize = 32;
 pub const MAX_CHAT: usize = 160;
+
+/// Sanitize and censor chat on the protocol boundary, not only in the game UI.
+/// Every peer can run a modified client, so the host must enforce this before
+/// forwarding any text. The same policy also covers host messages and clients
+/// receiving messages from older or modified hosts.
+fn moderate_chat(text: &str) -> String {
+    use rustrict::CensorStr;
+    clean_text(text, MAX_CHAT).censor()
+}
 const MAX_FIELD: usize = 64;
 /// A host takes at most this many states and this many other messages a second from one
 /// player (with bursts of as many); chat lines one a second (bursts of three).
@@ -1778,7 +1787,7 @@ impl LanSession {
     /// A command for player `to` (1 the host): the host passes it on. Used for switches
     /// worked in another player's bus and for the host's administration.
     pub fn command(&mut self, to: u32, text: &str) {
-        let text = clean_text(text, MAX_CHAT);
+        let text = moderate_chat(text);
         if text.is_empty() || to == self.my_id {
             return;
         }
@@ -1879,7 +1888,7 @@ impl LanSession {
     /// address alone, so the others never see it, and a game of any version shows it like any
     /// chat line (an admin's private word to a driver).
     pub fn say_to(&mut self, to: u32, name: &str, text: &str) -> Result<(), String> {
-        let text = clean_text(text, MAX_CHAT);
+        let text = moderate_chat(text);
         if text.is_empty() {
             return Err("nothing to say".into());
         }
@@ -1889,12 +1898,12 @@ impl LanSession {
         let name = clean_text(name, MAX_NAME);
         let addr = self.peers.get(&to).and_then(|p| p.addr).ok_or_else(|| format!("no player {to}"))?;
         self.send(format!("SAY|{}|{name}|{text}", self.my_id).as_bytes(), addr);
-        log::info!("LAN chat to {to} <{name}> {text}");
+        // Chat contents are intentionally not written to routine logs.
         Ok(())
     }
 
     pub fn say(&mut self, text: &str) -> Result<(), String> {
-        let text = clean_text(text, MAX_CHAT);
+        let text = moderate_chat(text);
         if text.is_empty() {
             return Err("nothing to say".into());
         }
@@ -1915,7 +1924,7 @@ impl LanSession {
                 }
             }
         }
-        log::info!("LAN chat <{}> {text}", self.my_name);
+        // Chat contents are intentionally not written to routine logs.
         self.events.push(LanEvent::Chat {
             id: self.my_id,
             name: self.my_name.clone(),
@@ -2747,12 +2756,12 @@ impl LanSession {
                     let (Some(id), name, text) = (
                         field(&parts, 1).parse::<u32>().ok(),
                         clean_text(field(&parts, 2), MAX_NAME),
-                        clean_text(field(&parts, 3), MAX_CHAT),
+                        moderate_chat(field(&parts, 3)),
                     ) else {
                         continue;
                     };
                     if !text.is_empty() {
-                        log::info!("LAN chat <{name}> {text}");
+                        // Chat contents are intentionally not written to routine logs.
                         self.events.push(LanEvent::Chat {
                             id,
                             name,
@@ -2947,7 +2956,7 @@ impl LanSession {
         let Some(id) = field(parts, 1).parse::<u32>().ok() else {
             return;
         };
-        let text = clean_text(field(parts, 2), MAX_CHAT);
+        let text = moderate_chat(field(parts, 2));
         let Some(peer) = self.checked_peer(id, from, MESSAGE_RATE, PeerTraffic::Message) else {
             return;
         };
@@ -2959,7 +2968,7 @@ impl LanSession {
             return;
         }
         let name = peer.label();
-        log::info!("LAN chat <{name}> {text}");
+        // Chat contents are intentionally not written to routine logs.
         self.broadcast(format!("SAY|{id}|{name}|{text}").as_bytes(), Some(id));
         self.events.push(LanEvent::Chat {
             id,
