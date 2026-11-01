@@ -10,7 +10,15 @@ pub(crate) struct MotionTargets {
     depth_view: wgpu::TextureView,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct RecordedMotion {
+    pub uniform: temporal_motion::MotionUniform,
+    pub jitter_px: [f32; 2],
+    pub reset: bool,
+}
+
 pub(crate) struct TemporalGpu {
+    last: Option<RecordedMotion>,
     history: temporal_motion::MotionHistory,
     pipelines: [wgpu::RenderPipeline; 6],
     sky: wgpu::RenderPipeline,
@@ -121,8 +129,21 @@ impl TemporalGpu {
         Self {
             history: Default::default(), pipelines, sky, bind_layout,
             uniform, previous_models, model_capacity: initial_capacity,
-            bind_group, targets: None,
+            bind_group, targets: None, last: None,
         }
+    }
+
+
+    pub(crate) fn next_jitter(&self) -> [f32; 2] {
+        self.history.next_jitter()
+    }
+
+    pub(crate) fn last_frame(&self) -> Option<RecordedMotion> {
+        self.last
+    }
+
+    pub(crate) fn inputs(&self) -> Option<(&wgpu::Texture, &wgpu::Texture)> {
+        self.targets.as_ref().map(|t| (&t._depth, &t._motion))
     }
 
     fn model_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
@@ -176,6 +197,9 @@ impl TemporalGpu {
     ) {
         if size.0 == 0 || size.1 == 0 || scene.camera_bind_group.is_none() { return; }
         let prepared = self.history.prepare(scene, camera, size);
+        self.last = Some(RecordedMotion {
+            uniform: prepared.uniform, jitter_px: prepared.jitter_px, reset: prepared.reset,
+        });
         let bytes: &[u8] = bytemuck::cast_slice(&prepared.previous_models);
         let required = (bytes.len() as u64).max(64);
         if required > self.model_capacity {
