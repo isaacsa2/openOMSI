@@ -125,7 +125,15 @@ function SelectRow({ row }) {
   const value = match ? match[0] : cur == null ? '' : typeof cur === 'boolean' ? (cur ? '1' : '0') : String(cur);
   return html`<div class="setting-row">
     <${Name} label=${row.label} help=${row.help} warn=${row.heavy?.(value, s) && 'Heavy: can cost many frames per second on most graphics cards'} />
-    <${Select} value=${value} options=${options} raw=${row.raw} onChange=${async (v) => (await saveSettings({ [row.key]: asStored(cur, v) })) && row.recheckUpdates && checkUpdates()} />
+    <${Select} value=${value} options=${options} raw=${row.raw} onChange=${async (v) => {
+      const patch = { [row.key]: asStored(cur, v) };
+      // Temporal and spatial upscalers must not be selected at the same time.
+      // Selecting another backend must also invalidate DLSS explicitly.
+      if (row.key === 'dlss' && v !== 'off') patch.upscaler = 'default';
+      if (row.key === 'upscaler' && v === 'fsr1') patch.dlss = 'off';
+      if (row.key === 'graphics_api' && v !== 'dx12') patch.dlss = 'off';
+      if ((await saveSettings(patch)) && row.recheckUpdates) checkUpdates();
+    }} />
   </div>`;
 }
 
