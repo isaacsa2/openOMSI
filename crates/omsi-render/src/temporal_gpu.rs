@@ -27,7 +27,7 @@ impl TemporalGpu {
         // Reuse the same scene vertex functions, alpha-test functions and shader
         // bindings as the current depth prepass. Build this module only on
         // explicit opt-in; the normal renderer shader remains unchanged.
-        let wgsl = format!("{}\n{}", scene_shader_source(false), include_str!("temporal_motion.wgsl"));
+        let wgsl = temporal_motion::shader_source();
         let module = pipelines::common::compile_shader(device, wgpu::ShaderModuleDescriptor {
             label: Some("DLSS temporal motion"),
             source: wgpu::ShaderSource::Wgsl(wgsl.into()),
