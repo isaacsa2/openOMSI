@@ -221,6 +221,19 @@ mod tests {
         .expect("DLSS motion shader should validate");
     }
     #[test]
+    fn dlss_presentation_shader_is_valid_wgsl() {
+        let shader = include_str!("dlss_present.wgsl");
+        let module = naga::front::wgsl::parse_str(shader)
+            .expect("DLSS result presentation WGSL should parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("DLSS result presentation WGSL should validate");
+    }
+
+    #[test]
     fn motion_uniform_matches_wgsl_structure() {
         assert_eq!(std::mem::size_of::<MotionUniform>(), 272);
         assert_eq!(std::mem::align_of::<MotionUniform>(), 4);
