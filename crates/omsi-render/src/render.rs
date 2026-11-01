@@ -211,7 +211,11 @@ impl Renderer {
     /// `angle::compile`: on this thread's stack the D3D compiler overflowed it).
     pub(crate) fn rebuilt(&self, options: RenderOptions) -> Renderer {
         let (device, queue, name, format) = (self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format);
-        let build = move || Self::build(device, queue, name, format, options);
+        let nvidia_rtx_candidate = self.adapter.as_ref().is_some_and(|adapter| {
+            let info = adapter.get_info();
+            nvidia_dlss::nvidia_rtx_candidate(info.vendor, &info.name)
+        });
+        let build = move || Self::build(device, queue, name, format, options, nvidia_rtx_candidate);
         if cfg!(windows) && gl_backend() && self.adapter_name.contains("ANGLE") {
             angle::compile(&self.device, build)
         } else {
