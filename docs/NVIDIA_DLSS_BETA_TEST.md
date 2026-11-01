@@ -8,7 +8,7 @@ No implication of affiliation with or endorsement from NVIDIA.
 
 - Windows x64, GeForce RTX hardware supported by your NVIDIA driver, and **DirectX 12** as openOMSI's selected backend.
 - NVIDIA Streamline **2.14.1**, obtained independently from official NVIDIA sources under its license. Use its matching `sl.interposer.dll`, `sl.common.dll`, `sl.dlss.dll`, and `nvngx_dlss.dll` in a local SDK runtime directory. Do not extract them from the privately distributed OmniLine build.
-- Existing, legally installed OMSI 2/openOMSI game content. The beta artifact is the game executable only, not a complete OMSI installation.
+- Existing, legally installed OMSI 2/openOMSI game content. The beta package contains the game and companion launchers for use with an existing, legitimate OMSI 2/openOMSI installation; it is not a complete OMSI content installation.
 - The actual Windows game binary must be compiled with `omsi-render/nvidia-dlss-experimental`.
 
 ## Run
