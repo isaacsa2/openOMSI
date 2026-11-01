@@ -524,7 +524,16 @@ impl Renderer {
     /// Streamline beta. No guessing from a saved preference or GPU brand.
     pub fn dlss_supported_backend(&self) -> bool {
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        { unsafe { self.device.as_hal::<wgpu_hal::api::Dx12>() }.is_some() }
+        {
+            // Check the adapter actually selected for this renderer, not merely
+            // another NVIDIA GPU installed in the same PC.
+            self.adapter.as_ref().is_some_and(|a| {
+                let info = a.get_info();
+                info.backend == wgpu::Backend::Dx12
+                    && nvidia_dlss::nvidia_rtx_candidate(info.vendor, &info.name)
+                    && unsafe { self.device.as_hal::<wgpu_hal::api::Dx12>() }.is_some()
+            })
+        }
         #[cfg(not(all(windows, feature = "nvidia-dlss-experimental")))]
         { false }
     }
