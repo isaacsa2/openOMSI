@@ -23,6 +23,11 @@ $env:OMSI_STREAMLINE_DIR = "C:\Path\To\NVIDIA\Streamline\bin\x64"
 
 Replace `quality` with `dlaa`, `balanced`, `performance`, or `ultra_performance`.
 Set `OMSI_DLSS_BETA=off` or unset it to disable the beta.
+NVIDIA's official integration guide specifies a NVIDIA-issued application ID for NGX components.
+If your SDK access provides an authorized ID, set `OMSI_DLSS_APPLICATION_ID` to that numeric ID.
+The historical public adapter's hard-coded project UUID has **not** been verified as registered.
+A zero/missing application ID may prevent DLSS from initializing; do not assume that a successful build is enough.
+
 The `dlss=` value in settings.cfg is **not yet connected to this experimental path**.
 You do **not** need `OMSI_DLSS_MOTION_DEBUG` when `OMSI_DLSS_BETA` is set.
 
