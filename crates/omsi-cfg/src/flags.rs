@@ -268,6 +268,11 @@ flags! {
     OMSI_DEBUG_WALLS: Bool, Debug, Use, "off", "Log the walls a walking player slides along.";
     OMSI_DEBUG_WARP: Bool, Debug, Use, "off", "Log crossings whose ground was moved by more than a metre.";
     OMSI_DEBUG_WHEELS: Bool, Debug, Use, "off", "Log where the wheel meshes of every vehicle type turn.";
+    OMSI_DLSS_APPLICATION_ID: Num, Tuning, Use, "-", "NVIDIA-issued numeric application ID for experimental DLSS NGX initialization (beta only).";
+    OMSI_DLSS_BETA: Text, Tuning, Use, "off", "Override experimental DLSS mode for the current session: off, dlaa, quality, balanced, performance, ultra_performance. DX12/RTX only.";
+    OMSI_DLSS_MOTION_DEBUG: Text, Test, Frame, "off", "Generate diagnostic DX12 motion vectors without enabling the Streamline output when set to 1.";
+    OMSI_DLSS_PROJECT_ID: Text, Tuning, Use, "-", "Optional registered Streamline project UUID supplied by the tester; not an NVIDIA runtime binary.";
+    OMSI_DLSS_VERBOSE: Bool, Debug, Use, "off", "Enable verbose NVIDIA Streamline diagnostics in the experimental DLSS integration.";
     OMSI_DRIVER_HANDS: Text, Test, Use, "-", "left,right: both driver hands held at these angles (grip close-ups).";
     OMSI_DRIVER_SHIFTER: Text, Test, Use, "-", "Part of a variable or file name: force the shifter the driver's hand uses; off: both hands on the wheel.";
     OMSI_DRIVE_PROFILE: Text, Test, Use, "-", "Offscreen: \"t throttle brake [steer]/...\" piecewise constant pedals (crash/kerb tests).";
@@ -480,6 +485,7 @@ flags! {
     OMSI_SKY_CUBE_EVERY_FRAME: Bool, Switch, Frame, "off", "Enhanced: redraw a slice of the sky cube every frame again, not at most 60 a second (A/B).";
     OMSI_SPOT_SELECT: Num, Test, Use, "-", "Turn on spotlight n (headlight pictures).";
     OMSI_STORM: Text, Tuning, Use, "-", "activity[,azimuth]: a thunderstorm of this activity (0..1) over the place whatever the weather; with an azimuth (degrees, 0 east, 90 north) the flash stands frozen there at its first stroke (for checks).";
+    OMSI_STREAMLINE_DIR: Text, Setup, Use, "-", "Folder with separately obtained official NVIDIA Streamline runtime DLLs for the optional Windows DX12 DLSS beta.";
     OMSI_SURFACE_BIAS: Num, Tuning, Use, "-24", "Depth bias of road surfaces.";
     OMSI_SURFACE_FLUSH: Num, Tuning, Once, "0.12", "Height in metres under which a surface counts as flush with the road.";
     OMSI_SUSP_TRACE: Text, Debug, Use, "-", "Offscreen CSV: body height and each wheel's travel and load every frame.";
