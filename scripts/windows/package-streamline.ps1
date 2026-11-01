@@ -21,13 +21,13 @@ $Zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $Arc
 try {
     function Get-SdkEntry {
         param([string] $Filename, [string] $Pattern)
-        $Matches = @($Zip.Entries | Where-Object {
+        $Entries = @($Zip.Entries | Where-Object {
             $_.FullName.Replace("\", "/") -match $Pattern
         })
-        if ($Matches.Count -ne 1) {
-            throw "Streamline SDK archive expected exactly one production '$Filename' ($Pattern), found $($Matches.Count)"
+        if ($Entries.Count -ne 1) {
+            throw "Streamline SDK archive expected exactly one production '$Filename' ($Pattern), found $($Entries.Count)"
         }
-        return $Matches[0]
+        return $Entries[0]
     }
 
     function Copy-Entry {
@@ -55,7 +55,17 @@ try {
         Write-Host "Official NVIDIA signed runtime: $Dll"
     }
 
-    $NgxLicense = Get-SdkEntry "nvngx_dlss.license.txt" "(?i)(^|/)(bin/x64|features)/nvngx_dlss\.license\.txt$"
+    # The SDK may carry identical NGX notices under bin/x64 and features.
+    # Prefer the production bin/x64 copy without failing on this benign duplicate.
+    $NgxNotices = @($Zip.Entries | Where-Object {
+        $_.FullName.Replace("\", "/") -match "(?i)(^|/)(bin/x64|features)/nvngx_dlss\.license\.txt$"
+    })
+    if ($NgxNotices.Count -eq 0) {
+        throw "Official NVIDIA NGX redistribution license not found in SDK"
+    }
+    $NgxLicense = $NgxNotices | Sort-Object {
+        if ($_.FullName.Replace("\", "/") -match "(?i)/bin/x64/") { 0 } else { 1 }
+    } | Select-Object -First 1
     Copy-Entry $NgxLicense "nvngx_dlss.license.txt"
 
     $LicenseOptions = @($Zip.Entries | Where-Object {
