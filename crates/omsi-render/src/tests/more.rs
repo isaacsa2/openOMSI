@@ -245,6 +245,7 @@ fn vanilla_gl_build_omits_unused_enhanced_resources() {
             no_enhanced: true,
             ..Default::default()
         },
+        false, // The NOOP backend is not a NVIDIA RTX adapter.
     );
     assert!(renderer.hdr_pass.is_none());
     assert!(renderer.tone.probe.is_none());
