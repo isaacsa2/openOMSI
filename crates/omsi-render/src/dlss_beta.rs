@@ -32,6 +32,13 @@ impl DlssBeta {
             .unwrap_or(saved)
     }
 
+    pub(crate) fn disable_on_validation_error(&mut self) {
+        if !self.failed {
+            log::error!("NVIDIA DLSS beta disabled after a GPU validation error; falling back to the standard renderer");
+        }
+        self.failed = true;
+    }
+
     pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat, mode: nvidia_dlss::DlssMode) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("DLSS beta output sampler"),
