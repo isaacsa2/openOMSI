@@ -574,15 +574,24 @@ impl Renderer {
         // Diagnostic-only motion target: inert without feature + explicit env flag.
         // Do not enable this until NVIDIA Streamline is integrated and verified.
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let temporal_gpu = if omsi_cfg::env::var("OMSI_DLSS_MOTION_DEBUG").ok().as_deref() == Some("1")
-            && !GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed) {
+        let mode = dlss_beta::DlssBeta::requested();
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        let is_dx12 = unsafe { device.as_hal::<wgpu_hal::api::Dx12>() }.is_some();
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        let temporal_gpu = if is_dx12 && (mode.is_on()
+            || omsi_cfg::env::var("OMSI_DLSS_MOTION_DEBUG").ok().as_deref() == Some("1")) {
             Some(temporal_gpu::TemporalGpu::new(&device, &scene))
         } else {
             None
         };
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        let dlss_beta = (mode.is_on() && is_dx12)
+            .then(|| dlss_beta::DlssBeta::new(&device, format, mode));
         Renderer {
             #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
             temporal_gpu,
+            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+            dlss_beta,
             targets: Targets {
                 scale_targets: HashMap::new(),
                 triple_targets: None,
