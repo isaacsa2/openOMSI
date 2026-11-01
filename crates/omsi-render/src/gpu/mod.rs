@@ -595,6 +595,8 @@ pub(crate) struct GpuErrors {
     /// frame on (a frame whose commands the device refused shows nothing at all - left to
     /// go on, the picture stood still on the loading screen while the game ran behind it).
     pub(crate) rt_error: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when the experimental DLSS motion/presentation pass fails; leave Enhanced+ intact.
+    pub(crate) dlss_error: Arc<std::sync::atomic::AtomicBool>,
     /// The card ran out of memory since the last `take_out_of_memory`.
     pub(crate) out_of_memory: Arc<std::sync::atomic::AtomicBool>,
     /// Why the graphics device was lost (a driver reset, the card removed), once it was.
