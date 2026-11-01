@@ -9,6 +9,19 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) const MOTION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg32Float;
+
+/// The original scene entry point vs_depth cannot be called from another
+/// entry point in WGSL. Convert just the *separate diagnostic shader copy* into
+/// an ordinary helper, retaining the exact same depth, alpha and surface-bias
+/// calculation. The normal scene shader remains byte-for-byte unchanged.
+pub(crate) fn shader_source() -> String {
+    const FROM: &str = "@vertex\\nfn vs_depth(in: VsIn) -> DepthOut {";
+    const TO: &str = "fn dlss_depth_helper(in: VsIn) -> DepthOut {";
+    let text = scene_shader_source(false);
+    assert_eq!(text.matches(FROM).count(), 1, "depth shader entry point changed");
+    format!("{}\\n{}", text.replace(FROM, TO), include_str!("temporal_motion.wgsl"))
+}
+
 static NEXT_SCENE_ID: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn new_scene_id() -> u64 {
@@ -194,11 +207,7 @@ mod tests {
     }
     #[test]
     fn motion_shader_parses_and_validates_with_current_scene() {
-        let text = format!(
-            "{}\n{}",
-            crate::scene_shader_source(false),
-            include_str!("temporal_motion.wgsl"),
-        );
+        let text = shader_source();
         let module = naga::front::wgsl::parse_str(&text)
             .expect("current scene plus DLSS motion shader should parse");
         naga::valid::Validator::new(
