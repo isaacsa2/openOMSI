@@ -22,6 +22,8 @@ pub mod clouds;
 // Streamline runtime remains behind the opt-in nvidia-dlss-experimental feature.
 pub mod nvidia_dlss;
 mod temporal_motion;
+#[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+mod temporal_gpu;
 mod cookies;
 pub use cookies::{Cookie, COOKIE_LAYERS};
 mod gpu_memory;
@@ -260,6 +262,9 @@ pub struct Renderer {
     history: ViewHistory,
     /// What the device's error handlers report: errors with multisampling or ray tracing on, out of memory, the device lost.
     errors: GpuErrors,
+    /// Off-by-default diagnostic GPU motion pass; no DLSS evaluation or image changes.
+    #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+    temporal_gpu: Option<temporal_gpu::TemporalGpu>,
 }
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
