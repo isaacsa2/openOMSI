@@ -305,6 +305,12 @@ impl Renderer {
         if self.targets.triple_targets.take().is_some() {
             self.history.triple_culling = Default::default();
         }
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        if let Some(mut beta) = self.dlss_beta.take() {
+            let shown = beta.render(self, scene, target, width, height, camera, lighting);
+            self.dlss_beta = Some(beta);
+            if shown { return; }
+        }
         self.render_inner(scene, target, width, height, camera, lighting, true, None, None, false);
     }
 
