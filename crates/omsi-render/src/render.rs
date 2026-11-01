@@ -757,6 +757,19 @@ impl Renderer {
         self.encode_precip_map(&mut enc.shadow, scene, &sh, &shadow_batches, &mut timers);
         let prepass_batches = if self.shares_prepass_depth(&f, &plan) { plan.prefill_batches() } else { &plan.prepass_batches };
         self.encode_depth_prepass(&mut enc.prepass, scene, &f, prepass_batches, &mut timers);
+        // A separate debug-only motion pass with its own depth surface. The scene
+        // and HUD output paths are untouched. Only the primary desktop view
+        // owns temporal history: mirrors, VR, photos and triple panels do not.
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        if with_overlays && projection.is_none() && !second_eye && f.lead_view {
+            if let Some(motion) = self.temporal_gpu.as_mut() {
+                motion.encode(
+                    &self.device, &self.queue, &mut enc.prepass,
+                    scene, camera, (f.width, f.height), prepass_batches,
+                );
+            }
+        }
+
         if plan.ground.active() {
             self.encode_ground(&mut enc.prepass, scene, &plan.ground, &mut timers);
         }
