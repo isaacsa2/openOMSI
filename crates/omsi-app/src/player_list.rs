@@ -122,6 +122,7 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                 return vec![(tr("That player is no longer here: pick them again"), "list".into())];
             };
             let muted = app.sound.voice_mutes.is_muted(&p.name);
+            let text_muted = app.net.remotes.chat.muted_text_ids.contains(&p.id);
             let mut out = vec![
                 noop(format!("{} (#{}) - {}{}", p.name, p.id, describe(p, &tr), role_word(p, &tr))),
                 // (a mute is this player's own: by name, kept between sessions)
@@ -131,6 +132,12 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                     (tr("Voice chat: audible. Mute them"), format!("vmute {}", t.tag()))
                 },
             ];
+            // A local text mute: never sends anything to the host or retains an identifier.
+            if text_muted {
+                out.push((tr("Text chat: hidden. Show their messages"), format!("tunmute {}", t.tag())));
+            } else {
+                out.push((tr("Text chat: visible. Hide their messages"), format!("tmute {}", t.tag())));
+            }
             // (an admin's: silencing a player's voice for the whole session, or taking them away)
             let acts = rights.is_some() && !(rights == Some(Role::Moderator) && p.admin == Some(Role::Admin));
             if acts {
@@ -234,6 +241,19 @@ pub(crate) fn run(app: &mut App, kind: &ListKind, action: &str) -> Option<ListKi
                 app.net.admin_panel.soon();
             }
             Some(ListKind::BanList)
+        }
+        // Local text mute, scoped to the current room and checked against the
+        // selected player's connection before updating the id-based filter.
+        "tmute" | "tunmute" => {
+            let t = target()?;
+            if players(app).iter().any(|p| p.id == t.id && p.conn == t.conn) {
+                if verb == "tmute" {
+                    app.net.remotes.chat.muted_text_ids.insert(t.id);
+                } else {
+                    app.net.remotes.chat.muted_text_ids.remove(&t.id);
+                }
+            }
+            Some(ListKind::PlayerPage(t))
         }
         // the player's own voice mute (by name, kept), and every other voice off
         "vmute" | "vunmute" => {
