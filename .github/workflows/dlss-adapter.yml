@@ -1,0 +1,35 @@
+name: DLSS experimental adapter checks
+
+on:
+  push:
+    branches:
+      - feat/nvidia-dlss-streamline-opt-in
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/omsi-render/**'
+      - '.github/workflows/dlss-adapter.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native-compile:
+    name: Streamline adapter / Windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check Windows DX12 Streamline adapter (no proprietary binaries)
+        run: cargo check --locked -p omsi-render --features nvidia-dlss-experimental --target x86_64-pc-windows-msvc
+  linux-portable-tests:
+    name: Portable DLSS modes / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test portable DLSS modes
+        run: cargo test --locked -p omsi-render --lib nvidia_dlss
