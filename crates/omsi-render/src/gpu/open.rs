@@ -606,6 +606,8 @@ impl Renderer {
             dlss_beta,
             #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
             dlss_frame_active: false,
+            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+            dlss_render_scale: 1.0,
             targets: Targets {
                 scale_targets: HashMap::new(),
                 triple_targets: None,
