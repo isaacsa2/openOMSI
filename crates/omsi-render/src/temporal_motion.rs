@@ -15,11 +15,14 @@ pub(crate) const MOTION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg32F
 /// an ordinary helper, retaining the exact same depth, alpha and surface-bias
 /// calculation. The normal scene shader remains byte-for-byte unchanged.
 pub(crate) fn shader_source() -> String {
-    const FROM: &str = "@vertex\nfn vs_depth(in: VsIn) -> DepthOut {";
-    const TO: &str = "fn dlss_depth_helper(in: VsIn) -> DepthOut {";
-    let text = scene_shader_source(false);
-    assert_eq!(text.matches(FROM).count(), 1, "depth shader entry point changed");
-    format!("{}\n{}", text.replace(FROM, TO), include_str!("temporal_motion.wgsl"))
+    const ENTRY: &str = "fn vs_depth(in: VsIn) -> DepthOut {";
+    let mut text = scene_shader_source(false);
+    let start = text.find(ENTRY).expect("depth shader entry point changed");
+    let attr = text[..start].rfind("@vertex").expect("depth vertex attribute missing");
+    assert!(text[attr + "@vertex".len()..start].trim().is_empty(),
+        "depth vertex function attributes changed");
+    text.replace_range(attr..start + ENTRY.len(), "fn dlss_depth_helper(in: VsIn) -> DepthOut {");
+    format!("{}\n{}", text, include_str!("temporal_motion.wgsl"))
 }
 
 static NEXT_SCENE_ID: AtomicU64 = AtomicU64::new(1);
