@@ -269,6 +269,8 @@ pub struct Renderer {
     temporal_gpu: Option<temporal_gpu::TemporalGpu>,
     #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
     dlss_beta: Option<dlss_beta::DlssBeta>,
+    #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+    dlss_frame_active: bool,
 }
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
