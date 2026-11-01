@@ -24,10 +24,11 @@
 <main>
 <p><a href="../">openOMSI</a></p>
 <h1>Privacy</h1>
-<p class="muted">Applies to openOMSI on every platform, including the iPhone, iPad and Mac apps. Last changed 12 October 2026.</p>
+<p class="muted">Applies to openOMSI on every platform, including the iPhone, iPad and Mac apps. Draft update 1 November 2026 (pending operator verification).</p>
 
-<p>openOMSI has no accounts, no advertising, no analytics SDKs and no tracking. Your settings, saved games,
-screenshots and the OMSI 2 content you add stay on your device.</p>
+<p>The core game does not require an openOMSI account and does not include advertising or analytics SDKs.
+Your settings, saved games, screenshots and the OMSI 2 content you add are normally kept on your device.
+Optional online services and multiplayer do process some technical and player information, as explained below.</p>
 
 <h2>"Playing now" counter</h2>
 <p>While a drive runs, the game tells the project's counter service every few minutes that one more copy of
@@ -39,9 +40,12 @@ off in the launcher: Settings, General, "Count me on the website's 'playing now'
 
 <h2>Online features you choose to use</h2>
 <ul>
-  <li><b>Multiplayer:</b> when you host or join a session, the other players' games receive what the session needs:
-  the driver name you chose, your vehicle, its position and your network address. Sessions are run by players, not by
-  the project; finding a session may go through a public message relay (ntfy.sh) and Cloudflare tunnels.</li>
+  <li><b>Multiplayer:</b> when you host or join a session, the game sends your chosen driver name, vehicle and position,
+  chat messages you send, and technical connection information. The host receives the network information needed
+  to connect you. A host may also receive a persistent hardware-derived identifier used by the server's ban system.
+  Most sessions are hosted and administered by players rather than by the project. Finding or joining a session may
+  involve public listing or relay services (including ntfy.sh and Cloudflare tunnels); those services can also
+  process connection metadata according to their own policies.</li>
   <li><b>Real weather and internet radio:</b> if you turn them on, the game fetches weather reports
   (aviationweather.gov) and radio streams directly from those services. They see an ordinary request from your
   network address.</li>
@@ -49,13 +53,34 @@ off in the launcher: Settings, General, "Count me on the website's 'playing now'
   hosted on (for example GitHub or Hugging Face).</li>
 </ul>
 
+<h2>Multiplayer safety and logs</h2>
+<p>Individual game and dedicated server operators can retain their own logs. In current releases, ordinary LAN logs
+may include player names and chat message text. Do not publish raw server logs or diagnostic files without removing
+private information. Multiplayer administrators can kick and ban participants and enforce voice-chat restrictions.
+The game offers profanity filtering and chat rate limits, but these do not detect every kind of harmful content.
+Players can turn off voice chat, which is disabled by default.</p>
+<p>Ban-related device identifiers may be persistent even when hashed. They should be handled as potentially personal
+information, with restricted access and retention appropriate to the hosting operator's responsibilities.</p>
+
+<h2>Community applications and creator forms</h2>
+<p>A Discord community and any optional creator application form are separate from playing the core game. Before
+submitting a form, check the notice provided by its operator for the purposes, lawful basis, recipients, retention
+period and a private contact channel for data requests. The game privacy notice alone does not describe the actual
+handling of form responses. Please do not post personal data or form submissions in public support channels.</p>
+
 <h2>Children</h2>
-<p>openOMSI does not knowingly collect personal information from anyone, children included.</p>
+<p>The core game does not currently verify a player's age. Online play can involve communication with other players,
+and hosting operators may make their own moderation and safety decisions. Age checks and specific protections depend
+on the service and legal requirements; we do not ask every player to provide identity documents merely to run the
+offline game. This notice is not a guarantee that every independently hosted session is suitable for children.</p>
 
 <h2>Contact</h2>
-<p>Questions about privacy: open an issue at
-<a href="https://github.com/openOMSI-org/openOMSI/issues">github.com/openOMSI-org/openOMSI/issues</a>
-or ask on <a href="https://discord.gg/openomsi">Discord</a>.</p>
+<p>For general questions, see
+<a href="https://github.com/openOMSI-org/openOMSI/issues">the project's GitHub issues</a>
+or the <a href="https://discord.gg/openomsi">community Discord</a>.
+Those channels may be public: do not send private account details, device identifiers, identity documents, private
+logs, or sensitive data there. The project operators must publish an appropriate private contact channel for
+data-subject requests once responsibility and routing are confirmed.</p>
 
 <hr>
 <p class="muted">openOMSI is an independent project and is not affiliated with MR Software or Aerosoft.</p>
