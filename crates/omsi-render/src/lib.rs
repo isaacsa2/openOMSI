@@ -297,6 +297,8 @@ pub struct RenderOptions {
     pub render_scale: f32,
     /// Experimental FSR1 spatial upscaler (at the start, or later with `set_upscaler`).
     pub fsr1: bool,
+    /// Beta DLSS / DLAA preference, used only with the Windows DX12 experimental feature.
+    pub dlss: nvidia_dlss::DlssMode,
     /// RCAS sharpening strength, from 0 (none) to 1.
     pub fsr_sharpness: f32,
     /// VR: each eye is drawn at this fraction of its headset image and scaled up to it (by
@@ -380,6 +382,7 @@ impl Default for RenderOptions {
             ssao: true,
             render_scale: 0.0,
             fsr1: false,
+            dlss: nvidia_dlss::DlssMode::Off,
             xr_scale: 1.0,
             fsr_sharpness: 0.8,
             compress_textures: true,
@@ -515,6 +518,15 @@ impl Renderer {
         } else {
             self.prepass_msaa_pipelines.as_ref()
         }
+    }
+
+    /// Whether this build and its actual graphics device can use the native
+    /// Streamline beta. No guessing from a saved preference or GPU brand.
+    pub fn dlss_supported_backend(&self) -> bool {
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        { unsafe { self.device.as_hal::<wgpu_hal::api::Dx12>() }.is_some() }
+        #[cfg(not(all(windows, feature = "nvidia-dlss-experimental")))]
+        { false }
     }
 
     pub fn format(&self) -> wgpu::TextureFormat {
