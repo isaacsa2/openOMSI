@@ -585,10 +585,15 @@ mod tests {
 /// The upscaler's rows of the graphics page (after the render scale's): the upscaler, and
 /// FSR 1's quality and sharpening while it is chosen.
 fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
-    let fsr = app.settings.upscaler == "fsr1";
+    let dlss_available = app.settings.graphics_api == "dx12"
+        && app.renderer.as_ref().is_some_and(|r| r.dlss_supported_backend())
+        && !app.vr_active()
+        && !app.settings.triple.enabled;
+    let fsr = app.settings.upscaler == "fsr1" && (!dlss_available || app.settings.dlss == "off");
     let pct = |v: f32| format!("{:.0} %", v * 100.0);
     [
         select_row(file, "upscaler", "Upscaling", "Standard Catmull-Rom or experimental FSR 1; changes show at once"),
+        select_row(file, "dlss", "NVIDIA DLSS / DLAA (beta)", "Windows DirectX 12 with a compatible GeForce RTX and official Streamline runtime; restarts the game to apply").filter(|_| dlss_available),
         select_row(file, "fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| fsr),
         slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength", &pct).filter(|_| fsr),
     ]
