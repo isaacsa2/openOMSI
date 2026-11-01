@@ -63,8 +63,16 @@ impl TemporalGpu {
             bind_group_layouts: &[Some(&scene.camera_layout), Some(&scene.material_layout), None, Some(&bind_layout)],
             immediate_size: 0,
         });
-        // Both sky and meshes share one pipeline layout: switching pipelines
-        // must not invalidate the group(3) motion-history binding.
+        // The fullscreen sky shader only reads motion history in group(3).
+        // It does NOT use the mesh camera group(0) or material group(1).
+        // Sharing mesh_layout required dummy binds for groups 0 and 1 and
+        // caused runtime validation failures, even though the shader did not
+        // reference those groups. Give the sky its own sparse layout instead.
+        let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("DLSS motion sky (history only)"),
+            bind_group_layouts: &[None, None, None, Some(&bind_layout)],
+            immediate_size: 0,
+        });
         let color = [Some(wgpu::ColorTargetState {
             format: temporal_motion::MOTION_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL,
         })];
@@ -100,7 +108,7 @@ impl TemporalGpu {
         let pipelines = [(0,false),(0,true),(1,false),(1,true),(2,false),(2,true)].map(|(kind,cull)| make(kind,cull));
         let sky = pipelines::common::compile_pipeline(device, &wgpu::RenderPipelineDescriptor {
             label: Some("DLSS motion sky"),
-            layout: Some(&mesh_layout),
+            layout: Some(&sky_layout),
             vertex: wgpu::VertexState {
                 module: &module, entry_point: Some("vs_temporal_sky"),
                 buffers: &[], compilation_options: Default::default(),
@@ -232,16 +240,20 @@ impl TemporalGpu {
             }),
             timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
         });
-        // The sky pipeline shares the scene's pipeline layout with meshes.
-        // wgpu validates group(0) even for the fullscreen sky draw, so the
-        // active camera bind group MUST be bound before its first draw.
-        // Binding it only for the later mesh batches triggered a GPU validation
-        // error ("DLSS motion sky expects a BindGroup at index 0").
-        pass.set_bind_group(0, scene.camera_bind_group.as_ref(), &[]);
-        pass.set_bind_group(3, Some(&self.bind_group), &[]);
+        // Sky uses group(3) ONLY. Set its pipeline before the bind group:
+        // switching from a different pipeline layout can invalidate binds.
         pass.set_pipeline(&self.sky);
+        pass.set_bind_group(3, Some(&self.bind_group), &[]);
         pass.draw(0..3, 0..1);
-        encode_batches(&mut pass, scene, batches, |pipe| &self.pipelines[pipe as usize]);
+        // The scene's mesh pipeline has a different layout (groups 0, 1, 3).
+        // Rebind group(3) *after* switching layouts, then let encode_batches
+        // bind material group(1) before its first mesh draw.
+        if let Some(first) = batches.first() {
+            pass.set_pipeline(&self.pipelines[first.pipe as usize]);
+            pass.set_bind_group(0, scene.camera_bind_group.as_ref(), &[]);
+            pass.set_bind_group(3, Some(&self.bind_group), &[]);
+            encode_batches(&mut pass, scene, batches, |pipe| &self.pipelines[pipe as usize]);
+        }
         drop(pass);
         // This state belongs only to a *desktop main view*, never a mirror or VR eye.
         self.history.finish(scene, camera, size);
