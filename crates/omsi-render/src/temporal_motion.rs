@@ -92,6 +92,9 @@ fn previous_or_current(
 }
 
 impl MotionHistory {
+    pub(crate) fn next_jitter(&self) -> [f32; 2] {
+        jitter_pixels(self.frame_index, 8)
+    }
     pub(crate) fn prepare(
         &mut self,
         scene: &Scene,
