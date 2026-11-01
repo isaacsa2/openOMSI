@@ -7,6 +7,8 @@ No implication of affiliation with or endorsement from NVIDIA.
 ## Requirements
 
 - Windows x64, GeForce RTX hardware supported by your NVIDIA driver, and **DirectX 12** as openOMSI's selected backend.
+- DLSS/DLAA controls are visible only on Windows PCs where DXGI identifies an NVIDIA RTX GPU candidate and DX12 is selected. In-game, the selected rendering adapter must also be an RTX GPU running DX12. A PC with Intel/AMD rendering selected will not display DLSS merely because a second RTX card is installed.
+- The RTX preflight is conservative and is not a promise of Streamline compatibility: official `slIsFeatureSupported` and successful runtime initialization remain mandatory when you activate DLSS. An unsupported or unidentified GPU uses the original rendering path.
 - NVIDIA Streamline **2.14.1**, obtained independently from official NVIDIA sources under its license. Use its matching `sl.interposer.dll`, `sl.common.dll`, `sl.dlss.dll`, and `nvngx_dlss.dll` in a local SDK runtime directory. Do not extract them from the privately distributed OmniLine build.
 - Existing, legally installed OMSI 2/openOMSI game content. The standard Windows package contains the game and companion launchers for use with an existing, legitimate OMSI 2/openOMSI installation; it is not a complete OMSI content installation.
 - The **standard Windows x64 build script** (`scripts/build-windows.cmd`) already compiles the optional native DLSS adapter into `openomsi.exe`. DLSS remains disabled by default. Custom manual `cargo build` commands require `--features omsi-render/nvidia-dlss-experimental`.
