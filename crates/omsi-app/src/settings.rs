@@ -1152,9 +1152,16 @@ impl Settings {
     }
 
     pub fn render_options(&self) -> omsi_render::RenderOptions {
-        let fsr1 = self.upscaler == "fsr1";
-        let render_scale = self.scene_render_scale();
-        omsi_render::RenderOptions { msaa: self.msaa, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr_sharpness: self.fsr_sharpness, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
+        // The experimental native renderer must never activate from an old
+        // preference while Vulkan/ANGLE/OpenGL is selected in the launcher.
+        let dlss = if cfg!(windows) && self.graphics_api == "dx12" {
+            omsi_render::nvidia_dlss::DlssMode::parse(&self.dlss)
+        } else {
+            omsi_render::nvidia_dlss::DlssMode::Off
+        };
+        let fsr1 = self.upscaler == "fsr1" && !dlss.is_on();
+        let render_scale = if dlss.is_on() { 1.0 } else { self.scene_render_scale() };
+        omsi_render::RenderOptions { msaa: self.msaa, dlss, anisotropy: self.anisotropy, shadow_size: self.shadow_size, ssao: self.ssao, render_scale, fsr1, fsr_sharpness: self.fsr_sharpness, xr_scale: 1.0, compress_textures: self.texture_compression, gpu_texture_compression: self.gpu_texture_compression, fxaa: self.post_aa != "off", min_obj_size: self.min_obj_size, max_obj_dist: self.object_distance(), mirror_enhanced: self.mirror_quality == "enhanced", mirror_shadows: self.mirror_shadows, mirror_particles: self.mirror_particles, omsi_shadow_casters: self.shadow_casters == "omsi", shadow_blobs: self.shadow_blobs, reflections: self.reflections > 0.0, preview_only: false, no_enhanced: !matches!(graphics_mode(&self.graphics), "enhanced" | "enhanced_plus"), ray_tracing: self.ray_tracing(), light_shadows: match self.light_shadows.as_str() { "off" => 0, "all" => 2, _ => 1 }, cloud_shadows: self.cloud_shadows, light_glow: self.light_glow, street_light: match self.street_light.as_str() { "on" => Some(true), "off" => Some(false), _ => None }, max_scene: None }
     }
 }
 
@@ -1248,6 +1255,18 @@ mod dlss_setting_tests {
         assert_eq!(Settings::from_text("dlss=unknown\n").dlss, "off");
         assert_eq!(Settings::from_text("dlss=quality\n").dlss, "quality");
         assert_eq!(Settings::from_text("dlss=dlaa\n").dlss, "dlaa");
+    }
+
+    #[test]
+    fn dlss_can_only_request_dx12_on_windows() {
+        let chosen = Settings::from_text("graphics_api=dx12\ndlss=quality\n");
+        assert_eq!(chosen.render_options().dlss.is_on(), cfg!(windows));
+        let vulkan = Settings::from_text("graphics_api=vulkan\ndlss=quality\n");
+        assert!(!vulkan.render_options().dlss.is_on());
+        let automatic = Settings::from_text("graphics_api=auto\ndlss=quality\n");
+        assert!(!automatic.render_options().dlss.is_on());
+        let off = Settings::from_text("graphics_api=dx12\ndlss=off\n");
+        assert!(!off.render_options().dlss.is_on());
     }
 
     #[test]
