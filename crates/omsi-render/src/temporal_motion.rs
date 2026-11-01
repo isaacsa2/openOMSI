@@ -193,6 +193,22 @@ mod tests {
         assert_eq!(found, old);
     }
     #[test]
+    fn motion_shader_parses_and_validates_with_current_scene() {
+        let text = format!(
+            "{}\\n{}",
+            crate::scene_shader_source(false),
+            include_str!("temporal_motion.wgsl"),
+        );
+        let module = naga::front::wgsl::parse_str(&text)
+            .expect("current scene plus DLSS motion shader should parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("DLSS motion shader should validate");
+    }
+    #[test]
     fn motion_uniform_matches_wgsl_structure() {
         assert_eq!(std::mem::size_of::<MotionUniform>(), 272);
         assert_eq!(std::mem::align_of::<MotionUniform>(), 4);
