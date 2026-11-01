@@ -98773,3 +98773,10 @@ _version: 2
   sv: "Passagerare reagerar på fulla bussar"
   sr: "Putnici reaguju na pune autobuse"
   ka: "მგზავრები რეაგირებენ გადავსებულ ავტობუსებზე"
+"DLSS mode":
+  de: "DLSS-Modus"
+  es: "Modo DLSS"
+  fr: "Mode DLSS"
+  it: "Modalità DLSS"
+  pt: "Modo do DLSS"
+  pt-pt: "Modo do DLSS"

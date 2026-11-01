@@ -46,6 +46,8 @@ const enhanced = (s) => mode(s) === 'enhanced';
 const traced = (s) => enhanced(s) && (!!s.ray_tracing || s.graphics === 'enhanced_plus');
 const mobile = (s, p) => p === 'android' || p === 'ios';
 const windows = (s, p) => p === 'windows';
+// DLSS can be offered: Windows, DirectX 12 and a GeForce RTX found by the launcher.
+const dlssHere = (s, boot) => boot?.platform === 'windows' && s.graphics_api === 'dx12' && boot?.dlss_gpu_candidate === true;
 const tripleOn = (s) => !!s.triple_screen;
 const vrOn = (s, p) => windows(s, p) && !!s.vr;
 
@@ -86,13 +88,15 @@ const graphics = {
         { type: 'custom', id: 'preset' },
         { type: 'custom', id: 'optimise' },
         { type: 'select', key: 'msaa', label: 'Anti-aliasing', options: [['1', 'Off'], ['2', '2x MSAA'], ['4', '4x MSAA'], ['8', '8x MSAA']], heavy: (v, s) => v === '8' && !traced(s) },
-        { type: 'select', key: 'upscaler', label: 'Upscaling', options: [['default', 'Standard (Catmull-Rom)'], ['fsr1', 'AMD FSR 1 (experimental)']], help: 'Standard Catmull-Rom or experimental FSR 1; changes show at once' },
-        { type: 'select', key: 'dlss', label: 'NVIDIA DLSS / DLAA (beta)', options: [
-          ['off', 'Off'], ['dlaa', 'DLAA (native resolution)'],
+        { type: 'select', key: 'upscaler', label: 'Upscaling', options: (s, boot) => [['default', 'Standard (Catmull-Rom)'], ['fsr1', 'AMD FSR 1 (experimental)'], ...(dlssHere(s, boot) ? [['dlss', 'NVIDIA DLSS / DLAA (beta)']] : [])],
+          // (DLSS is one of the upscalers; settings.cfg keeps its mode in `dlss`)
+          value: (s, boot) => (dlssHere(s, boot) && s.dlss && s.dlss !== 'off' ? 'dlss' : s.upscaler), help: 'Standard Catmull-Rom or experimental FSR 1; changes show at once' },
+        { type: 'select', key: 'dlss', label: 'DLSS mode', options: [
+          ['dlaa', 'DLAA (native resolution)'],
           ['quality', 'DLSS Quality'], ['balanced', 'DLSS Balanced'],
           ['performance', 'DLSS Performance'], ['ultra_performance', 'DLSS Ultra Performance'],
         ], help: 'Experimental. Requires a compatible GeForce RTX, DirectX 12 and NVIDIA Streamline runtime. Takes effect after restarting the game.',
-          when: (s, p, boot) => windows(s, p) && s.graphics_api === 'dx12' && boot?.dlss_gpu_candidate === true },
+          when: (s, p, boot) => dlssHere(s, boot) && !!s.dlss && s.dlss !== 'off' },
         { type: 'select', key: 'fsr_quality', label: 'FSR quality', options: [['ultra', 'Ultra Quality (77%)'], ['quality', 'Quality (67%)'], ['balanced', 'Balanced (59%)'], ['performance', 'Performance (50%)'], ['auto', 'Automatic (keeps the frame rate)'], ['custom', 'Use render scale']], when: (s) => s.upscaler === 'fsr1' && (!s.dlss || s.dlss === 'off') },
         { type: 'slider', key: 'fsr_sharpness', label: 'FSR sharpness', help: 'RCAS sharpening strength', min: 0, max: 1, step: 0.05, def: 0.8, store: snap(0.05), format: pct, when: (s) => s.upscaler === 'fsr1' && (!s.dlss || s.dlss === 'off') },
         { type: 'select', key: 'render_scale', label: 'Render scale', options: [['auto', 'Auto'], ['1', '100%'], ['0.85', '85%'], ['0.75', '75%'], ['0.67', '67%'], ['0.5', '50%']] },

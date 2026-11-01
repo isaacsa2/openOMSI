@@ -119,18 +119,21 @@ function Name({ label, help, warn }) {
 function SelectRow({ row }) {
   const s = S.settings;
   const options = typeof row.options === 'function' ? row.options(s, S.boot) : row.options;
-  const cur = s[row.key];
+  const cur = row.value ? row.value(s, S.boot) : s[row.key];
   // the choice the value means ("4" for 4); a value written by hand shows as itself
   const match = options.find(([v]) => same(cur, v) || String(cur) === String(v));
   const value = match ? match[0] : cur == null ? '' : typeof cur === 'boolean' ? (cur ? '1' : '0') : String(cur);
   return html`<div class="setting-row">
     <${Name} label=${row.label} help=${row.help} warn=${row.heavy?.(value, s) && 'Heavy: can cost many frames per second on most graphics cards'} />
     <${Select} value=${value} options=${options} raw=${row.raw} onChange=${async (v) => {
-      const patch = { [row.key]: asStored(cur, v) };
+      const patch = row.key === 'upscaler' && v === 'dlss'
+        // (DLSS among the upscalers: its last mode, else Quality)
+        ? { upscaler: 'default', dlss: s.dlss && s.dlss !== 'off' ? s.dlss : 'quality' }
+        : { [row.key]: asStored(cur, v) };
       // Temporal and spatial upscalers must not be selected at the same time.
       // Selecting another backend must also invalidate DLSS explicitly.
       if (row.key === 'dlss' && v !== 'off') patch.upscaler = 'default';
-      if (row.key === 'upscaler' && v === 'fsr1') patch.dlss = 'off';
+      if (row.key === 'upscaler' && v !== 'dlss') patch.dlss = 'off';
       if (row.key === 'graphics_api' && v !== 'dx12') patch.dlss = 'off';
       if ((await saveSettings(patch)) && row.recheckUpdates) checkUpdates();
     }} />

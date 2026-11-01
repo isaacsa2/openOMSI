@@ -605,18 +605,31 @@ mod dlss_menu_tests {
     }
 }
 
-fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
-    let dlss_available = dlss_option_visible(
+/// Whether DLSS is offered here: DirectX 12 on an RTX device, on the desktop view.
+pub(super) fn dlss_available(app: &App) -> bool {
+    dlss_option_visible(
         &app.settings.graphics_api,
         app.renderer.as_ref().is_some_and(|r| r.dlss_supported_backend()),
         app.vr_active(),
         app.settings.triple.enabled,
-    );
-    let fsr = app.settings.upscaler == "fsr1" && (!dlss_available || app.settings.dlss == "off");
+    )
+}
+
+fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
+    // (DLSS is one of the upscalers: chosen in the Upscaling list, its mode under it, as
+    // FSR 1's quality is; settings.cfg keeps `dlss` apart from `upscaler`)
+    let dlss_available = dlss_available(app);
+    let dlss = dlss_available && app.settings.dlss != "off";
+    let fsr = app.settings.upscaler == "fsr1" && !dlss;
     let pct = |v: f32| format!("{:.0} %", v * 100.0);
+    let upscaling = "Standard Catmull-Rom or experimental FSR 1; changes show at once";
     [
-        select_row(file, "upscaler", "Upscaling", "Standard Catmull-Rom or experimental FSR 1; changes show at once"),
-        select_row(file, "dlss", "NVIDIA DLSS / DLAA (beta)", "Windows DirectX 12 with a compatible GeForce RTX and official Streamline runtime; restarts the game to apply").filter(|_| dlss_available),
+        if dlss {
+            Some((row("Upscaling", 'o', &omsi_ui::tr("NVIDIA DLSS / DLAA (beta)"), upscaling, None), "sel upscaler".to_string()))
+        } else {
+            select_row(file, "upscaler", "Upscaling", upscaling)
+        },
+        select_row(file, "dlss", "DLSS mode", "Windows DirectX 12 with a compatible GeForce RTX and official Streamline runtime; restarts the game to apply").filter(|_| dlss),
         select_row(file, "fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| fsr),
         slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength", &pct).filter(|_| fsr),
     ]

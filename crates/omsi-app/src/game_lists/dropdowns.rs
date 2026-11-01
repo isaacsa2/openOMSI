@@ -83,7 +83,14 @@ pub(crate) fn dropdown_for(app: &App, row: usize, id: &str) -> Option<Dropdown> 
         "reset" => vec![(tr("Cancel"), "noop".to_string()), (tr("Reset all settings"), "reset_all".to_string())],
         key if key.starts_with("sel ") => {
             let key = &key[4..];
-            let (options, at, _) = select_state(&settings_file(), key);
+            let (mut options, mut at, _) = select_state(&settings_file(), key);
+            // (DLSS among the upscalers where it can run; settings.cfg keeps it in `dlss`)
+            if key == "upscaler" && super::menu_pages::dlss_available(app) {
+                options.push(("dlss", "NVIDIA DLSS / DLAA (beta)"));
+                if app.settings.dlss != "off" {
+                    at = Some(options.len() - 1);
+                }
+            }
             current = at;
             options.iter().map(|o| (tr(o.1), format!("pick {key} {}", o.0))).collect()
         }
@@ -140,17 +147,22 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
         }
         "pick" => {
             if let Some((key, value)) = arg.split_once(' ') {
+                // DLSS picked among the upscalers: its last mode, else Quality
+                let (key, value) = if key == "upscaler" && value == "dlss" {
+                    ("dlss", if app.settings.dlss != "off" { app.settings.dlss.clone() } else { "quality".to_string() })
+                } else {
+                    (key, value.to_string())
+                };
+                let value = value.as_str();
                 // Never accept a stale GPU dropdown selection from a non-DX12 session.
-                if key == "dlss" && !(app.settings.graphics_api == "dx12"
-                    && app.renderer.as_ref().is_some_and(|r| r.dlss_supported_backend())
-                    && !app.vr_active() && !app.settings.triple.enabled) {
+                if key == "dlss" && !super::menu_pages::dlss_available(app) {
                     return;
                 }
                 let before = app.settings.mirror_hud;
                 remember_setting(key, value);
                 if key == "dlss" && value != "off" {
                     remember_setting("upscaler", "default");
-                } else if key == "upscaler" && value == "fsr1" {
+                } else if key == "upscaler" {
                     remember_setting("dlss", "off");
                 }
                 reload_settings(app);
@@ -291,7 +303,7 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
         "render_scale" => vec![("auto", "Auto"), ("1", "100%"), ("0.85", "85%"), ("0.75", "75%"), ("0.67", "67%"), ("0.5", "50%")],
         "upscaler" => vec![("default", "Standard (Catmull-Rom)"), ("fsr1", "AMD FSR 1 (experimental)")],
         "dlss" => vec![
-            ("off", "Off"), ("dlaa", "DLAA (native resolution)"),
+            ("dlaa", "DLAA (native resolution)"),
             ("quality", "DLSS Quality"), ("balanced", "DLSS Balanced"),
             ("performance", "DLSS Performance"), ("ultra_performance", "DLSS Ultra Performance"),
         ],
