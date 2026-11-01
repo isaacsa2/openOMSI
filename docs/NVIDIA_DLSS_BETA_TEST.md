@@ -39,9 +39,15 @@ Note: The beta is for one primary desktop view. VR, mirrors, and triple-screen l
 
 1. Start with DLSS off on exactly the same route, bus, time/weather and window resolution; record FPS and GPU frametime.
 2. Try DLAA, Quality, Balanced and Performance; repeat for camera pans, traffic/pedestrians, tree movement and mirrors.
-3. Look for ghosting on buses, signs, windshield wipers, transparent glass, rain, sky and HUD.
-4. Switch resolution and teleport; temporal history must reset. Check for flicker and frame corruption.
-5. Disconnect/omit one official SDK DLL: the log should explain the missing runtime and fall back to the ordinary renderer (no crash).
-6. Include GPU, driver, graphics API, DLSS mode, screenshot/video and log with each report.
+3. Verify that the regular HUD, navigator, Alt menu, tooltips and any in-game overlay appear **above** the DLSS/DLAA image at the original 1920×1080 window size. Confirm that the Esc menu still works and that no UI is upscaled.
+4. Compare bus decals/route text, dashboards, interiors and textures in DLSS Off, DLAA, Quality and Balanced; the source texture resolution/VRAM residency must not change as a side-effect of selecting DLSS.
+5. Look for ghosting on buses, signs, windshield wipers, transparent glass, rain and sky.
+6. Switch resolution and teleport; temporal history must reset. Check for flicker and frame corruption.
+7. Disconnect/omit one official SDK DLL: the log should explain the missing runtime and fall back to the ordinary renderer (no crash).
+8. Include GPU, driver, graphics API, DLSS mode, screenshot/video and log with each report.
 
-**The 2026-11-01 hardware log confirmed Streamline initialized and computed Balanced render size, then wgpu rejected the sky-motion pass because camera bind group 0 was missing.** The pass binding order is corrected on this branch. Please retest it on the same RTX system, especially Enhanced+ mode. A successful CI build is not proof of valid image quality. Keep the PR in Draft until the GPU fix and license compatibility are reviewed.
+**RTX 3070 Ti beta status (2026-11-01):** Streamline 2.14.1 initialized, and DLSS/DLAA rendered the scene successfully after the earlier sky bind-group repairs. Screenshots at 1920×1080 revealed that the regular HUD and Alt menu were missing, although the Esc menu was accessible. This was traced to the DLSS 3D pass truncating `scene.overlay_res` while overlays were hidden and not recreating native-resolution GPU overlay resources after restoring them. The corrected DLSS pass calls `renderer.prepare_overlays(scene, width, height)` before final presentation, matching the standard triple-panel workflow.
+
+The same RTX tester reported weak detail in Balanced mode (1114×626 → 1920×1080). The DLSS 3D view now uses a conservative source texture mip LOD bias `log2(internal_width / output_width)`, clamped to [-1, 0], without lowering source texture resolution, changing VRAM policy or affecting DLAA's native-resolution LOD.
+
+**Both fixes require a new RTX 3070 Ti build and comparison screenshots**, particularly HUD, Alt, DLAA native quality and Balanced lettering. Keep the PR Draft until the GPU tests and licensing review are complete.
