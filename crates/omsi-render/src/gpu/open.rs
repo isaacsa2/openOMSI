@@ -68,6 +68,17 @@ impl Renderer {
     ) -> Result<Opened> {
         let info = adapter.get_info();
         let asked_options = options;
+        // A stored DLSS choice is never sufficient to activate it: adapter
+        // selection can change (laptops, eGPUs, fallback from DX12 to Vulkan).
+        // Reject unsupported actual adapters before building any DLSS pipeline.
+        let options = if options.dlss.is_on()
+            && (info.backend != wgpu::Backend::Dx12
+                || !nvidia_dlss::nvidia_rtx_candidate(info.vendor, &info.name)) {
+            log::warn!("DLSS requested but the selected adapter {} ({:?}) is not an NVIDIA RTX DX12 candidate; using the normal renderer", info.name, info.backend);
+            RenderOptions { dlss: nvidia_dlss::DlssMode::Off, ..options }
+        } else {
+            options
+        };
         // test hooks for an adapter that cannot be opened: an error, or wgpu going down
         #[cfg(feature = "test-hooks")]
         match omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() {
@@ -478,7 +489,7 @@ impl Renderer {
                 let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
                 let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
                 let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-                let (renderer, caught) = pipelines::parallel::catching(|| Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options }));
+                let (renderer, caught) = pipelines::parallel::catching(|| Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options }, nvidia_dlss::nvidia_rtx_candidate(info.vendor, &info.name)));
                 // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
                 #[cfg(feature = "test-hooks")]
                 if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
@@ -523,6 +534,7 @@ impl Renderer {
         adapter_name: String,
         format: wgpu::TextureFormat,
         options: RenderOptions,
+        nvidia_rtx_candidate: bool,
     ) -> Renderer {
         use pipelines::{coronas, defaults, enhanced, errors, mip, overlays, passes, post, scene, shadows, sky, ssao, upscale};
         let (msaa, shadow_size) = (options.msaa, options.shadow_size);
@@ -574,7 +586,7 @@ impl Renderer {
         // Diagnostic-only motion target: inert without feature + explicit env flag.
         // Do not enable this until NVIDIA Streamline is integrated and verified.
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let mode = dlss_beta::DlssBeta::requested(options.dlss);
+        let mode = if nvidia_rtx_candidate { dlss_beta::DlssBeta::requested(options.dlss) } else { nvidia_dlss::DlssMode::Off };
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
         let is_dx12 = unsafe { device.as_hal::<wgpu_hal::api::Dx12>() }.is_some();
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
