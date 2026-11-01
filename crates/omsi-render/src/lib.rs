@@ -21,6 +21,7 @@ pub mod clouds;
 // The portable DLSS mode and fallback tests are always compiled. The native
 // Streamline runtime remains behind the opt-in nvidia-dlss-experimental feature.
 pub mod nvidia_dlss;
+mod temporal_motion;
 mod cookies;
 pub use cookies::{Cookie, COOKIE_LAYERS};
 mod gpu_memory;
