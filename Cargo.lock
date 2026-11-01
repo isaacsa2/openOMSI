@@ -4244,6 +4244,7 @@ dependencies = [
  "pollster 1.0.1",
  "rayon",
  "wgpu",
+ "wgpu-hal",
  "windows 0.62.2",
  "winit",
 ]
