@@ -265,6 +265,18 @@ impl Renderer {
             .projection
             .map(|p| p * Mat4::look_to_rh((camera.position - ro).as_vec3(), camera.forward(), camera.up()))
             .unwrap_or_else(|| camera.view_proj(aspect, ro));
+        // DLSS reconstructs subpixel detail from a sequence of jittered 3D
+        // projections. Motion vectors stay UNJITTERED (temporal_motion.rs).
+        // Never jitter mirrors, VR eyes, triple displays or other views.
+        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
+        let vp_mat = if self.dlss_frame_active && f.with_overlays && f.projection.is_none() {
+            if let Some(motion) = self.temporal_gpu.as_ref() {
+                let j = motion.next_jitter();
+                let dx = 2.0 * j[0] / f.width.max(1) as f32;
+                let dy = -2.0 * j[1] / f.height.max(1) as f32;
+                Mat4::from_translation(Vec3::new(dx, dy, 0.0)) * vp_mat
+            } else { vp_mat }
+        } else { vp_mat };
         // the last frame's picture for the bounced light, found again under this frame's view
         if lead_view {
             let size = (f.width, f.height);
