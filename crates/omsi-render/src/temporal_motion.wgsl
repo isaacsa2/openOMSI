@@ -32,7 +32,7 @@ struct MotionFsIn {
 
 @vertex
 fn vs_temporal_motion(in: VsIn) -> MotionVsOut {
-    let d = vs_depth(in);
+    let d = dlss_depth_helper(in);
     let entry = draw_list[in.inst];
     let m = model_matrix(entry);
     let current_world = m * vec4<f32>(in.pos, 1.0) + vec4<f32>(tree_sway(in.pos, m), 0.0);
