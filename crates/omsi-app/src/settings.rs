@@ -1154,7 +1154,8 @@ impl Settings {
     pub fn render_options(&self) -> omsi_render::RenderOptions {
         // The experimental native renderer must never activate from an old
         // preference while Vulkan/ANGLE/OpenGL is selected in the launcher.
-        let dlss = if cfg!(windows) && self.graphics_api == "dx12" {
+        let dlss = if cfg!(windows) && self.graphics_api == "dx12"
+            && omsi_launcher_lib::dlss_gpu::dlss_gpu_candidate() {
             omsi_render::nvidia_dlss::DlssMode::parse(&self.dlss)
         } else {
             omsi_render::nvidia_dlss::DlssMode::Off
@@ -1260,7 +1261,7 @@ mod dlss_setting_tests {
     #[test]
     fn dlss_can_only_request_dx12_on_windows() {
         let chosen = Settings::from_text("graphics_api=dx12\ndlss=quality\n");
-        assert_eq!(chosen.render_options().dlss.is_on(), cfg!(windows));
+        assert_eq!(chosen.render_options().dlss.is_on(), cfg!(windows) && omsi_launcher_lib::dlss_gpu::dlss_gpu_candidate());
         let vulkan = Settings::from_text("graphics_api=vulkan\ndlss=quality\n");
         assert!(!vulkan.render_options().dlss.is_on());
         let automatic = Settings::from_text("graphics_api=auto\ndlss=quality\n");
