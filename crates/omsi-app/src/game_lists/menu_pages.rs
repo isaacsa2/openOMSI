@@ -585,8 +585,8 @@ mod tests {
 /// The upscaler's rows of the graphics page (after the render scale's): the upscaler, and
 /// FSR 1's quality and sharpening while it is chosen.
 /// DX12 must be both requested and confirmed by the active GPU.
-fn dlss_option_visible(api: &str, dx12_device: bool, vr_active: bool, triple_screen: bool) -> bool {
-    api == "dx12" && dx12_device && !vr_active && !triple_screen
+fn dlss_option_visible(api: &str, rtx_dx12_device: bool, vr_active: bool, triple_screen: bool) -> bool {
+    api == "dx12" && rtx_dx12_device && !vr_active && !triple_screen
 }
 
 #[cfg(test)]
