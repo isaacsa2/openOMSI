@@ -22,7 +22,7 @@ This branch is dedicated to DLSS Super Resolution and DLAA only. It does not imp
 - `dlss_present.wgsl` presents NVIDIA's full-size output without running it through the ordinary spatial upscaler. When initialization or evaluation fails, the game renders the ordinary picture; the experimental path remains off for that session.
 - `.github/workflows/dlss-beta-windows.yml` packages a Windows game executable and beta-test instructions **without** any NVIDIA DLLs. See `docs/NVIDIA_DLSS_BETA_TEST.md`.
 
-- The application now accepts and round-trips `dlss=off|dlaa|quality|balanced|performance|ultra_performance` in `settings.cfg`. The value is intentionally **not yet wired to the renderer** and has no effect on the image. This preserves existing graphics settings while the integration is developed.
+- The application and launcher parse, write and round-trip `dlss=off|dlaa|quality|balanced|performance|ultra_performance` in `settings.cfg`. The beta renderer now reads that value at startup **only** when Windows DirectX 12 is explicitly selected, and always rechecks the actual active device. Changing it in the in-game menu requires restarting the game.
 - `.github/workflows/dlss-adapter.yml` compiles the Windows-only native feature and exercises portable mode tests on Linux; failures from those jobs are treated as blockers, not ignored.
 - The Windows/D3D12 Streamline adapter from the MIT PR is kept behind the **off-by-default** Cargo feature `nvidia-dlss-experimental`. It has **not** yet been integrated with the current renderer and **must not** be described as working DLSS.
 - The runtime, when eventually connected, is intended to load NVIDIA libraries explicitly from a user-supplied location and to fail cleanly when unsupported.
@@ -32,7 +32,7 @@ This branch is dedicated to DLSS Super Resolution and DLAA only. It does not imp
 1. Motion vectors and Halton jitter have been integrated into the opt-in beta frame; **verify them on a real RTX GPU** (moving buses, camera pans, trees, alpha-cutouts, rain and reflections). No real-GPU execution has been proven.
 2. The opt-in beta has Streamline evaluation and HUD composition in source; **validate** wgpu/D3D12 queue ordering, texture state restoration, lifetime, command allocator reuse and GPU fences. Audit all unsafe sections before upstream.
 3. Add a separate DLSS output texture and an sRGB-correct final pass; do not apply standard upscaling, FSR, FXAA, or MSAA concurrently with DLSS.
-4. Wire the validated beta into user-facing settings and launcher/game menus after native runtime validation. The `settings.cfg` `dlss=` preference is currently stored but **not active**; beta selection is via environment variable only.
+4. The beta selector is present in the launcher and in-game graphics menu, gated by DirectX 12 (and the actual renderer for the in-game menu). Validate RTX hardware behaviour before a general release. Settings changes need a restart in this beta.
 5. Ensure fallback reinstates the previous complete graphics path (MSAA, FXAA, scale and any required pipeline state), even when a Windows/NVIDIA device fails to load the DLLs.
 6. Verify regular Windows, Linux, macOS and Android builds, shader validation on GL/Vulkan, and GPU runtime tests on compatible RTX hardware. Benchmark frametime and check ghosting, alpha cutouts, transparent objects, moving vehicles, glass, mirrors, VR and device loss.
 
