@@ -10,8 +10,9 @@ default = ["test-hooks"]
 # The fault-injection hook OMSI_FAKE_GPU_ERROR (see docs/DEBUG_FLAGS.md); a build without
 # it cannot be made to fail on purpose.
 test-hooks = []
-# The public MIT Streamline adapter is staged for the current renderer; disabled by default.
-# Activating this does not yet enable DLSS in the game (see docs/NVIDIA_DLSS.md).
+# Native Streamline adapter is compiled into the normal Windows x64 release binary
+# by scripts/build-windows.cmd, but DLSS remains opt-in and off by default.
+# Other targets retain their standard builds; no NVIDIA DLLs are distributed.
 nvidia-dlss-experimental = ["dep:wgpu-hal", "dep:windows-core"]
 
 [dependencies]
