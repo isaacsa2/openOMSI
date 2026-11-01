@@ -98,6 +98,25 @@ impl DlssMode {
     }
 }
 
+/// Conservative RTX candidate check for the adapter actually opened by wgpu.
+/// The Streamline slIsFeatureSupported call is still the authoritative check.
+pub fn nvidia_rtx_candidate(vendor: u32, name: &str) -> bool {
+    vendor == 0x10de && name.to_ascii_uppercase().contains("RTX")
+}
+
+#[cfg(test)]
+mod candidate_tests {
+    use super::*;
+    #[test]
+    fn dlss_requires_nvidia_rtx_identification() {
+        assert!(nvidia_rtx_candidate(0x10de, "NVIDIA GeForce RTX 4070"));
+        assert!(nvidia_rtx_candidate(0x10de, "NVIDIA RTX A2000"));
+        assert!(!nvidia_rtx_candidate(0x10de, "NVIDIA GeForce GTX 1080"));
+        assert!(!nvidia_rtx_candidate(0x1002, "NVIDIA GeForce RTX 4070"));
+        assert!(!nvidia_rtx_candidate(0x8086, "Intel Arc A580"));
+    }
+}
+
 /// What DLSS reads and writes this frame: the D3D12 resources behind wgpu's textures.
 pub struct Inputs<'a> {
     /// The 3D picture at the render size (the renderer's colour format, sRGB).
