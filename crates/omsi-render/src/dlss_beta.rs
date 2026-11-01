@@ -157,7 +157,9 @@ impl DlssBeta {
         // after Streamline, at the *actual window size*.
         let overlays = std::mem::take(&mut scene.overlays);
         let overlay_res = std::mem::take(&mut scene.overlay_res);
+        renderer.dlss_frame_active = true;
         renderer.render_inner(scene,&targets.color_view,render_size.0,render_size.1,camera,lighting,true,None,None,false);
+        renderer.dlss_frame_active = false;
         scene.overlays = overlays;
         scene.overlay_res = overlay_res;
         renderer.options = saved;
