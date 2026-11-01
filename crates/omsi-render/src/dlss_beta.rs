@@ -151,6 +151,9 @@ impl DlssBeta {
         // scaled by FSR1, FXAA or the ordinary render-scale pass a second time.
         let saved = renderer.options;
         renderer.options.render_scale = 1.0;
+        // DLSS already selected the internal resolution; a device-specific
+        // max_scene cap must not silently downscale the input a second time.
+        renderer.options.max_scene = None;
         renderer.options.fsr1 = false;
         renderer.options.fxaa = false;
         // Hide overlays while the 3D picture is being drawn. HUD is rendered only
