@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn motion_shader_parses_and_validates_with_current_scene() {
         let text = format!(
-            "{}\\n{}",
+            "{}\n{}",
             crate::scene_shader_source(false),
             include_str!("temporal_motion.wgsl"),
         );
