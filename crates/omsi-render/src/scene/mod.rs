@@ -195,6 +195,8 @@ pub struct Rainfall {
 }
 
 pub struct Scene {
+    /// Unique identity for renderer temporal history; not reused across loaded maps.
+    pub(crate) scene_id: u64,
     pub meshes: Vec<GpuMesh>,
     pub textures: Vec<GpuTexture>,
     /// Texture slot read by procedural rain films.
