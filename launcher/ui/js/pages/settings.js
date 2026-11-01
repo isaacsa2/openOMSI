@@ -45,7 +45,7 @@ function asStored(cur, v) {
   return v;
 }
 
-const visible = (row, s, platform) => !row.when || row.when(s, platform);
+const visible = (row, s, platform, boot) => !row.when || row.when(s, platform, boot);
 
 export function SettingsPage() {
   const s = useStore();
@@ -58,7 +58,7 @@ export function SettingsPage() {
   const platform = s.boot?.platform || '';
   // (the model test runs the game program: not on a phone)
   const phone = ['android', 'ios'].includes(platform);
-  const tabs = SETTINGS_TABS.filter((x) => visible(x, s.settings, platform));
+  const tabs = SETTINGS_TABS.filter((x) => visible(x, s.settings, platform, s.boot));
   const current = tabs.find((x) => x.id === tab) || tabs[0];
   const pick = (id) => {
     // (Troubleshooting is no tab of its own: it opens that page at its model test)
@@ -76,7 +76,7 @@ export function SettingsPage() {
       ? html`<div key=${tab}><${AiListsPage} /></div>`
       : html`<div class="settings-grid" key=${tab}>
       ${current.cols.map((col) => html`<${Card} title=${col.title}>
-        ${col.rows.filter((row) => visible(row, s.settings, platform)).map((row, i) => html`<${Row} key=${i + (row.key || row.id || row.label || row.title || '')} row=${row} ask=${ask} />`)}
+        ${col.rows.filter((row) => visible(row, s.settings, platform, s.boot)).map((row, i) => html`<${Row} key=${i + (row.key || row.id || row.label || row.title || '')} row=${row} ask=${ask} />`)}
       </${Card}>`)}
     </div>`}
     ${dialog}
