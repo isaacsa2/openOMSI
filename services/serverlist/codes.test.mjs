@@ -15,9 +15,11 @@ test("session codes and short codes are read as games write and players type the
   for (const bad of ["012-345-678", "12-345-678", "1234-567-890", "123-456-78a", "", 123456789]) {
     assert.equal(shortDigits(bad), null, String(bad));
   }
-  assert.equal(drawShort(0), "100000000");
-  assert.equal(drawShort(899999999), "999999999");
-  assert.equal(drawShort(4294967295).length, 9);
+  const from = (...n) => () => n.shift();
+  assert.equal(drawShort(from(0)), "100000000");
+  assert.equal(drawShort(from(899999999)), "999999999");
+  assert.equal(drawShort(from(3599999999)), "999999999");
+  assert.equal(drawShort(from(3600000000, 4294967295, 5)), "100000005", "the top of the range is drawn again");
 });
 
 test("a code leads to its session while the host refreshes it, then is forgotten", () => {

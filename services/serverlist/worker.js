@@ -67,7 +67,7 @@ export class List extends DurableObject {
     this.forget(now);
     if (!this.codeRegisters.allow(await sha256("code" + sourceKey(ip)), now)) return { status: 429, body: { error: "too many codes from this address: try again later" } };
     const token = randomHex(16);
-    const r = this.codes.register(body.code, await sha256(token), now, () => drawShort(crypto.getRandomValues(new Uint32Array(1))[0]));
+    const r = this.codes.register(body.code, await sha256(token), now, () => drawShort(() => crypto.getRandomValues(new Uint32Array(1))[0]));
     if (r.status === 201) r.body.token = token;
     return r;
   }

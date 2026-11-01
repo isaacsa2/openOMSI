@@ -28,9 +28,16 @@ export function shortDigits(v) {
   return /^[1-9][0-9]{8}$/.test(d) ? d : null;
 }
 
-// A fresh code from a random 32-bit number (the worker's `crypto.getRandomValues`).
+// A fresh code from random 32-bit numbers (`random32`: the worker's `crypto.getRandomValues`),
+// every code as likely as another: a number at or above the largest multiple of 900 000 000
+// below 2^32 is drawn again rather than folded over (which would favour the low codes).
+const SPAN = 900000000;
+const LIMIT = Math.floor(2 ** 32 / SPAN) * SPAN;
 export function drawShort(random32) {
-  return String(100000000 + (random32 % 900000000));
+  for (;;) {
+    const n = random32();
+    if (n < LIMIT) return String(100000000 + (n % SPAN));
+  }
 }
 
 export class Codes {
