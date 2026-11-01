@@ -15,7 +15,12 @@ if errorlevel 1 (
   echo Install Rust from https://rustup.rs using the MSVC toolchain, then run this script again.
   exit /b 1
 )
-cargo build --locked --release --target %TARGET% -p omsi-app -p omsi-launcher-core
+rem One regular Windows release executable: DLSS/DLAA is compiled into x64 and
+rem remains OFF unless the user enables it on a supported DX12 device.
+rem No separate DLSS executable or NVIDIA proprietary DLL is distributed.
+set "OPENOMSI_RENDER_FEATURES="
+if /i "%TARGET%"=="x86_64-pc-windows-msvc" set "OPENOMSI_RENDER_FEATURES=--features omsi-render/nvidia-dlss-experimental"
+cargo build --locked --release --target %TARGET% -p omsi-app -p omsi-launcher-core %OPENOMSI_RENDER_FEATURES%
 if errorlevel 1 goto :failed
 if not exist "dist\windows" mkdir "dist\windows"
 copy /y "target\%TARGET%\release\openomsi.exe" "dist\windows\openomsi.exe" >nul || goto :failed
