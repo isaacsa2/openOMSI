@@ -574,7 +574,7 @@ impl Renderer {
         // Diagnostic-only motion target: inert without feature + explicit env flag.
         // Do not enable this until NVIDIA Streamline is integrated and verified.
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let mode = dlss_beta::DlssBeta::requested();
+        let mode = dlss_beta::DlssBeta::requested(options.dlss);
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
         let is_dx12 = unsafe { device.as_hal::<wgpu_hal::api::Dx12>() }.is_some();
         #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
