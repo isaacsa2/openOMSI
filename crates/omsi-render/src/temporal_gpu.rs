@@ -54,11 +54,8 @@ impl TemporalGpu {
             bind_group_layouts: &[Some(&scene.camera_layout), Some(&scene.material_layout), None, Some(&bind_layout)],
             immediate_size: 0,
         });
-        let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("DLSS motion sky"),
-            bind_group_layouts: &[None, None, None, Some(&bind_layout)],
-            immediate_size: 0,
-        });
+        // Both sky and meshes share one pipeline layout: switching pipelines
+        // must not invalidate the group(3) motion-history binding.
         let color = [Some(wgpu::ColorTargetState {
             format: temporal_motion::MOTION_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL,
         })];
@@ -94,7 +91,7 @@ impl TemporalGpu {
         let pipelines = [(0,false),(0,true),(1,false),(1,true),(2,false),(2,true)].map(|(kind,cull)| make(kind,cull));
         let sky = pipelines::common::compile_pipeline(device, &wgpu::RenderPipelineDescriptor {
             label: Some("DLSS motion sky"),
-            layout: Some(&sky_layout),
+            layout: Some(&mesh_layout),
             vertex: wgpu::VertexState {
                 module: &module, entry_point: Some("vs_temporal_sky"),
                 buffers: &[], compilation_options: Default::default(),
