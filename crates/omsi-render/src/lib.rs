@@ -18,6 +18,9 @@
 pub mod angle;
 pub mod atmosphere;
 pub mod clouds;
+// Opt-in integration workspace; no DLSS paths are active in the released renderer.
+#[cfg(feature = "nvidia-dlss-experimental")]
+pub mod nvidia_dlss;
 mod cookies;
 pub use cookies::{Cookie, COOKIE_LAYERS};
 mod gpu_memory;
