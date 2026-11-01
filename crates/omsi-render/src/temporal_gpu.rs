@@ -28,6 +28,7 @@ pub(crate) struct TemporalGpu {
     model_capacity: u64,
     bind_group: wgpu::BindGroup,
     targets: Option<MotionTargets>,
+    old_targets: std::collections::VecDeque<MotionTargets>,
 }
 
 impl TemporalGpu {
@@ -129,7 +130,7 @@ impl TemporalGpu {
         Self {
             history: Default::default(), pipelines, sky, bind_layout,
             uniform, previous_models, model_capacity: initial_capacity,
-            bind_group, targets: None, last: None,
+            bind_group, targets: None, old_targets: Default::default(), last: None,
         }
     }
 
@@ -182,6 +183,13 @@ impl TemporalGpu {
         let depth = texture("DLSS motion depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
         let motion_view = motion.create_view(&Default::default());
         let depth_view = depth.create_view(&Default::default());
+        // Streamline may still hold native D3D12 references to the previous
+        // frame's input textures during a resize; retain a few older targets
+        // instead of dropping them immediately while GPU work is in flight.
+        if let Some(old) = self.targets.take() {
+            self.old_targets.push_back(old);
+            while self.old_targets.len() > 5 { self.old_targets.pop_front(); }
+        }
         self.targets = Some(MotionTargets { size, _motion: motion, motion_view, _depth: depth, depth_view });
     }
 
