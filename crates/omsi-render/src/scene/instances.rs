@@ -568,10 +568,6 @@ impl Renderer {
             }
             return;
         }
-        // Most frames have no dirty blocks. Avoid the cursor walk in that case.
-        if !scene.block_dirty.contains(&true) {
-            return;
-        }
         let mut left = CULL_BLOCK_REBUILDS;
         for _ in 0..blocks {
             if left == 0 {
