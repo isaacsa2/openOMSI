@@ -385,7 +385,9 @@ impl TrafficSim {
             }
             let h = heading.to_radians();
             let fwd = glam::DVec2::new(h.sin(), h.cos());
-            for l in 0..self.net.lanes.len() {
+            // Only a lane beginning near this off-road vehicle can satisfy the
+            // 25 m ahead / 6 m across gate test. Use the network's 50 m grid.
+            for l in crate::traffic::way::lanes_near(&self.net, pos.truncate(), 80.0) {
                 let lane = &self.net.lanes[l];
                 let Some((ci, li)) = lane.traffic_light else { continue };
                 if lane.kind != LaneKind::Street {
