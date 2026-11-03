@@ -498,8 +498,10 @@ has editable body geometry.
 `upscale_quality=native`, `quality`, `balanced`, `performance` or `ultra_performance`; Windows,
 DirectX 12 or Vulkan; DLSS only with an NVIDIA RTX card, FSR 3 with any): the picture is drawn smaller and brought up to the window with the help of the last
 frames, in place of the anti-aliasing and the render scale, from the next start (not with a headset
-or a triple screen). They are offered once the vendor's DLLs are beside `openomsi.exe` (the Windows x64 release
-carries them).
+or a triple screen). They are offered only when the vendor's DLLs are beside `openomsi.exe`.
+The Windows x64 release does **not** bundle NVIDIA or AMD upscaler DLLs by default while
+redistribution rights are under review; approved builds may include a vendor's DLLs.
+See [the third-party licensing review](UPSCALER_THIRD_PARTY_LICENSING.md).
 For DLSS (a GeForce RTX card) `sl.interposer.dll`, `sl.common.dll`, `sl.dlss.dll` and `nvngx_dlss.dll`
 from [NVIDIA's Streamline SDK](https://github.com/NVIDIA-RTX/Streamline), for FSR 3 (any card)
 `amd_fidelityfx_loader_dx12.dll` and `amd_fidelityfx_upscaler_dx12.dll` (on Vulkan the `_vk` ones) from
