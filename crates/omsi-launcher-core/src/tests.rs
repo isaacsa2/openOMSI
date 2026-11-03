@@ -47,7 +47,9 @@ fn the_games_options_survive_a_save() {
     for k in ["steer_look", "discord_status", "voice_enabled", "voice_mode", "voice_range", "voice_mic_gain", "launcher_rest", "camera_collision", "brake_hold", "auto_clutch", "momentary_gears", "ff_enabled", "head_tracking", "collision_objects", "led_mips", "led_glow", "look_sens", "look_smoothing_ms", "blinker_cancel", "pedal_brake", "mouse_pedal_strength", "head_idle", "head_idle_pace", "seat_y", "seat_pitch_deg"] {
         assert_eq!(back[k], v[k], "{k}");
     }
-    assert!(settings_from_text(None)["discord_status"].as_bool().unwrap());
+    assert!(!settings_from_text(None)["discord_status"].as_bool().unwrap());
+    // (a player who switched it on keeps it)
+    assert!(settings_from_text(Some("discord_status=1\n"))["discord_status"].as_bool().unwrap());
     assert!(settings_from_text(None)["launcher_rest"].as_bool().unwrap());
     // voice chat is off until switched on
     assert!(!settings_from_text(None)["voice_enabled"].as_bool().unwrap());
@@ -566,19 +568,4 @@ fn comfortable_cabin_is_an_independent_opt_in_launch_flag() {
     .unwrap();
     assert!(enabled.iter().any(|a| a == "--comfortable-cabin-on-start"));
     assert!(!enabled.iter().any(|a| a == "--autostart"));
-}
-
-#[test]
-fn dlss_beta_settings_round_trip_and_unknown_mode_fallback() {
-    for mode in ["off", "dlaa", "quality", "balanced", "performance", "ultra_performance"] {
-        let parsed = super::settings_from_text(Some(&format!("graphics_api=dx12\ndlss={mode}\n")));
-        assert_eq!(parsed["dlss"], mode);
-        let saved = super::settings_to_text(&parsed, None);
-        assert!(saved.contains(&format!("dlss={mode}\n")));
-        let restored = super::settings_from_text(Some(&saved));
-        assert_eq!(restored["dlss"], mode);
-    }
-    assert_eq!(super::settings_from_text(Some("dlss=invalid\n"))["dlss"], "off");
-    assert_eq!(super::settings_from_text(None)["dlss"], "off");
-    assert!(super::GRAPHICS_PROFILE_KEYS.contains(&"dlss"));
 }

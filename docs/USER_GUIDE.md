@@ -158,8 +158,10 @@ the cursor smoothly (a short easing, no steps). With *Smooth mouse steering* off
 Driving) the wheel and the pedals are where the cursor says at once, as in OMSI. While the mouse
 steers the cursor is held, so the wheel reaches its full lock past the window's edges and a
 cross shows where it steers; with *Hold the cursor while the mouse steers* off the system's
-crosshair stays free (it follows the hand without the frame's delay, and a graphics tablet's
-pen works with it) and the window's edges are the lock, as in OMSI.
+crosshair is shown (it follows the hand without the frame's delay, and a graphics tablet's
+pen works with it), kept inside the window while the mouse steers, and the window's edges are
+the lock, as in OMSI (on Windows and Linux: macOS does not let a game keep the cursor inside
+its window).
 
 Three switches there change the steering keys (all off by default): *Steering linearity* turns
 the wheel at OMSI's own steady pace (the curvature grows by the same amount every millisecond
@@ -492,6 +494,18 @@ With `collision_vehicles` enabled, impacts against AI traffic are delivered to t
 vehicle's collision scripts and deform a localized part of its body mesh where the model
 has editable body geometry.
 
+**NVIDIA DLSS and AMD FSR 3** (Settings → Graphics → Upscaling, `upscaler=dlss` or `fsr3`, with
+`upscale_quality=native`, `quality`, `balanced`, `performance` or `ultra_performance`; Windows and
+DirectX 12): the picture is drawn smaller and brought up to the window with the help of the last
+frames, in place of the anti-aliasing and the render scale, from the next start (not with a headset
+or a triple screen). The game does not
+come with them: they are offered once the vendor's DLLs are beside `openomsi.exe`.
+For DLSS (a GeForce RTX card) `sl.interposer.dll`, `sl.common.dll`, `sl.dlss.dll` and `nvngx_dlss.dll`
+from [NVIDIA's Streamline SDK](https://github.com/NVIDIA-RTX/Streamline), for FSR 3 (any card)
+`amd_fidelityfx_loader_dx12.dll` and `amd_fidelityfx_upscaler_dx12.dll` from
+[AMD's FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK). Where one cannot
+start, `game.log` says why and the picture is drawn as without it.
+
 **Graphics API** (Settings → Graphics → Display, `graphics_api`; not on a Mac): the interface named is asked first and
 the others follow, so a machine without it still starts. *ANGLE (DirectX 11)* (Windows) runs
 OpenGL ES through Google's ANGLE on the card's DirectX 11 driver: for graphics chips whose
@@ -600,13 +614,15 @@ apart.
 
 The quality presets (*Quality preset*: Low, Medium, High, Extra, Max, Ultra) set the graphics mode
 as well as the options: Low is Vanilla, Medium Vanilla+ (what the game starts with), High and above
-Enhanced - High enabling the street lamps' shadows, the clouds' and the glow, Extra with the street light
+Enhanced - High enabling the street lamps' shadows, Extra adding cloud shadows and light glow along with the street light
 and the reflections in full, Max with every light's shadows, the mirrors drawn as the picture and
 shadow maps of 4096, Ultra with Real-Time Ray Tracing on top of all of it. It shares Enhanced's tone curve, with the light a shade warmer and a light
 vignette.
 `OMSI_NO_RT=1` opens no ray queries, `OMSI_NO_RT_GRADE=1` leaves its grade out,
 `OMSI_RT_REFL_HALF=1` traces the reflections at half size, `OMSI_DEBUG_RT=n` (see
 `crates/omsi-render/src/rt.rs`) shows its buffers.
+
+*Road sunlight glare* (`road_glare=0..2`, default 1) scales direct sun highlights on roads and ground in Enhanced without changing diffuse daylight or puddle reflections. *Traffic headlight brightness* (`traffic_headlights=0..2`, default 1) changes white headlamp glows and projected road beams on other vehicles in Vanilla, Vanilla+ and Enhanced, not the player's lamps or the street lamps. Both controls apply while driving.
 
 Built-up snow on roads and roofs (`road_snow=0|1`) is **off by default**; enabling it in Graphics adds gradual snow accumulation and tyre tracks. With it off, the weather's conventional OMSI 2 road snow remains available. Existing saved preferences are preserved.
 

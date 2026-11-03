@@ -74,6 +74,8 @@ pub(crate) struct CameraUniform {
     /// x: the textures' mip bias - negative (log2 of the scale) while FSR 1 scales the picture
     /// up, as AMD advises for it: its textures as detailed as the window's size wants, not
     /// the smaller picture's (letters, gauges and signs came out soft); 0 otherwise.
+    /// y: ground-prepass flag (set only while that pass is active).
+    /// z: Enhanced road sunlight glare strength, default 1.
     pub(crate) lod: [f32; 4],
     /// The classic picture's headlight, Omsi.exe's one Direct3D spot light (the player's
     /// `[spotlight]`, see the scene shader's `classic_spot`): [0] xyz where its light leaves
@@ -178,4 +180,16 @@ pub(crate) struct SsaoUniform {
     /// and in x whether that picture can be read (see `bounce_history`).
     pub(crate) reproj: [[f32; 4]; 4],
     pub(crate) history: [f32; 4],
+}
+
+/// Temporal upscaling's motion vectors: `Motion` in `temporal/motion.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct MotionUniform {
+    pub(crate) vp: [[f32; 4]; 4],
+    pub(crate) vp_prev: [[f32; 4]; 4],
+    pub(crate) vp_prev_here: [[f32; 4]; 4],
+    pub(crate) vp_inv: [[f32; 4]; 4],
+    pub(crate) params: [f32; 4],
+    pub(crate) origin_delta: [f32; 4],
 }

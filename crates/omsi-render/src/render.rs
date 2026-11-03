@@ -211,11 +211,7 @@ impl Renderer {
     /// `angle::compile`: on this thread's stack the D3D compiler overflowed it).
     pub(crate) fn rebuilt(&self, options: RenderOptions) -> Renderer {
         let (device, queue, name, format) = (self.device.clone(), self.queue.clone(), self.adapter_name.clone(), self.format);
-        let nvidia_rtx_candidate = self.adapter.as_ref().is_some_and(|adapter| {
-            let info = adapter.get_info();
-            nvidia_dlss::nvidia_rtx_candidate(info.vendor, &info.name)
-        });
-        let build = move || Self::build(device, queue, name, format, options, nvidia_rtx_candidate);
+        let build = move || Self::build(device, queue, name, format, options);
         if cfg!(windows) && gl_backend() && self.adapter_name.contains("ANGLE") {
             angle::compile(&self.device, build)
         } else {
@@ -261,7 +257,7 @@ impl Renderer {
 
     pub fn rebuild_with(&mut self, scene: &mut Scene, options: RenderOptions) -> bool {
         let options = match ceiling() {
-            Some(c) => RenderOptions { msaa: c.msaa_for(options.msaa), ssao: options.ssao && c.ssao, shadow_size: options.shadow_size.clamp(512, c.shadow_size), ..options },
+            Some(c) => RenderOptions { msaa: c.msaa_for(options.msaa), ssao: options.ssao && c.ssao, shadow_size: options.shadow_size.clamp(512, c.shadow_size), puddle_reflections: options.puddle_reflections && c.puddle_reflections, ..options },
             None => options,
         };
         let options = if options.ray_tracing && options.msaa > 4 && !omsi_cfg::flags::OMSI_FULL_GPU.is_set() { RenderOptions { msaa: 4, ..options } } else { options };
@@ -309,16 +305,10 @@ impl Renderer {
         if self.targets.triple_targets.take().is_some() {
             self.history.triple_culling = Default::default();
         }
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        if let Some(mut beta) = self.dlss_beta.take() {
-            if self.errors.dlss_error.load(std::sync::atomic::Ordering::Relaxed) {
-                beta.disable_on_validation_error();
-            }
-            let shown = beta.render(self, scene, target, width, height, camera, lighting);
-            self.dlss_beta = Some(beta);
-            if shown { return; }
-        }
+        // (temporal upscaling only ever draws this picture: the window's own)
+        self.temporal_window = true;
         self.render_inner(scene, target, width, height, camera, lighting, true, None, None, false);
+        self.temporal_window = false;
     }
 
     /// Three independently culled and shaded physical panels, composited into a
@@ -724,8 +714,8 @@ impl Renderer {
         let mut plan = self.batch_draws(scene, &f, &visible, Vec::new());
         if plan.ground.active() {
             // (the frame's uniform was written with the flag off: the base is lit from the ground picture)
-            let lod = [self.fsr_mip_bias(&f), 1.0, 0.0, 0.0];
-            self.queue.write_buffer(&self.camera_buf, std::mem::offset_of!(CameraUniform, lod) as u64, bytemuck::bytes_of(&lod));
+            let flag = 1.0f32;
+            self.queue.write_buffer(&self.camera_buf, (std::mem::offset_of!(CameraUniform, lod) + 4) as u64, bytemuck::bytes_of(&flag));
         }
         // (the shadow casters' entries after the passes' own: the main pass's batches keep
         // their places in the list while only the shadows change, and its bundles are kept)
@@ -770,21 +760,6 @@ impl Renderer {
         self.encode_precip_map(&mut enc.shadow, scene, &sh, &shadow_batches, &mut timers);
         let prepass_batches = if self.shares_prepass_depth(&f, &plan) { plan.prefill_batches() } else { &plan.prepass_batches };
         self.encode_depth_prepass(&mut enc.prepass, scene, &f, prepass_batches, &mut timers);
-        // A separate debug-only motion pass with its own depth surface. The scene
-        // and HUD output paths are untouched. Only the primary desktop view
-        // owns temporal history: mirrors, VR, photos and triple panels do not.
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        if with_overlays && projection.is_none() && !second_eye && f.lead_view
-            && (self.dlss_frame_active
-                || omsi_cfg::env::var("OMSI_DLSS_MOTION_DEBUG").ok().as_deref() == Some("1")) {
-            if let Some(motion) = self.temporal_gpu.as_mut() {
-                motion.encode(
-                    &self.device, &self.queue, &mut enc.prepass,
-                    scene, camera, (f.width, f.height), prepass_batches,
-                );
-            }
-        }
-
         if plan.ground.active() {
             self.encode_ground(&mut enc.prepass, scene, &plan.ground, &mut timers);
         }
@@ -803,13 +778,15 @@ impl Renderer {
         // frame (wgpu checks every draw): the shadow maps, the prepass, the main pass and
         // the passes after it are finished side by side on helper threads and this one.
         let big =
-            shadow_batches.iter().map(|b| b.len()).sum::<usize>() + plan.prepass_batches.len() > 64 || !main_parts.is_empty();
+            shadow_batches.iter().map(|b| b.len()).sum::<usize>() + plan.prepass_batches.len() > 64 || !main_parts.is_empty() || (!cfg!(any(target_os = "macos", target_os = "ios")) && main_bundles.len() >= 2);
         if big && !f.env.no_post_split {
             let rest = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("after the main pass") });
             main_parts.push(std::mem::replace(&mut enc.picture, rest));
         }
         let puddles_on = self.encode_scene_reflections(&mut enc.picture, scene, &f, &plan, &cu, &mut timers);
         self.encode_fog_lamps(&mut enc.picture, scene, &f, vp_mat, puddles_on, &mut timers);
+        self.encode_temporal_late_motion(&mut enc.picture, scene, &f, &plan);
+        self.encode_temporal_mask(&mut enc.picture, scene, &f, &plan);
         self.encode_rain_film(&mut enc.picture, scene, &f, &plan.rain_batches, puddles_on);
         self.encode_classic_present(&mut enc.picture, scene, &f, puddles_on);
         if f.enhanced {
@@ -818,6 +795,10 @@ impl Renderer {
         self.encode_upscale(&mut enc.picture, scene, &f, &mut timers);
         clock.stage(self, "encode", "mirror.encode");
         self.finish_and_submit(enc, main_parts, big, with_overlays, &mut clock, timers);
+        // the picture is on the queue now: the upscaler brings it up into the window, the HUD after
+        if let Some(frame) = self.temporal_pending.take().filter(|_| f.temporal_frame) {
+            self.temporal_present(scene, &f, frame);
+        }
     }
 
     /// Render off-screen and return RGBA8 pixels.

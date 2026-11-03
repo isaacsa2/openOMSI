@@ -101,7 +101,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_DEBUG_WALLS` | bool | off | use | sim | Log the walls a walking player slides along. |
 | `OMSI_DEBUG_WARP` | bool | off | use | scene | Log crossings whose ground was moved by more than a metre. |
 | `OMSI_DEBUG_WHEELS` | bool | off | use | app | Log where the wheel meshes of every vehicle type turn. |
-| `OMSI_DLSS_VERBOSE` | bool | off | use | render | Enable verbose NVIDIA Streamline diagnostics in the experimental DLSS integration. |
 | `OMSI_DUMP_CLASSES` | bool | off | use | scene | mapgen_dump example: paint the paving by class (road, footway, yard) in telling colours. |
 | `OMSI_DUMP_CUT` | text | - | use | scene | Directory: write each tile's road-cut alpha masks as images. |
 | `OMSI_DUMP_GROUND` | text | - | use | scene | File: every loaded tile's final terrain and road cut as text. |
@@ -172,7 +171,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_CLOUDFLARED_OWN` | bool | off | use | net | LAN tunnel: only the game's own downloaded cloudflared, to test the download. |
 | `OMSI_CONDENSATION` | text | - | use | app | Offscreen: minutes,people[,engine] - the cabin air and condensation on the glass after that long. |
 | `OMSI_DAY_AIR` | text | - | once | render | haze,angstrom[,height,strat]: fix the day's air (twilight colours) instead of the varying one. |
-| `OMSI_DLSS_MOTION_DEBUG` | text | off | frame | render | Generate diagnostic DX12 motion vectors without enabling the Streamline output when set to 1. |
 | `OMSI_DRIVER_HANDS` | text | - | use | scene | left,right: both driver hands held at these angles (grip close-ups). |
 | `OMSI_DRIVER_SHIFTER` | text | - | use | scene | Part of a variable or file name: force the shifter the driver's hand uses; off: both hands on the wheel. |
 | `OMSI_DRIVE_PROFILE` | text | - | use | app | Offscreen: "t throttle brake [steer]/..." piecewise constant pedals (crash/kerb tests). |
@@ -280,6 +278,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_KEEP_ALLOCATOR` | bool | off | use | app | Skip the restart that swaps in the faster allocator at start. |
 | `OMSI_LAMP_SHADOWS_EVERY_FRAME` | bool | off | frame | render | Redraw the street lamps' shadow tiles every frame (not only when they change). |
 | `OMSI_LIGHT_GRID_SQUARES` | bool | off | frame | render | A light goes into every cell of the light grid's square round its range, the corners its range misses too (A/B). |
+| `OMSI_MAIN_SPLIT` | bool | off | frame | render | Split the main pass's bundles in two (encoded apart, the second part loads what the first stored). |
 | `OMSI_MIRROR_ENHANCED` | bool | off | frame | app, render | Draw the mirrors with the enhanced shading again. |
 | `OMSI_NOZCHECK_BIAS` | bool | off | use | scene | The old reading of [matl_noZcheck] (A/B). |
 | `OMSI_NO_ANIMPARENT` | bool | off | use | sim | Every mesh animated on its own, without [animparent] (A/B). |
@@ -312,10 +311,9 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_HARDWARE_ID` | bool | off | once | lan | LAN: the game sends no hardware identifier (a host can then turn the player away, and cannot ban the machine). |
 | `OMSI_NO_INTERP` | bool | off | once | lan | The old way without interpolation, for comparing. |
 | `OMSI_NO_LAMP_SIGHT` | bool | off | use | render | Enhanced by night: every lamp near the line of sight dazzles, hidden or not. |
-| `OMSI_NO_LAN_MODS` | bool | off | use | lan, net | LAN: do not exchange mods. |
+| `OMSI_NO_LAN_MODS` | bool | off | use | app, lan, net | LAN: do not exchange mods. |
 | `OMSI_NO_LAN_UPLOADS` | bool | off | use | lan | LAN: a game hosting a session takes no buses from the players who join. |
 | `OMSI_NO_LIGHT_MAP` | bool | off | use | scene | No night light maps on the tiles (A/B). |
-| `OMSI_NO_MAIN_SPLIT` | bool | off | frame | render | Do not split the main pass's bundles in two. |
 | `OMSI_NO_MATERIAL_SPLINE_BATCHING` | bool | off | use | scene | No batching of splines by material. |
 | `OMSI_NO_MODEL_ORDER` | bool | off | use | scene | Draw the opaque parts of ordered models first again (A/B). |
 | `OMSI_NO_MSAA_PREPASS` | bool | off | frame | render | No depth prepass with multisampling. |
@@ -371,9 +369,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | Name | Type | Default | Read | Crates | Description |
 |---|---|---|---|---|---|
 | `OMSI_CHARACTER_MODELS` | text | settings | use | app | Override the character models for a game session: original (OMSI's people) or improved (the Microsoft Rocketbox avatars, drawn on this computer only). |
-| `OMSI_DLSS_APPLICATION_ID` | num | - | use | render | NVIDIA-issued numeric application ID for experimental DLSS NGX initialization (beta only). |
-| `OMSI_DLSS_BETA` | text | off | use | render | Override experimental DLSS mode for the current session: off, dlaa, quality, balanced, performance, ultra_performance. DX12/RTX only. |
-| `OMSI_DLSS_PROJECT_ID` | text | - | use | render | Optional registered Streamline project UUID supplied by the tester; not an NVIDIA runtime binary. |
 | `OMSI_ENHANCED` | bool | settings | use | app | Enhanced graphics for this run. |
 | `OMSI_ENHANCED_PLUS` | bool | settings | use | app | Enhanced+ (ray traced) graphics for this run. |
 | `OMSI_FOOT_RUN` | num | 3.8 | use | app | On foot: the pace of a run (Shift) in m/s. |
@@ -426,7 +421,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SAFE_GPU` | num | 0 | use | app | Restarts after a lost graphics device: lighter on the card each time. Set at runtime on Android and by the restart. |
 | `OMSI_SAFE_MODE` | bool | off | use | guard, launcher-api, render | Safe mode, set by the start guard after failed starts: the basic render pipelines and no plugins. |
 | `OMSI_SCREEN_AT` | text | - | once | app, launcher-core | x,y: the screen (a point on the desktop, pixels) the game window opens on; the launcher sets it to where it stands. |
-| `OMSI_STREAMLINE_DIR` | text | - | use | render | Folder with separately obtained official NVIDIA Streamline runtime DLLs for the optional Windows DX12 DLSS beta. |
 | `OMSI_TOBII_DLL` | text | - | use | input | The Tobii Stream Engine DLL to load instead of the Tobii Experience's. |
 | `OMSI_TOMORROW_API_KEY` | text | private key file | use | app, platform | Private Tomorrow.io API key for map-selected weather; never include it in map configs or logs. |
 | `OMSI_TOMORROW_CACHE_DIR` | text | settings/weather-cache | use | platform | Private Tomorrow.io response cache and shared request-budget directory. |

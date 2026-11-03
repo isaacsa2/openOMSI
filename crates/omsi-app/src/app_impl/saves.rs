@@ -38,6 +38,7 @@ impl App {
         }
         // the situation to continue next time (OMSI writes it when a map is left; once, as
         // the rest: `career.seconds` is zero after the first time)
+        self.settle_depot_switch(true);
         self.save_last_situation();
         if self.session.career.path.is_some() {
             if let Err(e) = self.session.career.save() {
@@ -54,18 +55,7 @@ impl App {
             log::warn!("writing the session summary: {e}");
         }
         if let (Some(id), Some(p)) = (self.args.depot.as_deref(), self.player.as_ref()) {
-            let c = &self.session.career;
-            let outing = omsi_launcher_lib::depot::Outing {
-                map: self.args.map.clone(),
-                line: self.args.line.clone().unwrap_or_default(),
-                tour: self.args.tour.clone().unwrap_or_default(),
-                metres: c.metres,
-                seconds: c.seconds,
-                stops: c.stops[0],
-                tickets: c.tickets.0,
-                takings: c.tickets.1,
-                crashes: c.crashes[0],
-            };
+            let outing = crate::depot_bus::outing_since(&self.session.career, &self.args, &self.session.depot_base);
             crate::depot_bus::record(&p.vehicle, id, &outing);
         }
         self.session.career.seconds = 0.0;
@@ -91,9 +81,7 @@ impl App {
         let Ok(exe) = std::env::current_exe() else { return false };
         let mut cmd = std::process::Command::new(exe);
         cmd.arg("--root").arg(&self.args.root).arg("--no-menu").arg("--situation").arg(&file);
-        if self.args.no_plugins {
-            cmd.arg("--no-plugins");
-        }
+        self.pass_session_args(&mut cmd);
         // (the duty typed by itself goes on being typed: `--autostart` with a situation)
         if self.player.as_ref().is_some_and(|p| p.duty_typed) {
             cmd.arg("--autostart");
@@ -172,6 +160,22 @@ impl App {
         }
     }
 
+    fn pass_session_args(&self, cmd: &mut std::process::Command) {
+        if self.args.no_plugins {
+            cmd.arg("--no-plugins");
+        }
+        cmd.arg("--traffic").arg(self.args.traffic.to_string());
+        if self.args.passengers {
+            cmd.arg("--passengers");
+        }
+        if self.args.no_timetable_buses {
+            cmd.arg("--no-timetable-buses");
+        }
+        if let Some(d) = &self.args.driver {
+            cmd.arg("--driver").arg(d);
+        }
+    }
+
     /// The graphics device was lost (the driver reset the card: it ran out of memory, or a
     /// frame took it too long): the game starts again by itself on the situation just
     /// saved, with lighter graphics (`Settings::apply_safe_gpu`), and on Windows with the
@@ -182,16 +186,18 @@ impl App {
         if n >= 2 {
             return false;
         }
+        self.settle_depot_switch(true);
         let Some(file) = self.save_last_situation() else { return false };
         let Ok(exe) = std::env::current_exe() else { return false };
         let mut cmd = std::process::Command::new(exe);
         cmd.arg("--root").arg(&self.args.root).arg("--no-menu").arg("--situation").arg(&file);
-        if self.args.no_plugins {
-            cmd.arg("--no-plugins");
-        }
+        self.pass_session_args(&mut cmd);
         // (the duty typed by itself goes on being typed: `--autostart` with a situation)
         if self.player.as_ref().is_some_and(|p| p.duty_typed) {
             cmd.arg("--autostart");
+        }
+        if let Some(d) = &self.args.depot {
+            cmd.arg("--depot").arg(d);
         }
         cmd.env("OMSI_SAFE_GPU", (n + 1).to_string());
         // (on Windows the other interface: DirectX 12 after Vulkan, Vulkan after DirectX 12 -

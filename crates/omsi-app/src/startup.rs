@@ -295,7 +295,8 @@ pub(crate) fn backend_order() -> Vec<GraphicsApi> {
         return vec![GraphicsApi::Native(wgpu::Backends::METAL)];
     }
     let settings = crate::settings::Settings::load();
-    let wanted = if settings.vr_requested() {
+    // (the headset, DLSS and FSR 3 all work on wgpu's Direct3D 12 device)
+    let wanted = if settings.vr_requested() || settings.temporal_upscaling().is_some() {
         "dx12".to_owned()
     } else {
         omsi_cfg::flags::OMSI_BACKEND.var().map(str::to_string).unwrap_or(settings.graphics_api)
@@ -334,6 +335,9 @@ fn backend_instance(api: GraphicsApi) -> wgpu::Instance {
     let mut d = wgpu::InstanceDescriptor::new_without_display_handle();
     d.backend_options.gl.context_lock_timeout = Some(GL_CONTEXT_LOCK_TIMEOUT);
     d.backends = api.backends();
+    if d.backends == wgpu::Backends::GL {
+        d.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
+    }
     if api == GraphicsApi::Angle {
         return omsi_render::angle::instance(d);
     }
@@ -407,7 +411,7 @@ impl Opener {
                 self.k += 1;
                 continue;
             }
-            let surface = match inst.create_surface(self.window.clone()) {
+            let surface = match omsi_render::create_surface(&inst, &self.window) {
                 Ok(s) => s,
                 Err(e) => {
                     self.failures.push(format!("{}: no surface ({e})", b.map(|b| format!("{b:?}")).unwrap_or_else(|| "first choice".into())));

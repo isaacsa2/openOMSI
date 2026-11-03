@@ -268,11 +268,6 @@ flags! {
     OMSI_DEBUG_WALLS: Bool, Debug, Use, "off", "Log the walls a walking player slides along.";
     OMSI_DEBUG_WARP: Bool, Debug, Use, "off", "Log crossings whose ground was moved by more than a metre.";
     OMSI_DEBUG_WHEELS: Bool, Debug, Use, "off", "Log where the wheel meshes of every vehicle type turn.";
-    OMSI_DLSS_APPLICATION_ID: Num, Tuning, Use, "-", "NVIDIA-issued numeric application ID for experimental DLSS NGX initialization (beta only).";
-    OMSI_DLSS_BETA: Text, Tuning, Use, "off", "Override experimental DLSS mode for the current session: off, dlaa, quality, balanced, performance, ultra_performance. DX12/RTX only.";
-    OMSI_DLSS_MOTION_DEBUG: Text, Test, Frame, "off", "Generate diagnostic DX12 motion vectors without enabling the Streamline output when set to 1.";
-    OMSI_DLSS_PROJECT_ID: Text, Tuning, Use, "-", "Optional registered Streamline project UUID supplied by the tester; not an NVIDIA runtime binary.";
-    OMSI_DLSS_VERBOSE: Bool, Debug, Use, "off", "Enable verbose NVIDIA Streamline diagnostics in the experimental DLSS integration.";
     OMSI_DRIVER_HANDS: Text, Test, Use, "-", "left,right: both driver hands held at these angles (grip close-ups).";
     OMSI_DRIVER_SHIFTER: Text, Test, Use, "-", "Part of a variable or file name: force the shifter the driver's hand uses; off: both hands on the wheel.";
     OMSI_DRIVE_PROFILE: Text, Test, Use, "-", "Offscreen: \"t throttle brake [steer]/...\" piecewise constant pedals (crash/kerb tests).";
@@ -341,6 +336,7 @@ flags! {
     OMSI_LAUNCHER: Text, Setup, Use, "-", "Program a plain start opens as the launcher instead of the desktop launcher (openomsi-launcher-app) beside the game.";
     OMSI_LIGHT_GRID_SQUARES: Bool, Switch, Frame, "off", "A light goes into every cell of the light grid's square round its range, the corners its range misses too (A/B).";
     OMSI_LIST_ALIGNED: Bool, Debug, Use, "off", "Log the splines aligned to the terrain.";
+    OMSI_MAIN_SPLIT: Bool, Switch, Frame, "off", "Split the main pass's bundles in two (encoded apart, the second part loads what the first stored).";
     OMSI_MAX_FPS: Num, Tuning, Use, "settings", "Frame rate limit for this run.";
     OMSI_METER: Text, Tuning, Use, "-", "gain,target,dark,bright,bias,night: the exposure metering.";
     OMSI_MIRROR_ENHANCED: Bool, Switch, Frame, "off", "Draw the mirrors with the enhanced shading again.";
@@ -389,7 +385,6 @@ flags! {
     OMSI_NO_LAN_MODS: Bool, Switch, Use, "off", "LAN: do not exchange mods.";
     OMSI_NO_LAN_UPLOADS: Bool, Switch, Use, "off", "LAN: a game hosting a session takes no buses from the players who join.";
     OMSI_NO_LIGHT_MAP: Bool, Switch, Use, "off", "No night light maps on the tiles (A/B).";
-    OMSI_NO_MAIN_SPLIT: Bool, Switch, Frame, "off", "Do not split the main pass's bundles in two.";
     OMSI_NO_MAP_CACHE: Bool, Test, Use, "off", "Read the map's navigator layers (houses, ground, paving) again instead of from the cache.";
     OMSI_NO_MATERIAL_SPLINE_BATCHING: Bool, Switch, Use, "off", "No batching of splines by material.";
     OMSI_NO_MODEL_ORDER: Bool, Switch, Use, "off", "Draw the opaque parts of ordered models first again (A/B).";
@@ -485,7 +480,6 @@ flags! {
     OMSI_SKY_CUBE_EVERY_FRAME: Bool, Switch, Frame, "off", "Enhanced: redraw a slice of the sky cube every frame again, not at most 60 a second (A/B).";
     OMSI_SPOT_SELECT: Num, Test, Use, "-", "Turn on spotlight n (headlight pictures).";
     OMSI_STORM: Text, Tuning, Use, "-", "activity[,azimuth]: a thunderstorm of this activity (0..1) over the place whatever the weather; with an azimuth (degrees, 0 east, 90 north) the flash stands frozen there at its first stroke (for checks).";
-    OMSI_STREAMLINE_DIR: Text, Setup, Use, "-", "Folder with separately obtained official NVIDIA Streamline runtime DLLs for the optional Windows DX12 DLSS beta.";
     OMSI_SURFACE_BIAS: Num, Tuning, Use, "-24", "Depth bias of road surfaces.";
     OMSI_SURFACE_FLUSH: Num, Tuning, Once, "0.12", "Height in metres under which a surface counts as flush with the road.";
     OMSI_SUSP_TRACE: Text, Debug, Use, "-", "Offscreen CSV: body height and each wheel's travel and load every frame.";

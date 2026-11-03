@@ -59,7 +59,9 @@ impl Renderer {
         self.queue
             .write_buffer(&self.tone.post_buf, 0, bytemuck::bytes_of(&pu));
         // (a mirror's small picture goes without FXAA)
+        // (nor does the picture an upscaler takes: it smooths the edges from its jittered frames)
         let fxaa = with_overlays
+            && !f.temporal_frame
             && self.options.fxaa
             && self.options.msaa <= 1
             && !f.env.no_fxaa;
@@ -188,14 +190,13 @@ impl Renderer {
             && self.scale.fsr.is_some()
     }
 
-    /// Texture mip bias for the 3D scene. Temporal DLSS reconstruction needs
-    /// finer source mips than the low-resolution render target would pick on
-    /// its own. Do NOT change the resolution or residency of source textures.
-    /// Mirrors, VR and UI are not biased; DLAA renders at the output size.
+    /// The textures' mip bias for this view (`CameraUniform::lod`): log2 of the scale while
+    /// FSR 1 scales its picture up (-0.58 at 67 %, -1 at 50 %), as AMD advises for FSR 1;
+    /// else 0. (The standard upscaler keeps the textures as they were: its sharpening does
+    /// its part, and the picture it gives is unchanged.)
     pub(crate) fn fsr_mip_bias(&self, f: &FrameCtx) -> f32 {
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        if self.dlss_frame_active && f.with_overlays && f.projection.is_none() {
-            return dlss_texture_mip_bias(self.dlss_render_scale);
+        if f.temporal_frame {
+            return temporal_mip_bias(f.width, f.full_w);
         }
         let off = omsi_cfg::flags::OMSI_NO_FSR_MIP_BIAS.is_set() || self.scale.fsr_mip_bias_off.get();
         if !off && self.fsr_draws(f) { (f.width as f32 / f.full_w.max(1) as f32).log2().clamp(-1.0, 0.0) } else { 0.0 }
@@ -203,9 +204,15 @@ impl Renderer {
 
     // --- the smaller picture scaled up to the window, the HUD on top at full size;
     // the smaller the picture, the more it is sharpened
-    pub(crate) fn encode_upscale(&self, encoder: &mut wgpu::CommandEncoder, scene: &Scene, f: &FrameCtx, timers: &mut PassTimers) {
+    pub(crate) fn encode_upscale(&mut self, encoder: &mut wgpu::CommandEncoder, scene: &Scene, f: &FrameCtx, timers: &mut PassTimers) {
         let (width, height, full_w) = (f.width, f.height, f.full_w);
         let overlays = &f.overlays;
+        if f.temporal_frame {
+            // the upscaler takes the picture from here, after this frame's submit, and draws
+            // the HUD after it (`temporal_present`)
+            self.temporal_end_of_scene(encoder, scene);
+            return;
+        }
         if let Some((_, bg)) = &f.scene_target {
             // Opt-in FSR1 experiment. Use the existing scene scale setting for quality.
             // Leave mirrors, offscreen views, vanilla FXAA and the default path untouched.
@@ -361,26 +368,5 @@ impl Renderer {
                 }
             }
         }
-    }
-}
-
-/// Only the optional temporal scene reconstruction uses this LOD correction.
-/// A 1.0 input/output ratio (DLAA) must leave texture detail unchanged.
-#[cfg(any(test, all(windows, feature = "nvidia-dlss-experimental")))]
-pub(crate) fn dlss_texture_mip_bias(scale: f32) -> f32 {
-    if !scale.is_finite() || scale <= 0.0 { return 0.0; }
-    scale.log2().clamp(-1.0, 0.0)
-}
-
-#[cfg(test)]
-mod dlss_mip_tests {
-    #[test]
-    fn temporal_scene_mips_preserve_dlaa_and_improve_low_res_detail() {
-        use super::dlss_texture_mip_bias;
-        assert_eq!(dlss_texture_mip_bias(1.0), 0.0);
-        assert!((dlss_texture_mip_bias(1114.0 / 1920.0) + 0.785).abs() < 0.02);
-        assert_eq!(dlss_texture_mip_bias(0.5), -1.0);
-        assert_eq!(dlss_texture_mip_bias(f32::NAN), 0.0);
-        assert_eq!(dlss_texture_mip_bias(2.0), 0.0);
     }
 }

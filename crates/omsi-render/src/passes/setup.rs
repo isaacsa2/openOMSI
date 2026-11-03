@@ -71,7 +71,15 @@ impl Renderer {
         // from here on `width` and `height` are the size of the picture, `full_*` the
         // window's (the HUD is drawn at that size). Mirrors keep their own size.
         let (full_w, full_h) = (width, height);
-        let (width, height) = if with_overlays {
+        // With temporal upscaling the window's picture (only it: no mirror, headset eye or
+        // texture) is drawn at the size the upscaler asks for, and the upscaler does what FXAA
+        // and the render scale would
+        let temporal_frame = with_overlays && projection.is_none() && self.temporal_window && self.texture_aspect.is_none() && self.temporal_start();
+        let (width, height) = if temporal_frame {
+            let size = self.temporal_render_size((full_w, full_h));
+            self.temporal_targets(size, (full_w, full_h));
+            size
+        } else if with_overlays {
             self.scene_size(full_w, full_h)
         } else if let Some(s) = self.xr_fsr_scale().filter(|_| projection.is_some()) {
             // (a VR eye with FSR 1: drawn smaller, scaled up to the headset's image)
@@ -83,6 +91,7 @@ impl Renderer {
         // edges (the Enhanced path has it in its post passes): the picture is drawn into a
         // texture of the window's size and smoothed on its way to the window, the HUD after
         let vanilla_fxaa = with_overlays
+            && !temporal_frame
             && (width, height) == (full_w, full_h)
             && self.options.fxaa
             && self.options.msaa <= 1
@@ -95,8 +104,11 @@ impl Renderer {
             && scene.glass_slot.is_some()
             && (lighting.rain > 0.001 || lighting.wetness > 0.02)
             && !env.no_glass_picture;
-        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view);
-        let scene_target: Option<(wgpu::TextureView, wgpu::BindGroup)> = if scaled {
+        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view) || temporal_frame;
+        let scene_target: Option<(wgpu::TextureView, wgpu::BindGroup)> = if temporal_frame {
+            // (the picture goes into the upscaler's input, not into the render scale's target)
+            self.temporal.as_ref().and_then(|d| d.targets.as_ref()).map(|t| (t.color_view.clone(), t.color_bg.clone()))
+        } else if scaled {
             Some(self.scale_target(width, height))
         } else {
             None
@@ -124,6 +136,7 @@ impl Renderer {
         let puddles_wanted = with_overlays
             && self.puddles.is_some()
             && self.options.reflections
+            && self.options.puddle_reflections
             && lighting.puddles > 0
             && lighting.wetness * (1.0 - lighting.snow.clamp(0.0, 1.0)) > 0.05
             && scene.materials.iter().any(|m| m.uniform.params2[2] > 0.0)
@@ -151,7 +164,7 @@ impl Renderer {
         let ao_on = with_overlays && self.rt.is_none() && self.options.ssao && self.ssao_pipeline.is_some() && !env.no_ao;
         // the enhanced path's shading is costly: the depth prepass keeps it to the visible
         // surface (without multisampling, see `share_depth`)
-        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none());
+        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none()) || temporal_frame;
         let prepass_on = ao_on || depth_wanted;
         // the terrain's paint laid into one albedo picture first: the window's enhanced
         // picture, single-sampled, with the camera group's slot 8 free of the AO
@@ -217,6 +230,7 @@ impl Renderer {
             second_eye,
             ro,
             full_w,
+            temporal_frame,
             width,
             height,
             vanilla_fxaa,
@@ -265,18 +279,9 @@ impl Renderer {
             .projection
             .map(|p| p * Mat4::look_to_rh((camera.position - ro).as_vec3(), camera.forward(), camera.up()))
             .unwrap_or_else(|| camera.view_proj(aspect, ro));
-        // DLSS reconstructs subpixel detail from a sequence of jittered 3D
-        // projections. Motion vectors stay UNJITTERED (temporal_motion.rs).
-        // Never jitter mirrors, VR eyes, triple displays or other views.
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let vp_mat = if self.dlss_frame_active && f.with_overlays && f.projection.is_none() {
-            if let Some(motion) = self.temporal_gpu.as_ref() {
-                let j = motion.next_jitter();
-                let dx = 2.0 * j[0] / f.width.max(1) as f32;
-                let dy = -2.0 * j[1] / f.height.max(1) as f32;
-                Mat4::from_translation(Vec3::new(dx, dy, 0.0)) * vp_mat
-            } else { vp_mat }
-        } else { vp_mat };
+        // (temporal upscaling: the projection moved by this frame's sub-pixel offset)
+        self.temporal_pending = None;
+        let vp_mat = if f.temporal_frame { self.temporal_jitter(scene, f, vp_mat) } else { vp_mat };
         // the last frame's picture for the bounced light, found again under this frame's view
         if lead_view {
             let size = (f.width, f.height);
@@ -455,7 +460,8 @@ impl Renderer {
                 }
                 std::array::from_fn(|r| std::array::from_fn(|c| at[r * 4 + c]))
             },
-            lod: [self.fsr_mip_bias(f), 0.0, 0.0, 0.0],
+            // y belongs to the ground prepass and is set only by render_inner.
+            lod: [self.fsr_mip_bias(f), 0.0, lighting.road_glare.clamp(0.0, 2.0), 0.0],
             spot: classic_spot(&scene.lights, ro),
         };
         self.queue

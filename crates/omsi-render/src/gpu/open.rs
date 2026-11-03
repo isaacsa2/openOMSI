@@ -68,17 +68,6 @@ impl Renderer {
     ) -> Result<Opened> {
         let info = adapter.get_info();
         let asked_options = options;
-        // A stored DLSS choice is never sufficient to activate it: adapter
-        // selection can change (laptops, eGPUs, fallback from DX12 to Vulkan).
-        // Reject unsupported actual adapters before building any DLSS pipeline.
-        let options = if options.dlss.is_on()
-            && (info.backend != wgpu::Backend::Dx12
-                || !nvidia_dlss::nvidia_rtx_candidate(info.vendor, &info.name)) {
-            log::warn!("DLSS requested but the selected adapter {} ({:?}) is not an NVIDIA RTX DX12 candidate; using the normal renderer", info.name, info.backend);
-            RenderOptions { dlss: nvidia_dlss::DlssMode::Off, ..options }
-        } else {
-            options
-        };
         // test hooks for an adapter that cannot be opened: an error, or wgpu going down
         #[cfg(feature = "test-hooks")]
         match omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() {
@@ -129,6 +118,17 @@ impl Renderer {
         // a small or shared graphics chip gets a lighter picture (see `lighter_picture`)
         GL_BACKEND.store(info.backend == wgpu::Backend::Gl, std::sync::atomic::Ordering::Relaxed);
         let options = gpu_memory::lighter_picture(&info, vram, options);
+        // Temporal upscaling needs DirectX 12; DLSS an NVIDIA card too (whether it is an RTX one
+        // with a recent enough driver, Streamline tells at the first frame). It replaces the MSAA
+        let can_upscale = |t: Temporal| cfg!(windows) && info.backend == wgpu::Backend::Dx12 && (t.upscaler == TemporalUpscaler::Fsr3 || info.vendor == 0x10de);
+        let options = match options.temporal {
+            Some(t) if can_upscale(t) => RenderOptions { msaa: 1, ..options },
+            Some(t) => {
+                log::warn!("{} upscaling asked for, but {} on {:?} cannot do it (DirectX 12 is needed, and for DLSS an NVIDIA RTX card); drawing without it", t.upscaler.as_str(), info.name, info.backend);
+                RenderOptions { temporal: None, ..options }
+            }
+            None => options,
+        };
         let most = gpu_memory::ceiling(&info, vram);
         *CEILING.lock().unwrap_or_else(|e| e.into_inner()) = Some(if intel_vulkan_safe { gpu_memory::Ceiling { msaa: 1, ssao: false, shadow_size: most.shadow_size.min(2048), ..most } } else { most });
         let shadow_size = options
@@ -489,7 +489,7 @@ impl Renderer {
                 let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
                 let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
                 let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-                let (renderer, caught) = pipelines::parallel::catching(|| Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options }, nvidia_dlss::nvidia_rtx_candidate(info.vendor, &info.name)));
+                let (renderer, caught) = pipelines::parallel::catching(|| Self::build(device.clone(), queue.clone(), name.to_string(), format, RenderOptions { msaa, ..options }));
                 // (test hook: OMSI_FAKE_GPU_ERROR=pipeline fails a pipeline until the basic ones)
                 #[cfg(feature = "test-hooks")]
                 if !basic && omsi_cfg::flags::OMSI_FAKE_GPU_ERROR.var() == Some("pipeline") {
@@ -534,7 +534,6 @@ impl Renderer {
         adapter_name: String,
         format: wgpu::TextureFormat,
         options: RenderOptions,
-        nvidia_rtx_candidate: bool,
     ) -> Renderer {
         use pipelines::{coronas, defaults, enhanced, errors, mip, overlays, passes, post, scene, shadows, sky, ssao, upscale};
         let (msaa, shadow_size) = (options.msaa, options.shadow_size);
@@ -564,6 +563,8 @@ impl Renderer {
         let ssao = ssao::ssao(&device, gl);
         let fog_lamps = ssao::fog_lamps(&device, &scene.camera_layout, hdr_format, gl);
         let prepass = scene::prepass(&device, &scene, msaa, !leave_out_enhanced);
+        // (the prepass with motion vectors: only when temporal upscaling is asked for)
+        let temporal_pipes = pipelines::temporal::build(&device, &scene, options.temporal.map(|t| t.upscaler));
         let ground_pipelines = (!gl && !leave_out_enhanced && !sixteen_texture_units()).then(|| std::array::from_fn(|i| scene.ground_pipeline_at(&device, i)));
         let mip = mip::build(&device);
         let post = post::build(&device, format, hdr_format, &defaults.white_texture);
@@ -583,31 +584,7 @@ impl Renderer {
         });
         let rt = options.ray_tracing.then(|| rt::RayTracer::new(&device));
         let cookie_atlas = cookies::CookieAtlas::new();
-        // Diagnostic-only motion target: inert without feature + explicit env flag.
-        // Do not enable this until NVIDIA Streamline is integrated and verified.
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let mode = if nvidia_rtx_candidate { dlss_beta::DlssBeta::requested(options.dlss) } else { nvidia_dlss::DlssMode::Off };
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let is_dx12 = unsafe { device.as_hal::<wgpu_hal::api::Dx12>() }.is_some();
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let temporal_gpu = if is_dx12 && (mode.is_on()
-            || omsi_cfg::env::var("OMSI_DLSS_MOTION_DEBUG").ok().as_deref() == Some("1")) {
-            Some(temporal_gpu::TemporalGpu::new(&device, &scene))
-        } else {
-            None
-        };
-        #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-        let dlss_beta = (mode.is_on() && is_dx12)
-            .then(|| dlss_beta::DlssBeta::new(&device, format, mode));
         Renderer {
-            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-            temporal_gpu,
-            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-            dlss_beta,
-            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-            dlss_frame_active: false,
-            #[cfg(all(windows, feature = "nvidia-dlss-experimental"))]
-            dlss_render_scale: 1.0,
             targets: Targets {
                 scale_targets: HashMap::new(),
                 triple_targets: None,
@@ -728,7 +705,6 @@ impl Renderer {
             errors: GpuErrors {
                 gpu_error: errors.gpu_error,
                 rt_error: errors.rt_error,
-                dlss_error: errors.dlss_error,
                 out_of_memory: errors.out_of_memory,
                 device_lost: errors.device_lost,
             },
@@ -760,6 +736,11 @@ impl Renderer {
             ao_layout: ssao.layout,
             ao_buf: ssao.buf,
             prepass_pipelines: prepass.pipelines,
+            temporal_pipes,
+            temporal: None,
+            temporal_failed: false,
+            temporal_window: false,
+            temporal_pending: None,
             prepass_msaa_pipelines: prepass.msaa_pipelines,
             prepass_eye_pipelines: prepass.eye_pipelines,
             ground_pipelines,
@@ -794,6 +775,7 @@ impl Renderer {
             pictures: Default::default(),
             stats: Default::default(),
             counts: Default::default(),
+            deferred: Default::default(),
             frame_draws: (0, 0),
             profiling: omsi_cfg::flags::OMSI_PROFILE.is_set(),
             draw_audit_at: std::time::Instant::now(),

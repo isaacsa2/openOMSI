@@ -10,6 +10,7 @@ mod effects;
 mod ground;
 mod headlamp_shadow;
 mod main_pass;
+mod temporal;
 mod post;
 mod precip_map;
 pub(crate) use precip_map::*;
@@ -57,7 +58,7 @@ pub(crate) struct FrameEnv {
     pub skip_pipe: Option<&'static str>,
     pub no_bundles: bool,
     pub no_msaa_prepass: bool,
-    pub no_main_split: bool,
+    pub main_split: bool,
     pub no_post_split: bool,
     pub no_smoke: bool,
     pub no_snowfall: bool,
@@ -101,7 +102,7 @@ impl FrameEnv {
             skip_pipe: omsi_cfg::flags::OMSI_SKIP_PIPE.var(),
             no_bundles: omsi_cfg::flags::OMSI_NO_BUNDLES.is_set(),
             no_msaa_prepass: omsi_cfg::flags::OMSI_NO_MSAA_PREPASS.is_set(),
-            no_main_split: omsi_cfg::flags::OMSI_NO_MAIN_SPLIT.is_set(),
+            main_split: omsi_cfg::flags::OMSI_MAIN_SPLIT.is_set(),
             no_post_split: omsi_cfg::flags::OMSI_NO_POST_SPLIT.is_set(),
             no_smoke: omsi_cfg::flags::OMSI_NO_SMOKE.is_set(),
             no_snowfall: omsi_cfg::flags::OMSI_NO_SNOWFALL.is_set(),
@@ -146,6 +147,8 @@ pub(crate) struct FrameCtx<'a> {
     pub ro: DVec3,
     /// the window's width (the HUD is drawn at the window's size)
     pub full_w: u32,
+    /// temporal upscaling draws this frame: the window's own picture, at the size it scales up
+    pub temporal_frame: bool,
     /// the 3D picture's size (smaller than the window's with a render scale)
     pub width: u32,
     pub height: u32,

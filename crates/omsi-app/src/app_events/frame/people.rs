@@ -12,6 +12,9 @@ impl App {
     /// The player's duty, the personnel file's step, the placing of vehicles, the host's map
     /// edits and `--on-foot`.
     pub(super) fn frame_duty(&mut self, dt: f32) {
+        if self.session.depot_prev.is_some() {
+            self.settle_depot_switch(false);
+        }
         if self.session.duty.is_none() {
             self.session.career.no_trip();
         }
@@ -237,7 +240,7 @@ pub(super) fn humans(cx: HumansCx, dt: f32) {
             h.write_pax_vars(&mut p.vehicle);
             p.vehicle.host.humans_on_path_link = h.path_link_counts();
             p.vehicle.host.humans_on_seat = h.seat_counts();
-            let mut coins: Vec<usize> = std::mem::take(&mut p.vehicle.host.change_coins);
+            let mut coins: Vec<usize> = std::mem::take(&mut p.vehicle.host.change_coins).into_iter().map(|(c, worth)| h.money.as_ref().map_or(c, |m| m.coin_worth(c, worth))).collect();
             if std::mem::take(&mut p.give_change) {
                 let owed = h.change_due.unwrap_or(0.0);
                 if let Some(m) = h.money.as_mut() {

@@ -6,7 +6,6 @@ use crate::*;
 impl Renderer {
     pub fn new_scene(&self) -> Scene {
         Scene {
-            scene_id: temporal_motion::new_scene_id(),
             meshes: Vec::new(),
             textures: Vec::new(),
             glass_slot: None,
@@ -19,6 +18,7 @@ impl Renderer {
             interior_free: Vec::new(),
             coronas: Vec::new(),
             model_buf: None,
+            model_epoch: 0,
             params_buf: None,
             light_buf: None,
             grid_buf: None,
