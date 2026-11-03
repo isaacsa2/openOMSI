@@ -123,6 +123,32 @@ jobs:
           }
           Copy-Item (Join-Path $dir.FullName "libEGL.dll"), (Join-Path $dir.FullName "libGLESv2.dll"), (Join-Path $dir.FullName "LICENSE-ANGLE.txt") dist/windows/
           Get-ChildItem dist/windows
+      # NVIDIA's signed Streamline 2.14.1 production DLLs for DLSS (the SDK ZIP SHA-256 pinned,
+      # its licence notices beside them): offered in the game on an RTX card only.
+      - name: NVIDIA Streamline 2.14.1 (DLSS, x64 only)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force streamline | Out-Null
+          gh release download v2.14.1 -R NVIDIA-RTX/Streamline --pattern "streamline-sdk-v2.14.1.zip" -D streamline
+          & scripts/windows/package-streamline.ps1 -Archive "streamline/streamline-sdk-v2.14.1.zip" -Destination "dist/windows"
+      # AMD's signed FidelityFX SDK 2.4.0 DLLs for FSR 3 on DirectX 12 and Vulkan (MIT), taken
+      # at the tag's pinned commit, with the SDK's licence.
+      - name: AMD FidelityFX SDK 2.4.0 (FSR 3, x64 only)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          git init -q ffx
+          git -C ffx remote add origin https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
+          git -C ffx sparse-checkout set --no-cone /Kits/FidelityFX/signedbin/amd_fidelityfx_loader_dx12.dll /Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll /Kits/FidelityFX/signedbin/amd_fidelityfx_loader_vk.dll /Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll /Kits/FidelityFX/docs/license.md
+          git -C ffx fetch -q --depth 1 origin 7539ae8b6568ad29ed78a753404351daf3b5cca7
+          git -C ffx checkout -q FETCH_HEAD
+          if ((git -C ffx rev-parse HEAD) -ne '7539ae8b6568ad29ed78a753404351daf3b5cca7') { throw 'FidelityFX SDK commit mismatch' }
+          Copy-Item ffx/Kits/FidelityFX/signedbin/*.dll dist/windows/
+          Copy-Item ffx/Kits/FidelityFX/docs/license.md dist/windows/LICENSE-FidelityFX.md
+          Get-ChildItem dist/windows/*.dll | Select-Object Name,Length
       - name: ANGLE DirectX 11 startup regression (WARP)
         if: matrix.arch == 'x64' && github.event_name == 'pull_request'
         timeout-minutes: 10
