@@ -29,6 +29,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-NVIDIA's MIT-licensed Streamline SDK header notice is preserved in
-crates/omsi-render/src/nvidia_dlss.rs. The SDK and runtime may have
-additional, separate licensing terms which must be reviewed.
+The Streamline SDK's source/header MIT notice is preserved in
+crates/omsi-render/src/temporal/streamline.rs. This notice is for
+public source attribution only; it is NOT a redistribution license for
+nvngx_dlss.dll or other separately licensed NVIDIA binaries.
+See docs/UPSCALER_THIRD_PARTY_LICENSING.md before packaging these DLLs.
