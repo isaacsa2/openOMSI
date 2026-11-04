@@ -692,10 +692,14 @@ pub fn vulkan_extensions() -> Result<Vec<&'static CStr>> {
                 bail!("this Streamline's DLSS plugin does not run on Vulkan");
             }
             let names = |n, p| static_names(n, p).iter().map(|c| c.to_string_lossy().into_owned()).collect::<Vec<_>>().join(", ");
-            let features = [names(r.vk_num_features12, r.vk_features12), names(r.vk_num_features13, r.vk_features13)].into_iter().filter(|f| !f.is_empty()).collect::<Vec<_>>();
-            if !features.is_empty() {
-                bail!("DLSS asks for Vulkan features wgpu's device is not made with ({}); choose DirectX 12 for DLSS", features.join(", "));
+            // (the Vulkan 1.2 features the device is made with for it, `VULKAN_FEATURES`; any
+            // other, or a 1.3 one, it cannot have)
+            let wanted: Vec<String> = static_names(r.vk_num_features12, r.vk_features12).iter().chain(&static_names(r.vk_num_features13, r.vk_features13)).map(|c| c.to_string_lossy().into_owned()).collect();
+            let other: Vec<&String> = wanted.iter().filter(|f| !VULKAN_FEATURES.contains(&f.as_str())).collect();
+            if !other.is_empty() {
+                bail!("DLSS asks for Vulkan features wgpu's device is not made with ({}); choose DirectX 12 for DLSS", other.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
             }
+            let _ = names;
             if r.vk_num_compute_queues_required + r.vk_num_graphics_queues_required + r.vk_num_optical_flow_queues_required > 0 {
                 bail!("DLSS asks for Vulkan queues of its own, which wgpu's device does not make; choose DirectX 12 for DLSS");
             }
@@ -721,6 +725,11 @@ pub fn vulkan_extensions() -> Result<Vec<&'static CStr>> {
         }
     }
 }
+
+/// The Vulkan 1.2 features DLSS may ask for that the device is made with
+/// (`gpu::upscaler_device`): wgpu turns timeline semaphores on itself on Vulkan 1.2, the other two
+/// are chained to its device by us.
+pub const VULKAN_FEATURES: [&str; 3] = ["timelineSemaphore", "descriptorIndexing", "bufferDeviceAddress"];
 
 /// Lets go of Streamline started by `vulkan_extensions` when the device could not be made with
 /// what it asked for.
