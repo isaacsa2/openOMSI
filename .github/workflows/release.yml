@@ -123,11 +123,13 @@ jobs:
           }
           Copy-Item (Join-Path $dir.FullName "libEGL.dll"), (Join-Path $dir.FullName "libGLESv2.dll"), (Join-Path $dir.FullName "LICENSE-ANGLE.txt") dist/windows/
           Get-ChildItem dist/windows
-      # Legal hold: these proprietary DLSS/NGX binaries are not redistributed by default.
-      # Enable only after the project has documented authorization and AGPL compatibility.
-      # Repo Actions variable: OPENOMSI_NVIDIA_REDISTRIBUTION_APPROVED=true.
-      - name: NVIDIA Streamline 2.14.1 (DLSS, x64; approved redistribution only)
-        if: matrix.arch == 'x64' && vars.OPENOMSI_NVIDIA_REDISTRIBUTION_APPROVED == 'true'
+      # NVIDIA Streamline 2.14.1 production runtimes (MIT Streamline components,
+      # separately licensed proprietary NGX). Package only the four allowlisted
+      # signed DLLs with the original vendor licenses and provenance checks.
+      # Legal notice: docs/NVIDIA_DLL_LICENSE_SCOPE.md; this step is not an
+      # AGPL section 7 exception on behalf of third-party contributors.
+      - name: NVIDIA Streamline 2.14.1 (DLSS, x64)
+        if: matrix.arch == 'x64'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
