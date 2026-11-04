@@ -499,10 +499,13 @@ has editable body geometry.
 DirectX 12 or Vulkan; DLSS only with an NVIDIA RTX card, FSR 3 with any): the picture is drawn smaller and brought up to the window with the help of the last
 frames, in place of the anti-aliasing and the render scale, from the next start (not with a headset
 or a triple screen). They are offered only when the vendor's DLLs are beside `openomsi.exe`.
-The Windows x64 release **includes the four AMD FidelityFX 2.4.0 DLLs** explicitly
-listed under MIT in the pinned SDK's license. NVIDIA's proprietary DLSS/NGX
-DLLs are **not** included by default pending AGPL compatibility clearance.
-See [the third-party licensing review](UPSCALER_THIRD_PARTY_LICENSING.md).
+The Windows x64 packaging currently includes the four AMD FidelityFX 2.4.0
+DLLs identified under MIT and four signed NVIDIA Streamline/DLSS 2.14.1
+runtime DLLs. NVIDIA's proprietary NGX runtime retains its separate vendor
+license; these files are not AGPL-licensed or sublicensed by openOMSI.
+The combined distribution's AGPL compatibility is still under legal review.
+See [the licensing review](UPSCALER_THIRD_PARTY_LICENSING.md) and
+[NVIDIA DLL license scope](NVIDIA_DLL_LICENSE_SCOPE.md).
 For DLSS (a GeForce RTX card) `sl.interposer.dll`, `sl.common.dll`, `sl.dlss.dll` and `nvngx_dlss.dll`
 from [NVIDIA's Streamline SDK](https://github.com/NVIDIA-RTX/Streamline), for FSR 3 (any card)
 `amd_fidelityfx_loader_dx12.dll` and `amd_fidelityfx_upscaler_dx12.dll` (on Vulkan the `_vk` ones) from
