@@ -1,8 +1,10 @@
 # Third-party temporal upscaler licensing — decision record
 
-**Status (2026-11-03): AMD 2.4.0's four listed FSR upscaler DLLs CLEARED under MIT;
-NVIDIA's proprietary DLSS/NGX runtime NOT CLEARED for bundled AGPLv3 distribution.**
-This technical record is not legal advice or a guarantee for future SDK versions.
+**Status (2026-11-03): AMD 2.4.0's four FSR DLLs are expressly MIT-listed.
+The NVIDIA runtime is set to be bundled in Windows x64 builds at the
+maintainer's request; AGPLv3 compatibility for NVIDIA NGX is NOT legally
+resolved by this change.** This is not legal advice, nor a claim of consent
+from NVIDIA or every openOMSI rights holder.
 
 ## Scope
 
@@ -60,12 +62,15 @@ linking with GPL-incompatible libraries as needing an appropriate exception
 unless a defined exception applies. A custom linking exception for AGPL code
 cannot be granted unilaterally for other authors' contributions.
 
-**Action:** keep `OPENOMSI_NVIDIA_REDISTRIBUTION_APPROVED` unset and do not
-bundle the DLSS/NGX runtime in public openOMSI packages pending review of the
-exact SDK ZIP terms and, if necessary, written approval from NVIDIA and the
-relevant openOMSI rights holders. NVIDIA's open-source Streamline components
-may be distributed on their own under applicable MIT terms, but do not
-provide DLSS functionality without the NGX runtime.
+**Current project configuration:** the Windows x64 workflow bundles the
+four NVIDIA DLLs from the pinned SDK ZIP and copies the vendor's original
+license files. It preserves signature and integrity checks. This packaging
+change is a maintainer choice and **does not itself grant an AGPL linking
+exception**, establish compatibility, sublicense NVIDIA's DLLs, or shift
+liability to NVIDIA. NVIDIA's open-source Streamline core and proprietary
+NGX runtime remain subject to different legal grants. The maintainers
+should obtain confirmation from NVIDIA and appropriate openOMSI rights
+holders before public release; see `NVIDIA_DLL_LICENSE_SCOPE.md`.
 
 Official references:
 - https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.1/license.txt
