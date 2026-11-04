@@ -43,3 +43,5 @@ MIT-licensed. None of the production DLLs is committed to the source tree.
 
 DLSS and FSR 3 still require GPU validation on DX12 and Vulkan. Build/CI status
 and runtime functionality are separate from legal redistribution approval.
+
+The runs a tester goes through, and what to send back, are in `UPSCALING_TESTS.md`.
