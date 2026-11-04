@@ -11,30 +11,25 @@ is opt-in: Settings → Graphics → Upscaling, `upscaler=dlss` or `fsr3` plus
   the relevant DLLs; failure disables the upscaler and is logged in `game.log`.
 - The source integration does not contain the vendor's production DLLs.
 
-## Windows x64 packaging: redistribution on hold by default
+## Windows x64 packaging: AMD included, NVIDIA DLSS/NGX on hold
 
-`.github/workflows/release.yml` includes *optional* vendor packaging steps,
-but does **not** bundle either vendor's DLLs by default. The maintainer must
-independently complete a license review and explicitly set a GitHub Actions
-repository/organization variable to the literal string `true`:
+`.github/workflows/release.yml` packages the **four specific FidelityFX
+SDK 2.4.0 signed DLLs** on every Windows x64 release. The SDK's pinned
+`Kits/FidelityFX/docs/license.md` explicitly lists those four filenames
+as **MIT-licensed exceptions** (see its `These source files ... are subject
+to the following license` section). The workflow checks that the four are
+listed and includes the full license and third-party notices.
 
-- `OPENOMSI_NVIDIA_REDISTRIBUTION_APPROVED` for NVIDIA Streamline 2.14.1
-  and the DLSS/NGX runtime. The script verifies the SDK ZIP SHA-256 and
-  Authenticode signatures and includes the applicable notices.
-- `OPENOMSI_AMD_REDISTRIBUTION_APPROVED` for the FidelityFX SDK 2.4.0
-  signed DX12/Vulkan DLLs at its pinned commit, including the vendor license.
+NVIDIA Streamline 2.14.1's MIT-covered components and the proprietary DLSS/
+NGX runtime must not be treated as one license. The workflow **does not bundle
+NVIDIA DLLs by default**. `OPENOMSI_NVIDIA_REDISTRIBUTION_APPROVED=true`
+is a maintainer-controlled release switch, to be set **only** after
+documented compatibility/redistribution clearance for the actual SDK ZIP
+and openOMSI's AGPLv3 distribution.
 
-These are **maintainer-controlled approval switches**, not an assertion that
-permission has been obtained. Do not set them merely to make CI pass.
-A source build/release can run without those SDK DLLs; the corresponding
-upscaler choices remain unavailable until the necessary libraries are present.
-
-**Licensing is not interchangeable:** Streamline's publicly licensed
-source/header portions do not establish the terms for the proprietary
-`nvngx_dlss.dll`; AMD's signed binary distribution terms are not a blanket MIT
-grant. Whether bundling these SDKs alongside openOMSI (AGPLv3) is permitted
-requires review of the **exact** SDK binaries, license files, method of
-integration, and distribution. See
+Shipping AMD's four listed MIT binaries does not imply that every file in
+the FidelityFX SDK is MIT-licensed. The source code does not contain the
+vendors' production DLLs. See
 [`UPSCALER_THIRD_PARTY_LICENSING.md`](UPSCALER_THIRD_PARTY_LICENSING.md).
 
 ## Not verified yet
