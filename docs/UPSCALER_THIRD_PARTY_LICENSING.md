@@ -1,95 +1,82 @@
 # Third-party temporal upscaler licensing — decision record
 
-**Status (2026-11-03): NOT CLEARED for automatic public redistribution.**
-This is a technical licensing assessment for maintainers, **not legal advice**
-or a definitive determination of compatibility. The game source remains AGPLv3;
-vendor DLLs are not relicensed under the AGPL by including license notices.
+**Status (2026-11-03): AMD 2.4.0's four listed FSR upscaler DLLs CLEARED under MIT;
+NVIDIA's proprietary DLSS/NGX runtime NOT CLEARED for bundled AGPLv3 distribution.**
+This technical record is not legal advice or a guarantee for future SDK versions.
 
 ## Scope
 
-- Project: openOMSI, distributed under GNU AGPL version 3.
-- NVIDIA: Streamline **2.14.1**, production `sl.interposer.dll`,
-  `sl.common.dll`, `sl.dlss.dll`, `nvngx_dlss.dll`.
-  Packaging source: official versioned Streamline release ZIP, with pinned
-  SHA-256 and individual license notices.
-- AMD: FidelityFX SDK **2.4.0** signed `amd_fidelityfx_loader_*.dll` and
-  `amd_fidelityfx_upscaler_*.dll` from commit
-  `7539ae8b6568ad29ed78a753404351daf3b5cca7` (DX12 and Vulkan).
-- The licensing of the adapter source code is distinct from the distribution
-  terms of the compiled vendor binaries.
+- openOMSI is AGPLv3-licensed.
+- NVIDIA: Streamline 2.14.1; `sl.interposer.dll`, `sl.common.dll`,
+  `sl.dlss.dll` and `nvngx_dlss.dll`.
+- AMD: FidelityFX SDK 2.4.0, commit
+  `7539ae8b6568ad29ed78a753404351daf3b5cca7`:
+  `amd_fidelityfx_loader_dx12.dll`, `amd_fidelityfx_upscaler_dx12.dll`,
+  `amd_fidelityfx_loader_vk.dll`, `amd_fidelityfx_upscaler_vk.dll`.
 
-## Findings
+## AMD: the four exact binary files have an MIT exception
 
-### NVIDIA — rights still need clearance
+Read the *whole* pinned `Kits/FidelityFX/docs/license.md`, not just its
+opening paragraph. The first section sets a restrictive binary-only license
+for files **not** excepted below. Beginning at `These source files`, however,
+it lists **all four exact signedbin DLLs** above, then states those listed
+files `are subject to the following license`: the MIT grant.
 
-The NVIDIA Streamline repository's MIT-licensed source and headers **do not
-automatically license the separately provided DLSS/NGX production runtime**.
-The SDK ZIP supplies distinct notices, including `nvngx_dlss.license.txt`.
-NVIDIA's published RTX/NGX SDK agreements contain distribution conditions
-and restrictions on subjecting their SDK to open-source license obligations.
-The exact terms that govern this **particular Streamline 2.14.1 ZIP and
-nvngx_dlss.dll** must be compared with the proposed distribution, including
-any attribution or notification requirements. Preserving the notice alone
-does not establish AGPL compatibility.
+This **explicit exception** means these four signed DLLs can be redistributed
+together with the AGPLv3 openOMSI distribution under their MIT terms, with
+copyright/permission notice preserved. This conclusion is limited to those
+four filenames at the pinned commit — it does not cover every binary, SDK
+tool, library or future version.
 
-NVIDIA's integration guide identifies the required runtime files for an
-application, but technical packaging instructions do not override its
-applicable binary license.
+The Windows x64 workflow checks the MIT exception list, copies only the four
+allowlisted DLLs, includes the complete SDK license, a short mapping notice
+and the SDK's third-party notices. AMD packaging is on by default.
+
+Source:
+https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/docs/license.md
+
+## NVIDIA: MIT Streamline core versus proprietary NGX runtime
+
+The Streamline repository's `license.txt` grants MIT terms to the Streamline
+source/core portions. The production `nvngx_dlss.dll` is **separately
+licensed** by the NVIDIA RTX/NGX SDK EULA (`nvngx_dlss.license.txt` inside
+the official SDK distribution). NVIDIA's official Streamline integration guide
+identifies this DLL as required for DLSS.
+
+The NVIDIA RTX SDK license grants conditional permission to distribute
+SDK material incorporated in applications (section 1(c)) but imposes specific
+distribution obligations (section 2(c)) and prohibits use that would cause
+the proprietary SDK to become subject to an open-source license (section
+4(e)). The RTX supplement also specifies notification before **commercial**
+DLSS/NGX application releases (section 4). These provisions do not
+automatically prohibit every open-source game; they do mean that the
+interaction with AGPLv3 needs an affirmative, case-specific determination.
+
+The proprietary NGX DLL is *not* generally covered by the Streamline MIT
+license. Because openOMSI's optional DLSS integration dynamically loads this
+DLL, merely placing it beside `openomsi.exe` or calling it a separate file
+does not prove a GPL/AGPL-compatible aggregate. The GNU GPL FAQ treats
+linking with GPL-incompatible libraries as needing an appropriate exception
+unless a defined exception applies. A custom linking exception for AGPL code
+cannot be granted unilaterally for other authors' contributions.
+
+**Action:** keep `OPENOMSI_NVIDIA_REDISTRIBUTION_APPROVED` unset and do not
+bundle the DLSS/NGX runtime in public openOMSI packages pending review of the
+exact SDK ZIP terms and, if necessary, written approval from NVIDIA and the
+relevant openOMSI rights holders. NVIDIA's open-source Streamline components
+may be distributed on their own under applicable MIT terms, but do not
+provide DLSS functionality without the NGX runtime.
 
 Official references:
-- https://github.com/NVIDIA-RTX/Streamline/tree/v2.14.1
 - https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.1/license.txt
 - https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.1/docs/ProgrammingGuide.md
-- https://docs.nvidia.com/ngx/latest/ngx-eula/index.html
 - https://github.com/NVIDIA/DLSS/blob/main/LICENSE.txt
-
-### AMD — not blanket MIT for signed binaries
-
-The *pinned* SDK's `Kits/FidelityFX/docs/license.md` contains binary
-redistribution permission subject to conditions including reproducing its
-notices and restrictions on reverse engineering. This is **not the MIT
-license**, even though portions of source code may carry MIT notices.
-The exact applicability and compatibility of those restrictions with
-AGPLv3 for openOMSI's distribution must be reviewed; the permission to
-distribute a binary is not by itself permission to relicense it under AGPL.
-
-Official reference:
-- https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/docs/license.md
-
-### AGPLv3 and integration
-
-AGPLv3 imposes corresponding-source and downstream-rights obligations for
-covered combined works. Loading an optional, proprietary runtime through a
-DLL does **not automatically settle** whether the binaries form an aggregate,
-a combined work, or qualify for an exception (such as a system library).
-This turns on the actual integration and distribution facts. An additional
-permission/exception cannot be issued for third-party AGPL code without
-the rights holders' authority.
-
-References:
-- https://www.gnu.org/licenses/agpl-3.0.html
+- https://docs.nvidia.com/ngx/latest/ngx-eula/index.html
 - https://www.gnu.org/licenses/gpl-faq.html#GPLIncompatibleLibs
-- https://www.gnu.org/licenses/gpl-faq.html#SystemLibraryException
 
-## Required before turning on vendor packaging
+## Release and test distinction
 
-1. Retain and inspect the *exact* legal notices extracted from the versioned
-   production ZIP/SDK commit, and identify which notice governs **each**
-   shipped DLL (including NVIDIA NGX and AMD signed binaries).
-2. Record a competent licensing review of AGPLv3 compatibility for the
-   proposed integration and binary redistribution; obtain permission or
-   written clarification from the applicable vendor/rightsholders if needed.
-3. Verify all notice, attribution, branding, distribution and (if applicable)
-   pre-release/commercial-release notification requirements. Do not assume
-   NVIDIA's or AMD's permissions are identical.
-4. Document the approval and only then enable the corresponding GitHub
-   Actions variable: `OPENOMSI_NVIDIA_REDISTRIBUTION_APPROVED=true` and/or
-   `OPENOMSI_AMD_REDISTRIBUTION_APPROVED=true`.
-5. Validate the resulting Windows x64 artifact and any installer contents
-   before public publication.
-
-The release workflow deliberately **skips shipping vendor DLLs by default**,
-while preserving source integration and optional build steps. This is a
-temporary distribution safeguard, not a claim that the SDKs cannot lawfully
-be used or that the legal questions have been resolved. It also does not
-imply that separately distributing vendor binaries is automatically safe.
+Legal ability to redistribute a DLL is separate from compatibility,
+successful compilation and GPU validation. This review does not prove
+the AMD or NVIDIA upscaler works on DX12/Vulkan, does not certify CI and
+does not replace a review of any other SDK dependencies.
