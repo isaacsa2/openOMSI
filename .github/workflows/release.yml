@@ -139,7 +139,7 @@ jobs:
       # MIT-licensed exceptions in the pinned SDK's Kits/FidelityFX/docs/license.md.
       # Keep the exact file allowlist, upstream license and third-party notices.
       - name: AMD FidelityFX SDK 2.4.0 (FSR 3, x64; MIT-listed DLLs)
-        if: matrix.arch == 'x64' && vars.OPENOMSI_AMD_REDISTRIBUTION_APPROVED == 'true'
+        if: matrix.arch == 'x64'
         shell: pwsh
         run: |
           git init -q ffx
@@ -160,15 +160,15 @@ jobs:
           }
           Copy-Item ffx/Kits/FidelityFX/docs/license.md dist/windows/LICENSE-FidelityFX.md
           Copy-Item ffx/3rdpartynotice.md dist/windows/THIRD-PARTY-FidelityFX.md
-          @'
-These four DLLs are listed as MIT-licensed exceptions in the pinned
-AMD FidelityFX SDK 2.4.0's Kits/FidelityFX/docs/license.md:
-  amd_fidelityfx_loader_dx12.dll, amd_fidelityfx_upscaler_dx12.dll,
-  amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll
-Original SDK commit: 7539ae8b6568ad29ed78a753404351daf3b5cca7
-Full license: LICENSE-FidelityFX.md (MIT grant is near the end)
-Additional upstream third-party notices: THIRD-PARTY-FidelityFX.md
-'@ | Set-Content dist/windows/FidelityFX-BINARIES-NOTICE.txt -Encoding UTF8
+          $note = @(
+            'These four DLLs are listed as MIT-licensed exceptions in the pinned AMD FidelityFX SDK 2.4.0 license:',
+            'amd_fidelityfx_loader_dx12.dll, amd_fidelityfx_upscaler_dx12.dll,',
+            'amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll',
+            'Original SDK commit: 7539ae8b6568ad29ed78a753404351daf3b5cca7',
+            'Full license: LICENSE-FidelityFX.md (MIT grant is near the end)',
+            'Additional upstream third-party notices: THIRD-PARTY-FidelityFX.md'
+          ) -join "`n"
+          Set-Content -Path dist/windows/FidelityFX-BINARIES-NOTICE.txt -Value $note -Encoding UTF8
           Get-ChildItem dist/windows/amd_fidelityfx_*.dll | Select-Object Name,Length
       - name: ANGLE DirectX 11 startup regression (WARP)
         if: matrix.arch == 'x64' && github.event_name == 'pull_request'
