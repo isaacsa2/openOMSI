@@ -765,7 +765,7 @@ impl Runtime {
             });
         }
         let gpu = VkGpu::of(device).ok_or_else(|| anyhow!("the game is not running on DirectX 12 or Vulkan (Settings: Graphics API)"))?;
-        let prepared = PREPARED.lock().unwrap_or_else(|e| e.into_inner()).take().ok_or_else(|| anyhow!("Streamline was not started before the Vulkan device was made"))?;
+        let prepared = PREPARED.lock().unwrap_or_else(|e| e.into_inner()).take().ok_or_else(|| anyhow!("on Vulkan DLSS takes its place from the next start of the game, chosen before it (its device extensions are given when the device is made); this run goes on without it"))?;
         let module = prepared.module;
         let shutdown: Fn0 = load_fn(module, c"slShutdown")?;
         Self::start(module, &game_dir(), prepared.paths, Device::Vulkan(gpu)).inspect_err(|_| unsafe {
