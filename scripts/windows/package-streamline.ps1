@@ -85,9 +85,15 @@ Official archive SHA-256: $ExpectedSha256
 This release package contains NVIDIA's unmodified, signed runtime binaries:
   sl.interposer.dll, sl.common.dll, sl.dlss.dll, nvngx_dlss.dll
 
-License texts are shipped as NVIDIA-Streamline-LICENSE.txt and
-nvngx_dlss.license.txt. These binary files are not part of openOMSI's
-AGPL-licensed source; their applicable NVIDIA notices remain in force.
+These components are included as unmodified NVIDIA-distributed runtime
+libraries. The source code of openOMSI remains licensed under GNU AGPLv3.
+The NVIDIA binaries are NOT relicensed under AGPLv3:
+  - NVIDIA-Streamline-LICENSE.txt: Streamline components
+  - nvngx_dlss.license.txt: proprietary NVIDIA DLSS/NGX runtime
+The NVIDIA license terms and intellectual property rights remain in force.
+No NVIDIA endorsement of openOMSI is implied. This notice does not grant
+an AGPL section 7 linking exception for code owned by other contributors.
+See docs/NVIDIA_DLL_LICENSE_SCOPE.md in the project source repository.
 Only DLSS Super Resolution / DLAA is included, not DLSS Frame Generation.
 The game works without DLSS on unsupported hardware; DLSS is opt-in.
 "@
