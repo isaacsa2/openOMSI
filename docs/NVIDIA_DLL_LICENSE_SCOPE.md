@@ -16,15 +16,25 @@ per-DLL Authenticode signature validation. The package also includes
 
 ## Separate vendor licensing; no relicensing
 
-These NVIDIA binaries are **not** licensed under openOMSI's AGPLv3 and are
-**not** openOMSI project source code. Streamline's MIT-covered portions and
-the separate proprietary NVIDIA DLSS/NGX runtime must retain their original
+These NVIDIA binaries are **not** licensed under openOMSI's AGPLv3,
+and are **not** openOMSI project source code. The historical MIT license
+retained in openOMSI's `LICENSE` is also **not** a license for NVIDIA's
+vendor binaries. The relevant **original NVIDIA license** controls each
+component: Streamline code and components covered by NVIDIA's MIT grant
+remain MIT-covered, while `nvngx_dlss.dll` remains proprietary and governed
+by the separate NVIDIA RTX/NGX SDK terms (`nvngx_dlss.license.txt`). The
+Streamline SDK's `license.txt` also contains a specific notice for Nsight
+Perf files, which are not among the four packaged DLLs. Preserve all original
 copyright notices, license terms and limitations. NVIDIA retains the
 rights in its SDK and binaries; openOMSI does not grant downstream rights
 beyond NVIDIA's license. Distribution does **not** imply NVIDIA sponsorship,
 endorsement or an assignment of distributor liability to NVIDIA.
 
-The openOMSI source code remains GNU AGPLv3. This notice does **not**
+The openOMSI source code remains GNU AGPLv3. The author-controlled,
+NVIDIA-only additional permission described in
+[NVIDIA_STREAMLINE_AGPL_EXCEPTION.md](NVIDIA_STREAMLINE_AGPL_EXCEPTION.md)
+is a limited **linking/conveyance permission on covered project code**; it
+is not a change to any NVIDIA binary's own license. This notice does **not**
 purport to change the license on third-party contributions to openOMSI,
 does **not** grant an AGPLv3 section 7 linking exception on their behalf,
 and does **not** create extra rights from NVIDIA.
