@@ -701,26 +701,29 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------
-NVIDIA vendor runtime notice (not part of the GNU AGPL license)
+Third-party vendor binaries (notice, not part of the GNU AGPL)
 
-The original, unmodified NVIDIA Streamline 2.14.1 / DLSS runtime binaries
-(sl.interposer.dll, sl.common.dll, sl.dlss.dll and nvngx_dlss.dll) may be
-packaged alongside openOMSI as separately licensed third-party components.
-They are not openOMSI source code. Neither openOMSI's GNU AGPLv3 nor its
-historical MIT license above is a grant of rights to these NVIDIA binaries.
+All original openOMSI project source code, including its DLSS/FSR
+integration and launcher code, remains covered by GNU AGPL-3.0-only
+(subject only to any pre-existing third-party file-specific notices).
+The historical MIT notice retained above applies only to material
+previously licensed under those terms; it does not relicense the
+current openOMSI code or unrelated third-party components.
 
-MIT-covered Streamline code/components remain under NVIDIA's applicable MIT
-terms, with their notices preserved. NVIDIA's proprietary NGX/DLSS runtime
-(in particular nvngx_dlss.dll) remains governed by NVIDIA's own proprietary
-SDK/NGX license and corresponding original license file. openOMSI cannot
-relicense it under AGPLv3 or MIT, nor override NVIDIA's license terms.
+Original NVIDIA Streamline / DLSS binaries supplied alongside a build
+are separate third-party components, governed only by the applicable
+licenses supplied by NVIDIA. Streamline portions specifically covered
+by NVIDIA's MIT license remain under that MIT license; proprietary
+NVIDIA NGX/DLSS components, including nvngx_dlss.dll, remain under
+NVIDIA's proprietary RTX/NGX terms. Neither the project's AGPLv3
+license nor its historical MIT notice is asserted to cover those DLLs.
 
-A strictly NVIDIA Streamline/DLSS-specific AGPLv3 section 7 additional
-permission for original openOMSI code whose authors expressly consent is
-described in docs/NVIDIA_STREAMLINE_AGPL_EXCEPTION.md. That permission
-applies only to the author's own rights, not to other contributors' work;
-it does not by itself settle the legal conditions for distribution of the
-combined application or constitute NVIDIA approval or endorsement.
+The original AMD FidelityFX binaries, when included, retain their
+applicable AMD license and notices; this project's AGPLv3 does not
+purport to relicense them. See docs/UPSCALER_THIRD_PARTY_LICENSING.md
+and docs/NVIDIA_DLL_LICENSE_SCOPE.md for the exact packaged files and
+vendor documentation.
 
-See docs/NVIDIA_DLL_LICENSE_SCOPE.md and the vendor licenses shipped with
-the runtime. NVIDIA and its licensors retain all applicable rights.
+This notice is a description of license boundaries only; it does not
+amend vendor licenses or independently establish the right to
+distribute any particular combination of software.
