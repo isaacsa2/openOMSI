@@ -1,9 +1,10 @@
 # Proposed AGPLv3 section 7 additional permission: NVIDIA Streamline / DLSS ONLY
 
-**Status:** narrowly scoped permission text for review in PR #371. This file
-must **not** be represented as an effective exception for all of openOMSI,
-or as NVIDIA's approval, until the necessary copyright holders have expressly
-adopted it for their contributions and the vendor license requirements are met.
+**Status:** limited additional permission for code whose rights are held by
+isaacsa2, plus a proposed opt-in for other affected copyright holders. This
+is **not** an effective exception for all of openOMSI or NVIDIA's approval.
+Other rights holders must expressly adopt it for their own contributions,
+and the NVIDIA vendor terms must be satisfied independently.
 
 ## Additional permission for expressly authorized AGPL-covered code
 
@@ -48,18 +49,21 @@ versions or patched DLLs, or any other vendor's binaries.
 
 ## Adoption record and release requirement
 
-- **isaacsa2 / Isaac S.** has directed the proposal of this permission for
-  his **own copyrightable contributions** to the DLSS integration; no
-  authorization for other authors' code is asserted by that direction.
+- **isaacsa2 / Isaac S.** expressly grants the additional permission above
+  for original copyrightable portions of the DLSS integration **whose rights
+  he personally owns and is legally able to license**. This grant makes no
+  assertion of exclusive ownership of a shared file, and does not extend to
+  any other contributor's work.
 - **m3rlinek01**, the author of #3681's initial upscaling work: direct,
   written opt-in for the specific affected code is **still to be recorded**
   in the PR or an equivalent durable record.
 - **Other holders of affected pre-existing AGPL code:** determine the extent
   of their involvement and document any additional consents needed.
 
-This document is a **limited-permission proposal with incomplete adoption**;
-it is not evidence that a public combined AGPLv3/NVIDIA proprietary release
-has been legally cleared. When permissions are obtained, identify the exact
+This document contains a **limited grant for Isaac-owned code only** and a
+proposal for other authors whose approval has not been recorded. It is not
+evidence that a public combined AGPLv3/NVIDIA proprietary release has been
+legally cleared. When permissions are obtained, identify the exact
 covered files/portions and corresponding consenting holders, and add the
 relevant notice to those files before claiming the exception applies to them.
 
