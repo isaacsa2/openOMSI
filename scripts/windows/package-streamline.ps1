@@ -1,5 +1,6 @@
-# Package the official NVIDIA Streamline 2.14.1 PRODUCTION DLLs for one
-# Windows x64 openOMSI release archive. DLSS remains runtime opt-in.
+# Verify and extract the official NVIDIA Streamline 2.14.1 PRODUCTION DLLs
+# into a staging folder for an optional user-initiated installation.
+# The openOMSI public release does not bundle these proprietary binaries.
 #
 # Binary source: https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.14.1
 # Do not take files from third-party modifications or development/debug builds.
@@ -82,10 +83,10 @@ NVIDIA Streamline SDK v2.14.1 (PRODUCTION)
 Original download: https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.14.1
 Official archive SHA-256: $ExpectedSha256
 
-This release package contains NVIDIA's unmodified, signed runtime binaries:
+This optional user-installed component set contains NVIDIA's unmodified, signed binaries:
   sl.interposer.dll, sl.common.dll, sl.dlss.dll, nvngx_dlss.dll
 
-These components are included as unmodified NVIDIA-distributed runtime
+These components are installed as unmodified NVIDIA-distributed runtime
 libraries. The source code of openOMSI remains licensed under GNU AGPLv3.
 All original openOMSI integration source code remains GNU AGPLv3.
 These separate, unmodified NVIDIA vendor DLLs are NOT relicensed under
