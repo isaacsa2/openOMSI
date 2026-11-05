@@ -21,7 +21,7 @@ async fn work<F: FnOnce() -> Answer + Send + 'static>(f: F) -> Answer {
 }
 
 pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![call, call_bytes, pick_folder, pick_file, pick_mod, pick_hofs, open_path, open_url, update_relaunch, selftest_done, fit_zoom]
+    tauri::generate_handler![call, call_bytes, pick_folder, pick_file, pick_mod, pick_hofs, open_path, open_url, update_relaunch, selftest_done, fit_zoom, nvidia_dlss_status, nvidia_dlss_install]
 }
 
 /// This window, for the commands of `omsi-launcher-api`.
