@@ -1,16 +1,19 @@
 # NVIDIA DLL distribution and license scope
 
 This notice applies **only** to the third-party NVIDIA runtime binaries
-shipped alongside the Windows x64 build of openOMSI:
+available as an optional, **user-initiated installation** from NVIDIA's
+Streamline SDK 2.14.1 for the Windows x64 version of openOMSI:
 
 - `sl.interposer.dll`
 - `sl.common.dll`
 - `sl.dlss.dll`
 - `nvngx_dlss.dll`
 
-These DLLs come unmodified from NVIDIA Streamline SDK 2.14.1, downloaded
-from the original NVIDIA release and checked by a pinned ZIP SHA-256 and
-per-DLL Authenticode signature validation. The package also includes
+The openOMSI release ZIP contains **no NVIDIA runtime DLLs**. After the
+player acknowledges NVIDIA's terms and requests installation in the launcher,
+these binaries are downloaded directly from NVIDIA's original Streamline
+release and checked by a pinned SDK ZIP SHA-256 and per-DLL Authenticode
+signature validation. The separate user-installed component set includes
 `NVIDIA-Streamline-LICENSE.txt`, `nvngx_dlss.license.txt` and
 `NVIDIA-Streamline-NOTICE.txt`.
 
@@ -47,9 +50,12 @@ This classification of vendor binaries does not by itself resolve every
 question about combined AGPL/proprietary distribution; that assessment is
 separate from keeping each component under its correct license.
 
-The packaging workflow currently bundles these DLLs at the maintainer's
-direction. This record is documentation of scope and provenance, **not
-a completed legal clearance**. Before a public release, comply with the applicable vendor terms and
+The openOMSI packaging workflow does not bundle these DLLs. The optional
+installer obtains them only after explicit player consent. This notice
+records the licensing boundary and the installer provenance, **not a
+completed legal clearance**. Accepting NVIDIA's license grants the player
+only the rights that NVIDIA itself offers; it does not make the player the
+copyright owner of NVIDIA binaries. Before a public release, comply with the applicable vendor terms and
 resolve any outstanding rights or compatibility questions.
 
 Official vendor references:
