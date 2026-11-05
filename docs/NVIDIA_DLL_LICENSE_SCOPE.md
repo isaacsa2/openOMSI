@@ -56,5 +56,11 @@ GNU references:
 - https://www.gnu.org/licenses/agpl-3.0.html#section7
 - https://www.gnu.org/licenses/gpl-faq.html#GPLIncompatibleLibs
 
+A proposed, strictly NVIDIA-only additional permission under AGPLv3
+section 7 is recorded in [NVIDIA_STREAMLINE_AGPL_EXCEPTION.md](NVIDIA_STREAMLINE_AGPL_EXCEPTION.md).
+It does not take effect for other contributors' code without their consent and
+does not constitute NVIDIA's authorization. See
+[DLSS_AUTHORSHIP_SCOPE.md](DLSS_AUTHORSHIP_SCOPE.md) for the engineering/provenance boundary.
+
 No additional permissions for the openOMSI source code are granted by
 this notice.
