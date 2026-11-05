@@ -87,10 +87,13 @@ This release package contains NVIDIA's unmodified, signed runtime binaries:
 
 These components are included as unmodified NVIDIA-distributed runtime
 libraries. The source code of openOMSI remains licensed under GNU AGPLv3.
-The NVIDIA binaries are NOT relicensed under AGPLv3:
-  - NVIDIA-Streamline-LICENSE.txt: Streamline components
+The NVIDIA binaries are NOT relicensed under GNU AGPLv3 or the
+historical MIT notice in openOMSI's root LICENSE. Each component retains
+its ORIGINAL NVIDIA terms:
+  - NVIDIA-Streamline-LICENSE.txt: Streamline MIT-covered components
   - nvngx_dlss.license.txt: proprietary NVIDIA DLSS/NGX runtime
-The NVIDIA license terms and intellectual property rights remain in force.
+Original NVIDIA rights, restrictions and copyright notices remain in force.
+This software contains source code provided by NVIDIA Corporation.
 No NVIDIA endorsement of openOMSI is implied. This notice does not grant
 an AGPL section 7 linking exception for code owned by other contributors.
 See docs/NVIDIA_DLL_LICENSE_SCOPE.md in the project source repository.
