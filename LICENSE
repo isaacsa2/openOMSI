@@ -710,9 +710,10 @@ The historical MIT notice retained above applies only to material
 previously licensed under those terms; it does not relicense the
 current openOMSI code or unrelated third-party components.
 
-Original NVIDIA Streamline / DLSS binaries supplied alongside a build
-are separate third-party components, governed only by the applicable
-licenses supplied by NVIDIA. Streamline portions specifically covered
+NVIDIA Streamline / DLSS binaries, when separately installed at the
+player's request, are independent third-party vendor files governed by
+the applicable licenses supplied by NVIDIA. The openOMSI release ZIP
+does not contain NVIDIA DLSS binaries. Streamline portions specifically covered
 by NVIDIA's MIT license remain under that MIT license; proprietary
 NVIDIA NGX/DLSS components, including nvngx_dlss.dll, remain under
 NVIDIA's proprietary RTX/NGX terms. Neither the project's AGPLv3
