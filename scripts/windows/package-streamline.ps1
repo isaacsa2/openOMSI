@@ -18,6 +18,9 @@ if ($ActualSha256 -ne $ExpectedSha256) {
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $OutDir = (Resolve-Path -LiteralPath $Destination).Path
 Add-Type -AssemblyName System.IO.Compression
+# (ZipFile lives in System.IO.Compression.FileSystem on Windows PowerShell 5.1, which the
+# launcher runs as powershell.exe; PowerShell 7 has it in System.IO.Compression already)
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $Archive).Path)
 try {
     function Get-SdkEntry {
