@@ -1,9 +1,10 @@
 # Third-party temporal upscaler licensing — decision record
 
-**Status (2026-11-03): AMD 2.4.0's four FSR DLLs are expressly MIT-listed.
-The NVIDIA runtime is set to be bundled in Windows x64 builds at the
-maintainer's request; AGPLv3 compatibility for NVIDIA NGX is NOT legally
-resolved by this change.** This is not legal advice, nor a claim of consent
+**Status: AMD 2.4.0's four FSR DLLs are expressly MIT-listed and bundled.
+NVIDIA runtime DLLs are NOT bundled with openOMSI releases; the Windows
+launcher offers an optional, player-initiated direct download from NVIDIA
+only after the player acknowledges NVIDIA's terms. This does NOT independently
+settle AGPLv3/NGX compatibility.** This is not legal advice, nor a claim of consent
 from NVIDIA or every openOMSI rights holder.
 
 ## Scope
@@ -68,12 +69,13 @@ linking with GPL-incompatible libraries as needing an appropriate exception
 unless a defined exception applies. A custom linking exception for AGPL code
 cannot be granted unilaterally for other authors' contributions.
 
-**Current project configuration:** the Windows x64 workflow bundles the
-four NVIDIA DLLs from the pinned SDK ZIP and copies the vendor's original
-license files. It preserves signature and integrity checks. This packaging
-change is a maintainer choice and **does not itself grant an AGPL linking
-exception**, establish compatibility, sublicense NVIDIA's DLLs, or shift
-liability to NVIDIA. NVIDIA's open-source Streamline core and proprietary
+**Current project configuration:** the Windows x64 release workflow does
+**not** bundle NVIDIA DLLs. The launcher, at the player's request only,
+downloads the pinned official NVIDIA SDK archive, verifies its checksum and
+the four allowed signed DLLs, and installs the vendor's original license
+files. This opt-in installer does not itself grant an AGPL linking exception,
+establish compatibility, sublicense NVIDIA's DLLs, or shift liability to
+NVIDIA. Acceptance is not transfer of ownership. NVIDIA's open-source Streamline core and proprietary
 NGX runtime remain subject to different legal grants. The maintainers
 should obtain confirmation from NVIDIA and appropriate openOMSI rights
 holders before public release; see `NVIDIA_DLL_LICENSE_SCOPE.md`.
