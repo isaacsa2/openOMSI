@@ -55,7 +55,11 @@ automatically prohibit every open-source game; they do mean that the
 interaction with AGPLv3 needs an affirmative, case-specific determination.
 
 The proprietary NGX DLL is *not* generally covered by the Streamline MIT
-license. Because openOMSI's optional DLSS integration dynamically loads this
+license. The root openOMSI `LICENSE` and its retained historical MIT grant
+do **not** license any NVIDIA proprietary DLL; the original vendor terms
+apply independently. The limited author-owned AGPLv3 section 7 permission
+in `NVIDIA_STREAMLINE_AGPL_EXCEPTION.md` operates only on eligible openOMSI
+code and cannot amend NVIDIA licenses or license other contributors' work. Because openOMSI's optional DLSS integration dynamically loads this
 DLL, merely placing it beside `openomsi.exe` or calling it a separate file
 does not prove a GPL/AGPL-compatible aggregate. The GNU GPL FAQ treats
 linking with GPL-incompatible libraries as needing an appropriate exception
