@@ -26,13 +26,11 @@ NVIDIA Streamline 2.14.1/DLSS files from a SHA-256-pinned vendor ZIP:
 `nvngx_dlss.dll`. The original vendor license texts are packaged with them.
 The NVIDIA runtime has **separate terms**: the MIT license for the open
 Streamline components must not be assumed to cover the proprietary NGX DLL.
-The game source stays AGPLv3; no NVIDIA DLL is relicensed under AGPL.
-The historic MIT notice in the root `LICENSE` does not relicense NVIDIA's
-proprietary SDK either. MIT-covered Streamline components keep their
-**original NVIDIA MIT** terms; proprietary NGX keeps its **original NVIDIA
-RTX/NGX** terms. See the root `LICENSE` third-party notice and
-[`NVIDIA_STREAMLINE_AGPL_EXCEPTION.md`](NVIDIA_STREAMLINE_AGPL_EXCEPTION.md)
-for the limited AGPLv3 additional permission on author-owned openOMSI code.
+The **entire original openOMSI source integration**, including DLSS and
+FSR code, remains AGPLv3. NVIDIA's SDK binaries retain their **own NVIDIA
+licenses**, and AMD's binaries retain their applicable **AMD licenses**.
+Neither NVIDIA nor AMD vendor binaries are relicensed by the openOMSI AGPLv3
+or its historical MIT notice.
 
 **Legal caveat:** mere separate notices do not settle whether the combined
 AGPL application and proprietary DLSS runtime can lawfully be distributed
