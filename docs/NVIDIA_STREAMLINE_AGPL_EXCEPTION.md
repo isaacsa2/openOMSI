@@ -1,4 +1,4 @@
-# Proposed AGPLv3 section 7 additional permission: NVIDIA Streamline / DLSS ONLY
+# AGPLv3 section 7 additional permission for author-owned code: NVIDIA Streamline / DLSS ONLY
 
 **Status:** limited additional permission for code whose rights are held by
 isaacsa2, plus a proposed opt-in for other affected copyright holders. This
@@ -28,6 +28,25 @@ The purpose of this permission is interoperability with **NVIDIA DLSS Super
 Resolution / DLAA via Streamline**, not a blanket proprietary-SDK exception.
 It does not apply to other NVIDIA SDKs, other proprietary software, arbitrary
 versions or patched DLLs, or any other vendor's binaries.
+
+## Scope of the license boundary
+
+This exception operates **only on AGPL-covered openOMSI integration code**
+for which the granting author holds copyright. It permits linkage and
+conveyance of that authorized code together with the four specified
+NVIDIA vendor files, **only where NVIDIA's own license independently
+allows the distribution**.
+
+It does **not** place the NVIDIA SDK under the AGPLv3, nor does it grant
+MIT rights in NVIDIA binaries. MIT applies to the Streamline portions
+licensed by NVIDIA under MIT, and the NVIDIA proprietary NGX license
+continues to apply to `nvngx_dlss.dll`. An openOMSI author cannot amend,
+replace or waive vendor licenses.
+
+This is neither a relicensing of the whole openOMSI project nor a
+permission to link unrelated AGPL contributions without their owners'
+authorization. **A mere statement in this document does not prove that
+all required copyright permissions have been obtained.**
 
 ## Rights and limits
 
