@@ -8,7 +8,9 @@ from NVIDIA or every openOMSI rights holder.
 
 ## Scope
 
-- openOMSI is AGPLv3-licensed.
+- All original openOMSI source code (including the DLSS/FSR integration) stays
+  AGPLv3-licensed. Its license is not changed or excepted by bundling vendor
+  binaries.
 - NVIDIA: Streamline 2.14.1; `sl.interposer.dll`, `sl.common.dll`,
   `sl.dlss.dll` and `nvngx_dlss.dll`.
 - AMD: FidelityFX SDK 2.4.0, commit
@@ -55,11 +57,11 @@ automatically prohibit every open-source game; they do mean that the
 interaction with AGPLv3 needs an affirmative, case-specific determination.
 
 The proprietary NGX DLL is *not* generally covered by the Streamline MIT
-license. The root openOMSI `LICENSE` and its retained historical MIT grant
-do **not** license any NVIDIA proprietary DLL; the original vendor terms
-apply independently. The limited author-owned AGPLv3 section 7 permission
-in `NVIDIA_STREAMLINE_AGPL_EXCEPTION.md` operates only on eligible openOMSI
-code and cannot amend NVIDIA licenses or license other contributors' work. Because openOMSI's optional DLSS integration dynamically loads this
+license. Neither openOMSI's AGPLv3 nor its retained historical MIT notice
+changes the licensing of any vendor binary. NVIDIA's binaries keep their
+original NVIDIA terms; AMD's four specifically MIT-listed binaries keep
+their original AMD MIT terms. No openOMSI source code is being removed from
+AGPLv3 by this distribution notice. Because openOMSI's optional DLSS integration dynamically loads this
 DLL, merely placing it beside `openomsi.exe` or calling it a separate file
 does not prove a GPL/AGPL-compatible aggregate. The GNU GPL FAQ treats
 linking with GPL-incompatible libraries as needing an appropriate exception
