@@ -49,6 +49,22 @@ pub const CAR_RADIUS: f64 = 650.0;
 /// The bytes a second the cars of the table take at most to each client.
 pub const TRAFFIC_BYTES_PER_SECOND: f64 = 40_000.0;
 pub const PERSON_RADIUS: f64 = 260.0;
+
+/// Beyond this distance (m) from the player they are sent to, somebody moving is sent every
+/// `FAR_PERSON_EVERY` s rather than with every update (`nw::MOVING_EVERY`): out there a step
+/// is a pixel, and most of `PERSON_RADIUS`'s area is.
+pub const NEAR_PERSON: f64 = 100.0;
+pub const FAR_PERSON_EVERY: f32 = 0.3;
+
+/// Is a person last sent as `last` `age` s ago, `dist` m from the player, due again now as
+/// `q`: never sent, moved (far off, once `FAR_PERSON_EVERY` has passed), or standing past
+/// `nw::STANDING_EVERY` (the client forgets after `nw::FORGET_AFTER`).
+pub fn person_due(sent: Option<&([i64; 4], f32)>, q: [i64; 4], dist: f64) -> bool {
+    match sent {
+        None => true,
+        Some((last, age)) => (*last != q && (dist <= NEAR_PERSON || *age + 1.0e-4 >= FAR_PERSON_EVERY)) || *age >= nw::STANDING_EVERY,
+    }
+}
 pub const LIGHT_RADIUS: f64 = 450.0;
 /// How far in the past a client draws the host's world (ms): two frames of moving things
 /// to glide between, and room for a late datagram.
@@ -283,10 +299,7 @@ impl LanWorld {
             }
             let q = quant(p.pos.x, p.pos.y, p.pos.z, p.heading);
             let q = [q[0], q[1], q[2], q[3] ^ ((p.activity as i64) << 40)];
-            let due = match v.sent.get(&id) {
-                None => true,
-                Some((last, age)) => *last != q || *age >= nw::STANDING_EVERY,
-            };
+            let due = person_due(v.sent.get(&id), q, (p.pos - me).length());
             if !due {
                 continue;
             }
@@ -1320,10 +1333,7 @@ fn gather_people(view: &mut View, h: &Humans, table: Option<&omsi_net::traffic_t
             ),
         };
         let q = [q[0], q[1], q[2], q[3] ^ ((p.activity as i64) << 40) ^ (p.waiting.is_some() as i64) << 44];
-        let due = match view.sent.get(&key) {
-            None => true,
-            Some((last, age)) => *last != q || *age >= nw::STANDING_EVERY,
-        };
+        let due = person_due(view.sent.get(&key), q, (p.pos - at).length());
         if !due {
             continue;
         }

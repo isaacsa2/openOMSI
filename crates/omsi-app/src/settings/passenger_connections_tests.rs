@@ -100,3 +100,29 @@ fn all_passenger_options_remain_independent_across_both_writers() {
         }
     }
 }
+
+/// Patience and passengers by the hour: off by default (desktop, phone, an old file), read
+/// and written by the game and by the launcher, each once, independently of each other.
+#[test]
+fn patience_and_by_hour_round_trip_through_both_writers() {
+    for s in [Settings::desktop(), Settings::phone(), Settings::from_text("version=1\n")] {
+        assert!(!s.pax_patience && !s.pax_by_hour);
+    }
+    for phone in [false, true] {
+        for bits in 0..4 {
+            let original = Settings { pax_patience: bits & 1 != 0, pax_by_hour: bits & 2 != 0, ..Default::default() };
+            let native = original.to_text();
+            let back = Settings::from_text(&native);
+            assert_eq!((back.pax_patience, back.pax_by_hour), (original.pax_patience, original.pax_by_hour), "the game's own file");
+            let launcher = omsi_launcher_lib::settings_from_text_on(Some(&native), phone);
+            assert_eq!(launcher["pax_patience"].as_bool(), Some(original.pax_patience), "the launcher reads it");
+            assert_eq!(launcher["pax_by_hour"].as_bool(), Some(original.pax_by_hour));
+            let text = omsi_launcher_lib::settings_to_text(&launcher, Some(&native));
+            let restored = Settings::from_text(&text);
+            assert_eq!((restored.pax_patience, restored.pax_by_hour), (original.pax_patience, original.pax_by_hour), "through the launcher");
+            for key in ["pax_patience", "pax_by_hour"] {
+                assert_eq!(text.lines().filter(|l| l.starts_with(&format!("{key}="))).count(), 1, "{key}");
+            }
+        }
+    }
+}

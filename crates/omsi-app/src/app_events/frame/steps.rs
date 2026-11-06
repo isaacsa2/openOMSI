@@ -177,11 +177,12 @@ pub(crate) fn humans_by_hour(
     world: &World,
     time: f64,
     pax_density: f32,
+    by_hour: bool,
     duty: Option<&schedule::PlayerDuty>,
 ) {
     h.density = world
         .global
-        .passenger_density((time / 3600.0) as f32)
+        .passenger_density_by_hour((time / 3600.0) as f32, by_hour)
         * pax_density;
     h.time_of_day = time;
     h.delay = duty.map(|d| d.delay(time)).unwrap_or(0.0);
@@ -369,6 +370,7 @@ pub(crate) fn career_from_humans(career: &mut career::Career, h: &humans::Humans
     career.content = h.content as i32;
     career.ticket_requests = h.ticket_requests as i32;
     career.ticket_points = h.ticket_points as i32;
+    (career.patience, career.annoyed, career.gave_up) = (h.patience, h.annoyed as i32, h.gave_up as i32);
 }
 
 /// The player's duty at `time`: a stop picked on the bus's HTML display, the stops served
@@ -431,7 +433,8 @@ pub(crate) fn duty_step(
     // (the trip's summary, for the game to show)
     if let (Some(f), Some(j)) = (ended.as_ref(), journey.as_mut()) {
         let (passengers, tickets_asked) = career.trip_people(f.run).unwrap_or_default();
-        let rating = rated.map(|[driving, comfort, tickets]| crate::journey::TripRating { driving, comfort, tickets, passengers, tickets_asked });
+        let mood = career.trip_mood(f.run).map(|(annoyed, gave_up)| crate::journey::TripMood { annoyed, gave_up });
+        let rating = rated.map(|[driving, comfort, tickets]| crate::journey::TripRating { driving, comfort, tickets, passengers, tickets_asked, mood });
         j.trip_ended(f.index, rating, |km| omsi_ui::units::Units::now().long_distance(km, 1));
     }
     if let Some(events) = plugin_events {

@@ -34,10 +34,11 @@ pub fn remote_bus_player(bus: u64) -> Option<u32> {
     (bus >> 40 == 1).then_some((bus & 0xFFFF_FFFF) as u32)
 }
 
-/// One of the host's people as it tells the clients.
-pub struct LanPerson {
+/// One of the host's people as it tells the clients (borrowed: asked for every client
+/// several times a second).
+pub struct LanPerson<'a> {
     pub id: u32,
-    pub ty: Arc<HumanType>,
+    pub ty: &'a Arc<HumanType>,
     pub pos: DVec3,
     pub heading: f64,
     pub speed: f64,
@@ -54,14 +55,14 @@ impl PeopleSim {
 
     /// The riders of our own bus, for the other LAN players to see: (id, type, place in the
     /// bus frame, heading there, seat, activity).
-    pub fn lan_riders(&self) -> Vec<LanPerson> {
+    pub fn lan_riders(&self) -> impl Iterator<Item = LanPerson<'_>> + '_ {
         self.people
             .iter()
             .filter(|p| p.puppet.is_none() && !p.remote)
             .filter_map(|p| match p.place {
                 Place::Bus(BusId::Player, l) => Some(LanPerson {
                     id: p.id,
-                    ty: p.ty.clone(),
+                    ty: &p.ty,
                     pos: p.position,
                     heading: p.heading,
                     speed: 0.0,
@@ -79,7 +80,6 @@ impl PeopleSim {
                 }),
                 _ => None,
             })
-            .collect()
     }
 
     /// The places people are kept around: ours (the player's bus, else the camera) - not on
@@ -121,12 +121,12 @@ impl PeopleSim {
     /// Everybody within `radius` of `near` the clients may see (host): on foot, waiting at
     /// a stop, or aboard a timetable bus - not the riders of our own bus, which the others
     /// see from outside only.
-    pub fn lan_people(&self, near: DVec3, radius: f64) -> Vec<LanPerson> {
+    pub fn lan_people(&self, near: DVec3, radius: f64) -> impl Iterator<Item = LanPerson<'_>> + '_ {
         let r2 = radius * radius;
         self.people
             .iter()
             .filter(|p| p.puppet.is_none() && !p.remote)
-            .filter(|p| (p.position - near).length_squared() < r2)
+            .filter(move |p| (p.position - near).length_squared() < r2)
             .filter_map(|p| {
                 let aboard = match p.place {
                     Place::Bus(BusId::Player, _) => return None,
@@ -147,7 +147,7 @@ impl PeopleSim {
                 };
                 Some(LanPerson {
                     id: p.id,
-                    ty: p.ty.clone(),
+                    ty: &p.ty,
                     pos: p.position,
                     heading: p.heading,
                     speed: if aboard.is_some() { 0.0 } else { p.vel.length() },
@@ -156,7 +156,6 @@ impl PeopleSim {
                     waiting,
                 })
             })
-            .collect()
     }
 
     /// A client's bus takes these waiting people (host): those still waiting leave our
@@ -221,6 +220,7 @@ impl PeopleSim {
         self.claims_out.clear();
         self.claimed.clear();
         self.mirror_wait.clear();
+        self.mirror_wait_since.clear();
     }
 
     /// The human type of a file relative to a content root (`Humans/…/x.hum`).
@@ -284,9 +284,11 @@ impl PeopleSim {
         match pose.waiting {
             Some(w) => {
                 self.mirror_wait.insert(id, w);
+                self.mirror_wait_since.entry(id).or_insert(self.time);
             }
             None => {
                 self.mirror_wait.remove(&id);
+                self.mirror_wait_since.remove(&id);
             }
         }
         match pose.aboard {
@@ -307,6 +309,7 @@ impl PeopleSim {
         }
         self.claimed.remove(&id);
         self.mirror_wait.remove(&id);
+        self.mirror_wait_since.remove(&id);
     }
 
     /// A remote person this frame: they stand where the host put them.
@@ -341,6 +344,7 @@ impl PeopleSim {
     pub fn grant(&mut self, id: u32) -> bool {
         self.claimed.remove(&id);
         let Some((stop, spot)) = self.mirror_wait.remove(&id) else { return false };
+        let since = self.mirror_wait_since.remove(&id);
         let Some(i) = self.people.iter().position(|p| p.id == id && p.remote) else { return false };
         if !self.stops.contains_key(&stop) {
             return false;
@@ -360,6 +364,8 @@ impl PeopleSim {
         pax.dest = dest;
         pax.line = line;
         pax.ride_km = self.rand_f() as f32 * 19.0 + 1.0;
+        // (how long we have seen them wait: the host's own count does not travel)
+        pax.waited = since.map_or(0.0, |t| (self.time - t).max(0.0) as f32);
         pax.pos = self.people[i].position;
         pax.yaw = self.people[i].heading.to_radians();
         if let Some(sp) = sp {

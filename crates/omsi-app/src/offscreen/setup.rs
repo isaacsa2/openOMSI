@@ -434,6 +434,7 @@ fn new_humans(
         h.boarding = settings.boarding.clone();
         h.stand_chance = settings.standing_chance;
         h.short_rides_stand = settings.pax_short_rides_stand;
+        h.patience = settings.pax_patience;
         h.voices = match settings.pax_voices.as_str() { "off" => 2, "tickets" => 1, _ => 0 };
         if let Some(p) = player.as_mut() {
             h.set_cabin(&mut p.vehicle);

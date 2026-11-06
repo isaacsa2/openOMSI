@@ -8,6 +8,19 @@ promoted to stable releases (see [docs/VERSIONING.md](docs/VERSIONING.md)); the 
 
 ### New
 
+- **Passengers lose patience.** With *Passengers lose patience* on (Options › Gameplay and the
+  launcher's passenger settings, `pax_patience`, off by default), somebody who has waited 10 to 25
+  minutes at a stop with no bus of theirs coming walks off, and who steps into the player's bus
+  after a long wait or into a crowded one (85 % of its places taken) is annoyed. The trip's
+  summary shows the passengers' satisfaction and how many gave up waiting. In a LAN game the
+  host's people give up there; a client's bus counts the wait it has seen them wait.
+- **Passengers by the time of day.** With *Passengers by the time of day* on (`pax_by_hour`, off
+  by default), a map without its own hourly passenger numbers (`[trafficdensity_passenger]`)
+  gets a working day's: many people in the morning and evening rush hours, few at night, as many
+  over the day as before. A map's own numbers are used as they are.
+- **Lighter LAN people.** The host sends somebody walking more than 100 m from a client three
+  times a second instead of ten (nearer, and standing people, as before), and the people it
+  tells each client about are no longer copied for every client on every update.
 - **Remote cockpit on a phone or tablet**: the game serves a page on your home network
   (Options > Interface > Remote cockpit, off until switched on); scan the QR code or type the
   address and the 6-digit code, and the phone or tablet shows a dashboard with the map and the

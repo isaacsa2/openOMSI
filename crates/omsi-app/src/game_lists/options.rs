@@ -425,6 +425,8 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "passenger_hailing" => s.passenger_hailing,
         "passenger_full_bus_reaction" => s.passenger_full_bus_reaction,
         "pax_short_rides_stand" => s.pax_short_rides_stand,
+        "pax_patience" => s.pax_patience,
+        "pax_by_hour" => s.pax_by_hour,
         "navigator" => if app.vr_active() { app.vr_nav_profile().enabled } else { app.menus.navigator.as_ref().is_some_and(|n| n.enabled) },
         "nav_ai" => app.menus.navigator.as_ref().map_or(s.nav_ai, |n| n.show_ai),
         "nav_ai_cars" => app.menus.navigator.as_ref().map_or(s.nav_ai_cars, |n| n.show_cars),
@@ -562,6 +564,17 @@ pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static 
                 h.short_rides_stand = on;
             }
             Some(("pax_short_rides_stand", bit))
+        },
+        "pax_patience" => {
+            app.settings.pax_patience = on;
+            if let Some(h) = app.session.humans.as_mut() {
+                h.patience = on;
+            }
+            Some(("pax_patience", bit))
+        },
+        "pax_by_hour" => {
+            app.settings.pax_by_hour = on;
+            Some(("pax_by_hour", bit))
         },
         "navigator" => {
             if app.vr_active() {

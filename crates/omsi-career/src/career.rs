@@ -52,6 +52,11 @@ pub struct Career {
     pub content: i32,
     pub ticket_requests: i32,
     pub ticket_points: i32,
+    /// With waiting people's patience on: of the `stepped_in`, those annoyed; the people who
+    /// gave up waiting (this session's; not in the personnel file).
+    pub patience: bool,
+    pub annoyed: i32,
+    pub gave_up: i32,
     /// The driving penalty P (0..1), carried on from the personnel file.
     pub penalty: f64,
     /// When the pedals changed between throttle and brake lately (seconds of the session),
@@ -112,6 +117,8 @@ struct RatingStart {
     content: i32,
     ticket_requests: i32,
     ticket_points: i32,
+    annoyed: i32,
+    gave_up: i32,
 }
 
 /// The counters of this session already written into the personnel file: a second save
@@ -144,6 +151,9 @@ impl Default for Career {
             content: 0,
             ticket_requests: 0,
             ticket_points: 0,
+            patience: false,
+            annoyed: 0,
+            gave_up: 0,
             penalty: 0.0,
             seesaw: Default::default(),
             pedal: 0,
@@ -307,7 +317,7 @@ impl Career {
 
     /// Ratings counting from now.
     fn rating_start(&self) -> RatingStart {
-        RatingStart { penalty: 0.0, stepped_in: self.stepped_in, content: self.content, ticket_requests: self.ticket_requests, ticket_points: self.ticket_points }
+        RatingStart { penalty: 0.0, stepped_in: self.stepped_in, content: self.content, ticket_requests: self.ticket_requests, ticket_points: self.ticket_points, annoyed: self.annoyed, gave_up: self.gave_up }
     }
 
     /// The jolts since the last call.
@@ -357,6 +367,7 @@ impl Career {
         self.content = other.content;
         self.ticket_requests = other.ticket_requests;
         self.ticket_points = other.ticket_points;
+        (self.patience, self.annoyed, self.gave_up) = (other.patience, other.annoyed, other.gave_up);
         // (in the other driver's file already: not again in this one's)
         self.written.tickets = other.tickets;
         self.written.counters = [other.content, other.ticket_requests, other.ticket_points, other.stepped_in];
@@ -377,6 +388,14 @@ impl Career {
             comfort_percent(now.content - f.content, now.stepped_in - f.stepped_in),
             ticket_percent(now.ticket_points - f.ticket_points, now.ticket_requests - f.ticket_requests),
         ])
+    }
+
+    /// The ended trip run `run`'s passengers annoyed and people who gave up waiting (None
+    /// with patience off).
+    pub fn trip_mood(&self, run: u64) -> Option<(i32, i32)> {
+        let t = self.trip.as_ref().filter(|t| t.run == run && self.patience)?;
+        let n = t.next?;
+        Some((n.annoyed - t.from.annoyed, n.gave_up - t.from.gave_up))
     }
 
     pub fn trip_people(&self, run: u64) -> Option<(i32, i32)> {
@@ -555,6 +574,20 @@ impl Career {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With patience on, a trip's annoyed passengers and those who gave up are its own (the
+    /// session's counters less those at its start); with it off, none.
+    #[test]
+    fn a_trip_counts_its_own_annoyed_and_given_up() {
+        let mut c = Career { patience: true, stepped_in: 4, annoyed: 1, gave_up: 2, ..Default::default() };
+        c.trip_driven(1);
+        (c.stepped_in, c.annoyed, c.gave_up) = (10, 3, 5);
+        assert!(c.trip_ended(1).is_some());
+        assert_eq!(c.trip_mood(1), Some((2, 3)));
+        assert_eq!(c.trip_people(1), Some((6, 0)));
+        c.patience = false;
+        assert_eq!(c.trip_mood(1), None);
+    }
 
     /// The kilometres of a session go to the bus they were driven in too, whole hectometres
     /// at a time and the rest carried to the next save (#2475).

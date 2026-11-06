@@ -88,7 +88,7 @@ fn summary() -> crate::journey::TripSummary {
         served: (4, 5),
         on_time: 3,
         driven: Some(690.0),
-        rating: Some(crate::journey::TripRating { driving: 82.0, comfort: 95.0, tickets: 60.0, passengers: 23, tickets_asked: 9 }),
+        rating: Some(crate::journey::TripRating { driving: 82.0, comfort: 95.0, tickets: 60.0, passengers: 23, tickets_asked: 9, mood: Some(crate::journey::TripMood { annoyed: 3, gave_up: 2 }) }),
         stem: "preview".into(),
         dir: std::env::temp_dir(),
     }
