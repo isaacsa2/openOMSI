@@ -1,4 +1,4 @@
-use super::{ai_context, apply_ai_context};
+use super::{ai_context, apply_ai_context, person_due, FAR_PERSON_EVERY, NEAR_PERSON};
 use omsi_lan::mirror::relative_to_roots;
     use std::path::{Path, PathBuf};
 
@@ -104,3 +104,17 @@ use omsi_lan::mirror::relative_to_roots;
         v.host.hof = None;
         assert_eq!(super::car_meta(&v).hof, "", "no depot file: none named");
     }
+
+/// Somebody moving far off is sent less often; near by, with every update; standing, at
+/// least every `STANDING_EVERY` (the client keeps them till `FORGET_AFTER`).
+#[test]
+fn far_movers_are_sent_less_often() {
+    let (a, b) = ([1, 2, 3, 4], [1, 2, 3, 5]);
+    assert!(person_due(None, a, 250.0), "never sent");
+    assert!(person_due(Some(&(a, 0.1)), b, NEAR_PERSON - 1.0), "near: every update");
+    assert!(!person_due(Some(&(a, 0.1)), b, NEAR_PERSON + 1.0), "far: not yet");
+    assert!(person_due(Some(&(a, FAR_PERSON_EVERY)), b, 250.0), "far: once its time has passed");
+    assert!(!person_due(Some(&(a, 0.5)), a, 10.0), "standing");
+    assert!(person_due(Some(&(a, omsi_net::world::STANDING_EVERY)), a, 250.0), "standing too long unsent");
+    const { assert!(FAR_PERSON_EVERY < omsi_net::world::FORGET_AFTER / 3.0) };
+}

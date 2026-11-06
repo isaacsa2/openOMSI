@@ -612,6 +612,7 @@ impl App {
                     h.boarding = self.settings.boarding.clone();
                     h.stand_chance = self.settings.standing_chance;
                     h.short_rides_stand = self.settings.pax_short_rides_stand;
+                    h.patience = self.settings.pax_patience;
                     h.voices = match self.settings.pax_voices.as_str() { "off" => 2, "tickets" => 1, _ => 0 };
                     if let Some(p) = self.player.as_mut() {
                         h.set_cabin(&mut p.vehicle);

@@ -74,6 +74,7 @@ pub mod pax_stops;
 pub mod pax_tick;
 pub mod pax_task;
 pub mod pax_driver;
+pub mod patience;
 pub mod runners;
 pub mod ticket_hook;
 // What the renderer has to follow, the money on the desk and what the people need of the map.

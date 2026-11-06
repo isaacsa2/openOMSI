@@ -204,6 +204,8 @@ pub struct Pax {
     /// Late for a bus pulling in to the stop: walking up to it, then hurrying for it (see
     /// `runners`).
     pub late: Option<Late>,
+    /// Seconds waited at the stop so far (see `patience`).
+    pub waited: f32,
 }
 
 impl Pax {
@@ -277,6 +279,7 @@ impl Pax {
             bad_at: [0.0; 3],
             moved: 0.0,
             late: None,
+            waited: 0.0,
         }
     }
 

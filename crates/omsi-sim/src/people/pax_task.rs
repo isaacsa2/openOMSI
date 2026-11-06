@@ -324,7 +324,12 @@ impl PeopleSim {
         match p.task {
             Task::WaitingForBus => {
                 let Some(stop) = p.stop else { return };
+                self.pax_mut(i).unwrap().waited += dt;
                 let Some(b) = self.bus_for(i, stop, buses, bus_ix) else {
+                    if self.out_of_patience(i) {
+                        self.give_up(i, stop, remove);
+                        return;
+                    }
                     if super::debug_pax() && (self.time * 2.0).fract() < (dt as f64 * 2.0) {
                         let s = &self.stops[&stop];
                         let listed: Vec<String> = s.buses.iter().map(|(id, inbox)| format!("{id:?} box {inbox} shows {:?}", bus_ix.get(id).and_then(|k| buses[*k].terminus.clone()))).collect();
@@ -354,6 +359,7 @@ impl PeopleSim {
             }
             Task::ToBus => {
                 let Some(stop) = p.stop else { return };
+                self.pax_mut(i).unwrap().waited += dt;
                 if let Some(bn) = bn {
                     if bn.speed.abs() < 3.0 && self.in_stop_box(stop, bn.id) {
                         // A seat in a disconnected trailer needs an entry on this side

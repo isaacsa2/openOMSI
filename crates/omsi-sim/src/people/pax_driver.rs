@@ -135,6 +135,9 @@ impl PeopleSim {
         if !complaint_seen {
             self.content += 1;
         }
+        if self.annoyed_stepping_in(i, bn.id) {
+            self.annoyed += 1;
+        }
     }
 
     /// The ticket sale at the player's cash desk (case 4 with +0x61c = 3, 0x62c780 -

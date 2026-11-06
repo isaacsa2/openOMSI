@@ -54,9 +54,27 @@ pub struct TripRating {
     pub tickets: f64,
     pub passengers: i32,
     pub tickets_asked: i32,
+    /// With waiting people's patience on (`omsi_sim::people::patience`): how the trip's
+    /// passengers took the wait and the crowd.
+    pub mood: Option<TripMood>,
+}
+
+/// Of a trip's passengers, those annoyed stepping in (a long wait, a crowded bus), and the
+/// people who gave up waiting meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TripMood {
+    pub annoyed: i32,
+    pub gave_up: i32,
 }
 
 impl TripRating {
+    /// Per cent of the passengers who stepped in without being annoyed (None: patience off,
+    /// or nobody stepped in).
+    pub fn satisfaction_rated(&self) -> Option<f64> {
+        let m = self.mood?;
+        (self.passengers > 0).then(|| 100.0 * (self.passengers - m.annoyed.clamp(0, self.passengers)) as f64 / self.passengers as f64)
+    }
+
     pub fn comfort_rated(&self) -> Option<f64> {
         (self.passengers > 0).then_some(self.comfort)
     }
@@ -127,6 +145,9 @@ impl TripSummary {
             let percent = |p: Option<f64>| p.map(|p| format!("{p:.0} %")).unwrap_or_else(|| "-".into());
             out.push('\n');
             out.push_str(&tr(&format!("Passengers: {}, driving {:.0} %, comfort {}, ticket selling {}", r.passengers, r.driving, percent(r.comfort_rated()), percent(r.tickets_rated()))));
+            if let Some(m) = r.mood {
+                out.push_str(&format!(", {} {}, {} {}", tr("satisfaction"), percent(r.satisfaction_rated()), tr("gave up waiting"), m.gave_up));
+            }
         }
         out.push('\n');
         out.push_str(&tr(&format!("Rating: {} of 5", self.stars())));
@@ -480,7 +501,7 @@ mod tests {
         let mut j = Journey::new(("5".into(), "1".into(), 0), &trips, "Test", PathBuf::new());
         j.left((0, 0), (0.0, 0.0));
         j.arrived((0, 1), 0.0);
-        j.trip_ended(0, Some(TripRating { driving: 95.0, comfort: 100.0, tickets: 90.0, passengers: 12, tickets_asked: 8 }), km);
+        j.trip_ended(0, Some(TripRating { driving: 95.0, comfort: 100.0, tickets: 90.0, passengers: 12, tickets_asked: 8, mood: None }), km);
         let s = j.take_summary().expect("a summary");
         assert_eq!((s.served, s.on_time, s.driven), ((2, 2), 2, Some(60.0)));
         assert_eq!(s.stars(), 5);
@@ -488,13 +509,13 @@ mod tests {
         let t = s.text();
         assert!(t.contains("On time: 2 of 2") && t.contains("Time driven: 00:01:00") && t.contains("Passengers: 12, driving 95 %, comfort 100 %, ticket selling 90 %") && t.contains("Rating: 5 of 5"), "{t}");
 
-        let rough = TripSummary { on_time: 0, rating: Some(TripRating { driving: 30.0, comfort: 40.0, tickets: 100.0, passengers: 5, tickets_asked: 3 }), ..s.clone() };
+        let rough = TripSummary { on_time: 0, rating: Some(TripRating { driving: 30.0, comfort: 40.0, tickets: 100.0, passengers: 5, tickets_asked: 3, mood: None }), ..s.clone() };
         assert_eq!(rough.stars(), 2);
         assert_eq!(rough.mood(), Some("Your passengers were unhappy"));
-        let middling = TripSummary { rating: Some(TripRating { driving: 70.0, comfort: 50.0, tickets: 100.0, passengers: 5, tickets_asked: 3 }), ..s.clone() };
+        let middling = TripSummary { rating: Some(TripRating { driving: 70.0, comfort: 50.0, tickets: 100.0, passengers: 5, tickets_asked: 3, mood: None }), ..s.clone() };
         assert_eq!(middling.stars(), 4);
         assert_eq!(middling.mood(), Some("Your passengers were not very happy"));
-        let nobody = TripSummary { rating: Some(TripRating { driving: 50.0, comfort: 100.0, tickets: 100.0, passengers: 0, tickets_asked: 0 }), ..s.clone() };
+        let nobody = TripSummary { rating: Some(TripRating { driving: 50.0, comfort: 100.0, tickets: 100.0, passengers: 0, tickets_asked: 0, mood: None }), ..s.clone() };
         assert_eq!(nobody.mood(), None);
         assert_eq!(nobody.stars(), 4, "comfort and tickets nobody rated do not count");
         assert!(nobody.text().contains("Passengers: 0, driving 50 %, comfort -, ticket selling -"), "{}", nobody.text());

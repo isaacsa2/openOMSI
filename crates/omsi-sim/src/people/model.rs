@@ -324,6 +324,10 @@ pub struct PeopleSim {
     /// for the wrong (ticket selling = points / 2 × asked).
     pub stepped_in: u32,
     pub content: u32,
+    /// Of the `stepped_in`, those annoyed by a long wait or a crowded bus, and the people
+    /// who gave up waiting and walked off (`patience`; counted only with it on).
+    pub annoyed: u32,
+    pub gave_up: u32,
     pub ticket_requests: u32,
     pub ticket_points: u32,
     //sale events to play money sounds
@@ -435,6 +439,8 @@ pub struct PeopleSim {
     /// (`standing_chance` in the settings).
     pub stand_chance: f32,
     pub short_rides_stand: bool,
+    /// Waiting people lose patience (`patience`; an option, not Omsi.exe's).
+    pub patience: bool,
     /// The driver pressed the ticket key (`ticket_give`): sell the requested ticket.
     pub give_ticket: bool,
     /// The key that sells a ticket, as the HUD names it.
@@ -477,6 +483,9 @@ pub struct PeopleSim {
     pub claimed: HashMap<u32, f64>,
     /// The host's people waiting at a stop (client): (stop, waiting place).
     pub mirror_wait: HashMap<u32, (i64, usize)>,
+    /// Since when (`time`) each of them has been seen waiting (client): the wait they bring
+    /// along when handed over to our bus.
+    pub mirror_wait_since: HashMap<u32, f64>,
     /// How the player's bus is driven, for its riders' complaints.
     pub comfort: RideComfort,
     /// LAN play (host): the waiting people handed over to another player's bus, by stop and

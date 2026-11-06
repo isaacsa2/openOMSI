@@ -154,7 +154,7 @@ pub(super) fn humans(cx: HumansCx, dt: f32) {
             f.seat.map(|s| s.0) != own && f.inside.map(|i| i.0) != own
         });
         // (OMSI's `AIPassFactor`, the passengers setting in per cent)
-        steps::humans_by_hour(h, w, cx.clock.clock.time, cx.common.settings.pax_density, cx.duty.duty.as_ref());
+        steps::humans_by_hour(h, w, cx.clock.clock.time, cx.common.settings.pax_density, cx.common.settings.pax_by_hour, cx.duty.duty.as_ref());
         // The periodic fillings of the map each get a frame of their own: the traffic's
         // (`traffic_heavy_frame`, set in its stage before this one), the strollers and
         // stops of the people's step (every second, in `tick_inner`) and this one (every

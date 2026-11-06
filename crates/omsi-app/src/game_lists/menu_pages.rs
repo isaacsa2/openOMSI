@@ -37,6 +37,8 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         switch_row(app, "passenger_hailing", "Passengers signal approaching buses", "Optional visual hailing; only effective with supported natural animations"),
         switch_row(app, "passenger_full_bus_reaction", "Passengers react to full buses", "Optional visual acknowledgement when an approaching compatible bus is at passenger capacity"),
         switch_row(app, "pax_short_rides_stand", "Short rides stand by a door", "Passengers with no set stop who ride only a few kilometres take a free standing place near an exit rather than a seat"),
+        switch_row(app, "pax_patience", "Passengers lose patience", "Somebody who has waited 10 to 25 minutes with no bus of theirs coming walks off; a long wait or a crowded bus annoys those stepping in. The trip's summary shows their satisfaction"),
+        switch_row(app, "pax_by_hour", "Passengers by the time of day", "On maps without their own hourly passenger numbers: many people in the morning and evening rush hours, few at night"),
         switch_row(app, "auto_announce", "Arrival announcements at the stop", "On depot files that keep two recordings per stop (the Chinese maps), the arrival one is played as the bus reaches the stop: the IBIS's next stop key, pressed as the driver would"),
         pick("boarding", "Boarding", "How passengers get their tickets"),
         pick("standing_chance", "Standing passengers", "The chance a passenger stands although a seat is free"),

@@ -84,12 +84,30 @@ impl Season {
 
 /// Value of an hourly curve `[(hour, value)]` at `hour` (linear between points, first/last
 /// value outside).
+/// A working day's passengers for a map that gives none (hour, factor; 1 on average over
+/// the day, as many people as without it): the morning and evening rush hours, quiet late evenings, almost nobody at
+/// night.
+pub const DAY_PASSENGERS: [(f32, f32); 17] = [
+    (0.0, 0.2), (5.0, 0.3), (6.0, 0.9), (7.0, 1.8), (8.0, 2.0), (9.0, 1.4), (10.0, 1.1), (12.0, 1.2), (14.0, 1.2),
+    (16.0, 1.6), (17.0, 1.9), (18.0, 1.7), (19.0, 1.3), (21.0, 0.8), (22.0, 0.5), (23.0, 0.3), (24.0, 0.2),
+];
+
 pub fn curve_at(curve: &[(f32, f32)], hour: f32) -> f32 {
     if curve.is_empty() {
         return 1.0;
     }
-    let mut pts: Vec<(f32, f32)> = curve.to_vec();
-    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // (asked every frame: a curve already in order, as the files write them, is not copied)
+    let sorted;
+    let pts: &[(f32, f32)] = if curve.is_sorted_by(|a, b| a.0 <= b.0) {
+        curve
+    } else {
+        sorted = {
+            let mut v = curve.to_vec();
+            v.sort_by(|a, b| a.0.total_cmp(&b.0));
+            v
+        };
+        &sorted
+    };
     if hour <= pts[0].0 {
         return pts[0].1;
     }
@@ -169,6 +187,15 @@ impl GlobalCfg {
     /// Passenger density factor at an hour of the day.
     pub fn passenger_density(&self, hour: f32) -> f32 {
         curve_at(&self.traffic_density_passenger, hour)
+    }
+
+    /// `passenger_density`, or with `by_hour` on a map without `[trafficdensity_passenger]`,
+    /// `DAY_PASSENGERS`'s (`hour` past midnight wraps).
+    pub fn passenger_density_by_hour(&self, hour: f32, by_hour: bool) -> f32 {
+        if by_hour && self.traffic_density_passenger.is_empty() {
+            return curve_at(&DAY_PASSENGERS, hour.rem_euclid(24.0));
+        }
+        self.passenger_density(hour)
     }
 
     pub fn load(path: &Path) -> Result<GlobalCfg, omsi_cfg::CfgError> {
@@ -349,6 +376,22 @@ impl GlobalCfg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A map without its own hourly passengers gets a day's rush hours with the option on
+    /// (past midnight wrapping); its own curve, or the option off, stays as it was.
+    #[test]
+    fn passengers_by_the_hour_only_where_the_map_gives_none() {
+        let none = GlobalCfg::parse(&omsi_cfg::CfgFile::from_str("global.cfg", "[name]\nT\n"));
+        assert_eq!(none.passenger_density_by_hour(8.0, false), 1.0, "off: as before");
+        assert_eq!(none.passenger_density_by_hour(8.0, true), 2.0, "the morning rush");
+        assert!((none.passenger_density_by_hour(3.0, true) - 0.26).abs() < 1e-5, "the night");
+        assert_eq!(none.passenger_density_by_hour(27.0, true), none.passenger_density_by_hour(3.0, true), "a night line past midnight");
+        let mean = (0..24 * 4).map(|q| none.passenger_density_by_hour(q as f32 / 4.0, true)).sum::<f32>() / 96.0;
+        assert!((mean - 1.0).abs() < 0.01, "as many people over the day: {mean}");
+        let own = GlobalCfg::parse(&omsi_cfg::CfgFile::from_str("global.cfg", "[name]\nT\n[trafficdensity_passenger]\n8\n0.5\n"));
+        assert_eq!(own.passenger_density_by_hour(8.0, true), 0.5, "the map's own");
+        assert_eq!(curve_at(&[(10.0, 2.0), (0.0, 0.0)], 5.0), 1.0, "a curve out of order still read in order");
+    }
 
     /// Both winter kinds take the winter pictures; the snowy ones come with the weather (#2131).
     #[test]

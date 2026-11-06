@@ -92,12 +92,18 @@ impl TripPanel {
         }
         if let Some(r) = s.rating {
             tiles.push(("groups", r.passengers.to_string(), "passengers"));
+            if let Some(m) = r.mood {
+                tiles.push(("directions_walk", m.gave_up.to_string(), "gave up waiting"));
+            }
         }
         children.push(grow_row(tiles.iter().map(|(i, v, _)| row(vec![icon(i, 18.0, accent), text(v, 17.0, Weight::Bold)], RowAlign::Start)).collect()));
         children.push(grow_row(tiles.iter().map(|(_, _, l)| label(l, pal)).collect()));
         if let Some(r) = s.rating {
             children.push(divider());
-            let gauges = [("speed", Some(r.driving), "driving"), ("airport_shuttle", r.comfort_rated(), "comfort"), ("receipt_long", r.tickets_rated(), "ticket selling")];
+            let mut gauges = vec![("speed", Some(r.driving), "driving"), ("airport_shuttle", r.comfort_rated(), "comfort"), ("receipt_long", r.tickets_rated(), "ticket selling")];
+            if r.mood.is_some() {
+                gauges.push(("stars", r.satisfaction_rated(), "satisfaction"));
+            }
             children.push(columns(
                 gauges
                     .iter()

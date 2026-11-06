@@ -700,7 +700,7 @@ impl Offscreen<'_> {
             // a low hourly density at the start time)
             // (a dedicated server's own passenger density, which its admins may change)
             let density = srv_admin.passenger_density.unwrap_or(settings.pax_density);
-            steps::humans_by_hour(h, world, run_clock.time, density, duty.as_ref());
+            steps::humans_by_hour(h, world, run_clock.time, density, settings.pax_by_hour, duty.as_ref());
             // populate stops near every LAN player every 2 seconds, as app_events.rs
             // does every 2 s near the local player.  At startup `center` is ZERO (no
             // player bus on a headless server), so stops on the actual map - which can
