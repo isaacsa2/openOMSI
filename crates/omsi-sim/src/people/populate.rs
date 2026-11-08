@@ -199,14 +199,17 @@ impl PeopleSim {
                 remote.iter().any(|b| b.id == BusId::Ai(*bus) && (b.pos - s.pos).length() < 60.0)
             });
         }
-        // who belongs to each stop, counted once for all of them (a person counted per stop
-        // and frame was stops x people every frame). Exact through the loop: a stop's own
-        // spawns and departures change its count only, and it is read before them.
+        // Count people actually waiting at each stop once, not everyone retaining the
+        // origin stop id. Passengers keep that id while walking to a bus and for a short
+        // time after boarding; counting them here makes an emptied stop look full until
+        // their bus moves away. Keep remote handoffs counted separately below.
         let mut counts: HashMap<i64, usize> = HashMap::with_capacity(ids.len());
         for p in &self.people {
             if let State::Pax(x) = &p.state {
-                if let Some(s) = x.stop {
-                    *counts.entry(s).or_default() += 1;
+                if x.inside.is_none() && matches!(x.task, Task::WaitingForBus | Task::WalkingToBusstop) {
+                    if let Some(s) = x.stop {
+                        *counts.entry(s).or_default() += 1;
+                    }
                 }
             }
         }
@@ -255,7 +258,7 @@ impl PeopleSim {
                 s.factor = (r * 2.0 - 1.0) * k + 1.0;
             }
             let count = counts.get(&id).copied().unwrap_or(0);
-            debug_assert_eq!(count, self.people.iter().filter(|p| matches!(&p.state, State::Pax(x) if x.stop == Some(id))).count() + self.handed.iter().filter(|h| h.0 == id).count());
+            debug_assert_eq!(count, self.people.iter().filter(|p| matches!(&p.state, State::Pax(x) if x.stop == Some(id) && x.inside.is_none() && matches!(x.task, Task::WaitingForBus | Task::WalkingToBusstop))).count() + self.handed.iter().filter(|h| h.0 == id).count());
             let want = {
                 let s = &self.stops[&id];
                 let mean = (s.enter_max + s.enter_min) / 2.0;
