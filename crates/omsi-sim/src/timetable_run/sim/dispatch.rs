@@ -202,15 +202,13 @@ impl ScheduleSim {
         out
     }
 
-    /// The name each bus stop object has in the timetable (`Busstops.cfg`, the first entry
-    /// of an object id): what [`Schedule::stop_targets`] calls it. The map object's own
-    /// label can read otherwise (renamed in the editor, another code page than the tiles').
+    /// Name each stop by its timetable name, not its map-object label or numeric id.
+    /// Older OMSI 2 maps leave Busstops.cfg empty and instead provide the names
+    /// in the third line of each [station] record in their .ttp trip files.
+    /// Destination selection and stop-target matching must use the same names
+    /// as the buses' timetable, even on those older maps.
     pub fn stop_names(&self) -> HashMap<i64, String> {
-        let mut names = HashMap::new();
-        for b in &self.data.bus_stops {
-            names.entry(b.object_id).or_insert_with(|| b.name.trim().to_string());
-        }
-        names
+        timetable_stop_names(&self.data)
     }
 
     pub fn pending(&self) -> usize {
@@ -594,5 +592,84 @@ impl ScheduleSim {
     /// Departure `i`'s bus is out.
     pub fn started(&mut self, i: usize) {
         self.startup.remove(&i);
+    }
+}
+/// Build a single name index shared by passenger demand and destination matching.
+/// Busstops.cfg takes precedence; legacy type-1 trips fill only missing names.
+fn timetable_stop_names(data: &TimetableData) -> HashMap<i64, String> {
+    let mut names = HashMap::new();
+    for b in &data.bus_stops {
+        let name = b.name.trim();
+        if !name.is_empty() {
+            names.entry(b.object_id).or_insert_with(|| name.to_string());
+        }
+    }
+    for trip in &data.trips {
+        // Type-2 trips use Busstops.cfg. Legacy records have their own names.
+        if !trip.stations.is_empty() {
+            continue;
+        }
+        for record in &trip.stations_legacy {
+            let Some(id) = record.first().and_then(|s| s.trim().parse::<i64>().ok()) else {
+                continue;
+            };
+            let Some(name) = record.get(2).map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            names.entry(id).or_insert_with(|| name.to_string());
+        }
+    }
+    names
+}
+
+#[cfg(test)]
+mod legacy_passenger_stop_names_tests {
+    use super::*;
+
+    fn old_station(id: &str, name: &str) -> Vec<String> {
+        vec![id.into(), "0".into(), name.into()]
+    }
+
+    #[test]
+    fn type_one_trips_supply_missing_stop_names_for_passenger_destinations() {
+        let mut data = TimetableData::default();
+        data.trips.push(omsi_timetable::Trip {
+            stations_legacy: vec![
+                old_station("68476", "UPA Barris"),
+                old_station("67798", "Av. Vasco da Gama, 181"),
+                old_station("bad id", "Ignore me"),
+                old_station("99", " "),
+            ],
+            ..Default::default()
+        });
+        let names = timetable_stop_names(&data);
+        assert_eq!(names.get(&68476).map(String::as_str), Some("UPA Barris"));
+        assert_eq!(names.get(&67798).map(String::as_str), Some("Av. Vasco da Gama, 181"));
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn busstops_cfg_names_take_precedence_and_type_two_trips_do_not_invent_names() {
+        let mut data = TimetableData::default();
+        data.bus_stops.push(omsi_timetable::BusStopEntry {
+            object_id: 68476,
+            name: "Official timetable name".into(),
+            ..Default::default()
+        });
+        data.trips.push(omsi_timetable::Trip {
+            stations_legacy: vec![
+                old_station("68476", "Legacy spelling"),
+                old_station("67798", "Available on older maps"),
+            ],
+            ..Default::default()
+        });
+        data.trips.push(omsi_timetable::Trip {
+            stations: vec![888],
+            ..Default::default()
+        });
+        let names = timetable_stop_names(&data);
+        assert_eq!(names.get(&68476).map(String::as_str), Some("Official timetable name"));
+        assert_eq!(names.get(&67798).map(String::as_str), Some("Available on older maps"));
+        assert!(!names.contains_key(&888));
     }
 }
