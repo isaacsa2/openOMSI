@@ -631,6 +631,7 @@ mod legacy_passenger_stop_names_tests {
     }
 
     // CI regression: legacy .ttp station labels must reach passenger destination lookup.
+    // Keep this covered when fork Actions are re-enabled for pull requests.
     #[test]
     fn type_one_trips_supply_missing_stop_names_for_passenger_destinations() {
         let mut data = TimetableData::default();
