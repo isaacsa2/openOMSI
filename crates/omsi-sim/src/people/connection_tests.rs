@@ -220,3 +220,44 @@ fn a_stop_in_range_gets_one_more_waiting_person_each_time_its_clock_runs_out() {
     }
     assert_eq!(waiting(&h), 3);
 }
+
+#[test]
+fn a_passenger_already_heading_to_a_bus_does_not_keep_the_stop_full() {
+    let (mut h, _) = super::super::pax_stops::brt_tests::setup("stop-refill-after-boarding", None);
+    h.types = vec![h.people[0].ty.clone()];
+    h.pool_types = 1;
+    h.map_humans_done = true;
+
+    let stop = h.stops.get_mut(&42).unwrap();
+    h.center = stop.pos;
+    stop.spots = (0..4)
+        .map(|k| WaitSpot { pos: stop.pos + DVec3::X * k as f64, face: 0.0, height: 0.0 })
+        .collect();
+    stop.taken = vec![false; 4];
+    stop.enter_max = 1.0;
+    stop.enter_min = 1.0;
+    stop.near = true;
+    stop.clock_ms = 15_001.0;
+
+    // As in OMSI, the rider still carries their origin stop id while heading
+    // for the bus; this must no longer consume one waiting slot.
+    let rider = h.pax_mut(0).unwrap();
+    rider.stop = Some(42);
+    rider.bus = Some(BusId::Ai(3));
+    rider.task = Task::ToBus;
+
+    let world = FlatWorld::default();
+    for _ in 0..5 {
+        h.stops_tick(0.1, &world);
+    }
+
+    assert_eq!(h.stops[&42].want, 1);
+    let waiting = h.people.iter().filter(|p| {
+        matches!(&p.state, State::Pax(x)
+            if x.stop == Some(42)
+                && x.inside.is_none()
+                && matches!(x.task, Task::WaitingForBus | Task::WalkingToBusstop))
+    }).count();
+    assert_eq!(waiting, 1, "the stop should replenish without waiting for the bus to leave");
+    assert_eq!(h.people.len(), 2, "the already-boarding rider must be retained");
+}
