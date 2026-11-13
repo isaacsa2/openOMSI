@@ -3,6 +3,19 @@
 
 use super::*;
 
+// Validate the actual stored .bus/.ovh bytes, never a permission asserted by a peer.
+// Used for new uploads and while reopening persisted manifests from an older release.
+fn shareable_manifest(store: &Store, m: &VehicleManifest) -> bool {
+    if !super::super::transfer_policy::transfers_enabled() { return false; }
+    let mut checked = false;
+    for e in m.entries.iter().filter(|e| super::super::transfer_policy::is_descriptor(&e.path)) {
+        let Ok(bytes) = store.read(e) else { return false };
+        if !super::super::transfer_policy::allows_description_bytes(&e.path, &bytes) { return false }
+        checked = true;
+    }
+    checked
+}
+
 // (what the rest of the game asks, of the game's own store)
 
 pub(in crate::mods) fn open() -> bool {
@@ -143,6 +156,10 @@ impl Buses {
                 log::warn!("vehicles: {name} lacks {} in the store; left aside", lost.path);
                 continue;
             }
+            if !shareable_manifest(&store, &m) {
+                log::warn!("vehicles: {name} is private or unreadable; cannot redistribute its files");
+                continue;
+            }
             if !held.is_empty() {
                 for w in &held {
                     if let Some(e) = m.entries.iter().find(|e| e.path == w.path) {
@@ -227,15 +244,18 @@ impl Buses {
     }
 
     pub(super) fn put_making_room(&self, e: &Entry, data: &[u8], unused_for: std::time::Duration) -> Result<(), String> {
+        if !super::super::transfer_policy::allows_description_bytes(&e.path, data) {
+            return Err(format!("{}: vehicle forbids multiplayer file transfers", e.path));
+        }
         self.make_room(e.size, unused_for)?;
         // (sealed and written with the store let go, as a piece is: a file of a GB held the
         // store - and the host's frame asking which buses are in use, or mounting one - for
         // the whole write. The write goes to a file of its own and is renamed into place.)
         let store = self.lock().as_ref().ok_or("no store")?.store.clone();
+        // A received blob is not public merely because its bytes passed the
+        // hash check: it belongs to no approved vehicle until commit succeeds.
+        // Only commit() adds hashes to the table consulted by BLOB/PIECE.
         store.put(e, data).map_err(|x| x.to_string())?;
-        if let Some(v) = self.lock().as_mut() {
-            v.sizes.insert(e.sha256.to_ascii_lowercase(), e.size);
-        }
         Ok(())
     }
 
@@ -357,6 +377,10 @@ impl Buses {
             drop_pieces();
             return Err(format!("{}: not the file the list names", e.path));
         }
+        if !super::super::transfer_policy::allows_description_bytes(&e.path, &data) {
+            drop_pieces();
+            return Err(format!("{}: vehicle forbids multiplayer file transfers", e.path));
+        }
         // (refused for what it is: the bus goes on without it - `withhold`)
         let refused = crate::mods::quarantine::screen(&e.path, &data).err();
         if let Some(why) = refused {
@@ -388,6 +412,12 @@ impl Buses {
                 Some(why) if identity::key(&e.path) != bus_key => held.push(Withheld { path: e.path.clone(), why: why.clone() }),
                 _ => return Err(format!("{} has not come", e.path)),
             }
+        }
+        // Preserve the existing missing-file error (including quarantined bus
+        // descriptors) before checking the author's transfer policy. No manifest
+        // or cache is committed unless its actual stored .bus files opt in.
+        if !shareable_manifest(&v.store, &m) {
+            return Err("this vehicle forbids multiplayer file transfers".into());
         }
         if !held.is_empty() {
             let file = v.dir.join(format!("{fp}.withheld.json"));

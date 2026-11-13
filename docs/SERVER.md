@@ -148,11 +148,19 @@ Default is the value a new `server.cfg` is written with. A key missing from the 
 | `gateway_proxy_header` | `x-forwarded-for`, `cf-connecting-ip` | `x-forwarded-for` | header a proxy on this machine names a WebSocket player's address in |
 | `tunnel` | `0` / `1` | `1` | start a free Cloudflare quick tunnel (needs `cloudflared`) |
 | `share_positions` | `0` / `1` | `0` | answer `GET /players` |
-| `share_maps` | `0` / `1` | `0`; without the key: `1`, so an older `server.cfg` shares its map | a joiner without the map gets it, with everything it uses, from the server (gigabytes for a big map). Off: players install it and are told which is missing. |
+| `share_maps` | `0` / `1` | `0` in all configs, including older files missing this key | A dedicated server only sends its map and dependencies after explicitly setting `share_maps = 1`. Otherwise players install their own map. Player-hosted LAN never automatically shares the map. |
 | `accept_uploads` | `0` / `1` | `1` | [players' buses](#players-buses-accept_uploads) |
 | `uploads_keep_days` | 1 to 3650 days | `30` | keep an unused player bus this long |
 | `public_server` | `0` / `1` | `0` | list in the [public server list](#public-server-list) |
 | `public_list_url` | URL | not in a new file; empty or missing: openOMSI's own | optional: list service address |
+
+**Map transfer safety:** Both new and existing dedicated servers default to
+`share_maps = 0`, even if the key is absent from a legacy `server.cfg`.
+Admins must explicitly set `share_maps = 1` to distribute the map and its
+dependencies. Player-hosted LAN sessions do not automatically send maps;
+the connecting player must install the matching map locally. These defaults
+do not block separately authorized vehicle transfers or remove files previously
+downloaded by other players.
 
 **Voice** ([Voice chat](#voice-chat))
 
@@ -290,6 +298,70 @@ the bus files to the server, which keeps them and passes them on, so nobody sees
 * Empty `vehicles`: players may bring any bus. With a `vehicles` list, only those are taken.
 * `accept_uploads = 0` turns it off. A game hosting a session (`--lan-host`) takes joiners'
   buses the same way and keeps its own bus in its store for them.
+
+### Private vehicle file transfer opt-out (openOMSI extension)
+
+A vehicle author may mark a `.bus` or `.ovh` as non-redistributable:
+
+```ini
+[openomsi_multiplayer]
+allow_file_transfer 0
+```
+
+This is an opt-out from **automatic file transfer**, not from multiplayer driving.
+The official openOMSI client will not upload this vehicle to a player-hosted LAN
+or a dedicated server; the LAN host will not publish its own protected vehicle,
+and dedicated servers refuse to serve a protected vehicle from their fleet.
+Other players will see a stand-in unless they already have a matching local copy.
+
+`allow_file_transfer 1` explicitly permits transfers. With no policy block,
+or with a policy block that omits `allow_file_transfer`, the legacy behavior
+remains unchanged: transfers stay enabled. A present but unrecognized
+`allow_file_transfer` value is treated as `0`.
+Referenced `.bus` / `.ovh` descriptions (including articulated rear sections)
+are also checked. The session manifest omits a whole `Vehicles/<folder>` or
+`Trains/<folder>` if any vehicle description listed there forbids transfers.
+Previously persisted private vehicle manifests are not served after updating.
+
+### Protected asset folders and strict mode
+
+To prevent a public bus from indirectly transmitting private textures, scripts,
+fonts or sounds, create an empty file named `.openomsi-no-share` inside any
+**on-disk directory** whose contents must never be uploaded. The official
+sender checks each file and its parent directories before transfer, including
+resolved symlink locations. The server fleet and the host's map manifest
+honor this marker too. The marker itself is not uploaded. A vehicle that
+depends on such a file cannot be auto-transferred as a complete package;
+a map package omits marked files. Keep private resources separate from
+public mod dependencies.
+
+A stronger **optional** policy is `OMSI_LAN_REQUIRE_TRANSFER_OPT_IN=1`
+(set before starting the game). In this mode, only vehicles explicitly marked
+with `allow_file_transfer 1` are automatically shared; unmarked legacy
+vehicles are not uploaded. The receiving server applies the same check
+when configured in strict mode. The switch is off by default to avoid
+silently breaking the existing public mod ecosystem. Strict mode does not
+override an explicit `0`.
+
+For an additional **machine-wide emergency opt-out**, set
+`OMSI_NO_LAN_VEHICLE_TRANSFER=1` before starting openOMSI. This prevents
+automatic vehicle uploads, player-hosted sharing, dedicated fleet transfers
+and accepting vehicle uploads on that machine, even for older mods with no
+policy block. It is **off by default** so unmarked `.bus`/`.ovh` files continue
+to transfer normally unless the player explicitly enables this safeguard.
+It does not stop map file transfer when a dedicated admin explicitly enables
+`share_maps = 1`; leave maps disabled if protecting private content.
+
+**Limitations:** This does not retract content already delivered, prevent
+redistribution by modified clients or older releases, or infer ownership of
+unmarked shared assets outside vehicle folders. The directory marker applies
+to ordinary disk files; paths inside virtual archives may require a separate
+folder-level sharing policy. Do not put private assets in content folders
+shared by the map itself.
+To limit automatic sharing on dedicated servers, use `share_maps = 0`
+and/or `accept_uploads = 0`; for player-hosted LAN, `OMSI_NO_LAN_MODS=1`
+turns off all mod exchange and `OMSI_NO_LAN_UPLOADS=1` prevents receiving
+other players' vehicles. This policy is not DRM.
 
 ## Optional RP speed governor
 

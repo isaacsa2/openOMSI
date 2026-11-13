@@ -18,6 +18,24 @@ fn entry(path: &str, data: &[u8]) -> Entry {
     Entry { path: path.into(), size: data.len() as u64, sha256: super::super::sha256_of(data) }
 }
 
+#[test]
+fn private_vehicle_cannot_reach_upload_or_local_cache_paths() {
+    let root = temp("protected-before-send");
+    let bus_file = root.join("Vehicles/P/private.bus");
+    std::fs::create_dir_all(bus_file.parent().unwrap()).unwrap();
+    std::fs::write(&bus_file, "[openomsi_multiplayer]\nallow_file_transfer 0\n").unwrap();
+    let files = vec![("Vehicles/P/private.bus".to_string(), bus_file.clone())];
+    let host = SocketAddr::from(([127, 0, 0, 1], 1));
+
+    // No connection is made to this deliberately unavailable endpoint:
+    // rejection must happen inside send_files before any network traffic.
+    let err = sending::send_files("Vehicles/P/private.bus", files.clone(), host, 1, false).unwrap_err();
+    assert!(err.to_string().contains("forbids multiplayer file transfers"), "{err}");
+    let err = server::keep_files("Vehicles/P/private.bus", files).unwrap_err();
+    assert!(err.contains("forbids multiplayer file transfers"), "{err}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// OFFER → the indices wanted (or the host's refusal).
 fn offer(host: SocketAddr, session: u64, m: &VehicleManifest) -> (super::super::Connection, Result<Vec<usize>, String>) {
     let (raw, mut out, mut input) = super::super::open(host, session).unwrap();
@@ -656,8 +674,13 @@ fn a_bus_that_makes_no_list_is_not_worked_out_every_frame() {
             Vec::new()
         }
     };
-    // (a bus path that leaves the root: no valid list)
-    let bus = "../outside.bus";
+    // A readable vehicle with an empty list still fails its manifest. Keep the
+    // existing "list only once per bus/paint" regression independent of the new
+    // fast rejection of invalid or protected vehicle paths.
+    let bus = "Vehicles/NoList/no-list.bus";
+    let bus_path = root.join(bus);
+    std::fs::create_dir_all(bus_path.parent().unwrap()).unwrap();
+    std::fs::write(&bus_path, "[friendlyname]\nTest\nNoList\nDefault\n").unwrap();
     own.identify(&root, bus, "paint", lister());
     let t = std::time::Instant::now();
     while !own.has_failed(bus, "paint") && t.elapsed() < std::time::Duration::from_secs(10) {

@@ -425,7 +425,7 @@ Settings → Camera:
 - *Resume*, *Options* (launcher settings), *Controls*
 - *Camera*: seat, field of view, view and mirror editor
 - *Vehicle options*:
-  - destination display, depot file, fleet number, driver;
+  - destination display, depot file, fleet number, driver, **Livery...** (switch the current bus repaint while driving, including in multiplayer, without respawning);
   - drive another placed vehicle, place any installed vehicle, couple/uncouple, get out, swap or reload;
   - service: refuel and wash (only at a petrol station or the depot's wash yard, as in OMSI), repair, put the bus back on its wheels, move it on the map.
 - *World options*: clock and date, weather (and custom weather), temperature, wind, traffic, passengers, [object editor](#object-editor)
@@ -710,7 +710,7 @@ Settings → Graphics → Display, `graphics_api` (not on a Mac). The chosen int
 
 - Settings → Graphics → **Optimise for my PC**: measures for about a minute on your next drive and tunes graphics to your target frame rate. Your settings are saved first; *Restore my previous settings* brings them back.
 - Settings → General → *Frame rate in the corner* and *Performance details* (off, compact, detailed): where frame time goes.
-- **Video memory** (Settings → Graphics): total GPU memory the game may use (textures, models, picture). *Automatic* = nine tenths of the card. Big maps fit through compressed textures and tiles that free everything on unload.
+- **Video memory** (Settings → Graphics): total GPU memory the game may use (textures, models, picture). *Automatic* now also engages texture-budget recovery when the driver reports a finite memory limit, even if both manual limits are unset. Long drives on smaller GPUs still need testing with the same map and graphics backend.
 
 Measuring:
 
@@ -949,7 +949,45 @@ The host simulates, for everyone and around every player: AI traffic, timetable 
 
 ### The host's mods
 
-Content the session uses that is not in the OMSI 2 folder itself is shared: map, bus, objects, splines, AI vehicles and people from the content folder or archives, including a content folder inside the OMSI 2 folder.
+**Map sharing is OFF by default**, for player-hosted LAN and dedicated servers
+(including legacy `server.cfg` files without a `share_maps` key). Everyone
+must install the host's map locally. A dedicated-server admin can explicitly
+set `share_maps = 1` to opt into transferring maps and dependencies; the
+player-hosted LAN interface does not offer a map-sharing opt-in.
+
+Vehicle sharing is separate. The running player can choose **Esc → Vehicle
+options → Livery...** at any time, even in LAN. The bus stays in place and
+keeps its script state, passengers and damage; peers receive the updated paint
+name and content fingerprint, then obtain any permitted missing textures.
+They may briefly see a stand-in while those files arrive. A vehicle whose
+`.bus` or `.ovh` contains `[openomsi_multiplayer]` and `allow_file_transfer 0`
+is **not automatically uploaded** by the updated official client; peers must
+already own it to see it correctly. Without the directive, transfers remain
+enabled by default. Older and modified clients may ignore this opt-out.
+
+Players with private vehicles can additionally set
+`OMSI_NO_LAN_VEHICLE_TRANSFER=1` before starting the game, preventing this
+machine from automatically uploading or serving **any** vehicle content.
+This switch is off by default and does not prevent use of installed vehicles.
+The server-wide `accept_uploads = 0` separately stops receiving players' buses.
+
+For stricter protection without turning off multiplayer, use
+`OMSI_LAN_REQUIRE_TRANSFER_OPT_IN=1`: only `.bus`/`.ovh` vehicles
+containing the explicit `allow_file_transfer 1` declaration may be shared.
+This stricter policy is **opt-in**, so existing unmarked public vehicles still
+share by default when it is not enabled.
+
+A mod author can also put an empty `.openomsi-no-share` marker file inside
+an on-disk folder of private textures, fonts, scripts or sounds. That directory
+and everything beneath it will be excluded from automatic outgoing
+transfers, even when referenced by an otherwise shareable vehicle.
+For private resources inside archives, keep them outside shared packages.
+These policies do not undo downloads already made and cannot stop
+modified clients that deliberately ignore them.
+
+Bus files authorized for sharing are offered as needed, and can include their
+model, selected livery, scripts and referenced assets. Map redistribution is
+not implicit in that vehicle workflow.
 
 - Listed with a SHA-256 per file and served over TCP on the session port.
 - Joiners fetch what they lack before loading the map and keep it for next time (`~/.openomsi/lan-store`).

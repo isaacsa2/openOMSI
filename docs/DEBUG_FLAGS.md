@@ -194,6 +194,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_JOINT_ANGLE` | num | - | use | app | Degrees: the rear section of an articulated bus held at that angle. |
 | `OMSI_LANES_NEAR` | text | - | use | app | x,y,r: log the driving lanes passing there. |
 | `OMSI_LAN_AUDIO` | bool | off | use | app | Offscreen LAN: with the other buses' sounds. |
+| `OMSI_LAN_REQUIRE_TRANSFER_OPT_IN` | bool | off | use | lan | LAN strict privacy mode: only auto-share .bus/.ovh vehicles with an explicit allow_file_transfer 1; unmarked legacy vehicles stay private until this switch is disabled. |
 | `OMSI_LAN_SAY` | text | - | use | lan | "30=Hallo;45=Bye": LAN chat lines said at these seconds of the session. |
 | `OMSI_MOBILE` | bool | off | use | app | The phone layout on a computer (screen cut-outs). |
 | `OMSI_MUTE` | bool | off | use | audio | Mix everything as usual but play nothing. |
@@ -313,6 +314,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_LAMP_SIGHT` | bool | off | use | render | Enhanced by night: every lamp near the line of sight dazzles, hidden or not. |
 | `OMSI_NO_LAN_MODS` | bool | off | use | app, lan, net | LAN: do not exchange mods. |
 | `OMSI_NO_LAN_UPLOADS` | bool | off | use | lan | LAN: a game hosting a session takes no buses from the players who join. |
+| `OMSI_NO_LAN_VEHICLE_TRANSFER` | bool | off | use | lan | LAN: do not automatically upload or serve vehicle files from this machine, including the host bus and dedicated fleet. Does not affect driving or already distributed copies. |
 | `OMSI_NO_LIGHT_MAP` | bool | off | use | scene | No night light maps on the tiles (A/B). |
 | `OMSI_NO_MATERIAL_SPLINE_BATCHING` | bool | off | use | scene | No batching of splines by material. |
 | `OMSI_NO_MODEL_ORDER` | bool | off | use | scene | Draw the opaque parts of ordered models first again (A/B). |

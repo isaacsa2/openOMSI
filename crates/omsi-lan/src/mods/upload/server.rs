@@ -420,6 +420,7 @@ impl Uploads {
 
     pub(in crate::mods) fn accepting(&self) -> bool {
         self.accept.load(Ordering::Relaxed)
+            && crate::mods::transfer_policy::transfers_enabled()
     }
 
     pub(in crate::mods) fn open(&self) {
@@ -446,6 +447,10 @@ impl Uploads {
 
     pub(in crate::mods) fn keep_own(&'static self, root: &Path, bus: &str, paint: &str, own: impl FnOnce() -> Vec<PathBuf> + Send + 'static) {
         if bus.is_empty() || !self.serving() {
+            return;
+        }
+        if !crate::mods::transfer_policy::allows_bus(root, bus) {
+            log::info!("LAN host: {bus} is private; its files will not be offered");
             return;
         }
         let key = format!("{bus}|{paint}");
@@ -479,6 +484,10 @@ impl Uploads {
 /// file refused for what it is is withheld, the bus kept without it), the bus kept by the
 /// fingerprint worked out from them. The fingerprint.
 pub(in crate::mods) fn keep_files(bus: &str, files: Vec<(String, PathBuf)>) -> Result<String, String> {
+    // Refuse protected content before hashing, caching or writing any bytes.
+    if !crate::mods::transfer_policy::allows_dependencies(&files) {
+        return Err("this vehicle forbids multiplayer file transfers".into());
+    }
     if !crate::mods::vehicles::is_open() && !crate::mods::vehicles::open() {
         return Err("no store".into());
     }
