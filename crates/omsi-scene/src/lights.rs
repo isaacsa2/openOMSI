@@ -173,7 +173,7 @@ pub fn vehicle_lights(
         crate::model_lights_extend(&t.ty.model, &part_mesh_xf, t.position, &car_value, &t.light_fade, coronas);
     }
     for corona in &mut coronas[first_corona..] {
-        corona.vehicle_lamp = !corona.beam && !corona.halo;
+        corona.vehicle_lamp = true;
     }
     let body = v.body_rotation();
     // headlights: the spotlight selected by Spot_Select
