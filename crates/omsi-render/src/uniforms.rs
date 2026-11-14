@@ -103,6 +103,7 @@ pub(crate) struct PostUniform {
     pub(crate) d: [f32; 4],
     /// x how much of a metered shortfall (a picture darker than the light model expects: a
     /// tunnel, a dark cab) the eye makes up, the rest as post.wgsl's `c.x` does for a surplus
+    /// y how far the sun has set (0..1), for the display shadow lift
     pub(crate) e: [f32; 4],
 }
 
