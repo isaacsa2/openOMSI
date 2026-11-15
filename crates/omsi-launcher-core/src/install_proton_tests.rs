@@ -15,7 +15,8 @@ fn authored_nested_bases_are_separate_and_unsafe_paths_are_rejected() {
         rel: rel.into(),
         size: 1,
         index,
-        proton_base: base.map(str::to_owned), proton_authorization: None,
+        proton_base: base.map(str::to_owned),
+        proton_authorization: None,
     })
     .collect();
     let mut tree = Node::default();
@@ -95,7 +96,8 @@ fn reads_bounded_configs_from_zip_and_folder_before_planning() {
             rel: "Display.map.txt".into(),
             size: text.len() as u64,
             index: 0,
-            proton_authorization: None, proton_base: None,
+            proton_authorization: None,
+            proton_base: None,
         }];
         read_layouts(&mut source, &mut entries, &job).unwrap();
         assert_eq!(entries[0].proton_base.as_deref(), Some("Wrapper/Base"));
@@ -122,7 +124,8 @@ fn standalone_maps_and_multiple_siblings_are_planned_separately() {
         rel: rel.to_string(),
         size: 1,
         index,
-        proton_authorization: None, proton_base: None,
+        proton_authorization: None,
+        proton_base: None,
     })
     .collect();
     let mut tree = Node::default();
@@ -141,10 +144,12 @@ fn standalone_maps_and_multiple_siblings_are_planned_separately() {
     assert_eq!(plan.maps.len(), 2);
     assert_eq!(used.len(), entries.len());
     assert_eq!(plan.maps[0].dest, "maps/Proton-A");
-    assert!(plan.maps[0]
-        .files
-        .iter()
-        .any(|(_, p)| p == "A/tiles/x/map.3ds"));
+    assert!(
+        plan.maps[0]
+            .files
+            .iter()
+            .any(|(_, p)| p == "A/tiles/x/map.3ds")
+    );
     assert!(check_mode(&plan, InstallMode::InPlace).is_err());
     assert!(check_mode(&plan, InstallMode::Extract).is_ok());
 }
@@ -162,7 +167,8 @@ fn unique_base_folder_and_inline_maps_are_detected_without_guessing_ambiguous_la
                 rel: rel.to_string(),
                 size: 1,
                 index,
-                proton_authorization: None, proton_base: None,
+                proton_authorization: None,
+                proton_base: None,
             })
             .collect();
         let mut tree = Node::default();
@@ -180,10 +186,12 @@ fn unique_base_folder_and_inline_maps_are_detected_without_guessing_ambiguous_la
         ));
         assert_eq!(plan.maps[0].dest, "maps/Proton-Display");
         assert_eq!(used.len(), entries.len());
-        assert!(plan.maps[0]
-            .files
-            .iter()
-            .any(|(_, rel)| rel == "Display.map.txt"));
+        assert!(
+            plan.maps[0]
+                .files
+                .iter()
+                .any(|(_, rel)| rel == "Display.map.txt")
+        );
     }
     let mut node = Node::default();
     node.insert("Display.map.txt", 0);
@@ -237,7 +245,11 @@ fn install_supplied_proton_zip_when_available() {
         .ok()
         .and_then(|n| n.parse().ok())
         .unwrap_or(1);
-    let maps: Vec<_> = report.installed.iter().filter(|p| p.starts_with("maps/")).collect();
+    let maps: Vec<_> = report
+        .installed
+        .iter()
+        .filter(|p| p.starts_with("maps/"))
+        .collect();
     assert_eq!(maps.len(), expected);
     assert!(report.installed.iter().any(|p| p == "HOFs"));
     for installed in maps {
@@ -245,11 +257,24 @@ fn install_supplied_proton_zip_when_available() {
         assert!(!map.join("proton-import/work").exists());
         let global = omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(&map)).unwrap();
         assert!(!global.tiles.is_empty() && !global.entry_points.is_empty());
-        let hof = omsi_vehicle::Hof::load(&content.join("HOFs").join(format!("{}.hofoi", omsi_proton::depot::name(installed)))).unwrap();
-        assert_eq!(omsi_proton::depot::installed_name(&map), Some(hof.name.clone()));
+        let hof = omsi_vehicle::Hof::load(
+            &content
+                .join("HOFs")
+                .join(format!("{}.hofoi", omsi_proton::depot::name(installed))),
+        )
+        .unwrap();
+        assert_eq!(
+            omsi_proton::depot::installed_name(&map),
+            Some(hof.name.clone())
+        );
         let info = crate::read_map(&map, map.file_name().unwrap().to_str().unwrap(), "en").unwrap();
         assert_eq!(info.hof, hof.name);
-        eprintln!("{}: {} shared HOF destinations and {} stops", installed, hof.termini.len(), hof.bus_stops.len());
+        eprintln!(
+            "{}: {} shared HOF destinations and {} stops",
+            installed,
+            hof.termini.len(),
+            hof.bus_stops.len()
+        );
         for t in global.tiles {
             let tile = omsi_map::Tile::load(&map.join(t.file)).unwrap();
             for o in tile.objects {
@@ -268,8 +293,16 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
     let models = source.join("Town/tiles/x");
     std::fs::create_dir_all(&models).unwrap();
     std::fs::create_dir_all(source.join("Town/textures")).unwrap();
-    std::fs::write(source.join("Town.map.txt"), "[map]\nbaseDir=Town\nmodelsDir=x\nmapModVersion=4\n[openomsi]\nallowConversion=1\n").unwrap();
-    std::fs::write(models.join("entrypoints.txt"), "[entrypoint_1]\nname=Centro\nposX=1\nposY=0\nposZ=1\n").unwrap();
+    std::fs::write(
+        source.join("Town.map.txt"),
+        "[map]\nbaseDir=Town\nmodelsDir=x\nmapModVersion=4\n[openomsi]\nallowConversion=1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        models.join("entrypoints.txt"),
+        "[entrypoint_1]\nname=Centro\nposX=1\nposY=0\nposZ=1\n",
+    )
+    .unwrap();
     fn chunk(tag: u16, data: &[u8]) -> Vec<u8> {
         let mut out = tag.to_le_bytes().to_vec();
         out.extend(((data.len() + 6) as u32).to_le_bytes());
@@ -277,12 +310,26 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
         out
     }
     let mut positions = 3u16.to_le_bytes().to_vec();
-    positions.extend([0f32, 0., 0., 10., 0., 0., 0., 10., 0.].into_iter().flat_map(f32::to_le_bytes));
+    positions.extend(
+        [0f32, 0., 0., 10., 0., 0., 0., 10., 0.]
+            .into_iter()
+            .flat_map(f32::to_le_bytes),
+    );
     let mut mesh = chunk(0x4110, &positions);
-    mesh.extend(chunk(0x4120, &[1u16, 0, 1, 2, 0].into_iter().flat_map(u16::to_le_bytes).collect::<Vec<_>>()));
+    mesh.extend(chunk(
+        0x4120,
+        &[1u16, 0, 1, 2, 0]
+            .into_iter()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>(),
+    ));
     let mut object = b"road\0".to_vec();
     object.extend(chunk(0x4100, &mesh));
-    std::fs::write(models.join("road.3ds"), chunk(0x4d4d, &chunk(0x3d3d, &chunk(0x4000, &object)))).unwrap();
+    std::fs::write(
+        models.join("road.3ds"),
+        chunk(0x4d4d, &chunk(0x3d3d, &chunk(0x4000, &object))),
+    )
+    .unwrap();
     std::fs::write(source.join("LICENSE.txt"), b"Exact license\r\n\x80").unwrap();
     std::fs::create_dir_all(source.join("Credits")).unwrap();
     std::fs::write(source.join("Credits/Author.txt"), b"Original author").unwrap();
@@ -290,25 +337,61 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
     std::fs::write(content.join("Vehicles/Test/original.hof"), "unchanged").unwrap();
     std::fs::create_dir_all(content.join("HOFs")).unwrap();
     std::fs::write(content.join("HOFs/original.hof"), "unchanged shared").unwrap();
-    let report = run_blocking(content.clone(), None, source, InstallMode::Extract, None, false);
+    let report = run_blocking(
+        content.clone(),
+        None,
+        source,
+        InstallMode::Extract,
+        None,
+        false,
+    );
     assert_eq!(report.state, "done", "{report:?}");
     assert_eq!(report.installed, ["maps/Proton-Town", "HOFs"]);
     let map = content.join("maps/Proton-Town");
-    let hof = omsi_vehicle::Hof::load(&content.join("HOFs").join(format!("{}.hofoi", omsi_proton::depot::name("maps/Proton-Town")))).unwrap();
+    let hof = omsi_vehicle::Hof::load(&content.join("HOFs").join(format!(
+        "{}.hofoi",
+        omsi_proton::depot::name("maps/Proton-Town")
+    )))
+    .unwrap();
     assert_eq!(hof.termini[0].menu_name(), "Centro");
-    assert_eq!(crate::read_map(&map, "Proton-Town", "en").unwrap().hof, hof.name);
-    assert_eq!(std::fs::read(map.join("LICENSE.txt")).unwrap(),b"Exact license\r\n\x80");
-    assert_eq!(std::fs::read(map.join("Credits/Author.txt")).unwrap(),b"Original author");
+    assert_eq!(
+        crate::read_map(&map, "Proton-Town", "en").unwrap().hof,
+        hof.name
+    );
+    assert_eq!(
+        std::fs::read(map.join("LICENSE.txt")).unwrap(),
+        b"Exact license\r\n\x80"
+    );
+    assert_eq!(
+        std::fs::read(map.join("Credits/Author.txt")).unwrap(),
+        b"Original author"
+    );
 
     // Explicit native depot choices still take precedence over the generated hint.
-    std::fs::write(map.join("ailists.cfg"), "[aigroup_depot]\nNative\nOriginal\n").unwrap();
-    assert_eq!(crate::read_map(&map, "Proton-Town", "en").unwrap().hof, "Original");
-    assert_eq!(std::fs::read_to_string(content.join("Vehicles/Test/original.hof")).unwrap(), "unchanged");
+    std::fs::write(
+        map.join("ailists.cfg"),
+        "[aigroup_depot]\nNative\nOriginal\n",
+    )
+    .unwrap();
+    assert_eq!(
+        crate::read_map(&map, "Proton-Town", "en").unwrap().hof,
+        "Original"
+    );
+    assert_eq!(
+        std::fs::read_to_string(content.join("Vehicles/Test/original.hof")).unwrap(),
+        "unchanged"
+    );
     assert!(!content.join(STAGING).exists());
-    let registry: serde_json::Value = serde_json::from_slice(&std::fs::read(content.join("Mods").join(crate::mods::REGISTRY)).unwrap()).unwrap();
+    let registry: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(content.join("Mods").join(crate::mods::REGISTRY)).unwrap(),
+    )
+    .unwrap();
     let paths = registry["mods"][0]["paths"].as_array().unwrap();
     assert!(paths.iter().any(|p| p.as_str() == Some("maps/Proton-Town")));
-    let owned_hof = format!("HOFs/{}.hofoi", omsi_proton::depot::name("maps/Proton-Town"));
+    let owned_hof = format!(
+        "HOFs/{}.hofoi",
+        omsi_proton::depot::name("maps/Proton-Town")
+    );
     assert!(paths.iter().any(|p| p.as_str() == Some(&owned_hof)));
     let id = registry["mods"][0]["id"].as_str().unwrap();
     crate::mods::set_enabled(&content, id, false).unwrap();
@@ -317,35 +400,83 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
     assert!(map.exists() && content.join(&owned_hof).exists());
     crate::mods::remove(&content, id).unwrap();
     assert!(!map.exists() && !content.join(&owned_hof).exists());
-    assert_eq!(std::fs::read_to_string(content.join("HOFs/original.hof")).unwrap(), "unchanged shared");
+    assert_eq!(
+        std::fs::read_to_string(content.join("HOFs/original.hof")).unwrap(),
+        "unchanged shared"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn all_selected_maps_are_checked_before_any_output_even_after_source_changes() {
     let root = std::env::temp_dir().join(format!("proton-all-permissions-{}", std::process::id()));
-    let source = root.join("source"); let content = root.join("content");
+    let source = root.join("source");
+    let content = root.join("content");
     for name in ["Allowed", "Blocked"] {
         std::fs::create_dir_all(source.join(format!("{name}/tiles/x"))).unwrap();
         std::fs::write(source.join(format!("{name}.map.txt")), format!("[map]\nbaseDir={name}\nmodelsDir=x\nmapModVersion=4\n[openomsi]\nallowConversion={}\n", if name == "Allowed" {1} else {0})).unwrap();
     }
-    let report = run_blocking(content.clone(), None, source.clone(), InstallMode::Extract, None, false);
+    let report = run_blocking(
+        content.clone(),
+        None,
+        source.clone(),
+        InstallMode::Extract,
+        None,
+        false,
+    );
     assert_ne!(report.state, "done", "{report:?}");
     assert!(report.installed.is_empty());
     assert!(!content.join("maps").exists());
     assert!(!content.join(STAGING).exists());
-    let entries = vec![Entry { rel:"Allowed.map.txt".into(),size:1,index:0,proton_base:None,proton_authorization:Some(Ok(())) },Entry {rel:"Blocked.map.txt".into(),size:1,index:1,proton_base:None,proton_authorization:Some(Err("blocked".into()))}];
+    let entries = vec![
+        Entry {
+            rel: "Allowed.map.txt".into(),
+            size: 1,
+            index: 0,
+            proton_base: None,
+            proton_authorization: Some(Ok(())),
+        },
+        Entry {
+            rel: "Blocked.map.txt".into(),
+            size: 1,
+            index: 1,
+            proton_base: None,
+            proton_authorization: Some(Err("blocked".into())),
+        },
+    ];
     let mut plan = Plan::default();
-    for (i,name) in ["Allowed", "Blocked"].iter().enumerate() {
-        plan.maps.push(Mapping {src:"".into(),dest:format!("maps/Proton-{name}"),what:KIND.into(),files:vec![(i,format!("{name}.map.txt"))],bytes:1,aside:false});
+    for (i, name) in ["Allowed", "Blocked"].iter().enumerate() {
+        plan.maps.push(Mapping {
+            src: "".into(),
+            dest: format!("maps/Proton-{name}"),
+            what: KIND.into(),
+            files: vec![(i, format!("{name}.map.txt"))],
+            bytes: 1,
+            aside: false,
+        });
     }
     assert!(validate_selected(&plan, &entries).is_err());
     let staging = root.join("stage");
-    for (i,name) in ["Allowed", "Blocked"].iter().enumerate() {
+    for (i, name) in ["Allowed", "Blocked"].iter().enumerate() {
         std::fs::create_dir_all(staging.join(i.to_string())).unwrap();
-        std::fs::copy(source.join(format!("{name}.map.txt")), staging.join(i.to_string()).join(format!("{name}.map.txt"))).unwrap();
+        std::fs::copy(
+            source.join(format!("{name}.map.txt")),
+            staging.join(i.to_string()).join(format!("{name}.map.txt")),
+        )
+        .unwrap();
     }
-    let job = Job {id:0,source:source.clone(),mode:InstallMode::Extract,from_inbox:false,cancel:AtomicBool::new(false),progress:Mutex::new(Progress::default()),bytes_done:AtomicU64::new(0),files_done:AtomicU64::new(0),linked:Mutex::new(Vec::new()),stall_at:u64::MAX};
+    let job = Job {
+        id: 0,
+        source: source.clone(),
+        mode: InstallMode::Extract,
+        from_inbox: false,
+        cancel: AtomicBool::new(false),
+        progress: Mutex::new(Progress::default()),
+        bytes_done: AtomicU64::new(0),
+        files_done: AtomicU64::new(0),
+        linked: Mutex::new(Vec::new()),
+        stall_at: u64::MAX,
+    };
     assert!(convert(&staging, &mut plan, &job).is_err());
     assert!(!staging.join("0/proton-import").exists());
     assert!(!staging.join("0/global.cfgoi").exists());
@@ -354,22 +485,36 @@ fn all_selected_maps_are_checked_before_any_output_even_after_source_changes() {
 
 #[test]
 fn zip_without_declaration_is_refused_and_original_stays_identical() {
-    let root = std::env::temp_dir().join(format!("proton-zip-refused-{}",std::process::id()));
+    let root = std::env::temp_dir().join(format!("proton-zip-refused-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let archive = root.join("source.zip");
     let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
-    for (name, data) in [("Town.map.txt","[map]\nbaseDir=Town\nmodelsDir=x\nmapModVersion=4\n"),("Town/tiles/x/road.3ds","not read before permission")] {
-        zip.start_file(name,zip::write::SimpleFileOptions::default()).unwrap();
+    for (name, data) in [
+        (
+            "Town.map.txt",
+            "[map]\nbaseDir=Town\nmodelsDir=x\nmapModVersion=4\n",
+        ),
+        ("Town/tiles/x/road.3ds", "not read before permission"),
+    ] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
         zip.write_all(data.as_bytes()).unwrap();
     }
     zip.finish().unwrap();
     let original = std::fs::read(&archive).unwrap();
     let content = root.join("content");
-    let report = run_blocking(content.clone(),None,archive.clone(),InstallMode::Extract,None,false);
-    assert_ne!(report.state,"done","{report:?}");
+    let report = run_blocking(
+        content.clone(),
+        None,
+        archive.clone(),
+        InstallMode::Extract,
+        None,
+        false,
+    );
+    assert_ne!(report.state, "done", "{report:?}");
     assert!(format!("{report:?}").contains("allowConversion"));
     assert!(report.installed.is_empty());
     assert!(!content.join("maps").exists());
-    assert_eq!(std::fs::read(&archive).unwrap(),original);
+    assert_eq!(std::fs::read(&archive).unwrap(), original);
     std::fs::remove_dir_all(root).unwrap();
 }

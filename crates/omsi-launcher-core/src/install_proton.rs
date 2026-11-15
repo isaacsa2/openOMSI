@@ -10,7 +10,9 @@ pub(super) fn read_layouts(source: &mut Source, entries: &mut [Entry], job: &Job
             continue;
         }
         if entry.size > 64 * 1024 {
-            entry.proton_authorization = Some(Err("map configuration exceeds 64 KiB; conversion blocked".into()));
+            entry.proton_authorization = Some(Err(
+                "map configuration exceeds 64 KiB; conversion blocked".into(),
+            ));
             continue;
         }
         if job.cancelled() {
@@ -30,7 +32,8 @@ pub(super) fn read_layouts(source: &mut Source, entries: &mut [Entry], job: &Job
             }
         }
         entry.proton_base = omsi_proton::base_dir(&data).ok();
-        entry.proton_authorization = Some(omsi_proton::permission::validate(&data).map_err(|e| e.to_string()));
+        entry.proton_authorization =
+            Some(omsi_proton::permission::validate(&data).map_err(|e| e.to_string()));
     }
     Ok(())
 }
@@ -38,12 +41,21 @@ pub(super) fn read_layouts(source: &mut Source, entries: &mut [Entry], job: &Job
 /// Validate every selected source map before creating a staging/output directory.
 pub(super) fn validate_selected(plan: &Plan, entries: &[Entry]) -> Result<()> {
     for map in plan.maps.iter().filter(|m| m.what == KIND) {
-        let config = map.files.iter().find(|(_, p)| p.to_ascii_lowercase().ends_with(".map.txt"))
-            .and_then(|(i, _)| entries.get(*i)).context("missing source map declaration")?;
+        let config = map
+            .files
+            .iter()
+            .find(|(_, p)| p.to_ascii_lowercase().ends_with(".map.txt"))
+            .and_then(|(i, _)| entries.get(*i))
+            .context("missing source map declaration")?;
         match &config.proton_authorization {
-            Some(Ok(())) => {},
+            Some(Ok(())) => {}
             Some(Err(message)) => return Err(anyhow!("{}: {message}", config.rel)),
-            None => return Err(anyhow!("{}: conversion blocked: missing validated [openomsi] allowConversion=1 declaration", config.rel)),
+            None => {
+                return Err(anyhow!(
+                    "{}: conversion blocked: missing validated [openomsi] allowConversion=1 declaration",
+                    config.rel
+                ));
+            }
         }
     }
     Ok(())
@@ -76,11 +88,9 @@ pub(super) fn plan_at(
     used: &mut HashSet<usize>,
 ) -> bool {
     // A normal OMSI map can carry incidental .map.txt files; it stays a normal map.
-    if node
-        .files
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("global.cfg") || name.eq_ignore_ascii_case(omsi_cfg::oi::GLOBAL))
-    {
+    if node.files.iter().any(|(name, _)| {
+        name.eq_ignore_ascii_case("global.cfg") || name.eq_ignore_ascii_case(omsi_cfg::oi::GLOBAL)
+    }) {
         return false;
     }
     let mut found = false;
@@ -145,7 +155,9 @@ pub(super) fn plan_at(
             if attribution(name) {
                 let (docs, size) = collect(folder, &join(path, name), entries);
                 for (index, rel) in docs {
-                    if !files.iter().any(|(i, _)| *i == index) { files.push((index, join(name, &rel))); }
+                    if !files.iter().any(|(i, _)| *i == index) {
+                        files.push((index, join(name, &rel)));
+                    }
                 }
                 bytes = bytes.saturating_add(size);
             }
@@ -169,7 +181,20 @@ pub(super) fn plan_at(
 
 fn attribution(name: &str) -> bool {
     let name = name.to_lowercase();
-    ["license", "licence", "licença", "licenca", "credit", "crédito", "copyright", "readme", "author", "autor"].iter().any(|tag| name.contains(tag))
+    [
+        "license",
+        "licence",
+        "licença",
+        "licenca",
+        "credit",
+        "crédito",
+        "copyright",
+        "readme",
+        "author",
+        "autor",
+    ]
+    .iter()
+    .any(|tag| name.contains(tag))
 }
 
 pub(super) fn extra_space(plan: &Plan) -> u64 {
@@ -184,7 +209,9 @@ pub(super) fn extra_space(plan: &Plan) -> u64 {
 
 pub(super) fn check_mode(plan: &Plan, mode: InstallMode) -> Result<()> {
     if mode == InstallMode::InPlace && plan.maps.iter().any(|m| m.what == KIND) {
-        return Err(anyhow!("Proton maps must be extracted and converted; choose Extract instead of using the archive in place"));
+        return Err(anyhow!(
+            "Proton maps must be extracted and converted; choose Extract instead of using the archive in place"
+        ));
     }
     Ok(())
 }
@@ -193,7 +220,10 @@ pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> 
     // Folder sources can change after planning. Recheck every copied declaration
     // before converting the first map, not only when each map is reached.
     for (i, m) in plan.maps.iter().enumerate().filter(|(_, m)| m.what == KIND) {
-        let config = m.files.iter().find(|(_, p)| p.to_ascii_lowercase().ends_with(".map.txt"))
+        let config = m
+            .files
+            .iter()
+            .find(|(_, p)| p.to_ascii_lowercase().ends_with(".map.txt"))
             .context("missing original map configuration")?;
         omsi_proton::permission::validate_file(&staging.join(i.to_string()).join(&config.1))?;
     }
@@ -239,8 +269,12 @@ pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> 
         // Generated files take the same move/cleanup and mod-ownership path as
         // source files. No shared depot is installed before all maps convert.
         plan.maps.push(Mapping {
-            src: String::new(), dest: "HOFs".into(), what: "generated map depots".into(),
-            files: hofs, bytes: hof_bytes, aside: false,
+            src: String::new(),
+            dest: "HOFs".into(),
+            what: "generated map depots".into(),
+            files: hofs,
+            bytes: hof_bytes,
+            aside: false,
         });
     }
     Ok(())
