@@ -17,6 +17,7 @@ mod path_corners;
 mod path_smoothing;
 mod paths;
 pub mod permission;
+pub mod oi;
 mod prefabs;
 mod road_surface;
 mod settings;
@@ -321,7 +322,7 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     );
     ensure!(
         !child(dir, "global.cfg")?.exists()
-            && !child(dir, omsi_cfg::oi::GLOBAL)?.exists()
+            && !child(dir, crate::oi::GLOBAL)?.exists()
             && !child(dir, "proton-import")?.exists(),
         "source contains reserved import output files"
     );

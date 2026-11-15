@@ -112,10 +112,10 @@ fn copy(
     Ok(())
 }
 
-pub(crate) fn text(path: &Path, text: &str, kind: omsi_cfg::oi::Kind) -> Result<()> {
+pub(crate) fn text(path: &Path, text: &str, kind: crate::oi::Kind) -> Result<()> {
     let raw = path.with_extension("temporary");
     crate::text(&raw, text)?;
-    omsi_cfg::oi::encode_file(&raw, path, kind)?;
+    crate::oi::encode_file(&raw, path, kind)?;
     std::fs::remove_file(raw)?;
     Ok(())
 }

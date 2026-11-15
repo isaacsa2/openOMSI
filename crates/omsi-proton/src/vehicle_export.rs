@@ -7,7 +7,7 @@ use crate::{
     vehicle_physics::Physics,
 };
 use anyhow::{Context, Result, ensure};
-use omsi_cfg::oi::{self, Kind};
+use crate::oi::{self, Kind};
 use std::path::Path;
 
 pub(crate) fn export(
