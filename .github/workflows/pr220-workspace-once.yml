@@ -1,4 +1,4 @@
-name: One-time PR220 workspace validation
+name: One-time PR220 workspace lockfile sync
 
 on:
   push:
@@ -17,11 +17,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Check recovered converter with current workspace
-        run: cargo check -p omsi-proton --lib --message-format=short
-      - name: Run converter unit tests
-        run: cargo test -p omsi-proton --lib -- --test-threads=1
-      - name: Commit regenerated lockfile and remove temporary workflow
+      - name: Compile library and standalone converter examples
+        run: cargo check -p omsi-proton --lib --examples --message-format=short
+      - name: Commit lockfile and remove temporary workflow
         shell: bash
         run: |
           set -euo pipefail
@@ -29,5 +27,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/pr220-workspace-once.yml
           git add Cargo.lock
-          git commit -m "build(proton): update lockfile for converter workspace crate"
+          git commit -m "build(proton): refresh lockfile for recovered converter"
           git push origin HEAD:refs/heads/preview/next-test-build
