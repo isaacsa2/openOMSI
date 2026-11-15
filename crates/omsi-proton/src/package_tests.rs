@@ -68,7 +68,7 @@ fn source_preserving_package_loads_native_links_and_keeps_attribution_bytes() {
     );
     assert!(!source.join("proton-import").exists());
     assert!(map.join("global.cfg").is_file());
-    assert!(!map.join("global.cfg").exists());
+    assert!(!map.join("global.cfgoi").exists());
     let global = omsi_map::GlobalCfg::load(&map.join("global.cfg")).unwrap();
     for tile in global.tiles {
         assert!(tile.file.ends_with(".map"));

@@ -187,7 +187,7 @@ fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
     for t in global.tiles {
         let tile = omsi_map::Tile::load(&f.0.join(&t.file)).unwrap();
         let terrain =
-            omsi_map::Terrain::load(&f.0.join(&t.file).with_extension("terrainoi")).unwrap();
+            omsi_map::Terrain::load(&f.0.join(format!("{}.terrain", t.file))).unwrap();
         assert!(terrain.heights.iter().all(|&h| h < 7.0));
         assert_eq!(tile.objects.len(), 1);
         assert_eq!(tile.objects[0].pos, [0.0; 3]);

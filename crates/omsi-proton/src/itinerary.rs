@@ -36,8 +36,10 @@ use std::path::Path;
 
 /// Generated next to the navigation data.
 pub const FILE: &str = "proton-import/itineraries.json";
-/// What the installed map holds once its generated files are sealed.
-pub const SEALED: &str = "proton-import/itineraries.jsonoi";
+/// What a newly converted map holds in native JSON.
+pub const SEALED: &str = FILE;
+/// Retained for existing experimental OI map installations.
+pub const LEGACY_SEALED: &str = "proton-import/itineraries.jsonoi";
 
 const MAX_ITINERARIES: usize = 512;
 const MAX_STOPS: usize = 512;
@@ -92,7 +94,7 @@ struct Input {
     itineraries: Vec<Itinerary>,
 }
 
-/// Read the itineraries of a converted map (the decoded bytes of [`SEALED`]). Anything out
+/// Read the itineraries of a converted map from native JSON or the legacy decoded OI payload. Anything out
 /// of bounds, of another version or with fewer than two stops is refused as a whole.
 pub fn from_bytes(bytes: &[u8]) -> Result<Vec<Itinerary>> {
     ensure!(bytes.len() <= 8 << 20, "itineraries file exceeds 8 MiB");

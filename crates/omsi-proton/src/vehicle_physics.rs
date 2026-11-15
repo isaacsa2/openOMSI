@@ -190,7 +190,7 @@ impl Physics {
             moi.iter_mut().for_each(|v| *v *= 1000.);
         }
         let mut s = format!(
-            "[friendlyname]\nProton Bus\n{}\nDefault\n[ai_veh_type]\n2\n[mass]\n{mass}\n[cog]\n{}\n{}\n{}\n[schwerpunkt]\n{}\n[boundingbox]\n{}\n{}\n{}\n{}\n{}\n{}\n[rollwiderstand]\n{}\n[rot_pnt_long]\n{rear}\n[inv_min_turnradius]\n{inv}\n[model]\nModel/model.cfgoi\n[paths]\nModel/paths.cfgoi\n[passengercabin]\nModel/cabin.cfgoi\n[varnamelist]\n1\nScript/variables.cfgoi\n[stringvarnamelist]\n1\nScript/strings.cfgoi\n[script]\n1\nScript/main.cfgoi\n",
+            "[friendlyname]\nProton Bus\n{}\nDefault\n[ai_veh_type]\n2\n[mass]\n{mass}\n[cog]\n{}\n{}\n{}\n[schwerpunkt]\n{}\n[boundingbox]\n{}\n{}\n{}\n{}\n{}\n{}\n[rollwiderstand]\n{}\n[rot_pnt_long]\n{rear}\n[inv_min_turnradius]\n{inv}\n[model]\nModel/model.cfg\n[paths]\nModel/paths.cfg\n[passengercabin]\nModel/cabin.cfg\n[varnamelist]\n1\nScript/variables.cfg\n[stringvarnamelist]\n1\nScript/strings.cfg\n[script]\n1\nScript/main.cfg\n",
             info.name,
             cog[0],
             cog[1],
