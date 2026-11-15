@@ -726,6 +726,9 @@ pub fn navigation_map_of(root: &Path, tiles: &[(i32, i32, PathBuf)], chrono_dirs
         slis.lock().len(),
         t0.elapsed().as_secs_f64()
     );
+    // Converted maps may provide explicit roads even without native OMSI splines.
+    // Integrate only declared navigable paths; keep overview-only helpers out.
+    let _imported = crate::proton_navigation::load(tiles, &mut lanes);
     NavigationMap { lanes, road_surfaces: roads, places: positions, signs, names }
 }
 

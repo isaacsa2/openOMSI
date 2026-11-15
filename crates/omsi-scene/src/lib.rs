@@ -54,6 +54,7 @@ mod terrain_paint;
 mod sound_probe;
 mod world;
 mod open;
+mod proton_navigation;
 mod stage;
 mod place;
 mod cut_terrain;
