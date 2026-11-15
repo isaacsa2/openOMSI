@@ -46,6 +46,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Keep at least this much free on the disk after an install (bytes).
+#[path = "install_proton.rs"]
+mod proton;
+
 const MIN_MARGIN: u64 = 512 * 1024 * 1024;
 /// Stop unpacking when the disk gets this full while a job runs (something else writes).
 const ABORT_BELOW: u64 = 1024 * 1024 * 1024;
@@ -430,6 +433,8 @@ struct Entry {
     size: u64,
     /// Index in the archive (zip sources).
     index: usize,
+    proton_base: Option<String>,
+    proton_authorization: Option<std::result::Result<(), String>>,
 }
 
 /// A folder of the source as a tree of names.
@@ -556,10 +561,10 @@ const PACK_ONLY: &[&str] = &["Vehicles", "maps", "Sceneryobjects", "Splines", "H
 
 /// What a folder is, judged by the files directly in it.
 fn guess_kind(n: &Node) -> Option<&'static str> {
-    if n.files.iter().any(|(f, _)| f.eq_ignore_ascii_case("global.cfg")) {
+    if n.files.iter().any(|(f, _)| (f.eq_ignore_ascii_case("global.cfg") || f.eq_ignore_ascii_case(omsi_cfg::oi::GLOBAL))) {
         return Some("maps");
     }
-    for (ext, kind) in [("bus", "Vehicles"), ("ovh", "Vehicles"), ("zug", "Trains"), ("sco", "Sceneryobjects"), ("sli", "Splines"), ("hum", "Humans"), ("owt", "Weather"), ("otp", "TicketPacks"), ("oft", "Fonts"), ("odr", "Drivers"), ("osn", "Situations"), ("dll", "Plugins"), ("opl", "Plugins")] {
+    for (ext, kind) in [("busoi", "Vehicles"), ("ovhoi", "Vehicles"), ("bus", "Vehicles"), ("ovh", "Vehicles"), ("zug", "Trains"), ("sco", "Sceneryobjects"), ("sli", "Splines"), ("hum", "Humans"), ("owt", "Weather"), ("otp", "TicketPacks"), ("oft", "Fonts"), ("odr", "Drivers"), ("osn", "Situations"), ("dll", "Plugins"), ("opl", "Plugins")] {
         if n.files.iter().any(|(f, _)| has_ext(f, &[ext])) {
             return Some(kind);
         }
@@ -655,6 +660,10 @@ fn plan(entries: &[Entry], source_name: &str, installed: &Installed) -> Plan {
         let mut found = false;
         for path in &level {
             let Some(node) = tree.get(path) else { continue };
+            if proton::plan_at(node, path, entries, &mut plan, &mut used) {
+                found = true;
+                continue;
+            }
             // a folder holding bus files is a bus even with `Sound` / `Texture` in it; one
             // holding `Vehicles` or `Sceneryobjects` is a pack whatever lies beside them
             let pack = node.dirs.keys().any(|d| PACK_ONLY.iter().any(|f| f.eq_ignore_ascii_case(d)));
@@ -678,7 +687,7 @@ fn plan(entries: &[Entry], source_name: &str, installed: &Installed) -> Plan {
                             let bpath = join(&cpath, bus);
                             let (files, bytes) = collect(bn, &bpath, entries);
                             used.extend(files.iter().map(|f| f.0));
-                            if bn.has_ext_deep(&["bus", "ovh", "zug", "sco"]) {
+                            if bn.has_ext_deep(&["bus", "busoi", "ovh", "ovhoi", "zug", "sco"]) {
                                 plan.maps.push(Mapping { src: bpath, dest: format!("Vehicles/{bus}"), what: "vehicle".into(), files, bytes, aside: false });
                             } else {
                                 match installed.vehicle(bus) {
@@ -773,7 +782,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     }
     // (the name becomes a folder name: `...zip` has the stem `..`)
     let source_name = if archive.is_some() { src.file_stem() } else { src.file_name() }.map(|s| s.to_string_lossy().to_string()).filter(|n| safe_rel(n).as_deref() == Some(n.as_str())).unwrap_or_else(|| "mod".into());
-    let (mut source, entries) = if staged_archive {
+    let (mut source, mut entries) = if staged_archive {
         let unpacked = staging_dir(content, job.id).join("source");
         job.state("unpacking", tr("checking the archive and unpacking it into staging"));
         unpack_archive(job, content, &src, &unpacked, archive.unwrap())?;
@@ -802,8 +811,10 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     if entries.is_empty() {
         return Err(anyhow!(trf("{name} is empty", &[("name", &src.display())])));
     }
+    proton::read_layouts(&mut source, &mut entries, job)?;
     let installed = Installed { content, root };
-    let plan = plan(&entries, &source_name, &installed);
+    let mut plan = plan(&entries, &source_name, &installed);
+    proton::validate_selected(&plan, &entries)?;
     if plan.maps.is_empty() {
         return Err(anyhow!(trf("could not tell what {name} is: no Vehicles / maps / Sceneryobjects ... folders and no .bus / .sco / .sli / global.cfg files in it", &[("name", &src.display())])));
     }
@@ -822,7 +833,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
     // an inbox folder's files are hard-linked into the staging folder (no space, and the
     // originals stay until the install is in place); everything else is written anew
     let moving = (job.from_inbox && !is_zip) || staged_archive;
-    let needed = if moving { 0 } else { total_bytes + (total_bytes / 20).max(MIN_MARGIN) };
+    let needed = (if moving { 0 } else { total_bytes + (total_bytes / 20).max(MIN_MARGIN) }).saturating_add(proton::extra_space(&plan));
     let free = free_space(content).unwrap_or(u64::MAX);
     job.set(|p| {
         p.files_total = total_files;
@@ -851,6 +862,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
         m => m,
     }};
     job.set(|p| p.mode = mode);
+    proton::check_mode(&plan, mode)?;
     if mode == InstallMode::InPlace {
         layout?;
         drop(source);
@@ -947,6 +959,7 @@ fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> {
         }
     }
     drop(source);
+    proton::convert(&staging, &mut plan, job)?;
     if job.cancelled() {
         return Err(anyhow!(Cancelled));
     }
@@ -1289,12 +1302,14 @@ pub fn inspect(content: &Path, root: Option<&Path>, src: &Path) -> Result<Source
     }
     let f = std::fs::File::open(src).with_context(|| format!("opening {}", src.display()))?;
     let mut z = zip::ZipArchive::new(std::io::BufReader::with_capacity(ZIP_BUFFER, f)).with_context(|| trf("{name} is not a readable zip archive", &[("name", &src.display())]))?;
-    let (entries, _) = list_zip(&mut z, &job)?;
+    let (mut entries, _) = list_zip(&mut z, &job)?;
+    proton::read_layouts(&mut Source::Zip(z), &mut entries, &job)?;
     let source_name = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "mod".into());
     let plan = plan(&entries, &source_name, &Installed { content, root });
+    proton::validate_selected(&plan, &entries)?;
     let files: u64 = plan.maps.iter().map(|m| m.files.len() as u64).sum();
     let unpacked: u64 = plan.maps.iter().map(|m| m.bytes).sum();
-    let needed = unpacked + (unpacked / 20).max(MIN_MARGIN);
+    let needed = unpacked.saturating_add((unpacked / 20).max(MIN_MARGIN)).saturating_add(proton::extra_space(&plan));
     let layout = if plan.maps.is_empty() { Err(anyhow!(tr("nothing in it the game would use"))) } else { in_place_layout(src, &plan) };
     let fits = needed <= free;
     let in_place_ok = layout.is_ok();
