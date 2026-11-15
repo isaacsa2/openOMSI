@@ -13,11 +13,11 @@ serde.workspace = true
 serde_json.workspace = true
 flate2.workspace = true
 omsi-cfg = { path = "../omsi-cfg" }
+omsi-map = { path = "../omsi-map" }
 omsi-o3d = { path = "../omsi-o3d" }
 
 [dev-dependencies]
 omsi-sim = { path = "../omsi-sim" }
 omsi-vehicle = { path = "../omsi-vehicle" }
 omsi-geometry = { path = "../omsi-geometry" }
-omsi-map = { path = "../omsi-map" }
 omsi-scenery = { path = "../omsi-scenery" }
