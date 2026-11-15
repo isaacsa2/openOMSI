@@ -1,34 +1,42 @@
-# Proton Bus converter — recovery status
+# Proton Bus converter — recovery in progress
 
-This directory and its supporting source are being recovered from [PR #220](https://github.com/isaacsa2/openOMSI/pull/220), last updated on 2026-10-13.
+This draft recovers [PR #220](https://github.com/isaacsa2/openOMSI/pull/220), originally developed in October 2026, on top of the official openOMSI `main` of 15 November 2026.
 
-## What has been preserved
+The historical implementation is preserved at `archive/pr220-legacy-20261013`. The refreshed PR does **not** overwrite current engine or launcher files with their October versions.
 
-- The original `omsi-proton` converter source, examples and synthetic tests, at `crates/omsi-proton/`.
-- The original 2026-10-13 branch remains available at `archive/pr220-legacy-20261013` for comparison.
-- The feature recovery branch is rooted in the current official `main`, instead of replacing newer game code with October-era versions.
+## Recovered and verified
 
-## Current status: source recovery only
+- Restored the complete experimental `crates/omsi-proton/` source, synthetic tests and command-line examples, without including third-party assets.
+- Registered `omsi-proton` in the current Cargo workspace, added the needed `flate2` dependency and refreshed `Cargo.lock`.
+- Isolated the legacy OpenOMSI-only OI envelope writer/decoder in the converter crate, instead of changing the current engine's VFS before a dedicated review.
+- Ran rustfmt on the recovered source. The size-budget and security-audit workflows passed in this recovery.
+- **`cargo check -p omsi-proton --lib --examples` passed on 15 November 2026.** This validates the library and the CLI examples against current dependencies, *not* game compatibility.
 
-**Not ready for runtime use, merging, or distribution as a working converter.**
+## Not yet working
 
-The restored crate is **not yet included in the workspace** and the old integrations (launcher, installer, OI format readers, native scene, traffic, input, vehicle, navigation and localisation) have **not** been replayed over current main. This is intentional: applying October versions of shared engine files to November main would overwrite significant upstream changes. Historical generated build artifacts are also not evidence of current compatibility.
+**This is not a functional in-game Proton Bus importer and must not be merged or advertised as such.** The present game does not have the recovered OI readers, launcher Mods integration, scene/navigation/AI/passenger/vehicle rendering or simulator hooks. Merely copying older versions of these files would discard many newer upstream changes.
 
-## Porting checklist
+The older `cargo test -p omsi-proton --lib` suite still does **not compile** on current main. It references `omsi_cfg::oi` and older `GlobalCfg.unscheduled_passengers` / `SceneryObject.switched_map_lights` interfaces. These failures are known compatibility work, **not passing tests**. Existing synthetic fixtures must be ported together with the runtime code rather than deleted or silently skipped.
 
-- [ ] Reconcile OI-format readers and format validation with current `omsi-cfg`, map and vehicle pipelines.
-- [ ] Reconcile the converter's `omsi-proton` APIs with current workspace dependencies; regenerate lockfile and enable the crate in the workspace.
-- [ ] Restore safe, opt-in **local** map/vehicle conversion in the Mods installer, without any auto-bypass.
-- [ ] Port launcher/scene/navigation/AI traffic/passenger/lighting and rigid-bus hooks against current APIs, in small reviewable changes.
-- [ ] Preserve mandatory `[openomsi]\nallowConversion=1` validation, source staging/rollback and path/size controls on **all** entry points.
-- [ ] Keep creator attribution and source asset licenses; the editable declaration is **not** proof of authorship or redistribution permission.
-- [ ] Validate supported PBSU/Ciano versions with creator-supplied test packages; do not ship models, textures, sounds or maps from third parties.
-- [ ] Rework old docs to avoid implying support that is not yet present.
-- [ ] Run `cargo fmt`, `cargo check`, targeted tests, size-budget, security audit and platform builds on the **new head**.
-- [ ] Perform in-game testing (graphics, physics, doors, passengers, traffic and night lighting) before requesting upstream review.
+## Integration checklist
 
-## Historical validation
+- [x] Preserve the original branch and recover the converter source on current upstream main
+- [x] Format the converter code and register it in the Cargo workspace
+- [x] Regenerate the lockfile and compile the converter library and CLI examples
+- [ ] Design and validate secure, bounded OI reading from disk, mounted archives and other modern VFS layers; prefer current loader APIs
+- [ ] Restore opt-in local map/vehicle conversion in Mods, with staging, rollback, file budgets and canonical `[openomsi]\nallowConversion=1` validation on every entry point
+- [ ] Reconcile the current map/vehicle/scene/navigation, collision, passengers, traffic, signal-light and vehicle-animation interfaces without regressing unrelated features
+- [ ] Port existing unit/integration tests and add modern regression coverage (including malformed OI headers, sizes, source paths, licences and cancellation)
+- [ ] Update translated UI, user documentation, format notes and test instructions
+- [ ] Run full PR checks, security audit, targeted tests and platform builds against the final head
+- [ ] Perform real map/bus visual and gameplay testing, with explicit creator-supplied test packages
 
-The 2026-10-13 test build workflows succeeded for release packaging, but PR checks failed the size budget (one extra line in `crates/omsi-launcher-core/src/lib.rs`) and the security audit reported a RustSec vulnerability. Those historical results cannot be used to approve the revived code on current main.
+The `allowConversion=1` declaration is editable text, **not verified proof of identity or redistribution rights**. Respect the author's attribution and licence. Do not bundle or redistribute another game's models, scripts, maps, textures or sounds without permission.
 
-The original implementation lives at [commit 22c8401](https://github.com/isaacsa2/openOMSI/commit/22c8401e5d6bd868a7ee4e5ce031204eaa49552e).
+Original archived head: [22c8401](https://github.com/isaacsa2/openOMSI/commit/22c8401e5d6bd868a7ee4e5ce031204eaa49552e). The October check runs failed size-budget and security audit; those historical results do not describe the current head.
+
+---
+
+## Resumo em português
+
+A PR #220 foi reaberta e sincronizada com a `main` oficial. O código do conversor Proton Bus, os exemplos e o `Cargo.lock` foram recuperados e atualizados; a **biblioteca e os exemplos compilam**. Ainda faltam integração com o jogo, correções nos testes antigos, validação de mapas/ônibus reais e revisão completa. A PR continua em **rascunho**, sem merge ou alteração da `main`.
