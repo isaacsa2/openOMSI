@@ -1,0 +1,177 @@
+name: PR220 native outputs migration
+on:
+  push:
+    branches: [preview/next-test-build]
+    paths: [.github/workflows/pr220-native-outputs-once.yml]
+permissions:
+  contents: write
+jobs:
+  port:
+    if: github.repository == 'isaacsa2/openOMSI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Migrate converter outputs and preserve legacy readers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          
+          from pathlib import Path
+          import re, subprocess
+          def edit(p, replacements, required=True):
+              f=Path(p); s=f.read_text()
+              for old,new in replacements:
+                  if required and old not in s:
+                      raise RuntimeError(f"Expected anchor missing {p}: {old[:90]!r}")
+                  s=s.replace(old,new)
+              if s!=f.read_text(): f.write_text(s)
+              print("UPDATED", p)
+          
+          prefix = """//! Native openOMSI/OMSI asset validation; generated definitions are not wrapped in OI envelopes.
+          //! Keep old OI readers for already-imported packages, but newly converted assets
+          //! use the engine's ordinary .cfg, .map, .sco, .o3d, .hof and .bus/.ovh loaders.
+          use anyhow::{Context, Result, ensure};
+          use std::path::{Path, PathBuf};
+          
+          pub(crate) fn validate_native(dir: &Path, installed: &str, cancel: &impl Fn() -> bool) -> Result<()> {
+              let global = dir.join("global.cfg");
+              ensure!(global.is_file(), "missing native map manifest");
+              let map = omsi_map::GlobalCfg::load(&global).context("validating native map manifest")?;
+              ensure!(!map.tiles.is_empty(), "native map has no tiles");
+              for tile in &map.tiles {
+                  ensure!(!cancel(), "map import cancelled");
+                  ensure!(tile.file.starts_with("tile_") && tile.file.ends_with(".map")
+                      && !tile.file.split('/').any(|part| part == ".."),
+                      "generated tile is not a native map file");
+                  let tile_path = dir.join(&tile.file);
+                  ensure!(tile_path.is_file(), "missing native tile {}", tile.file);
+                  let contents = omsi_map::Tile::load(&tile_path)
+                      .with_context(|| format!("validating native tile {}", tile.file))?;
+                  for object in contents.objects {
+                      let rel = object.file.strip_prefix(installed)
+                          .and_then(|p| p.strip_prefix('/'))
+                          .context("generated scenery path escapes the imported map")?;
+                      ensure!(!rel.is_empty() && !rel.split('/').any(|part| part == "." || part == "..")
+                          && !rel.contains(['\\\\', ':', '\\0']),
+                          "unsafe generated scenery path");
+                      ensure!(rel.ends_with(".sco"), "generated scenery has no native .sco extension");
+                      let file = dir.join(rel);
+                      ensure!(file.is_file(), "missing generated scenery: {}", file.display());
+                      ensure!(!std::fs::symlink_metadata(&file)?.file_type().is_symlink(),
+                          "generated scenery cannot be a symbolic link");
+                  }
+              }
+              ensure!(dir.join(crate::depot::FILE).is_file(), "missing native depot");
+              ensure!(dir.join(crate::navigation::FILE).is_file(), "missing native navigation metadata");
+              Ok(())
+          }
+          
+          """
+          p=Path("crates/omsi-proton/src/package.rs")
+          s=p.read_text()
+          anchor="/// Source-preserving CLI path using the same mandatory declaration as the launcher."
+          assert s.count(anchor)==1
+          s=prefix+s[s.index(anchor):]
+          s=s.replace('format!("{}.hofoi", crate::depot::name(&installed))', 'format!("{}.hof", crate::depot::name(&installed))')
+          p.write_text(s)
+          print("UPDATED",p)
+          
+          edit("crates/omsi-proton/src/lib.rs", [
+           ("//! in staging and emits OpenOMSI-only OI definitions for the native simulation.",
+            "//! in staging and emits native OMSI/openOMSI definitions for the simulation."),
+           ("package::seal(dir, installed_rel, &cancel).context(\"sealing converted map files\")?",
+            "package::validate_native(dir, installed_rel, &cancel).context(\"validating converted native map files\")?"),
+          ])
+          edit("crates/omsi-proton/src/vehicle_export.rs",[
+           ("use crate::oi::{self, Kind};\n",""),
+           ('            oi::encode_file(&raw, &folder.join(format!("{name_file}.o3doi")), Kind::Mesh)?;\n            std::fs::remove_file(raw)?;\n', ''),
+           ('model.push_str(&format!("[mesh]\\n{name_file}.o3doi\\n"));','model.push_str(&format!("[mesh]\\n{name_file}.o3d\\n"));'),
+           (".cfgoi", ".cfg"), (".busoi", ".bus"),
+           ('vehicle_package::text(&target.join(path), &text, Kind::Config)?','vehicle_package::text(&target.join(path), &text)?'),
+           ('vehicle_package::text(&target.join("vehicle.bus"), &def, Kind::Vehicle)?','vehicle_package::text(&target.join("vehicle.bus"), &def)?'),
+          ])
+          p=Path("crates/omsi-proton/src/vehicle_package.rs");s=p.read_text()
+          key="pub(crate) fn text(path: &Path, text: &str, kind: crate::oi::Kind) -> Result<()> {"
+          assert key in s
+          s=s[:s.index(key)]+'''pub(crate) fn text(path: &Path, text: &str) -> Result<()> {
+              crate::text(path, text)
+          }
+          '''
+          p.write_text(s)
+          print("UPDATED",p)
+          edit("crates/omsi-proton/src/depot.rs",[
+           ('pub const FILE: &str = "proton-import/depot.hofoi";','pub const FILE: &str = "proton-import/depot.hof";'),
+           ('pub const NAME_FILE: &str = "proton-import/depot.cfgoi";','pub const NAME_FILE: &str = "proton-import/depot.txt";'),
+           ('    let file = dir.join(NAME_FILE);\n    if omsi_cfg::vfs::file_size(&file)? > 4096 {',
+            '    let file = dir.join(NAME_FILE);\n    let file = if omsi_cfg::vfs::is_file(&file) { file } else { dir.join("proton-import/depot.cfgoi") };\n    if omsi_cfg::vfs::file_size(&file)? > 4096 {'),
+          ])
+          edit("crates/omsi-proton/src/navigation.rs",[
+           ('pub const FILE: &str = "proton-import/navigation.jsonoi";',
+            'pub const FILE: &str = "proton-import/navigation.json";\n/// Older experimental imports remain readable.\npub const LEGACY_FILE: &str = "proton-import/navigation.jsonoi";'),
+          ])
+          edit("crates/omsi-scene/src/proton_navigation.rs",[
+           ('    let file = dir.join(omsi_proton::navigation::FILE);',
+            '    let file = dir.join(omsi_proton::navigation::FILE);\n    let file = if omsi_cfg::vfs::is_file(&file) { file } else { dir.join(omsi_proton::navigation::LEGACY_FILE) };'),
+          ])
+          edit("crates/omsi-proton/src/traffic.rs",[
+           ('pub const FILE: &str = "proton-import/traffic.jsonoi";',
+            'pub const FILE: &str = "proton-import/traffic.json";\nconst LEGACY_FILE: &str = "proton-import/traffic.jsonoi";'),
+           ('        let bytes = omsi_cfg::vfs::read(&map.join(FILE))?;',
+            '        let file = map.join(FILE);\n        let file = if omsi_cfg::vfs::is_file(&file) { file } else { map.join(LEGACY_FILE) };\n        let bytes = omsi_cfg::vfs::read(&file)?;'),
+           ('&& v.file.ends_with(".ovhoi"),', '&& (v.file.ends_with(".ovh") || v.file.ends_with(".ovhoi")),'),
+           ('.ovhoi', '.ovh'), ('.cfgoi', '.cfg'), ('.o3doi', '.o3d'),
+          ])
+          # The previous whole-file extension change must not erase the intentional old-asset fallback.
+          p=Path("crates/omsi-proton/src/traffic.rs");s=p.read_text()
+          s=s.replace('(v.file.ends_with(".ovh") || v.file.ends_with(".ovh"))',
+                      '(v.file.ends_with(".ovh") || v.file.ends_with(".ovhoi"))')
+          p.write_text(s)
+          edit("crates/omsi-launcher-core/src/install_proton.rs", [
+           ('format!("{}.hofoi", omsi_proton::depot::name(&m.dest))',
+            'format!("{}.hof", omsi_proton::depot::name(&m.dest))'),
+           ('OI package for OpenOMSI','native package for openOMSI'),
+          ])
+          edit("crates/omsi-launcher-core/src/install_proton_tests.rs", [(".hofoi", ".hof")])
+          edit("crates/omsi-proton/src/package_tests.rs",[
+           ('source_preserving_package_loads_oi_links_and_keeps_attribution_bytes',
+            'source_preserving_package_loads_native_links_and_keeps_attribution_bytes'),
+           ('    assert!(!map.join("global.cfg").exists());',
+            '    assert!(map.join("global.cfg").is_file());\n    assert!(!map.join("global.cfgoi").exists());'),
+           ('omsi_map::GlobalCfg::load(&map.join(omsi_cfg::oi::GLOBAL))',
+            'omsi_map::GlobalCfg::load(&map.join("global.cfg"))'),
+           ('".tileoi"','".map"'), ('".oscoi"','".sco"'),
+          ])
+          # Tests against conversion outputs: never change the legacy OI reader implementation.
+          for p in sorted(Path("crates/omsi-proton/src").glob("*tests.rs")):
+              s=p.read_text();old=s
+              s=s.replace("omsi_cfg::oi::GLOBAL",'"global.cfg"')
+              for a,b in [(".tileoi",".map"),(".terrainoi",".map.terrain"),(".oscoi",".sco"),
+                          (".o3doi",".o3d"),(".cfgoi",".cfg"),(".busoi",".bus"),
+                          (".ovhoi",".ovh"),(".hofoi",".hof"),(".jsonoi",".json")]:
+                  s=s.replace(a,b)
+              if s!=old:
+                  p.write_text(s);print("UPDATED test",p)
+          # Align tests embedded inside converter traffic module (converted outputs only).
+          # New traffic manifest validation still accepts legacy OI paths.
+          assert 'v.file.ends_with(".ovhoi")' in Path("crates/omsi-proton/src/traffic.rs").read_text()
+          print("NATIVE OUTPUT FORMAT MIGRATION COMPLETE")
+          PY
+          rustfmt crates/omsi-proton/src/package.rs crates/omsi-proton/src/lib.rs crates/omsi-proton/src/vehicle_export.rs crates/omsi-proton/src/vehicle_package.rs crates/omsi-proton/src/depot.rs crates/omsi-proton/src/navigation.rs crates/omsi-proton/src/traffic.rs crates/omsi-scene/src/proton_navigation.rs crates/omsi-launcher-core/src/install_proton.rs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/pr220-native-outputs-once.yml
+          git add crates/omsi-proton crates/omsi-scene/src/proton_navigation.rs crates/omsi-launcher-core/src/install_proton.rs crates/omsi-launcher-core/src/install_proton_tests.rs
+          git commit -m 'feat(proton): emit native openOMSI/OMSI assets instead of OI envelopes'
+          git push origin HEAD:refs/heads/preview/next-test-build
+      - name: Install native Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libasound2-dev libudev-dev libx11-dev libxcb1-dev libssl-dev libgtk-3-dev
+      - name: Check converter and scene all targets
+        run: cargo check -p omsi-proton -p omsi-launcher-core -p omsi-scene --all-targets --message-format=short
+      - name: Test native map and bus conversion
+        run: cargo test -p omsi-proton --lib -- --test-threads=1
+      - name: Test Mods native map import
+        run: cargo test -p omsi-launcher-core install::proton::tests --lib -- --test-threads=1
