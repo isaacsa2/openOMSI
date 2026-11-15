@@ -1067,12 +1067,21 @@ pub fn poll() -> Result<Poll> {
     })
 }
 
+mod airports;
+pub use airports::nearest_airport;
+mod custom_weather;
+pub use custom_weather::{CustomWeather, custom_weather};
+pub use omsi_content::weather_choice::metar_airports;
+mod date_codes;
+use date_codes::{add_days, day_before, days_of, weekday};
 mod content_lists;
 pub use content_lists::*;
+use content_lists::{read_map, missing_packs_of, paint_schemes, dsc_candidates, parse_dsc};
 use content_lists::{content_language, date_for_game, log_line, year_span_of};
 
 mod timetable_lists;
 pub use timetable_lists::*;
+use timetable_lists::lines_on;
 
 // ---------------------------------------------------------------------------------------
 // profiles: the driver's personnel file plus the sessions the game writes

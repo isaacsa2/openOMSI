@@ -151,7 +151,7 @@ fn log_empty(rel: &str, what: &str) {
 
 /// The map in `d` and the files its entry is read from beyond the stamped ones (the tiles,
 /// when their entry objects are its entry points).
-fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf>) {
+pub(super) fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf>) {
     let mut g = match omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(d)) {
         Ok(g) => g,
         Err(e) => {
@@ -310,7 +310,7 @@ pub fn vehicle_type_label(type_name: &str, path: &Path) -> String {
 }
 
 /// The vehicle packs whose parts a model file names and that are installed nowhere.
-fn missing_packs_of(model: &Path) -> Vec<String> {
+pub(super) fn missing_packs_of(model: &Path) -> Vec<String> {
     let Ok(text) = omsi_cfg::vfs::read(model) else {
         return Vec::new();
     };
@@ -340,7 +340,7 @@ fn missing_packs_of(model: &Path) -> Vec<String> {
 
 /// `[item]` names of every `.cti` in the model's `[CTC]` folders (in every content root):
 /// the paint schemes, and the folders they were read from.
-fn paint_schemes(vehicle: &omsi_vehicle::Vehicle) -> (Vec<String>, Vec<PathBuf>) {
+pub(super) fn paint_schemes(vehicle: &omsi_vehicle::Vehicle) -> (Vec<String>, Vec<PathBuf>) {
     let mut names: Vec<String> = Vec::new();
     let mut dirs_read: Vec<PathBuf> = Vec::new();
     let Some(model_rel) = vehicle.model.as_ref() else {
@@ -787,11 +787,6 @@ pub struct WeatherInfo {
     pub installed: bool,
 }
 
-pub use omsi_content::weather_choice::metar_airports;
-mod airports;
-pub use airports::nearest_airport;
-mod custom_weather;
-pub use custom_weather::{CustomWeather, custom_weather};
 
 pub fn list_weather() -> Result<Vec<WeatherInfo>> {
     root()?;
@@ -913,7 +908,7 @@ pub(super) fn content_language() -> &'static str {
 /// The description files OMSI reads for `file` (`global.cfg` -> `global_ENG.dsc`), in the
 /// order they are tried: the language itself, then English for a language that has none
 /// (German is the files' own language, so German falls back to the file itself).
-fn dsc_candidates(file: &Path, lang: &str) -> Vec<PathBuf> {
+pub(super) fn dsc_candidates(file: &Path, lang: &str) -> Vec<PathBuf> {
     let stem = file
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -929,12 +924,12 @@ fn dsc_candidates(file: &Path, lang: &str) -> Vec<PathBuf> {
 }
 
 /// A `.dsc` file: the `[name]` / `[friendlyname]` lines and the `[description]` text.
-struct Dsc {
-    name: Vec<String>,
-    description: String,
+pub(super) struct Dsc {
+    pub(super) name: Vec<String>,
+    pub(super) description: String,
 }
 
-fn parse_dsc(text: &str) -> Dsc {
+pub(super) fn parse_dsc(text: &str) -> Dsc {
     let mut name = Vec::new();
     let mut desc: Vec<&str> = Vec::new();
     let mut section = "";

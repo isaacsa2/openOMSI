@@ -243,7 +243,7 @@ pub fn list_lines(map: &str, date: &str) -> Result<Vec<LineInfo>> {
     lines_on(&map_dir, date)
 }
 
-fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
+pub(super) fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
     let date = if date.trim().is_empty() {
         DEFAULT_DATE
     } else {
@@ -428,8 +428,6 @@ fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
     Ok(out)
 }
 
-mod date_codes;
-use date_codes::{add_days, day_before, days_of, weekday};
 
 fn natural_key(s: &str) -> (u64, String) {
     let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
