@@ -1,12 +1,12 @@
 //! Export optional gameplay as ordinary, tile-local OMSI scenery and paths.
 use crate::{
+    Report,
     convert::EDGE,
     paths::{DrivePath, Point},
     signals::Collector,
     stops::Stop,
-    Report,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::{Vec2, Vec3};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -167,9 +167,7 @@ fn attach_signals(
                     let p = s.a + ab * t;
                     let d = (p - trigger.centre).truncate().length();
                     nearest = nearest.min(d);
-                    if d <= reach
-                        && (p.z - trigger.centre.z).abs() <= trigger.height
-                        && t < 0.99999
+                    if d <= reach && (p.z - trigger.centre.z).abs() <= trigger.height && t < 0.99999
                     {
                         candidates.push((d, i, t));
                     }
@@ -286,7 +284,13 @@ fn placement(
     labels: &[String],
 ) -> String {
     let (x, y) = key(pos);
-    let mut out = format!("[object]\n0\n{installed}/proton-import/{stem}.sco\n{id}\n{}\n{}\n{}\n{heading}\n0\n0\n{}\n",pos.x-x as f32*EDGE,pos.y-y as f32*EDGE,pos.z,labels.len());
+    let mut out = format!(
+        "[object]\n0\n{installed}/proton-import/{stem}.sco\n{id}\n{}\n{}\n{}\n{heading}\n0\n0\n{}\n",
+        pos.x - x as f32 * EDGE,
+        pos.y - y as f32 * EDGE,
+        pos.z,
+        labels.len()
+    );
     for label in labels {
         out.push_str(label);
         out.push('\n');
@@ -494,7 +498,10 @@ pub(crate) fn export(
             }
         }
         let amount = stop.passengers.min(stop.waiting.len());
-        placed.push(PlacedStop { id: stop.id.clone(), object: id });
+        placed.push(PlacedStop {
+            id: stop.id.clone(),
+            object: id,
+        });
         let labels = vec![
             stop.name,
             amount.to_string(),
@@ -555,23 +562,47 @@ mod tests {
         DrivePath {
             points: points
                 .iter()
-                .map(|&pos| Point { pos, speed: 40.0, turn: 0, buses: false, cars: true, density: 1.0 })
+                .map(|&pos| Point {
+                    pos,
+                    speed: 40.0,
+                    turn: 0,
+                    buses: false,
+                    cars: true,
+                    density: 1.0,
+                })
                 .collect(),
             pedestrian: false,
         }
     }
 
     fn trigger(centre: [f32; 3], radius: f32, any_angle: bool) -> crate::signals::Trigger {
-        crate::signals::Trigger { group: 0, path: 0, centre: Vec3::from(centre), radius, height: 5.0, any_angle }
+        crate::signals::Trigger {
+            group: 0,
+            path: 0,
+            centre: Vec3::from(centre),
+            radius,
+            height: 5.0,
+            any_angle,
+        }
     }
 
     /// Which chains got a signal, after the paths are cut where the stop lines are.
-    fn stopped(paths: &[DrivePath], triggers: Vec<crate::signals::Trigger>) -> (BTreeSet<usize>, Report) {
+    fn stopped(
+        paths: &[DrivePath],
+        triggers: Vec<crate::signals::Trigger>,
+    ) -> (BTreeSet<usize>, Report) {
         let mut signals = Collector::default();
         signals.triggers = triggers;
         let mut report = Report::default();
         let lanes = attach_signals(segments(paths).unwrap(), &signals, &mut report).unwrap();
-        (lanes.iter().filter(|l| l.signal.is_some()).map(|l| l.path).collect(), report)
+        (
+            lanes
+                .iter()
+                .filter(|l| l.signal.is_some())
+                .map(|l| l.path)
+                .collect(),
+            report,
+        )
     }
 
     #[test]
@@ -580,13 +611,32 @@ mod tests {
         // 2 m off the axis with a 1 m capsule: a car's flank is in it, its centre line is not
         let (beside, report) = stopped(&road, vec![trigger([10.0, 2.0, 0.0], 1.0, false)]);
         assert_eq!(beside, BTreeSet::from([0]));
-        assert_eq!((report.traffic_light_triggers, report.traffic_light_triggers_matched), (1, 1));
+        assert_eq!(
+            (
+                report.traffic_light_triggers,
+                report.traffic_light_triggers_matched
+            ),
+            (1, 1)
+        );
         // 2.5 m is out of reach: nothing is guessed, and the report counts it
         let (far, report) = stopped(&road, vec![trigger([10.0, 2.5, 0.0], 1.0, false)]);
         assert!(far.is_empty());
-        assert_eq!((report.traffic_light_triggers, report.traffic_light_triggers_matched), (1, 0));
-        let warning = report.warnings.iter().find(|w| w.contains("no authored vehicle path")).unwrap();
-        assert!(warning.starts_with("1 of 1 traffic-light triggers") && warning.contains("2.5 m"), "{warning}");
+        assert_eq!(
+            (
+                report.traffic_light_triggers,
+                report.traffic_light_triggers_matched
+            ),
+            (1, 0)
+        );
+        let warning = report
+            .warnings
+            .iter()
+            .find(|w| w.contains("no authored vehicle path"))
+            .unwrap();
+        assert!(
+            warning.starts_with("1 of 1 traffic-light triggers") && warning.contains("2.5 m"),
+            "{warning}"
+        );
     }
 
     #[test]
@@ -611,7 +661,11 @@ mod tests {
         let (stopped, report) = stopped(&paths, vec![trigger([10.0, 0.0, 0.0], 1.0, false)]);
         assert!(stopped.is_empty());
         assert_eq!(report.traffic_light_triggers_matched, 0);
-        assert!(report.warnings.iter().any(|w| w.contains("different ways")), "{:?}", report.warnings);
+        assert!(
+            report.warnings.iter().any(|w| w.contains("different ways")),
+            "{:?}",
+            report.warnings
+        );
         // `_anyangle_` is exactly the author saying every direction stops
         let (both, _) = stopped_any(&paths);
         assert_eq!(both, BTreeSet::from([0, 1]));
@@ -645,7 +699,12 @@ mod tests {
         let mut report = Report::default();
         let lanes = attach_signals(segments(&road).unwrap(), &signals, &mut report).unwrap();
         let held: Vec<_> = lanes.iter().filter(|l| l.signal.is_some()).collect();
-        assert_eq!(held.len(), 1, "{:?}", held.iter().map(|l| (l.a.x, l.b.x)).collect::<Vec<_>>());
+        assert_eq!(
+            held.len(),
+            1,
+            "{:?}",
+            held.iter().map(|l| (l.a.x, l.b.x)).collect::<Vec<_>>()
+        );
         assert_eq!(held[0].a.x, 9.5);
     }
 

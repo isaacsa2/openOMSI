@@ -3,7 +3,7 @@
 #[cfg(test)]
 use crate::three_ds::Model;
 use crate::three_ds::Object;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::{Vec2, Vec3};
 use omsi_o3d::{Material, Mesh, Triangle, Vertex};
 #[cfg(test)]
@@ -405,10 +405,12 @@ mod budget_tests {
         let mut bytes = GEOMETRY_LIMIT_BYTES - FACE_BYTES;
         reserve_face(&mut bytes).unwrap();
         assert_eq!(bytes, GEOMETRY_LIMIT_BYTES);
-        assert!(reserve_face(&mut bytes)
-            .unwrap_err()
-            .to_string()
-            .contains("8 GiB"));
+        assert!(
+            reserve_face(&mut bytes)
+                .unwrap_err()
+                .to_string()
+                .contains("8 GiB")
+        );
         assert_eq!(bytes, GEOMETRY_LIMIT_BYTES);
         bytes = u64::MAX;
         assert!(reserve_face(&mut bytes).is_err());
@@ -441,14 +443,16 @@ mod budget_tests {
             normal: Vec3::Z,
             uv: Vec2::ZERO,
         };
-        assert!(add_triangle(
-            &mut tiles,
-            [vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)],
-            0,
-            &mut bytes,
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("16384"));
+        assert!(
+            add_triangle(
+                &mut tiles,
+                [vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)],
+                0,
+                &mut bytes,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("16384")
+        );
     }
 }

@@ -1,6 +1,6 @@
 //! Streetlight placeholders become native map lights and inexpensive coronas.
-use crate::{child, convert::EDGE, files, ini, paths::centre, three_ds::Object, Report};
-use anyhow::{ensure, Result};
+use crate::{Report, child, convert::EDGE, files, ini, paths::centre, three_ds::Object};
+use anyhow::{Result, ensure};
 use std::{collections::BTreeMap, path::Path};
 
 struct Definition {

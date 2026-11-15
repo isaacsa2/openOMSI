@@ -5,7 +5,7 @@ use crate::{
     vehicle::Inspection,
     vehicle_package::Report,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use std::path::Path;
 pub(crate) fn export(info: &Inspection, target: &Path, report: &mut Report) -> Result<String> {
     let mut out = String::new();

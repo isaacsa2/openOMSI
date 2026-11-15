@@ -1,44 +1,44 @@
 //! Declared conversion of user-supplied Proton Bus phase 2-4 maps. Conversion runs
 //! in staging and emits OpenOMSI-only OI definitions for the native simulation.
 //! Only free driving is supported. Source mods are never embedded in the program.
-mod convert;
-mod export;
 mod author_file;
+mod convert;
 pub mod depot;
 mod destination_text;
-pub mod permission;
-pub mod package;
-mod materials;
-mod prefabs;
+mod export;
 mod gameplay;
 pub mod itinerary;
+mod materials;
 pub mod navigation;
 mod navigation_index;
-mod road_surface;
-pub mod traffic;
-pub mod vehicle;
-pub mod vehicle_package;
-mod vehicle_export;
-mod vehicle_physics;
-mod vehicle_script;
-mod vehicle_model;
-mod vehicle_cabin;
-mod vehicle_sounds;
 mod optimise;
-mod paths;
+pub mod package;
 mod path_corners;
 mod path_smoothing;
+mod paths;
+pub mod permission;
+mod prefabs;
+mod road_surface;
 mod settings;
 mod signals;
-mod stops;
-mod texture_settings;
 mod spawn;
 mod spool;
-mod tags;
+mod stops;
 mod streetlights;
+mod tags;
+mod texture_settings;
 pub mod three_ds;
+pub mod traffic;
+pub mod vehicle;
+mod vehicle_cabin;
+mod vehicle_export;
+mod vehicle_model;
+pub mod vehicle_package;
+mod vehicle_physics;
+mod vehicle_script;
+mod vehicle_sounds;
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 
 use omsi_o3d::Material;
 use std::collections::BTreeMap;
@@ -77,7 +77,10 @@ pub struct Report {
 }
 
 fn ini(path: &Path) -> Result<Ini> {
-    ensure!(std::fs::metadata(path)?.len() <= 1024 * 1024, "Proton configuration exceeds 1 MiB");
+    ensure!(
+        std::fs::metadata(path)?.len() <= 1024 * 1024,
+        "Proton configuration exceeds 1 MiB"
+    );
     let bytes = std::fs::read(path)?;
     Ok(ini_bytes(&bytes))
 }
@@ -106,7 +109,10 @@ fn ini_bytes(bytes: &[u8]) -> Ini {
         if let Some(s) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
             current = s.to_ascii_lowercase();
         } else if let Some((k, v)) = line.split_once('=') {
-            sections.entry(current.clone()).or_default().insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
+            sections
+                .entry(current.clone())
+                .or_default()
+                .insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
         }
     }
     sections
@@ -144,7 +150,11 @@ fn child(base: &Path, rel: &str) -> Result<PathBuf> {
             out = exact;
         } else {
             if let Ok(m) = std::fs::metadata(&out) {
-                ensure!(m.is_dir(), "Proton path parent is not a directory: {}", out.display());
+                ensure!(
+                    m.is_dir(),
+                    "Proton path parent is not a directory: {}",
+                    out.display()
+                );
             }
             out = match std::fs::read_dir(&out) {
                 Ok(entries) => entries
@@ -155,8 +165,11 @@ fn child(base: &Path, rel: &str) -> Result<PathBuf> {
                 // Missing optional nested assets are checked by the caller. Keep
                 // validating every remaining component instead of returning early.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => exact,
-                Err(e) => return Err(e).with_context(||
-                    format!("resolving Proton path {rel:?} inside {}", out.display())),
+                Err(e) => {
+                    return Err(e).with_context(|| {
+                        format!("resolving Proton path {rel:?} inside {}", out.display())
+                    });
+                }
             };
         }
         if let Ok(m) = std::fs::symlink_metadata(&out) {
@@ -298,11 +311,18 @@ fn textures(
 /// `installed_rel` is its eventual `maps/Proton-<name>` location below the content root.
 pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Result<Report> {
     ensure!(
-        installed_rel.strip_prefix("maps/Proton-").is_some_and(|name| !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':', '\n', '\r', '\0'])),
+        installed_rel
+            .strip_prefix("maps/Proton-")
+            .is_some_and(|name| !name.is_empty()
+                && name != "."
+                && name != ".."
+                && !name.contains(['/', '\\', ':', '\n', '\r', '\0'])),
         "invalid imported map destination"
     );
     ensure!(
-        !child(dir, "global.cfg")?.exists() && !child(dir, omsi_cfg::oi::GLOBAL)?.exists() && !child(dir, "proton-import")?.exists(),
+        !child(dir, "global.cfg")?.exists()
+            && !child(dir, omsi_cfg::oi::GLOBAL)?.exists()
+            && !child(dir, "proton-import")?.exists(),
         "source contains reserved import output files"
     );
     let configs: Vec<_> = files(dir, "txt")?
@@ -332,7 +352,11 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         &child(&base, "tiles")?,
         map.get("modelsdir").context("missing modelsDir")?,
     )?;
-    ensure!(models.is_dir(), "missing Proton model folder: {}", models.display());
+    ensure!(
+        models.is_dir(),
+        "missing Proton model folder: {}",
+        models.display()
+    );
     let texture_dir = child(
         &base,
         map.get("textures")
@@ -340,7 +364,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
             .unwrap_or("textures"),
     )?;
     let mut report = Report::default();
-    let mut spawns = spawns(&base, &models, &mut report.warnings).context("reading map entry points")?;
+    let mut spawns =
+        spawns(&base, &models, &mut report.warnings).context("reading map entry points")?;
     let markers = prefixes(&models)?;
     let mut spool = spool::Spool::new(&dir.join("proton-import/work"), &spawns)?;
     let mut registry = materials::Registry::default();
@@ -350,10 +375,22 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     let smooth = settings::value(&config, "ai_traffic", "usesplines") == Some("1");
     let mut stops = stops::Collector::new(&models)?;
     let mut signals = signals::Collector::new(&models, &mut report)?;
-    let mut lamps = streetlights::Collector::new(&models, &texture_dir, &dir.join("proton-import/texture"), &mut report).context("reading streetlights")?;
+    let mut lamps = streetlights::Collector::new(
+        &models,
+        &texture_dir,
+        &dir.join("proton-import/texture"),
+        &mut report,
+    )
+    .context("reading streetlights")?;
     let mut helpers = 0;
     let mut embedded_trees = 0;
-    let mut inputs: Vec<_> = files(&models, "3ds")?.into_iter().map(|model| prefabs::Placement { model, transform: glam::Mat4::IDENTITY }).collect();
+    let mut inputs: Vec<_> = files(&models, "3ds")?
+        .into_iter()
+        .map(|model| prefabs::Placement {
+            model,
+            transform: glam::Mat4::IDENTITY,
+        })
+        .collect();
     inputs.extend(prefabs::read(&base, &models, &mut report)?);
     for input in inputs {
         let f = input.model;
@@ -478,26 +515,64 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
     if !lamps.tiles.is_empty() {
         let omitted: usize = lamps.tiles.values().map(Vec::len).sum();
         report.lights_imported -= omitted;
-        report.warnings.push(format!("{omitted} streetlight markers outside scenery tiles were omitted"));
+        report.warnings.push(format!(
+            "{omitted} streetlight markers outside scenery tiles were omitted"
+        ));
     }
     let (navigation, paths) = navigation.finish(&mut report, smooth)?;
     let mut gameplay = gameplay::Paths::new(&paths)?;
     drop(paths);
     let stops = stops.finish(&mut gameplay, &mut report)?;
-    let known: Vec<_> = stops.iter().map(|s| itinerary::Known { id: s.id.clone(), name: s.name.clone() }).collect();
+    let known: Vec<_> = stops
+        .iter()
+        .map(|s| itinerary::Known {
+            id: s.id.clone(),
+            name: s.name.clone(),
+        })
+        .collect();
     let mut destinations = depot::destinations(&base, &spawns, &stops, &mut report.warnings)?;
-    let signs = destination_text::load(&configs[0], &destinations, &mut report).context("reading the destinations file")?;
+    let signs = destination_text::load(&configs[0], &destinations, &mut report)
+        .context("reading the destinations file")?;
     destination_text::apply(&signs, &mut destinations);
-    let itineraries = itinerary::load(&configs[0], &known, &destinations, &mut report).context("reading the itineraries file")?;
-    depot::export(dir, installed_rel, &destinations, &signs, &stops, &mut report).context("exporting map HOF")?;
-    let placed = gameplay::export(dir, installed_rel, &keys, gameplay, stops, signals, &mut report, &cancel).context("exporting map paths, stops and signals")?;
+    let itineraries = itinerary::load(&configs[0], &known, &destinations, &mut report)
+        .context("reading the itineraries file")?;
+    depot::export(
+        dir,
+        installed_rel,
+        &destinations,
+        &signs,
+        &stops,
+        &mut report,
+    )
+    .context("exporting map HOF")?;
+    let placed = gameplay::export(
+        dir,
+        installed_rel,
+        &keys,
+        gameplay,
+        stops,
+        signals,
+        &mut report,
+        &cancel,
+    )
+    .context("exporting map paths, stops and signals")?;
     itinerary::export(dir, itineraries, &placed, &mut report).context("exporting itineraries")?;
     let file = std::fs::File::create(dir.join("proton-import/navigation.json"))?;
     let mut writer = std::io::BufWriter::new(file);
     serde_json::to_writer(&mut writer, &navigation)?;
     std::io::Write::flush(&mut writer)?;
     export::global(dir, installed_rel, &keys, &spawns)?;
-    traffic::export(dir, &base, &texture_dir, installed_rel, &config, &mut report, &mut output_bytes, &cancel).context("exporting map AI vehicles")?;
+    traffic::export(
+        dir,
+        &base,
+        &texture_dir,
+        installed_rel,
+        &config,
+        &mut report,
+        &mut output_bytes,
+        &cancel,
+    )
+    .context("exporting map AI vehicles")?;
     package::seal(dir, installed_rel, &cancel).context("sealing converted map files")?;
     report.tiles = keys.len();
     report.triangles = spool.tiles.values().sum();
@@ -512,13 +587,13 @@ mod stream_tests;
 mod tests;
 
 #[cfg(test)]
-mod tag_tests;
-#[cfg(test)]
-mod navigation_tests;
+mod depot_tests;
 #[cfg(test)]
 mod gameplay_tests;
 #[cfg(test)]
-mod depot_tests;
+mod navigation_tests;
+#[cfg(test)]
+mod tag_tests;
 
 #[cfg(test)]
 mod package_tests;

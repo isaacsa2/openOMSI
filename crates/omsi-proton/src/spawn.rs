@@ -2,8 +2,8 @@
 //! authored starts, but report and relocate a start with no nearby supporting face.
 #[cfg(test)]
 use crate::convert::Tiles;
-use crate::{convert::EDGE, Spawn};
-use anyhow::{bail, ensure, Context, Result};
+use crate::{Spawn, convert::EDGE};
+use anyhow::{Context, Result, bail, ensure};
 use glam::Vec3;
 
 pub(crate) fn number(

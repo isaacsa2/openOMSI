@@ -28,10 +28,12 @@ fn a_missing_nested_ai_asset_does_not_abort_or_publish_an_incomplete_map() {
     .unwrap();
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert!(report.tiles > 0);
-    assert!(report
-        .warnings
-        .iter()
-        .any(|w| w.contains("missing AI model") && w.contains("MissingTaxi")));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("missing AI model") && w.contains("MissingTaxi"))
+    );
     let map = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
     assert!(map.unscheduled_passengers);
     let traffic = crate::traffic::Manifest::load(&f.0).unwrap();
@@ -137,10 +139,12 @@ fn entry_point_degree_suffixes_keep_the_authored_heading_in_the_native_map() {
         assert!((heading - expected).abs() < 1e-6);
     }
     assert_eq!(report.warnings.len(), 3);
-    assert!(report
-        .warnings
-        .iter()
-        .all(|w| w.contains("roty") && w.contains("degrees")));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .all(|w| w.contains("roty") && w.contains("degrees"))
+    );
 }
 
 #[test]
@@ -418,10 +422,12 @@ fn o3d_writer_preserves_indices_material_opacity_and_uv() {
     };
     convert::write_mesh(&f.0.join("test.o3d"), &mesh, &[material.clone()]).unwrap();
     let loaded = omsi_o3d::load_mesh(&f.0.join("test.o3d")).unwrap();
-    assert!(loaded
-        .vertices
-        .iter()
-        .all(|v| v.position == Vec3::new(2.0, 4.0, 3.0) && v.normal == Vec3::Y));
+    assert!(
+        loaded
+            .vertices
+            .iter()
+            .all(|v| v.position == Vec3::new(2.0, 4.0, 3.0) && v.normal == Vec3::Y)
+    );
     assert_eq!(loaded.triangles[0].indices, [0, 2, 1]);
     let rendered = omsi_geometry::mesh_from_o3d(&loaded);
     assert_eq!(rendered.positions, vec![v.position; 3]);
@@ -502,20 +508,27 @@ fn supplied_map_fixture_when_available() {
                 assert!(!mesh.triangles.is_empty());
                 vertices += mesh.vertices.len();
                 materials += mesh.materials.len();
-                assert!(mesh
-                    .vertices
-                    .iter()
-                    .all(|v| v.position.is_finite() && v.normal.is_finite()));
-                assert!(mesh
-                    .triangles
-                    .iter()
-                    .all(|t| (t.material as usize) < mesh.materials.len()));
+                assert!(
+                    mesh.vertices
+                        .iter()
+                        .all(|v| v.position.is_finite() && v.normal.is_finite())
+                );
+                assert!(
+                    mesh.triangles
+                        .iter()
+                        .all(|t| (t.material as usize) < mesh.materials.len())
+                );
             }
         }
     }
     eprintln!(
         "Imported {} tiles, {} triangles, {} skipped markers, {} GPS helpers, {} duplicate vertices removed; {vertices} vertices and {materials} material slots exported; warnings: {:?}",
-        report.tiles, report.triangles, report.markers_skipped, report.gps_skipped, report.vertices_removed, report.warnings
+        report.tiles,
+        report.triangles,
+        report.markers_skipped,
+        report.gps_skipped,
+        report.vertices_removed,
+        report.warnings
     );
 }
 
@@ -532,12 +545,14 @@ fn empty_entry_heading_defaults_to_zero_but_empty_coordinates_are_rejected() {
     let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
     assert_eq!(global.entry_points[0].quat, [0., 0., 0., 1.]);
     assert!(report.warnings.iter().any(|s| s.contains("empty rotation")));
-    assert!(crate::spawn::number(
-        Some(&String::new()),
-        "posx",
-        "entrypoint_1",
-        &f.0,
-        &mut vec![]
-    )
-    .is_err());
+    assert!(
+        crate::spawn::number(
+            Some(&String::new()),
+            "posx",
+            "entrypoint_1",
+            &f.0,
+            &mut vec![]
+        )
+        .is_err()
+    );
 }

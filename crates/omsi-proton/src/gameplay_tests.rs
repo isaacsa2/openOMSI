@@ -1,6 +1,6 @@
 use crate::{
     import,
-    tests::{chunk, named_model, setup, Fixture},
+    tests::{Fixture, chunk, named_model, setup},
 };
 use glam::Vec3;
 
@@ -77,9 +77,11 @@ fn vertex_only_3ds_markers_create_native_paths_without_rendering_helper_geometry
     let bytes = chunk(0x4d4d, &chunk(0x3d3d, &edit));
     let parsed = crate::three_ds::parse(&bytes).unwrap();
     assert_eq!(parsed.objects.len(), 5);
-    assert!(parsed.objects[1..]
-        .iter()
-        .all(|o| o.positions.len() == 1 && o.faces.is_empty()));
+    assert!(
+        parsed.objects[1..]
+            .iter()
+            .all(|o| o.positions.len() == 1 && o.faces.is_empty())
+    );
     std::fs::write(f.0.join("Town/tiles/0x0/road.3ds"), bytes).unwrap();
     config(
         &f,
@@ -122,10 +124,30 @@ fn native_paths_stops_waiting_and_lamps_survive_an_end_to_end_import() {
             ("_junction_path1_green_additive_", [305.0, 9.0, 8.0]),
         ],
     );
-    config(&f,"aivehicles","road.txt","[000]\nposX=292\nposZ=10\nposY=7\n[001]\nposX=315\nposZ=10\nposY=7\n[defaults]\nspawnInterval=10\napplySpeedMultiplier=1\nspeedMultiplier=0.8\nrightBlinker=1\nisBusSpawner=1\n");
-    config(&f,"aipeople","walk.txt","[000]\nposX=299\nposZ=8\nposY=7\n[001]\nposX=315\nposZ=8\nposY=7\n[automatic_setup]\nreverse=1\n");
-    config(&f,"busstops","stop.txt","[busstop]\nname=Parada São João\npaxAmount=25\n[from_3d]\nreadFrom3D=1\nprefix=stop\nmaxPathsToCheck=2\n");
-    config(&f,"trafficlights","signal.txt","[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=2\ntickInterval=2\nrandomTimestampAtStart=0\nuseRealLights=0\n[tick1]\nrepeat=2\npath1_red=1\npath1_trigger=1\n[tick2]\nrepeat=3\npath1_green=1\n");
+    config(
+        &f,
+        "aivehicles",
+        "road.txt",
+        "[000]\nposX=292\nposZ=10\nposY=7\n[001]\nposX=315\nposZ=10\nposY=7\n[defaults]\nspawnInterval=10\napplySpeedMultiplier=1\nspeedMultiplier=0.8\nrightBlinker=1\nisBusSpawner=1\n",
+    );
+    config(
+        &f,
+        "aipeople",
+        "walk.txt",
+        "[000]\nposX=299\nposZ=8\nposY=7\n[001]\nposX=315\nposZ=8\nposY=7\n[automatic_setup]\nreverse=1\n",
+    );
+    config(
+        &f,
+        "busstops",
+        "stop.txt",
+        "[busstop]\nname=Parada São João\npaxAmount=25\n[from_3d]\nreadFrom3D=1\nprefix=stop\nmaxPathsToCheck=2\n",
+    );
+    config(
+        &f,
+        "trafficlights",
+        "signal.txt",
+        "[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=2\ntickInterval=2\nrandomTimestampAtStart=0\nuseRealLights=0\n[tick1]\nrepeat=2\npath1_red=1\npath1_trigger=1\n[tick2]\nrepeat=3\npath1_green=1\n",
+    );
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.stops_imported, 1);
     assert_eq!(report.signals_imported, 1);
@@ -184,13 +206,19 @@ fn native_paths_stops_waiting_and_lamps_survive_an_end_to_end_import() {
         assert_eq!(glow.size, crate::signals::corona_size(1.0));
         assert!(glow.size > 0.4, "{}", glow.size);
         assert_eq!(glow.values[0], 1.0);
-        assert!(sco.switched_map_lights.is_empty(), "useRealLights=0 adds no light on the road");
+        assert!(
+            sco.switched_map_lights.is_empty(),
+            "useRealLights=0 adds no light on the road"
+        );
     }
 
     // a signal lamp's glow follows its size within the range that can be seen and not mistaken
     // for a floodlight
     let size = crate::signals::corona_size;
-    assert_eq!((size(0.0), size(0.1), size(1.0), size(50.0)), (0.6, 0.6, 1.2, 1.2));
+    assert_eq!(
+        (size(0.0), size(0.1), size(1.0), size(50.0)),
+        (0.6, 0.6, 1.2, 1.2)
+    );
     assert!((size(0.3) - 1.05).abs() < 1e-6);
     assert!(size(0.2) < size(0.3) && size(0.3) < size(0.34));
     let plain = all
@@ -201,14 +229,18 @@ fn native_paths_stops_waiting_and_lamps_survive_an_end_to_end_import() {
                 && o.file.contains("paths_1_0")
         })
         .unwrap();
-    assert!(plain
-        .rules
-        .iter()
-        .any(|r| r.kind == "speedlimit" && r.value == 40.0));
-    assert!(plain
-        .rules
-        .iter()
-        .any(|r| r.kind == "trafficdensity" && r.value == 0.5));
+    assert!(
+        plain
+            .rules
+            .iter()
+            .any(|r| r.kind == "speedlimit" && r.value == 40.0)
+    );
+    assert!(
+        plain
+            .rules
+            .iter()
+            .any(|r| r.kind == "trafficdensity" && r.value == 0.5)
+    );
     assert!(plain.rules.iter().any(|r| r.kind == "bus"));
 }
 
@@ -223,19 +255,52 @@ fn real_lamp_light_follows_its_lamp_and_a_shared_prefix_keeps_the_first_program(
             ("junction_path1_green_a", [301.0, 10.0, 9.0]),
         ],
     );
-    config(&f,"trafficlights","a.txt","[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=2\ntickInterval=2\nrandomTimestampAtStart=0\n[tick1]\nrepeat=2\npath1_red=1\n[tick2]\nrepeat=3\npath1_green=1\n[red_light]\ncolorR=1\ncolorG=0.2\ncolorB=0\nintensity=0.5\nrange=12\n");
-    config(&f,"trafficlights","b.txt","[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=1\ntickInterval=7\nrandomTimestampAtStart=0\n[tick1]\npath1_red=1\n");
-    config(&f,"trafficlights","c.txt","[trafficlight]\nprefix=lonely\nhowManyPaths=1\nhowManyTicks=1\nrandomTimestampAtStart=0\n[tick1]\npath1_red=1\n");
+    config(
+        &f,
+        "trafficlights",
+        "a.txt",
+        "[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=2\ntickInterval=2\nrandomTimestampAtStart=0\n[tick1]\nrepeat=2\npath1_red=1\n[tick2]\nrepeat=3\npath1_green=1\n[red_light]\ncolorR=1\ncolorG=0.2\ncolorB=0\nintensity=0.5\nrange=12\n",
+    );
+    config(
+        &f,
+        "trafficlights",
+        "b.txt",
+        "[trafficlight]\nprefix=junction\nhowManyPaths=1\nhowManyTicks=1\ntickInterval=7\nrandomTimestampAtStart=0\n[tick1]\npath1_red=1\n",
+    );
+    config(
+        &f,
+        "trafficlights",
+        "c.txt",
+        "[trafficlight]\nprefix=lonely\nhowManyPaths=1\nhowManyTicks=1\nrandomTimestampAtStart=0\n[tick1]\npath1_red=1\n",
+    );
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.signals_imported, 1);
     let said = |text: &str| report.warnings.iter().any(|w| w.contains(text));
-    assert!(said("junction: traffic-light prefix declared by both a.txt and b.txt; a.txt drives"), "{:?}", report.warnings);
-    assert!(said("1 traffic-light programs have no lamp or trigger in the map (objects named <prefix>_path<N>_red_…): lonely"), "{:?}", report.warnings);
+    assert!(
+        said("junction: traffic-light prefix declared by both a.txt and b.txt; a.txt drives"),
+        "{:?}",
+        report.warnings
+    );
+    assert!(
+        said(
+            "1 traffic-light programs have no lamp or trigger in the map (objects named <prefix>_path<N>_red_…): lonely"
+        ),
+        "{:?}",
+        report.warnings
+    );
     assert!(!said("real-light"), "{:?}", report.warnings);
     let tiles = loaded(&f);
     let all: Vec<_> = tiles.iter().flat_map(|t| &t.objects).collect();
-    let program = all.iter().map(|o| sco(&f, o)).find(|s| !s.traffic_lights.is_empty()).unwrap();
-    assert_eq!(program.traffic_lights_group, Some(10.0), "a.txt's cycle, not b.txt's");
+    let program = all
+        .iter()
+        .map(|o| sco(&f, o))
+        .find(|s| !s.traffic_lights.is_empty())
+        .unwrap();
+    assert_eq!(
+        program.traffic_lights_group,
+        Some(10.0),
+        "a.txt's cycle, not b.txt's"
+    );
     let mut lights: Vec<_> = all
         .iter()
         .filter(|o| o.file.contains("/signal_"))
@@ -258,7 +323,12 @@ fn decorative_signals_never_hold_traffic_without_authored_triggers() {
     let f = Fixture::new();
     setup(&f);
     objects(&f, &[("flash_path1_yellow_a", [301.0, 10.0, 8.0])]);
-    config(&f,"trafficlights","flash.txt","[trafficlight]\nprefix=flash\nhowManyPaths=1\nhowManyTicks=2\ntickInterval=0.8\nrandomTimestampAtStart=0\nuseRealLights=0\n[tick1]\npath1_yellow=1\n[tick2]\n");
+    config(
+        &f,
+        "trafficlights",
+        "flash.txt",
+        "[trafficlight]\nprefix=flash\nhowManyPaths=1\nhowManyTicks=2\ntickInterval=0.8\nrandomTimestampAtStart=0\nuseRealLights=0\n[tick1]\npath1_yellow=1\n[tick2]\n",
+    );
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.signals_imported, 1);
     assert_eq!(report.signal_paths_imported, 0);
@@ -269,10 +339,12 @@ fn decorative_signals_never_hold_traffic_without_authored_triggers() {
         .map(|o| sco(&f, o))
         .find(|s| !s.traffic_lights.is_empty())
         .unwrap();
-    assert!(program.traffic_lights[3]
-        .phases
-        .iter()
-        .all(|p| p.state == 12));
+    assert!(
+        program.traffic_lights[3]
+            .phases
+            .iter()
+            .all(|p| p.state == 12)
+    );
     assert_eq!(
         program.traffic_lights[1]
             .phases
@@ -287,7 +359,12 @@ fn decorative_signals_never_hold_traffic_without_authored_triggers() {
 fn coordinate_stops_preserve_world_waiting_positions_and_relative_facing() {
     let f = Fixture::new();
     setup(&f);
-    config(&f,"busstops","left.txt","[busstop]\nname=[TH3D] Platform\nposX=301\nposZ=10\nposY=7\nrotY=90\nisLeft=1\npaxAmount=1\n[standing_1]\nposX=301\nposZ=13\nposY=7.2\nrotY=270\n");
+    config(
+        &f,
+        "busstops",
+        "left.txt",
+        "[busstop]\nname=[TH3D] Platform\nposX=301\nposZ=10\nposY=7\nrotY=90\nisLeft=1\npaxAmount=1\n[standing_1]\nposX=301\nposZ=13\nposY=7.2\nrotY=270\n",
+    );
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.stops_imported, 1);
     let tiles = loaded(&f);
@@ -324,10 +401,12 @@ fn missing_stop_trigger_is_reported_and_helper_geometry_is_omitted() {
     );
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.stops_imported, 0);
-    assert!(report
-        .warnings
-        .iter()
-        .any(|w| w.contains("missing bus-stop trigger")));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("missing bus-stop trigger"))
+    );
     assert_eq!(
         report.triangles, 3,
         "unrecognised prefixed helpers keep the previous omission policy"
@@ -350,10 +429,12 @@ fn zero_duration_cycles_and_non_finite_gameplay_parameters_are_rejected_safely()
     let f = Fixture::new();
     setup(&f);
     config(&f, "busstops", "stop.txt", "[busstop]\npaxAmount=NaN\n");
-    assert!(import(&f.0, "maps/Proton-Town", || false)
-        .unwrap_err()
-        .to_string()
-        .contains("invalid Proton parameter"));
+    assert!(
+        import(&f.0, "maps/Proton-Town", || false)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid Proton parameter")
+    );
 }
 
 #[test]
@@ -386,7 +467,9 @@ fn emissive_alpha_modes_keep_zero_depth_writes_for_additive_approximations() {
             .any(|m| m.alpha == 2 && m.no_z_write && m.allcolor.is_some()),
         "{material:?}"
     );
-    assert!(material
-        .iter()
-        .any(|m| m.alpha == 2 && !m.no_z_write && m.allcolor.is_some()));
+    assert!(
+        material
+            .iter()
+            .any(|m| m.alpha == 2 && !m.no_z_write && m.allcolor.is_some())
+    );
 }

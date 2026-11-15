@@ -1,6 +1,6 @@
 //! Transactional vehicle conversion: public entry points always check the source declaration.
 use crate::{permission, vehicle};
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, serde::Serialize)]

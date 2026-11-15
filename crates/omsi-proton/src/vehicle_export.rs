@@ -6,7 +6,7 @@ use crate::{
     vehicle_package::{self, Report},
     vehicle_physics::Physics,
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use omsi_cfg::oi::{self, Kind};
 use std::path::Path;
 

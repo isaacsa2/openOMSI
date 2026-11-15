@@ -1,4 +1,4 @@
-use crate::tests::{setup, Fixture};
+use crate::tests::{Fixture, setup};
 use std::path::Path;
 
 fn names(dir: &Path) -> Vec<std::path::PathBuf> {
@@ -23,10 +23,12 @@ fn denied_public_import_and_cli_never_create_output_or_edit_source() {
         let text = format!("[map]\nbaseDir=Town\nmodelsDir=0x0\nmapModVersion=4\n{declaration}\n");
         std::fs::write(f.0.join("Town.map.txt"), &text).unwrap();
         let before = names(&f.0);
-        assert!(crate::import(&f.0, "maps/Proton-Town", || false)
-            .unwrap_err()
-            .to_string()
-            .contains("Town.map.txt"));
+        assert!(
+            crate::import(&f.0, "maps/Proton-Town", || false)
+                .unwrap_err()
+                .to_string()
+                .contains("Town.map.txt")
+        );
         assert_eq!(names(&f.0), before);
         let output = f.0.with_extension("converted");
         assert!(crate::package::convert_folder(&f.0, &output, "Town").is_err());

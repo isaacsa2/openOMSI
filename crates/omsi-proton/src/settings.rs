@@ -1,6 +1,6 @@
 //! Bounded parameters shared by the optional gameplay converters.
 use crate::Ini;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 
 pub(crate) fn value<'a>(cfg: &'a Ini, section: &str, key: &str) -> Option<&'a str> {
     cfg.get(section)

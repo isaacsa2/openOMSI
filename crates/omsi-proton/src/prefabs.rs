@@ -1,10 +1,9 @@
 //! Authored phase-4 instances feed the same bounded scene converter as tile meshes.
 use crate::{
-    child, ini,
+    Report, child, ini,
     settings::{number, position, value},
-    Report,
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use std::path::{Path, PathBuf};
 
@@ -107,7 +106,7 @@ pub(crate) fn transform(object: &mut crate::three_ds::Object, matrix: Mat4) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::{setup, Fixture};
+    use crate::tests::{Fixture, setup};
     #[test]
     fn authored_instance_transforms_and_mirrored_winding_are_preserved() {
         let f = Fixture::new();

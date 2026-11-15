@@ -3,7 +3,7 @@ use crate::{
     depot::Destination,
     gameplay_tests::{config, loaded, sco},
     import,
-    tests::{setup, Fixture},
+    tests::{Fixture, setup},
 };
 
 fn known() -> Vec<Known> {
@@ -151,26 +151,32 @@ fn what_cannot_be_told_for_certain_is_left_out_with_its_reason() {
     assert!(why(&raw("Start", &["Praca Central", "Inventada"])).contains("no imported stop"));
     assert!(why(&raw("Start", &["Praca Central", "Matriz"])).contains("@sul_a or @sul_b"));
     assert!(why(&raw("Start", &["Praca Central", "@centro"])).contains("twice in a row"));
-    assert!(why(&raw("Outro", &["Praca Central", "@fim"]))
-        .contains("no destination of the generated HOF"));
+    assert!(
+        why(&raw("Outro", &["Praca Central", "@fim"]))
+            .contains("no destination of the generated HOF")
+    );
     assert!(why(&raw("Garagem", &["Praca Central", "@fim"])).contains("out-of-service"));
     // 490 is not 4900: only the whole destination counts
     assert!(why(&raw("490", &["Praca Central", "@fim"])).contains("no destination"));
-    assert!(why(&Raw {
-        at: 1,
-        stops: vec!["a".into(), "b".into()],
-        ..Default::default()
-    })
-    .contains("no destination"));
+    assert!(
+        why(&Raw {
+            at: 1,
+            stops: vec!["a".into(), "b".into()],
+            ..Default::default()
+        })
+        .contains("no destination")
+    );
     // a destination that exists only because a stop ends a line is where it ends: it comes last
     let wrong = why(&raw("Terminal Pimentas", &["@fim", "Praca Central"]));
     assert!(wrong.contains("is a stop, but the last stop is"), "{wrong}");
-    assert!(resolve(
-        &raw("Terminal Pimentas", &["Praca Central", "@fim"]),
-        &known(),
-        &destinations()
-    )
-    .is_ok());
+    assert!(
+        resolve(
+            &raw("Terminal Pimentas", &["Praca Central", "@fim"]),
+            &known(),
+            &destinations()
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -228,12 +234,14 @@ fn the_reader_refuses_what_the_importer_never_writes() {
     let one_stop =
         String::from_utf8_lossy(ok).replace(r#",{"object":1000002,"id":"b","name":"B"}"#, "");
     assert!(from_bytes(one_stop.as_bytes()).is_err());
-    assert!(from_bytes(
-        String::from_utf8_lossy(ok)
-            .replace(r#""version":1"#, r#""version":2"#)
-            .as_bytes()
-    )
-    .is_err());
+    assert!(
+        from_bytes(
+            String::from_utf8_lossy(ok)
+                .replace(r#""version":1"#, r#""version":2"#)
+                .as_bytes()
+        )
+        .is_err()
+    );
     assert!(from_bytes(b"{}").is_err());
     assert!(from_bytes(&vec![b' '; (8 << 20) + 1]).is_err());
 }
@@ -257,7 +265,12 @@ fn stop_files(f: &Fixture) {
         "sul_b.txt",
         "[busstop]\nname=Matriz\nposX=309\nposZ=10\nposY=7\npaxAmount=0\n",
     );
-    config(f, "busstops", "fim.txt", "[busstop]\nname=Terminal Pimentas\nisLatestStop=1\nposX=313\nposZ=10\nposY=7\npaxAmount=0\n");
+    config(
+        f,
+        "busstops",
+        "fim.txt",
+        "[busstop]\nname=Terminal Pimentas\nisLatestStop=1\nposX=313\nposZ=10\nposY=7\npaxAmount=0\n",
+    );
     config(
         f,
         "busstops",

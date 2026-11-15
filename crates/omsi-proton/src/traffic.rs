@@ -1,10 +1,9 @@
 //! Map-authored static AI vehicles. Installed Grundorf supplies missing categories.
 use crate::{
-    child, files, ini,
+    Report, child, files, ini,
     settings::{label, number, value},
-    Report,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::Vec3;
 use omsi_o3d::Vertex;
 use serde::{Deserialize, Serialize};
@@ -107,7 +106,8 @@ pub(crate) fn export(
             if !model.is_file() {
                 report.warnings.push(format!(
                     "{}: missing AI model {}; definition omitted",
-                    file.display(), model.display()
+                    file.display(),
+                    model.display()
                 ));
                 continue;
             }
@@ -201,7 +201,14 @@ pub(crate) fn export(
                 std::fs::remove_dir_all(&target)?;
                 continue;
             }
-            skins(&folder, &cfg, &target, &skin_slots.names, &mut model_cfg, cancel)?;
+            skins(
+                &folder,
+                &cfg,
+                &target,
+                &skin_slots.names,
+                &mut model_cfg,
+                cancel,
+            )?;
             crate::text(&models.join("model.cfg"), &model_cfg)?;
             let size = (hi - lo).max(Vec3::splat(0.1));
             let centre = (hi + lo) * 0.5;
@@ -209,7 +216,16 @@ pub(crate) fn export(
                 .clamp(100.0, 100_000.0)
                 / 1000.0;
             let vehicle_name = label(&file.file_stem().unwrap_or_default().to_string_lossy())?;
-            let mut def = format!("[type]\n0\n[ai_veh_type]\n{}\n[mass]\n{mass}\n[boundingbox]\n{}\n{}\n{}\n{}\n{}\n{}\n[model]\nModel/model.cfg\n",if buses {2} else {0},size.x,size.y,size.z,centre.x,centre.y,centre.z);
+            let mut def = format!(
+                "[type]\n0\n[ai_veh_type]\n{}\n[mass]\n{mass}\n[boundingbox]\n{}\n{}\n{}\n{}\n{}\n{}\n[model]\nModel/model.cfg\n",
+                if buses { 2 } else { 0 },
+                size.x,
+                size.y,
+                size.z,
+                centre.x,
+                centre.y,
+                centre.z
+            );
             sounds(&folder, &cfg, &target, &mut def, report)?;
             crate::text(&target.join("vehicle.ovh"), &def)?;
             data.vehicles.push(Vehicle {
@@ -316,7 +332,7 @@ fn sounds(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::{setup, Fixture};
+    use crate::tests::{Fixture, setup};
     #[test]
     fn source_ai_is_an_oi_vehicle_with_relative_model_and_sounds() {
         let f = Fixture::new();
@@ -341,7 +357,11 @@ mod tests {
         let cfg = omsi_cfg::vfs::read_text(&base.join("Model/model.cfgoi")).unwrap();
         assert!(cfg.contains("body_0.o3doi"));
         let mesh = omsi_o3d::load_mesh(&base.join("Model/body_0.o3doi")).unwrap();
-        assert!(mesh.vertices.iter().all(|v| v.position.abs().max_element() < 10.));
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.position.abs().max_element() < 10.)
+        );
         assert_eq!(
             std::fs::read(base.join("Sound/moving.wav")).unwrap(),
             b"fixture"

@@ -67,7 +67,10 @@ pub(crate) fn generate(
     .collect::<Vec<_>>();
     let mut init="1 (S.L.elec_busbar_main) (S.L.parking_brake) 0 (S.L.engine_on) (S.L.oi_selector) 1 (S.L.oi_gear) 250 (S.L.engine_tank_capacity) (S.L.engine_tank_content) 80 (S.L.engine_temp)".to_string();
     init.push_str(" -1 (S.L.target_index_int)");
-    let mut frame=format!("(L.L.n_Wheel) abs (L.L.oi_ratio) abs * {} * {} max (S.L.engine_n)\n(L.L.engine_on) ! {{if}} 0 (S.L.engine_n) {{endif}}\n(L.L.engine_n) {} / 0 max 1 min (S.L.oi_rpm_norm)\n(L.L.Throttle) 0 max 1 min (S.L.oi_throttle)\n(L.L.oi_shift_timer) (L.S.Timegap) - 0 max (S.L.oi_shift_timer)\n",p.differential,p.idle,p.max_rpm);
+    let mut frame = format!(
+        "(L.L.n_Wheel) abs (L.L.oi_ratio) abs * {} * {} max (S.L.engine_n)\n(L.L.engine_on) ! {{if}} 0 (S.L.engine_n) {{endif}}\n(L.L.engine_n) {} / 0 max 1 min (S.L.oi_rpm_norm)\n(L.L.Throttle) 0 max 1 min (S.L.oi_throttle)\n(L.L.oi_shift_timer) (L.S.Timegap) - 0 max (S.L.oi_shift_timer)\n",
+        p.differential, p.idle, p.max_rpm
+    );
     // Hysteresis and a cooldown avoid jumping through all ratios in one frame.
     frame.push_str(&format!("(L.L.oi_selector) 1 = (L.L.oi_shift_timer) 0 = && {{if}}\n(L.L.engine_n) {} > (L.L.oi_gear) {} < && {{if}} (L.L.oi_gear) 1 + (S.L.oi_gear) 0.4 (S.L.oi_shift_timer) {{else}}\n(L.L.engine_n) {} < (L.L.oi_gear) 1 > && {{if}} (L.L.oi_gear) 1 - (S.L.oi_gear) 0.4 (S.L.oi_shift_timer) {{endif}} {{endif}} {{endif}}\n0 (S.L.oi_ratio)\n",p.shift_up,p.ratios.len(),p.shift_down));
     for (i, r) in p.ratios.iter().enumerate() {
@@ -188,7 +191,13 @@ pub(crate) fn generate(
         (&["automatic_R", "kw_s_R"], -1),
     ] {
         for n in names {
-            trigger(&mut script,n,&format!("(L.L.Velocity_Ground) abs 0.5 < {{if}} {selector} (S.L.oi_selector) 1 (S.L.oi_gear) {{endif}}"));
+            trigger(
+                &mut script,
+                n,
+                &format!(
+                    "(L.L.Velocity_Ground) abs 0.5 < {{if}} {selector} (S.L.oi_selector) 1 (S.L.oi_gear) {{endif}}"
+                ),
+            );
         }
     }
     for g in 1..=p.ratios.len() {
@@ -199,7 +208,9 @@ pub(crate) fn generate(
         );
     }
     for i in 0..info.doors.len() {
-        let toggle=format!("(L.L.Velocity_Ground) abs 0.5 < {{if}} (L.L.oi_door_target_{i}) ! (S.L.oi_door_target_{i}) {{endif}}");
+        let toggle = format!(
+            "(L.L.Velocity_Ground) abs 0.5 < {{if}} (L.L.oi_door_target_{i}) ! (S.L.oi_door_target_{i}) {{endif}}"
+        );
         trigger(&mut script, &format!("oi_door_button_{i}"), &toggle);
         trigger(&mut script, &format!("bus_doorfront{i}"), &toggle);
         trigger(&mut script, &format!("bus_door_{}", i + 1), &toggle);

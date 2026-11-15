@@ -1,11 +1,10 @@
 //! Authored navigation geometry and lightweight simulation paths.
 use crate::{
-    child, files, ini,
-    navigation::{Navigation, Road, Route, MAX_POINTS, MAX_TRIANGLES},
+    Report, Spawn, child, files, ini,
+    navigation::{MAX_POINTS, MAX_TRIANGLES, Navigation, Road, Route},
     three_ds::Object,
-    Report, Spawn,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::Vec3;
 use std::{collections::BTreeMap, path::Path};
 
@@ -94,7 +93,12 @@ impl Collector {
                             let Ok(index) = section.parse::<usize>() else {
                                 continue;
                             };
-                            if !["posx","posy","posz"].iter().any(|key| fields.contains_key(*key)) { continue; }
+                            if !["posx", "posy", "posz"]
+                                .iter()
+                                .any(|key| fields.contains_key(*key))
+                            {
+                                continue;
+                            }
                             ensure!(index <= 999, "gameplay path index exceeds 999");
                             let n = |k: &str| -> Result<f32> {
                                 let value = fields
@@ -157,13 +161,20 @@ impl Collector {
     }
 
     pub fn gps(&mut self, object: &Object, file: &str, report: &mut Report) -> Result<()> {
-        let mut matched = crate::navigation_index::route_in(&object.name,&self.data.routes);
+        let mut matched = crate::navigation_index::route_in(&object.name, &self.data.routes);
         if matched.is_empty() && !crate::navigation_index::explicit_gps_route(&object.name) {
-            matched = crate::navigation_index::route_in(file,&self.data.routes);
-            if matched.is_empty() && self.data.routes.len() == 1 && !crate::navigation_index::explicit_gps_route(file) { matched.push(0); }
+            matched = crate::navigation_index::route_in(file, &self.data.routes);
+            if matched.is_empty()
+                && self.data.routes.len() == 1
+                && !crate::navigation_index::explicit_gps_route(file)
+            {
+                matched.push(0);
+            }
         }
         // A spelling shared by distinct entrypoints is ambiguous; never show both routes.
-        if matched.len() > 1 { matched.clear(); }
+        if matched.len() > 1 {
+            matched.clear();
+        }
         if matched.is_empty() {
             report.gps_skipped += 1;
             return Ok(());
@@ -229,7 +240,11 @@ impl Collector {
         Ok(found)
     }
 
-    pub fn finish(mut self, report: &mut Report, smooth: bool) -> Result<(Navigation, Vec<DrivePath>)> {
+    pub fn finish(
+        mut self,
+        report: &mut Report,
+        smooth: bool,
+    ) -> Result<(Navigation, Vec<DrivePath>)> {
         let mut gameplay = Vec::new();
         for path in self.paths {
             if !path.enabled {
@@ -308,7 +323,10 @@ impl Collector {
                     });
                 }
                 if path.enabled {
-                    gameplay.push(DrivePath { points, pedestrian: path.pedestrian });
+                    gameplay.push(DrivePath {
+                        points,
+                        pedestrian: path.pedestrian,
+                    });
                 }
             }
         }
@@ -320,9 +338,16 @@ impl Collector {
             ));
         }
         let surfaces = self.data.road_triangles.len();
-        self.data.road_triangles.truncate(MAX_TRIANGLES.saturating_sub(self.triangles));
+        self.data
+            .road_triangles
+            .truncate(MAX_TRIANGLES.saturating_sub(self.triangles));
         report.road_surface_triangles = self.data.road_triangles.len();
-        if report.road_surface_triangles < surfaces { report.warnings.push("3D road overview reduced to reserve navigation space for authored GPS routes".into()); }
+        if report.road_surface_triangles < surfaces {
+            report.warnings.push(
+                "3D road overview reduced to reserve navigation space for authored GPS routes"
+                    .into(),
+            );
+        }
         let connectors = crate::path_corners::connect(&mut gameplay, report);
         gameplay.extend(connectors);
         ensure!(self.data.roads.len() <= 4096, "too many navigation roads");

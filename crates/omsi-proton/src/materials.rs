@@ -4,7 +4,7 @@ use crate::{
     tags::Mode,
     three_ds::{Object, Scene, UvTransform},
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use omsi_o3d::Material;
 use std::collections::BTreeMap;
 

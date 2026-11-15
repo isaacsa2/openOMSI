@@ -93,10 +93,11 @@ fn map_import_repairs_only_non_finite_uvs_and_keeps_strict_3ds_readers() {
             tile.x, tile.y
         )))
         .unwrap();
-        assert!(mesh
-            .vertices
-            .iter()
-            .all(|v| v.uv.is_finite() && v.position.is_finite()));
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.uv.is_finite() && v.position.is_finite())
+        );
         assert!(!mesh.triangles.is_empty());
     }
 }
@@ -303,10 +304,12 @@ fn blender_records_forward_materials_uv_mapping_and_utf8_names_are_recognised() 
     for file in std::fs::read_dir(temp.0.join("proton-import/model")).unwrap() {
         let mesh = omsi_o3d::load_mesh(&file.unwrap().path()).unwrap();
         let rendered = omsi_geometry::mesh_from_o3d(&mesh);
-        assert!(rendered
-            .uvs
-            .iter()
-            .all(|v| (*v - Vec2::new(-1.4, 0.3)).length() < 1e-6));
+        assert!(
+            rendered
+                .uvs
+                .iter()
+                .all(|v| (*v - Vec2::new(-1.4, 0.3)).length() < 1e-6)
+        );
         assert_eq!(mesh.materials.len(), 1);
         // Parsing preserves the source records; Proton's rendered material uses
         // the texture alone, without the exporter's tint, reflection or emission.
@@ -377,13 +380,17 @@ fn spooled_tiles_survive_writer_eviction_share_vertices_and_clean_up_on_failure(
     assert_eq!(mesh.triangles.len(), 2);
     assert_eq!(mesh.triangles[0].indices, mesh.triangles[1].indices);
     assert_eq!(tile.removed, 3);
-    assert!(spool
-        .mesh((0, 0), &[Material::default()], &[Mode::Auto], &|| true)
-        .is_err());
+    assert!(
+        spool
+            .mesh((0, 0), &[Material::default()], &[Mode::Auto], &|| true)
+            .is_err()
+    );
     std::fs::write(work.join("0_0.faces"), [0]).unwrap();
-    assert!(spool
-        .mesh((0, 0), &[Material::default()], &[Mode::Auto], &|| false)
-        .is_err());
+    assert!(
+        spool
+            .mesh((0, 0), &[Material::default()], &[Mode::Auto], &|| false)
+            .is_err()
+    );
     drop(spool);
     assert!(!work.exists());
 }
@@ -396,13 +403,19 @@ fn identical_materials_across_files_share_source_slots_but_different_uv_maps_do_
     let bytes = chunk(0x4d4d, &chunk(0x3d3d, &edit));
     let mut scene = three_ds::Scene::open(&temp.file(&bytes), &|| false).unwrap();
     let mut registry = crate::materials::Registry::default();
-    let (names, _) = registry.register(&scene, &crate::texture_settings::Presets::default()).unwrap();
+    let (names, _) = registry
+        .register(&scene, &crate::texture_settings::Presets::default())
+        .unwrap();
     assert_eq!(names["A"], names["B"]);
     let count = registry.materials.len();
-    registry.register(&scene, &crate::texture_settings::Presets::default()).unwrap();
+    registry
+        .register(&scene, &crate::texture_settings::Presets::default())
+        .unwrap();
     assert_eq!(registry.materials.len(), count);
     scene.mappings[1].scale.x = 2.0;
-    let (names, _) = registry.register(&scene, &crate::texture_settings::Presets::default()).unwrap();
+    let (names, _) = registry
+        .register(&scene, &crate::texture_settings::Presets::default())
+        .unwrap();
     assert_ne!(names["A"], names["B"]);
 }
 

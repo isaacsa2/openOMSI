@@ -1,5 +1,5 @@
 //! Conservative map drawing from tagged/textured road faces, with no inferred AI links.
-use crate::{navigation::Navigation, texture_settings::Presets, three_ds::Object, Report};
+use crate::{Report, navigation::Navigation, texture_settings::Presets, three_ds::Object};
 use omsi_o3d::Material;
 const LIMIT: usize = 32_768;
 

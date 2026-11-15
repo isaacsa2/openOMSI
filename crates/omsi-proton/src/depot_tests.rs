@@ -112,12 +112,29 @@ fn imported_hof(services: &[&str], stops: &[&str]) -> Hof {
 
 #[test]
 fn lines_come_first_in_the_order_a_driver_reads_them_and_stops_never_move_their_codes() {
-    let services = ["490 TERMINAL PIMENTAS", "44 METACIL", "420AT TREVO", "Garagem", "10 Rota", "2 Rota"];
+    let services = [
+        "490 TERMINAL PIMENTAS",
+        "44 METACIL",
+        "420AT TREVO",
+        "Garagem",
+        "10 Rota",
+        "2 Rota",
+    ];
     let few = imported_hof(&services, &["Zeta", "Alfa"]);
     let names: Vec<_> = few.termini.iter().map(|t| t.menu_name()).collect();
     assert_eq!(
         names,
-        ["2 Rota", "10 Rota", "44 METACIL", "420AT TREVO", "490 TERMINAL PIMENTAS", "Garagem", "Start", "Alfa", "Zeta"]
+        [
+            "2 Rota",
+            "10 Rota",
+            "44 METACIL",
+            "420AT TREVO",
+            "490 TERMINAL PIMENTAS",
+            "Garagem",
+            "Start",
+            "Alfa",
+            "Zeta"
+        ]
     );
     assert_eq!(
         few.termini.iter().map(|t| t.code).collect::<Vec<_>>(),
@@ -142,15 +159,29 @@ fn a_dest_folder_that_differs_only_in_case_is_the_same_destination() {
     )
     .unwrap();
     std::fs::create_dir_all(f.0.join("Town/dest/821 CARMELA (Parcial)")).unwrap();
-    std::fs::write(f.0.join("Town/dest/821 CARMELA (Parcial)/outofservice.txt"), "").unwrap();
+    std::fs::write(
+        f.0.join("Town/dest/821 CARMELA (Parcial)/outofservice.txt"),
+        "",
+    )
+    .unwrap();
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     let hof = Hof::load(&f.0.join(depot::FILE)).unwrap();
     assert_eq!(report.destinations_imported, 1);
     assert_eq!(hof.termini.len(), 1);
-    assert_eq!(hof.termini[0].menu_name(), "821 CARMELA (parcial)", "the entry point's spelling");
-    assert!(hof.termini[0].all_exit, "the folder's out-of-service mark still counts");
+    assert_eq!(
+        hof.termini[0].menu_name(),
+        "821 CARMELA (parcial)",
+        "the entry point's spelling"
+    );
     assert!(
-        report.warnings.iter().any(|w| w.contains("differs only in case")),
+        hof.termini[0].all_exit,
+        "the folder's out-of-service mark still counts"
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("differs only in case")),
         "{:?}",
         report.warnings
     );

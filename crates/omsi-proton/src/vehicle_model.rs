@@ -1,10 +1,9 @@
 //! Recognized functional mesh tags mapped to native animation/material directives.
 use crate::{
-    ini,
+    Ini, ini,
     settings::{number, position},
     vehicle::Inspection,
     vehicle_physics::Physics,
-    Ini,
 };
 use anyhow::Result;
 use glam::{Quat, Vec3};

@@ -1,11 +1,11 @@
 //! Hidden seat/path markers become a native passenger cabin, never visible boxes.
 use crate::{
+    Ini,
     settings::{number, position},
     three_ds::Object,
     vehicle::Inspection,
-    Ini,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::Vec3;
 use std::collections::BTreeMap;
 

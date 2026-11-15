@@ -24,7 +24,9 @@ pub fn name(installed: &str) -> String {
 /// Read the small display-name hint without loading all HOF destinations.
 pub fn installed_name(dir: &Path) -> Option<String> {
     let file = dir.join(NAME_FILE);
-    if omsi_cfg::vfs::file_size(&file)? > 4096 { return None; }
+    if omsi_cfg::vfs::file_size(&file)? > 4096 {
+        return None;
+    }
     let name = omsi_cfg::vfs::read_text(&file).ok()?;
     (!name.is_empty() && name.len() <= 1024 && !name.chars().any(char::is_control)).then_some(name)
 }
@@ -84,7 +86,13 @@ fn service(
         }
         None => {
             spelt.insert(name.to_lowercase(), name.clone());
-            found.insert(name, Destination { reserved: reserved.unwrap_or(false), service: true });
+            found.insert(
+                name,
+                Destination {
+                    reserved: reserved.unwrap_or(false),
+                    service: true,
+                },
+            );
         }
     }
 }
@@ -100,7 +108,14 @@ pub(crate) fn destinations(
     let mut destinations = Destinations::new();
     let mut spelt = BTreeMap::new();
     for spawn in spawns {
-        service(&mut destinations, &mut spelt, warnings, field(&spawn.name)?, None, "entry point");
+        service(
+            &mut destinations,
+            &mut spelt,
+            warnings,
+            field(&spawn.name)?,
+            None,
+            "entry point",
+        );
         ensure!(destinations.len() <= 4096, "too many map destinations");
     }
     let dest = child(base, "dest")?;
@@ -122,7 +137,14 @@ pub(crate) fn destinations(
         for folder in folders {
             let path = child(&dest, &folder)?;
             let reserved = child(&path, "outofservice.txt")?.is_file();
-            service(&mut destinations, &mut spelt, warnings, field(&folder)?, Some(reserved), "dest/ folder");
+            service(
+                &mut destinations,
+                &mut spelt,
+                warnings,
+                field(&folder)?,
+                Some(reserved),
+                "dest/ folder",
+            );
             ensure!(destinations.len() <= 4096, "too many map destinations");
         }
     }
@@ -132,7 +154,10 @@ pub(crate) fn destinations(
     for stop in stops.iter().filter(|s| s.terminal) {
         destinations
             .entry(field(&stop.name)?)
-            .or_insert(Destination { reserved: false, service: false });
+            .or_insert(Destination {
+                reserved: false,
+                service: false,
+            });
     }
     destinations.retain(|name, _| !name.trim().is_empty());
     ensure!(destinations.len() <= 8192, "too many map destinations");
@@ -262,9 +287,16 @@ mod order_tests {
         assert_eq!(natural("721 A", "820 B"), Less);
         assert_eq!(natural("garagem", "GARAGEM COOPER"), Less);
         assert_eq!(natural("Zeta", "alfa"), Greater);
-        assert_eq!(natural("12 a", "012 a"), std::cmp::Ordering::Equal, "leading zeros are no difference");
+        assert_eq!(
+            natural("12 a", "012 a"),
+            std::cmp::Ordering::Equal,
+            "leading zeros are no difference"
+        );
         assert_eq!(natural("", "a"), Less);
         // far longer than any integer type: still compared as numbers
-        assert_eq!(natural("99999999999999999999999 a", "100000000000000000000000 a"), Less);
+        assert_eq!(
+            natural("99999999999999999999999 a", "100000000000000000000000 a"),
+            Less
+        );
     }
 }

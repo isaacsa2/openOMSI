@@ -1,7 +1,7 @@
 use crate::{
     import,
-    tags::{classify, Mode, ObjectKind},
-    tests::{chunk, model, named_model, setup, Fixture},
+    tags::{Mode, ObjectKind, classify},
+    tests::{Fixture, chunk, model, named_model, setup},
 };
 use glam::{DVec3, Mat4};
 
@@ -53,17 +53,18 @@ fn shared_texture_keeps_blend_cutout_and_untagged_material_slots_distinct() {
             let sco =
                 omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.oscoi")))
                     .unwrap();
-            let mesh =
-                omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{stem}.o3doi"))).unwrap();
+            let mesh = omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{stem}.o3doi")))
+                .unwrap();
             assert_eq!(
                 mesh.materials.len(),
                 3,
                 "shader modes must survive compaction"
             );
-            assert!(mesh
-                .materials
-                .iter()
-                .all(|m| m.texture == texture && m.diffuse[3] == 1.0));
+            assert!(
+                mesh.materials
+                    .iter()
+                    .all(|m| m.texture == texture && m.diffuse[3] == 1.0)
+            );
             assert!((0..3).all(|slot| mesh.triangles.iter().any(|t| t.material == slot)));
             let overrides = &sco.model.meshes[0].materials;
             let expected = if texture.ends_with("PNG") {
@@ -78,9 +79,11 @@ fn shared_texture_keeps_blend_cutout_and_untagged_material_slots_distinct() {
                     .collect::<Vec<_>>(),
                 expected
             );
-            assert!(overrides
-                .iter()
-                .all(|m| m.texture == texture && m.alpha_set));
+            assert!(
+                overrides
+                    .iter()
+                    .all(|m| m.texture == texture && m.alpha_set)
+            );
         }
         assert_eq!(
             std::fs::read_dir(f.0.join("proton-import/texture"))
@@ -127,8 +130,9 @@ fn exporter_colours_and_white_specular_do_not_wash_out_imported_textures() {
                 }
             );
         }
-        let sco = omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.oscoi")))
-            .unwrap();
+        let sco =
+            omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.oscoi")))
+                .unwrap();
         assert_eq!(
             sco.model.meshes[0]
                 .materials
@@ -240,10 +244,12 @@ fn gameplay_volumes_and_embedded_tree_boxes_are_omitted_and_reported() {
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.warnings.len(), 2);
     assert!(report.warnings.iter().any(|w| w.starts_with("4 invisible")));
-    assert!(report
-        .warnings
-        .iter()
-        .any(|w| w.starts_with("1 embedded tree")));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("1 embedded tree"))
+    );
     // The tiny road clips into three faces; all five helper geometries must be absent.
     assert_eq!(report.triangles, 3);
     for name in [

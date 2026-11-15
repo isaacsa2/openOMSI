@@ -26,8 +26,8 @@
 //! empty, too long or holds a control character, or a size over the limits stops the import
 //! and names the line. A `[destination]` whose name is no destination of the HOF, or that
 //! gives nothing, is left out and reported, so one mistake does not take the others with it.
-use crate::{depot::Destinations, settings::label, Report};
-use anyhow::{bail, ensure, Result};
+use crate::{Report, depot::Destinations, settings::label};
+use anyhow::{Result, bail, ensure};
 use std::{collections::BTreeMap, path::Path};
 
 const MAX_ENTRIES: usize = 4096;

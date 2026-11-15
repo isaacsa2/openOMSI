@@ -1,11 +1,10 @@
 //! Authored rigid-bus data translated to the native vehicle/physics interface.
 use crate::{
-    ini,
+    Ini, ini,
     settings::{number, position, value},
     vehicle::Inspection,
-    Ini,
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 
 pub(crate) struct Axle {
     pub left: [f32; 3],
@@ -190,7 +189,21 @@ impl Physics {
         if moi[0] >= 5000. {
             moi.iter_mut().for_each(|v| *v *= 1000.);
         }
-        let mut s=format!("[friendlyname]\nProton Bus\n{}\nDefault\n[ai_veh_type]\n2\n[mass]\n{mass}\n[cog]\n{}\n{}\n{}\n[schwerpunkt]\n{}\n[boundingbox]\n{}\n{}\n{}\n{}\n{}\n{}\n[rollwiderstand]\n{}\n[rot_pnt_long]\n{rear}\n[inv_min_turnradius]\n{inv}\n[model]\nModel/model.cfgoi\n[paths]\nModel/paths.cfgoi\n[passengercabin]\nModel/cabin.cfgoi\n[varnamelist]\n1\nScript/variables.cfgoi\n[stringvarnamelist]\n1\nScript/strings.cfgoi\n[script]\n1\nScript/main.cfgoi\n",info.name,cog[0],cog[1],cog[2],cog[2],size[0],size[1],size[2],center[0],center[1],center[2],info.mass_kg*0.009*9.81);
+        let mut s = format!(
+            "[friendlyname]\nProton Bus\n{}\nDefault\n[ai_veh_type]\n2\n[mass]\n{mass}\n[cog]\n{}\n{}\n{}\n[schwerpunkt]\n{}\n[boundingbox]\n{}\n{}\n{}\n{}\n{}\n{}\n[rollwiderstand]\n{}\n[rot_pnt_long]\n{rear}\n[inv_min_turnradius]\n{inv}\n[model]\nModel/model.cfgoi\n[paths]\nModel/paths.cfgoi\n[passengercabin]\nModel/cabin.cfgoi\n[varnamelist]\n1\nScript/variables.cfgoi\n[stringvarnamelist]\n1\nScript/strings.cfgoi\n[script]\n1\nScript/main.cfgoi\n",
+            info.name,
+            cog[0],
+            cog[1],
+            cog[2],
+            cog[2],
+            size[0],
+            size[1],
+            size[2],
+            center[0],
+            center[1],
+            center[2],
+            info.mass_kg * 0.009 * 9.81
+        );
         s.push_str(&format!(
             "[momentofintertia]\n{}\n{}\n{}\n",
             moi[0], moi[1], moi[2]

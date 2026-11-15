@@ -1,5 +1,5 @@
 //! An editable creator declaration, not verified identity or copy protection.
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use std::{io::Read, path::Path};
 
 pub fn validate_file(path: &Path) -> Result<()> {
@@ -48,7 +48,10 @@ pub fn validate(bytes: &[u8]) -> Result<()> {
             section == "openomsi" && key.trim() == "allowConversion",
             "conversion blocked: use exactly [openomsi] and allowConversion=1"
         );
-        ensure!(!found, "conversion blocked: duplicate or conflicting allowConversion declarations; keep exactly one");
+        ensure!(
+            !found,
+            "conversion blocked: duplicate or conflicting allowConversion declarations; keep exactly one"
+        );
         ensure!(
             value.trim() == "1",
             "conversion blocked: [openomsi] allowConversion must be exactly 1; found {:?}",
@@ -56,7 +59,10 @@ pub fn validate(bytes: &[u8]) -> Result<()> {
         );
         found = true;
     }
-    ensure!(found, "conversion blocked: original main configuration (.map.txt, .bus.txt or .ini) must contain [openomsi] followed by allowConversion=1; only the creator should add this declaration");
+    ensure!(
+        found,
+        "conversion blocked: original main configuration (.map.txt, .bus.txt or .ini) must contain [openomsi] followed by allowConversion=1; only the creator should add this declaration"
+    );
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 //! Approximate authored useSplines without crossing gaps or interpolating path rules.
 use crate::{navigation::MAX_POINTS, paths::Point};
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::Vec3;
 
 pub(crate) fn smooth(points: Vec<Point>) -> Result<Vec<Point>> {
@@ -103,11 +103,15 @@ mod tests {
             .iter()
             .position(|p| p.pos == controls[1].pos)
             .unwrap();
-        assert!(points[..split]
-            .iter()
-            .all(|p| p.speed == 20. && p.buses && !p.cars && (0.0..2.0).contains(&p.pos[2])));
-        assert!(points[split..points.len() - 1]
-            .iter()
-            .all(|p| p.speed == 40.));
+        assert!(
+            points[..split]
+                .iter()
+                .all(|p| p.speed == 20. && p.buses && !p.cars && (0.0..2.0).contains(&p.pos[2]))
+        );
+        assert!(
+            points[split..points.len() - 1]
+                .iter()
+                .all(|p| p.speed == 40.)
+        );
     }
 }

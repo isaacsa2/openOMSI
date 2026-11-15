@@ -1,5 +1,5 @@
 use crate::{
-    tests::{chunk, Fixture},
+    tests::{Fixture, chunk},
     vehicle_package::convert,
 };
 use std::{path::Path, sync::Arc};
@@ -93,16 +93,19 @@ fn denied_vehicle_conversion_never_writes_partial_files_or_declaration() {
         let file = fixture(&f, declaration);
         let before = std::fs::read(&file).unwrap();
         let out = f.0.join("output");
-        assert!(convert(&file, &out, || false)
-            .unwrap_err()
-            .to_string()
-            .contains("conversion blocked"));
+        assert!(
+            convert(&file, &out, || false)
+                .unwrap_err()
+                .to_string()
+                .contains("conversion blocked")
+        );
         assert!(!out.exists());
         assert_eq!(std::fs::read(file).unwrap(), before);
-        assert!(!std::fs::read_dir(&f.0).unwrap().flatten().any(|p| p
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".proton-vehicle")));
+        assert!(!std::fs::read_dir(&f.0).unwrap().flatten().any(|p| {
+            p.file_name()
+                .to_string_lossy()
+                .starts_with(".proton-vehicle")
+        }));
     }
 }
 #[test]
@@ -134,10 +137,11 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
     );
     for i in 0..r.meshes {
         let mesh = omsi_o3d::load_mesh(&base.join(format!("Model/mesh_{i}.o3doi"))).unwrap();
-        assert!(mesh
-            .vertices
-            .iter()
-            .all(|v| v.position.abs().max_element() < 10.));
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.position.abs().max_element() < 10.)
+        );
     }
     let mut v = native(&out);
     assert_eq!(v.var("target_index_int"), Some(-1.));
@@ -148,24 +152,26 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
     assert_eq!(v.ty.model.interior_lights.len(), 1);
     assert_eq!(v.ty.def.cameras_reflexion.len(), 1);
     assert_eq!(v.ty.model.meshes[0].viewpoint, 5);
-    assert!(v
-        .ty
-        .meshes
-        .iter()
-        .any(|m| m.materials.iter().any(|m| m.texture == "reflexion0.bmp")));
-    assert!(v
-        .ty
-        .model
-        .meshes
-        .iter()
-        .any(|m| m.materials.iter().any(|m| m.use_text_texture == Some(0))));
+    assert!(
+        v.ty.meshes
+            .iter()
+            .any(|m| m.materials.iter().any(|m| m.texture == "reflexion0.bmp"))
+    );
+    assert!(
+        v.ty.model
+            .meshes
+            .iter()
+            .any(|m| m.materials.iter().any(|m| m.use_text_texture == Some(0)))
+    );
     assert!(v.ty.program.str_var("IBIS_terminus_name").is_some());
     let sound = omsi_vehicle::SoundCfg::load(&base.join("Sound/sound.cfgoi")).unwrap();
     assert_eq!(sound.sounds.len(), 2);
-    assert!(sound
-        .sounds
-        .iter()
-        .any(|s| s.conditions.iter().any(|c| c.variable == "horn")));
+    assert!(
+        sound
+            .sounds
+            .iter()
+            .any(|s| s.conditions.iter().any(|c| c.variable == "horn"))
+    );
     assert!(v.trigger("kw_m_enginestart"));
     assert!(v.trigger("parking_brake_release"));
     assert!(v.trigger("automatic_D"));
@@ -254,10 +260,12 @@ fn failed_or_cancelled_vehicle_conversion_discards_stage() {
     let main = fixture(&f, "[openomsi]\nallowConversion=1\n");
     let out = f.0.join("output");
     let n = std::sync::atomic::AtomicUsize::new(0);
-    assert!(convert(&main, &out, || n
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        > 20)
-    .is_err());
+    assert!(
+        convert(&main, &out, || n
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            > 20)
+        .is_err()
+    );
     assert!(!out.exists());
     std::fs::write(
         f.0.join("source/Bus/models.txt"),
@@ -267,10 +275,11 @@ fn failed_or_cancelled_vehicle_conversion_discards_stage() {
     std::fs::write(f.0.join("source/Bus/bad.3ds"), b"damaged").unwrap();
     assert!(convert(&main, &out, || false).is_err());
     assert!(!out.exists());
-    assert!(!std::fs::read_dir(&f.0).unwrap().flatten().any(|p| p
-        .file_name()
-        .to_string_lossy()
-        .starts_with(".proton-vehicle")));
+    assert!(!std::fs::read_dir(&f.0).unwrap().flatten().any(|p| {
+        p.file_name()
+            .to_string_lossy()
+            .starts_with(".proton-vehicle")
+    }));
 }
 
 #[test]
@@ -345,10 +354,11 @@ fn a_converted_real_map_can_be_read_by_native_parsers() {
             {
                 let mesh =
                     omsi_o3d::load_mesh(&path.parent().unwrap().join("model").join(model)).unwrap();
-                assert!(mesh
-                    .vertices
-                    .iter()
-                    .all(|v| v.position.is_finite() && v.normal.is_finite()));
+                assert!(
+                    mesh.vertices
+                        .iter()
+                        .all(|v| v.position.is_finite() && v.normal.is_finite())
+                );
                 triangles += mesh.triangles.len();
             }
         }

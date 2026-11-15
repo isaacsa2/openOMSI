@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     depot::{self, Destination},
     import,
-    tests::{setup, Fixture},
+    tests::{Fixture, setup},
 };
 use omsi_vehicle::Hof;
 
@@ -87,11 +87,13 @@ fn nothing_irregular_is_guessed_at() {
     assert!(bad("[destination]\nname=a\ntext=1\ntext=2\n").contains("twice"));
     assert!(bad("[destination]\nname=a\nvia=\n").contains("via is empty"));
     assert!(bad("[destination]\nname=a\ntext=a\tb\n").contains("control character"));
-    assert!(bad(&format!(
-        "[destination]\nname=a\ntext={}\n",
-        "x".repeat(257)
-    ))
-    .contains("too long"));
+    assert!(
+        bad(&format!(
+            "[destination]\nname=a\ntext={}\n",
+            "x".repeat(257)
+        ))
+        .contains("too long")
+    );
     assert!(bad("[destination]\nname=a\nout_of_service=yes\n").contains("0 or 1"));
     assert!(bad("[destination]\nname=a\nout_of_service=1\nout_of_service=1\n").contains("twice"));
     assert!(bad("[destination]\nname\n").contains("expected key=value"));
@@ -116,30 +118,38 @@ fn a_name_resolves_exactly_or_by_case_and_a_mistake_is_left_out_and_reported() {
         resolve(&raw("490 terminal pimentas", Some("T"), None), &d).unwrap(),
         "490 TERMINAL PIMENTAS"
     );
-    assert!(resolve(&raw("GARAGEM", Some("G"), None), &d)
-        .unwrap_err()
-        .contains("several"));
+    assert!(
+        resolve(&raw("GARAGEM", Some("G"), None), &d)
+            .unwrap_err()
+            .contains("several")
+    );
     assert!(
         resolve(&raw("490", Some("T"), None), &d)
             .unwrap_err()
             .contains("no destination"),
         "490 is not 4900"
     );
-    assert!(resolve(&raw("Nada", Some("T"), None), &d)
+    assert!(
+        resolve(&raw("Nada", Some("T"), None), &d)
+            .unwrap_err()
+            .contains("no destination")
+    );
+    assert!(
+        resolve(&raw("Garagem", None, None), &d)
+            .unwrap_err()
+            .contains("gives no")
+    );
+    assert!(
+        resolve(
+            &Raw {
+                at: 1,
+                ..Default::default()
+            },
+            &d
+        )
         .unwrap_err()
-        .contains("no destination"));
-    assert!(resolve(&raw("Garagem", None, None), &d)
-        .unwrap_err()
-        .contains("gives no"));
-    assert!(resolve(
-        &Raw {
-            at: 1,
-            ..Default::default()
-        },
-        &d
-    )
-    .unwrap_err()
-    .contains("no name"));
+        .contains("no name")
+    );
     let mut report = Report::default();
     let raws = [
         raw(
@@ -188,10 +198,12 @@ fn the_same_destination_twice_is_one_and_two_that_disagree_are_neither() {
         "which of them the displays show would be a guess"
     );
     assert_eq!(report.warnings.len(), 2);
-    assert!(report
-        .warnings
-        .iter()
-        .all(|w| w.contains("declared again with other values")));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .all(|w| w.contains("declared again with other values"))
+    );
 }
 
 #[test]

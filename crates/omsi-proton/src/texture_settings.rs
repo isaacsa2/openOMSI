@@ -1,10 +1,9 @@
 //! Approximate the documented material presets without distributing built-in assets.
 use crate::{
-    files, ini,
+    Report, files, ini,
     settings::{number, value},
-    Report,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use omsi_o3d::Material;
 use std::{collections::BTreeMap, path::Path};
 
@@ -55,7 +54,11 @@ impl Presets {
 
     pub fn is_road(&self, texture: &str) -> bool {
         let texture = texture.replace('\\', "/");
-        let name = texture.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+        let name = texture
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
         self.0.get(&name).is_some_and(|p| p.starts_with("asphalt/"))
     }
 

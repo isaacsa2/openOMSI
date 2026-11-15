@@ -13,7 +13,7 @@
 //! Nothing that already joins is touched: an end that has a native link keeps its place, and a
 //! corner where another chain begins or ends is left as drawn, so a repair can never cut a
 //! junction that worked.
-use crate::{paths::DrivePath, paths::Point, Report};
+use crate::{Report, paths::DrivePath, paths::Point};
 use glam::{Vec2, Vec3};
 
 /// The native tolerance between the end of a lane and the start of the next (m).

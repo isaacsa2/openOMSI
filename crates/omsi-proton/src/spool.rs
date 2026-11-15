@@ -1,12 +1,12 @@
 //! Bounded buffered writers spool clipped faces to staging; only one tile is assembled.
 use crate::{
+    Spawn,
     convert::{Faces, TILE_LIMIT},
     optimise::Builder,
     spawn::Probe,
     tags::Mode,
-    Spawn,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::{Vec2, Vec3};
 use omsi_o3d::{Material, Mesh, Vertex};
 use std::{

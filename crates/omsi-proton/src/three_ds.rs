@@ -1,6 +1,6 @@
 //! Static 3DS geometry. Vertex positions in 3DS are already in the file's world frame;
 //! its local-axis matrix describes the object's frame, not another transform to apply.
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use glam::{Vec2, Vec3};
 use omsi_o3d::Material;
 use std::io::Read;
@@ -119,11 +119,13 @@ mod load_tests {
         assert_eq!(reader.position(), 6);
         assert_eq!(model.trailing_bytes as u64, FILE_LIMIT_BYTES - 6);
         reader.set_position(0);
-        assert!(read_model(&mut reader, FILE_LIMIT_BYTES + 1, &|| false)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("1 GiB"));
+        assert!(
+            read_model(&mut reader, FILE_LIMIT_BYTES + 1, &|| false)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("1 GiB")
+        );
         assert_eq!(reader.position(), 0);
     }
 
@@ -134,11 +136,13 @@ mod load_tests {
         let truncated = Cursor::new([0x4d, 0x4d, 20, 0, 0, 0]);
         assert!(read_model(truncated, 20, &|| false).is_err());
         let valid = Cursor::new([0x4d, 0x4d, 6, 0, 0, 0]);
-        assert!(read_model(valid, 6, &|| true)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("cancelled"));
+        assert!(
+            read_model(valid, 6, &|| true)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("cancelled")
+        );
     }
 }
 

@@ -45,9 +45,13 @@ pub(crate) fn classify(name: &str) -> ObjectKind {
     ObjectKind::Mesh(if name.contains("_additive_") {
         Mode::Additive
     } else if name.contains("_emissive_") {
-        if name.contains("_transparent_") { Mode::EmissiveBlend }
-        else if name.contains("_cutout_") { Mode::EmissiveCutout }
-        else { Mode::Emissive }
+        if name.contains("_transparent_") {
+            Mode::EmissiveBlend
+        } else if name.contains("_cutout_") {
+            Mode::EmissiveCutout
+        } else {
+            Mode::Emissive
+        }
     } else if name.contains("_transparent_") {
         Mode::Blend
     } else if name.contains("_cutout_") {

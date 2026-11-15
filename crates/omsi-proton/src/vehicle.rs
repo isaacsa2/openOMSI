@@ -3,7 +3,7 @@ use crate::{
     child, ini,
     settings::{label, number, position, value},
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -197,7 +197,7 @@ mod tests {
         let f = crate::tests::Fixture::new();
         std::fs::create_dir_all(f.0.join("Bus/Scripts")).unwrap();
         let main = f.0.join("Bus.ini");
-        let text="[mod]\nname=Fixture\nbusModVersion=2\n[config]\nbaseDir=Bus\nmodels1=Scripts/models.txt\n[data]\nmass1=12000\ntemplate=4x2\n[doors]\nrightdoor1=Scripts/door.txt\n[posDriverHead]\nposX=-1\nposY=2\nposZ=4\n";
+        let text = "[mod]\nname=Fixture\nbusModVersion=2\n[config]\nbaseDir=Bus\nmodels1=Scripts/models.txt\n[data]\nmass1=12000\ntemplate=4x2\n[doors]\nrightdoor1=Scripts/door.txt\n[posDriverHead]\nposX=-1\nposY=2\nposZ=4\n";
         std::fs::write(&main, text).unwrap();
         std::fs::write(
             f.0.join("Bus/Scripts/models.txt"),

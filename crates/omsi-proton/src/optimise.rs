@@ -3,7 +3,7 @@
 use crate::convert::Tiles;
 use crate::tags::Mode;
 #[cfg(test)]
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use omsi_o3d::{Material, Mesh, Vertex};
 use std::collections::{BTreeMap, HashMap};
 

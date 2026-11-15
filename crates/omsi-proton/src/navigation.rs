@@ -1,5 +1,5 @@
 //! Small, versioned navigation data, separate from collision and render geometry.
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
 pub use crate::navigation_index::TriangleIndex;

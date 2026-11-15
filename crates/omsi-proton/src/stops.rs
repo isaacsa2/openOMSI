@@ -1,12 +1,11 @@
 //! Stops retain only their trigger bounds and authored waiting positions.
 use crate::{
-    child, files, ini,
+    Report, child, files, ini,
     paths::centre,
     settings::{label, number, position, value},
     three_ds::Object,
-    Report,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::Vec3;
 use std::{collections::BTreeMap, path::Path};
 
@@ -85,7 +84,10 @@ impl Collector {
                     let pos = position(&cfg, section)?;
                     stop.waiting.insert(
                         index,
-                        (pos, (stop.heading + number(&cfg, section, "roty", 0.0)?).rem_euclid(360.0)),
+                        (
+                            pos,
+                            (stop.heading + number(&cfg, section, "roty", 0.0)?).rem_euclid(360.0),
+                        ),
                     );
                 }
             }

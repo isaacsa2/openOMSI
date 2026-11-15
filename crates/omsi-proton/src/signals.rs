@@ -1,16 +1,15 @@
 //! Traffic lamp channels and stop triggers share one native clock per junction.
 use crate::{
-    child,
-    convert::{Faces, EDGE},
+    Report, child,
+    convert::{EDGE, Faces},
     files, ini,
     materials::Registry,
     paths::centre,
     settings::{label, number, value},
     tags::Mode,
     three_ds::Object,
-    Report,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use glam::Vec3;
 use omsi_o3d::{Mesh, Triangle, Vertex};
 use std::{
@@ -88,7 +87,11 @@ impl Collector {
             // (lamps and triggers are named by the prefix: a second program of the same
             // name could never drive them, and which one Proton takes is not documented,
             // so the first by file name is kept, the same on every import)
-            let name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let name = file
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             if let Some(first) = declared.get(&prefix) {
                 report.warnings.push(format!(
                     "{prefix}: traffic-light prefix declared by both {first} and {name}; {first} drives its lamps and triggers, {name} is skipped"
@@ -170,7 +173,8 @@ impl Collector {
                 height: number(&cfg, "trafficlight", "triggerheight", 5.0)?.clamp(0.1, 50.0),
                 tiles: BTreeSet::new(),
                 colors,
-                lights: (value(&cfg, "trafficlight", "usereallights") != Some("0")).then_some(ranges),
+                lights: (value(&cfg, "trafficlight", "usereallights") != Some("0"))
+                    .then_some(ranges),
             });
         }
         Ok(out)
@@ -323,7 +327,9 @@ impl Collector {
             )?;
             let variable = ["red", "yellow", "green"][color];
             let [r, g, b] = program.colors[color];
-            let mut sco = format!("[absheight]\n[fixed]\n[trafficlight]\n[mesh]\n{stem}.o3d\n[visible]\n{variable}\n1\n");
+            let mut sco = format!(
+                "[absheight]\n[fixed]\n[trafficlight]\n[mesh]\n{stem}.o3d\n[visible]\n{variable}\n1\n"
+            );
             crate::export::material_overrides(
                 &mut sco,
                 &sink.mesh.materials,

@@ -1,7 +1,7 @@
 //! Files an author writes beside a map's configuration (`<map>.itineraries.txt`,
 //! `<map>.destinations.txt`): OpenOMSI files, not Proton ones, so the original configuration is
 //! never edited and a map without them imports exactly as before.
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use std::path::Path;
 
 const FILE_MAX: u64 = 1 << 20;

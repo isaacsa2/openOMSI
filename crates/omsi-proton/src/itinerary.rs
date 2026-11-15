@@ -29,8 +29,8 @@
 //! author meant would invent a service. An itinerary whose stops or destination cannot be
 //! resolved to exactly one thing is left out and reported instead, so one mistake does not
 //! take the others with it.
-use crate::{depot::Destinations, gameplay::PlacedStop, settings::label, Report};
-use anyhow::{bail, ensure, Result};
+use crate::{Report, depot::Destinations, gameplay::PlacedStop, settings::label};
+use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -222,11 +222,7 @@ fn resolve_stop<'a>(known: &'a [Known], reference: &str) -> Result<&'a Known, St
 }
 
 /// An itinerary resolved to stop ids, or the reason it cannot be.
-fn resolve(
-    raw: &Raw,
-    known: &[Known],
-    destinations: &Destinations,
-) -> Result<Draft, String> {
+fn resolve(raw: &Raw, known: &[Known], destinations: &Destinations) -> Result<Draft, String> {
     let wanted = raw.destination.as_deref().ok_or("no destination")?;
     if raw.stops.len() < 2 {
         return Err("an itinerary needs at least two stops".into());
@@ -237,14 +233,14 @@ fn resolve(
         .collect();
     let (destination, service) = match hits.as_slice() {
         [(_, d)] if d.reserved => {
-            return Err(format!("{wanted:?} is an out-of-service destination"))
+            return Err(format!("{wanted:?} is an out-of-service destination"));
         }
         [(name, d)] => ((*name).clone(), d.service),
         [] => return Err(format!("{wanted:?} is no destination of the generated HOF")),
         _ => {
             return Err(format!(
                 "{wanted:?} matches several destinations of the generated HOF"
-            ))
+            ));
         }
     };
     let mut stops: Vec<&Known> = Vec::with_capacity(raw.stops.len());
@@ -332,7 +328,9 @@ fn drafts(
         }
     }
     let doubt = |at: usize| {
-        format!("itineraries file, line {at}: itinerary left out: another with the same line, direction and destination has other stops; tell them apart by line or direction")
+        format!(
+            "itineraries file, line {at}: itinerary left out: another with the same line, direction and destination has other stops; tell them apart by line or direction"
+        )
     };
     for (at, _) in &late {
         report.warnings.push(doubt(*at));
