@@ -115,6 +115,7 @@ impl World {
                 ailists,
                 date,
                 chrono_dirs,
+                unscheduled_passengers: global.unscheduled_passengers,
             }),
             ..Default::default()
         }));
