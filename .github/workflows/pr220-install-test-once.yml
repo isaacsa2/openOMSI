@@ -1,0 +1,35 @@
+name: PR220 one-time installer build and test
+
+on:
+  push:
+    branches: [preview/next-test-build]
+    paths: [.github/workflows/pr220-install-test-once.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.repository == 'isaacsa2/openOMSI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Format installer changes and remove one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt
+          rustfmt crates/omsi-launcher-core/src/install.rs crates/omsi-launcher-core/src/install/source.rs crates/omsi-launcher-core/src/install/tests.rs crates/omsi-launcher-core/src/install_proton.rs crates/omsi-launcher-core/src/install_proton_tests.rs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/pr220-install-test-once.yml
+          git add crates/omsi-launcher-core
+          git commit -m "style(proton): format recovered Mods converter integration"
+          git push origin HEAD:refs/heads/preview/next-test-build
+      - name: Compile launcher and converter with current engine
+        run: cargo check -p omsi-launcher-core -p omsi-proton --all-targets --message-format=short
+      - name: Run Proton converter unit tests
+        run: cargo test -p omsi-proton --lib -- --test-threads=1
+      - name: Run Proton Mods installer unit tests
+        run: cargo test -p omsi-launcher-core install::proton::tests --lib -- --test-threads=1
