@@ -787,7 +787,6 @@ pub struct WeatherInfo {
     pub installed: bool,
 }
 
-
 pub fn list_weather() -> Result<Vec<WeatherInfo>> {
     root()?;
     let mut out = Vec::new();

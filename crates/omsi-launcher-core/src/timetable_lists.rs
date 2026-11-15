@@ -428,7 +428,6 @@ pub(super) fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
     Ok(out)
 }
 
-
 fn natural_key(s: &str) -> (u64, String) {
     let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
     (digits.parse().unwrap_or(u64::MAX), s.to_ascii_lowercase())

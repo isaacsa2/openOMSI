@@ -7,8 +7,13 @@ pub fn get_settings() -> Result<Value> {
     let text = std::fs::read_to_string(data_dir().join("settings.cfg")).ok();
     let mut v = settings_from_text(text.as_deref());
     // (what the page may offer beside the upscalers that are always there; not a setting)
-    let game_dir = find_game(&load_config_raw().game).and_then(|g| g.parent().map(Path::to_path_buf));
-    v["temporal_upscalers"] = json!(game_dir.map_or_else(omsi_cfg::upscaler_files::of_the_system, |d| omsi_cfg::upscaler_files::available(&d)));
+    let game_dir =
+        find_game(&load_config_raw().game).and_then(|g| g.parent().map(Path::to_path_buf));
+    v["temporal_upscalers"] = json!(
+        game_dir.map_or_else(omsi_cfg::upscaler_files::of_the_system, |d| {
+            omsi_cfg::upscaler_files::available(&d)
+        })
+    );
     v["frame_generators"] = json!(omsi_cfg::upscaler_files::frame_generation_choices());
     // no settings of our own yet: start from what the player set in OMSI 2
     if text.is_none() {
@@ -28,7 +33,15 @@ pub fn get_settings() -> Result<Value> {
 /// dropped when the file is written again (the game takes the last line of them, so a kept
 /// `lang=` would undo the page's `language=`).
 // (`navigator_opacity`: the opacity was the navigator's before it was the whole interface's)
-const SETTING_ALIASES: &[(&str, &str)] = &[("af", "anisotropy"), ("ambient_occlusion", "ssao"), ("fractal", "detail_textures"), ("lang", "language"), ("texmemlimit", "texture_memory"), ("navigator_opacity", "ui_opacity"), ("gear_buttons_hold", "momentary_gears")];
+const SETTING_ALIASES: &[(&str, &str)] = &[
+    ("af", "anisotropy"),
+    ("ambient_occlusion", "ssao"),
+    ("fractal", "detail_textures"),
+    ("lang", "language"),
+    ("texmemlimit", "texture_memory"),
+    ("navigator_opacity", "ui_opacity"),
+    ("gear_buttons_hold", "momentary_gears"),
+];
 
 /// Keys of before that are dropped when the file is written again: `texture_memory=` (and
 /// OMSI's `texmemlimit=`, its alias) was the textures' budget, which `video_memory=` - all
@@ -38,25 +51,43 @@ const RETIRED_SETTINGS: &[&str] = &["texture_memory", "nav_light"];
 
 /// A window size as the settings keep it: "WxH" in pixels (each 320..16384), else "auto".
 pub fn resolution_text(v: &str) -> String {
-    let v = v.trim().to_ascii_lowercase().replace(' ', "").replace(['*', '×'], "x");
-    match v.split_once('x').map(|(w, h)| (w.trim().parse::<u32>(), h.trim().parse::<u32>())) {
-        Some((Ok(w), Ok(h))) if (320..=16384).contains(&w) && (240..=16384).contains(&h) => format!("{w}x{h}"),
+    let v = v
+        .trim()
+        .to_ascii_lowercase()
+        .replace(' ', "")
+        .replace(['*', '×'], "x");
+    match v
+        .split_once('x')
+        .map(|(w, h)| (w.trim().parse::<u32>(), h.trim().parse::<u32>()))
+    {
+        Some((Ok(w), Ok(h))) if (320..=16384).contains(&w) && (240..=16384).contains(&h) => {
+            format!("{w}x{h}")
+        }
         _ => "auto".into(),
     }
 }
 
 fn setting_key(k: &str) -> String {
     let k = k.trim().to_ascii_lowercase();
-    SETTING_ALIASES.iter().find(|(alias, _)| *alias == k).map(|(_, key)| key.to_string()).unwrap_or(k)
+    SETTING_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == k)
+        .map(|(_, key)| key.to_string())
+        .unwrap_or(k)
 }
 
 // (the language table lives in omsi-cfg, below the input crate that needs it too)
-pub use omsi_cfg::lang::{language_code, language_iso, LANGUAGES};
+pub use omsi_cfg::lang::{LANGUAGES, language_code, language_iso};
 
 /// `vanilla` (as OMSI 2), `vanilla_plus`, `enhanced` or `enhanced_plus`, from the ways a file
 /// may spell them (as the game's `settings::graphics_mode`).
 pub fn graphics_mode(v: &str) -> &'static str {
-    match v.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
+    match v
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', ' '], "_")
+        .as_str()
+    {
         "enhanced_plus" | "enhanced+" | "enhancedplus" | "enhanced_+" | "2" => "enhanced_plus",
         "enhanced" | "1" => "enhanced",
         "vanilla" | "classic" | "original" | "omsi" | "omsi2" | "omsi_2" => "vanilla",
@@ -68,8 +99,20 @@ pub fn graphics_mode(v: &str) -> &'static str {
 /// `vanilla`, `vanilla_plus`, `enhanced`, or `enhanced_plus` for Enhanced with Real-Time Ray
 /// Tracing on (what the code that tunes for the traced picture asks).
 pub fn effective_mode(v: &Value) -> &'static str {
-    let g = graphics_mode(v.get("graphics").and_then(|x| x.as_str()).unwrap_or("vanilla_plus"));
-    if g == "enhanced" && v.get("ray_tracing").and_then(|x| x.as_bool()).unwrap_or(false) { "enhanced_plus" } else { g }
+    let g = graphics_mode(
+        v.get("graphics")
+            .and_then(|x| x.as_str())
+            .unwrap_or("vanilla_plus"),
+    );
+    if g == "enhanced"
+        && v.get("ray_tracing")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false)
+    {
+        "enhanced_plus"
+    } else {
+        g
+    }
 }
 
 /// The Graphics settings' quality presets: Low, Medium, High, Extra, Max and Ultra, shared by the
@@ -82,7 +125,14 @@ pub fn effective_mode(v: &Value) -> &'static str {
 /// texture memory is left as it is.
 pub fn graphics_presets() -> [(&'static str, Value); 6] {
     // per level: Low, Medium, High, Extra, Max, Ultra
-    let graphics = ["vanilla", "vanilla_plus", "enhanced", "enhanced", "enhanced", "enhanced"];
+    let graphics = [
+        "vanilla",
+        "vanilla_plus",
+        "enhanced",
+        "enhanced",
+        "enhanced",
+        "enhanced",
+    ];
     let msaa = [1, 4, 2, 4, 4, 4];
     let scale = ["0.75", "auto", "auto", "auto", "auto", "auto"];
     let anisotropy = [2, 8, 8, 8, 16, 16];
@@ -96,7 +146,9 @@ pub fn graphics_presets() -> [(&'static str, Value); 6] {
     let light_shadows = ["off", "off", "street", "street", "all", "all"];
     let street_light = ["off", "off", "off", "auto", "on", "on"];
     let puddles = ["off", "high", "low", "high", "high", "high"];
-    let mirror_quality = ["standard", "standard", "standard", "standard", "enhanced", "enhanced"];
+    let mirror_quality = [
+        "standard", "standard", "standard", "standard", "enhanced", "enhanced",
+    ];
     std::array::from_fn(|i| {
         let low = i == 0;
         let preset = json!({
@@ -116,7 +168,10 @@ pub fn graphics_presets() -> [(&'static str, Value); 6] {
                 preset.as_object_mut().map(|o| o.remove(k));
             }
         }
-        (["Low", "Medium", "High", "Extra", "Max", "Ultra"][i], preset)
+        (
+            ["Low", "Medium", "High", "Extra", "Max", "Ultra"][i],
+            preset,
+        )
     })
 }
 
@@ -131,12 +186,20 @@ pub fn vehicle_smoke(x: &str) -> &'static str {
 
 /// The wet roads' reflections: `off` or `low`, else `high` (as the game reads its `puddles`).
 pub fn puddles(x: &str) -> &'static str {
-    match x.trim().to_ascii_lowercase().as_str() { "off" | "0" | "none" => "off", "low" => "low", _ => "high" }
+    match x.trim().to_ascii_lowercase().as_str() {
+        "off" | "0" | "none" => "off",
+        "low" => "low",
+        _ => "high",
+    }
 }
 
 /// The enhanced clouds' quality: `low`, else `high` (as the game's `settings::cloud_quality`).
 fn cloud_quality(x: &str) -> &'static str {
-    if x.trim().eq_ignore_ascii_case("low") { "low" } else { "high" }
+    if x.trim().eq_ignore_ascii_case("low") {
+        "low"
+    } else {
+        "high"
+    }
 }
 
 /// Which lights cast shadows: `off` or `all`, else `street` (as the game's `settings::light_shadows`).
@@ -209,8 +272,14 @@ pub fn head_tracking_source(v: &str) -> &'static str {
 /// (`head_tracking_dead_zone`, 0 to 1 degrees, 0.1), in twentieths (none, or one out of its
 /// reach: the default).
 pub fn head_tracking_value(key: &str, v: Option<f64>) -> f64 {
-    let default = if key == "head_tracking_smoothing" { 0.5 } else { 0.1 };
-    v.filter(|x| x.is_finite() && (0.0..=1.0).contains(x)).map(|x| (x * 20.0).round() / 20.0).unwrap_or(default)
+    let default = if key == "head_tracking_smoothing" {
+        0.5
+    } else {
+        0.1
+    };
+    v.filter(|x| x.is_finite() && (0.0..=1.0).contains(x))
+        .map(|x| (x * 20.0).round() / 20.0)
+        .unwrap_or(default)
 }
 
 fn ui_theme_from_text(text: &str) -> &'static str {
@@ -220,15 +289,32 @@ fn ui_theme_from_text(text: &str) -> &'static str {
         if line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-        let Some((key, value)) = line.split_once('=') else { continue };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
         let (key, value) = (setting_key(key), value.trim());
         match key.as_str() {
-            "ui_theme" => theme = Some(if value.eq_ignore_ascii_case("light") { "light" } else { "dark" }),
-            "nav_light" => legacy_nav_light = Some(matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "on" | "yes")),
+            "ui_theme" => {
+                theme = Some(if value.eq_ignore_ascii_case("light") {
+                    "light"
+                } else {
+                    "dark"
+                })
+            }
+            "nav_light" => {
+                legacy_nav_light = Some(matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on" | "yes"
+                ))
+            }
             _ => {}
         }
     }
-    theme.unwrap_or(if legacy_nav_light == Some(true) { "light" } else { "dark" })
+    theme.unwrap_or(if legacy_nav_light == Some(true) {
+        "light"
+    } else {
+        "dark"
+    })
 }
 
 /// Dynamic and map-placed arrows, each falling back to the former shared setting.
@@ -238,7 +324,10 @@ pub fn route_arrows_from_text(text: &str) -> (bool, bool) {
     let mut map = None;
     for (key, value) in text.lines().filter_map(|line| line.split_once('=')) {
         let on = || {
-            matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on" | "yes")
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on" | "yes"
+            )
         };
         match key.trim().to_ascii_lowercase().as_str() {
             "nav_arrows" => legacy = on(),
@@ -608,14 +697,25 @@ pub fn tutorials() -> Vec<(usize, String, String)> {
     let lang = content_language();
     let mut out = Vec::new();
     for n in 1..=4usize {
-        let p = [lang, "ENG", "DEU"].iter().map(|l| r.join("Tutorials").join(format!("menu_{n}_{l}.html"))).find(|p| p.is_file());
+        let p = [lang, "ENG", "DEU"]
+            .iter()
+            .map(|l| r.join("Tutorials").join(format!("menu_{n}_{l}.html")))
+            .find(|p| p.is_file());
         let Some(p) = p else { continue };
-        let Ok(bytes) = std::fs::read(&p) else { continue };
+        let Ok(bytes) = std::fs::read(&p) else {
+            continue;
+        };
         let html = omsi_cfg::codepage::decode(&bytes);
         let body = html.split_once("</style>").map(|x| x.1).unwrap_or(&html);
         let mut text = String::new();
         let mut tag = false;
-        for c in body.replace("</p>", "\n").replace("<br>", "\n").replace("</h2>", "\n").replace("<li>", "\n• ").chars() {
+        for c in body
+            .replace("</p>", "\n")
+            .replace("<br>", "\n")
+            .replace("</h2>", "\n")
+            .replace("<li>", "\n• ")
+            .chars()
+        {
             match c {
                 '<' => tag = true,
                 '>' => tag = false,
@@ -624,7 +724,10 @@ pub fn tutorials() -> Vec<(usize, String, String)> {
             }
         }
         let text = decode_html_entities(&text);
-        let mut lines = text.lines().map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|l| !l.is_empty());
+        let mut lines = text
+            .lines()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|l| !l.is_empty());
         let title = lines.next().unwrap_or_default();
         let rest: Vec<String> = lines.collect();
         out.push((n, title, rest.join("\n")));
@@ -640,19 +743,41 @@ pub use omsi_content::tutorial::decode_html_entities;
 pub fn option_presets() -> Vec<(String, Value)> {
     let Ok(r) = root() else { return Vec::new() };
     let mut out = Vec::new();
-    let Ok(dir) = std::fs::read_dir(r.join("option_presets")) else { return out };
-    let mut files: Vec<PathBuf> = dir.flatten().map(|e| e.path()).filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("oop")).unwrap_or(false)).collect();
+    let Ok(dir) = std::fs::read_dir(r.join("option_presets")) else {
+        return out;
+    };
+    let mut files: Vec<PathBuf> = dir
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .map(|e| e.eq_ignore_ascii_case("oop"))
+                .unwrap_or(false)
+        })
+        .collect();
     files.sort();
     for f in files {
-        let Ok(o) = omsi_content::options::Options::load(&f) else { continue };
-        let name = f.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        let Ok(o) = omsi_content::options::Options::load(&f) else {
+            continue;
+        };
+        let name = f
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let mut v = json!({});
         if !cfg!(any(target_os = "android", target_os = "ios")) {
             v["max_fps"] = json!(o.i32("maxfps", 0).max(0));
         }
         v["min_obj_size"] = json!(o.f32("performance_minobjsize", 0.013) as f64);
-        v["max_obj_dist"] = json!((o.f32("performance_maxobjdist", 900.0).round() as i64).to_string());
-        if let Some(af) = o.values.get("texfilter").and_then(|x| x.get(1)).and_then(|x| x.parse::<i64>().ok()) {
+        v["max_obj_dist"] =
+            json!((o.f32("performance_maxobjdist", 900.0).round() as i64).to_string());
+        if let Some(af) = o
+            .values
+            .get("texfilter")
+            .and_then(|x| x.get(1))
+            .and_then(|x| x.parse::<i64>().ok())
+        {
             v["anisotropy"] = json!(af.clamp(1, 16));
         }
         let refl = o.i32("performance_refltexsize", 8);
@@ -979,5 +1104,3 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     }
     text
 }
-
-

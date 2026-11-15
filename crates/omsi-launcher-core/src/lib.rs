@@ -1076,12 +1076,12 @@ mod date_codes;
 use date_codes::{add_days, day_before, days_of, weekday};
 mod content_lists;
 pub use content_lists::*;
-use content_lists::{read_map, missing_packs_of, paint_schemes, dsc_candidates, parse_dsc};
 use content_lists::{content_language, date_for_game, log_line, year_span_of};
+use content_lists::{dsc_candidates, missing_packs_of, paint_schemes, parse_dsc, read_map};
 
 mod timetable_lists;
-pub use timetable_lists::*;
 use timetable_lists::lines_on;
+pub use timetable_lists::*;
 
 // ---------------------------------------------------------------------------------------
 // profiles: the driver's personnel file plus the sessions the game writes
