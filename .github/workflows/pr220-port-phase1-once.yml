@@ -1,0 +1,70 @@
+name: PR220 phase 1 OI and model parser restoration
+
+on:
+  push:
+    branches: [preview/next-test-build]
+    paths: [.github/workflows/pr220-port-phase1-once.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    if: github.repository == 'isaacsa2/openOMSI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore OI format reader with today's VFS and map parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, tempfile
+          def patch(path, original, updated):
+              p=Path(path); s=p.read_text()
+              assert original in s, (path,original)
+              p.write_text(s.replace(original,updated,1))
+          codec=Path("crates/omsi-proton/src/oi.rs").read_text()
+          codec=codec.replace("omsi_cfg::", "crate::")
+          Path("crates/omsi-cfg/src/oi.rs").write_text(codec)
+          Path("crates/omsi-proton/src/oi.rs").unlink()
+          patch("crates/omsi-proton/src/lib.rs", "pub mod oi;", "pub use omsi_cfg::oi;")
+          patch("crates/omsi-cfg/src/lib.rs", "pub mod number;", "pub mod number;\npub mod oi;")
+          patch("crates/omsi-cfg/src/vfs.rs", "return Ok(b.to_vec());", "return crate::oi::decode(path, b.to_vec());")
+          p=Path("crates/omsi-cfg/src/vfs.rs")
+          s=p.read_text()
+          anchor="    r\n}\n\nthread_local! {"
+          assert anchor in s
+          p.write_text(s.replace(anchor,"    r.and_then(|b| crate::oi::decode(path, b))\n}\n\nthread_local! {",1))
+          patch("crates/omsi-map/src/global.rs", "    pub left_hand_traffic: bool,", "    pub left_hand_traffic: bool,\n    /// Generated OpenOMSI-only maps: support unscheduled stops without a timetable.\n    pub unscheduled_passengers: bool,")
+          patch("crates/omsi-map/src/global.rs", '"moneysystem" => g.money_system = r.str().to_string(),', '"moneysystem" => g.money_system = r.str().to_string(),\n                "openomsi_unscheduled_passengers" => g.unscheduled_passengers = r.i32() == 1,')
+          path="crates/omsi-scenery/src/sco.rs"
+          old="22c8401e5d6bd868a7ee4e5ce031204eaa49552e"
+          base="3c50e44cb3307204ebbc16cafc7447ad8376c0a2"
+          with tempfile.TemporaryDirectory() as d:
+              files=[]
+              for name,ref in [("current","HEAD"),("base",base),("feature",old)]:
+                  p=Path(d,name)
+                  p.write_bytes(subprocess.check_output(["git","show",f"{ref}:{path}"]))
+                  files.append(str(p))
+              merged=subprocess.run(["git","merge-file","-p",*files],capture_output=True)
+              assert merged.returncode==0, merged.stderr.decode()
+              Path(path).write_bytes(merged.stdout)
+          PY
+          rustfmt crates/omsi-cfg/src/oi.rs crates/omsi-cfg/src/lib.rs crates/omsi-cfg/src/vfs.rs crates/omsi-map/src/global.rs crates/omsi-scenery/src/sco.rs crates/omsi-proton/src/lib.rs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/pr220-port-phase1-once.yml
+          git add crates/omsi-cfg crates/omsi-map/src/global.rs crates/omsi-scenery/src/sco.rs crates/omsi-proton
+          git commit -m "feat(proton): restore bounded OI loading and map metadata parsing"
+          git push origin HEAD:refs/heads/preview/next-test-build
+      - name: Check converter and codecs compile
+        run: cargo check -p omsi-proton --lib --examples
+      - name: Run OI reader regression tests
+        run: cargo test -p omsi-cfg oi::tests --lib -- --nocapture
+      - name: Compile recovered converter legacy tests (diagnostic)
+        run: cargo test -p omsi-proton --lib --no-run
