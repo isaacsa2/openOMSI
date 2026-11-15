@@ -801,7 +801,6 @@ fn join(a: &str, b: &str) -> String {
 
 /// Work out what goes where.
 
-
 fn kind_label(kind: &str) -> &'static str {
     match kind {
         "maps" => "map",
@@ -829,8 +828,6 @@ use runner::run;
 
 // ---------------------------------------------------------------------------------------
 // the job
-
-
 
 /// Where a mod moved to `Mods/installed` keeps the list of the folders its install made
 /// (`<name>.txt`, one content-relative path a line).

@@ -267,7 +267,9 @@ fn install_supplied_proton_zip_when_available() {
             omsi_proton::depot::installed_name(&map),
             Some(hof.name.clone())
         );
-        let info = crate::read_map(&map, map.file_name().unwrap().to_str().unwrap(), "en").0.unwrap();
+        let info = crate::read_map(&map, map.file_name().unwrap().to_str().unwrap(), "en")
+            .0
+            .unwrap();
         assert_eq!(info.hof, hof.name);
         eprintln!(
             "{}: {} shared HOF destinations and {} stops",

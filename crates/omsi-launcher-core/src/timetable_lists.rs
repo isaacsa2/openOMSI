@@ -101,31 +101,60 @@ pub struct RoadPiece {
 /// The trip's own track (`.ttr`) when it names one - trains, ferries, and the type-1 trips
 /// of mod maps - else the station links between its stops, as the game walks them.
 pub fn trip_path(map: &str, date: &str, trip: &str) -> Result<TripPath> {
-    let map_dir = resolve_content(map)?.parent().map(|p| p.to_path_buf()).context("map folder")?;
-    let date = if date.trim().is_empty() { DEFAULT_DATE } else { date.trim() };
-    let code = omsi_map::date_code(date).with_context(|| i18n::trf("'{date}' is not a date (YYYY-MM-DD)", &[("date", &date)]))?;
+    let map_dir = resolve_content(map)?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .context("map folder")?;
+    let date = if date.trim().is_empty() {
+        DEFAULT_DATE
+    } else {
+        date.trim()
+    };
+    let code = omsi_map::date_code(date)
+        .with_context(|| i18n::trf("'{date}' is not a date (YYYY-MM-DD)", &[("date", &date)]))?;
     let chrono = omsi_map::active_chrono_dirs(&map_dir, code);
     let off = omsi_map::chrono_deactivated_lines(&chrono);
     let data = omsi_timetable::TimetableData::load_with_chrono(&map_dir, &chrono, &off);
     let mut out = TripPath::default();
-    let Some(t) = data.trips.iter().find(|x| x.is_named(trip.trim())) else { return Ok(out) };
+    let Some(t) = data.trips.iter().find(|x| x.is_named(trip.trim())) else {
+        return Ok(out);
+    };
     // a type-1 trip's stations are its own `[station]` records (all of Novi Sad)
     out.stops = if t.stations.is_empty() {
-        t.stations_legacy.iter().filter_map(|r| r.first()?.trim().parse::<i64>().ok()).collect()
+        t.stations_legacy
+            .iter()
+            .filter_map(|r| r.first()?.trim().parse::<i64>().ok())
+            .collect()
     } else {
         t.stations.clone()
     };
     // the tile of a path step is the index of its entry in `[map]`, as the game reads it
-    let tiles = omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(&map_dir)).map(|g| g.raw_tiles).unwrap_or_default();
+    let tiles = omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(&map_dir))
+        .map(|g| g.raw_tiles)
+        .unwrap_or_default();
     let at = |tile_index: f64| tiles.get(tile_index as usize).copied();
-    let track_name = if t.display_name.trim().is_empty() { t.name.trim() } else { t.display_name.trim() };
-    if let Some(track) = data.tracks.iter().find(|x| x.path.file_stem().map(|s| s.to_string_lossy().eq_ignore_ascii_case(track_name)).unwrap_or(false)) {
+    let track_name = if t.display_name.trim().is_empty() {
+        t.name.trim()
+    } else {
+        t.display_name.trim()
+    };
+    if let Some(track) = data.tracks.iter().find(|x| {
+        x.path
+            .file_stem()
+            .map(|s| s.to_string_lossy().eq_ignore_ascii_case(track_name))
+            .unwrap_or(false)
+    }) {
         for e in &track.entries {
             if e.values.len() < 5 {
                 continue;
             }
             if let Some(tile) = at(e.values[2]) {
-                out.route.push(RoadPiece { tile_x: tile.0, tile_y: tile.1, spline: e.values[0] as i64, path: e.values[1] as u16 });
+                out.route.push(RoadPiece {
+                    tile_x: tile.0,
+                    tile_y: tile.1,
+                    spline: e.values[0] as i64,
+                    path: e.values[1] as u16,
+                });
             }
         }
         return Ok(out);
@@ -136,16 +165,33 @@ pub fn trip_path(map: &str, date: &str, trip: &str) -> Result<TripPath> {
 
 /// The road pieces a run of stops drives by the map's station links (consecutive links
 /// repeat the piece they share).
-fn link_route(data: &omsi_timetable::TimetableData, stops: &[i64], at: &dyn Fn(f64) -> Option<(i32, i32)>) -> Vec<RoadPiece> {
+fn link_route(
+    data: &omsi_timetable::TimetableData,
+    stops: &[i64],
+    at: &dyn Fn(f64) -> Option<(i32, i32)>,
+) -> Vec<RoadPiece> {
     let mut route: Vec<RoadPiece> = Vec::new();
     for w in stops.windows(2) {
-        let Some(link) = data.stn_links.iter().find(|l| l.from_id == w[0] && l.to_id == w[1]) else { continue };
+        let Some(link) = data
+            .stn_links
+            .iter()
+            .find(|l| l.from_id == w[0] && l.to_id == w[1])
+        else {
+            continue;
+        };
         for e in &link.entries {
             if e.values.len() < 4 {
                 continue;
             }
-            let Some(tile) = at(e.values[2]) else { continue };
-            let p = RoadPiece { tile_x: tile.0, tile_y: tile.1, spline: e.values[0] as i64, path: e.values[1] as u16 };
+            let Some(tile) = at(e.values[2]) else {
+                continue;
+            };
+            let p = RoadPiece {
+                tile_x: tile.0,
+                tile_y: tile.1,
+                spline: e.values[0] as i64,
+                path: e.values[1] as u16,
+            };
             if route.last() != Some(&p) {
                 route.push(p);
             }
@@ -156,7 +202,9 @@ fn link_route(data: &omsi_timetable::TimetableData, stops: &[i64], at: &dyn Fn(f
 
 /// Active Chrono directories for `map_dir` when `date` parses.
 pub fn chrono_dirs_for_date(map_dir: &Path, date: &str) -> Vec<PathBuf> {
-    omsi_map::date_code(date.trim()).map(|c| omsi_map::active_chrono_dirs(map_dir, c)).unwrap_or_default()
+    omsi_map::date_code(date.trim())
+        .map(|c| omsi_map::active_chrono_dirs(map_dir, c))
+        .unwrap_or_default()
 }
 
 /// Timetable data for `map_dir`, layering active Chrono events when `date` parses.
@@ -169,32 +217,56 @@ pub fn timetable_for_date(map_dir: &Path, date: &str) -> omsi_timetable::Timetab
 /// A run of stops - a trip being made in the timetable editor - as a map picture needs it:
 /// the road pieces the map's station links drive between them.
 pub fn chain_path(map: &str, date: &str, stops: &[i64]) -> Result<TripPath> {
-    let map_dir = resolve_content(map)?.parent().map(|p| p.to_path_buf()).context("map folder")?;
+    let map_dir = resolve_content(map)?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .context("map folder")?;
     let data = timetable_for_date(&map_dir, date);
-    let tiles = omsi_map::GlobalCfg::load(&map_dir.join("global.cfg")).map(|g| g.raw_tiles).unwrap_or_default();
+    let tiles = omsi_map::GlobalCfg::load(&map_dir.join("global.cfg"))
+        .map(|g| g.raw_tiles)
+        .unwrap_or_default();
     let at = |tile_index: f64| tiles.get(tile_index as usize).copied();
-    Ok(TripPath { route: link_route(&data, stops, &at), stops: stops.to_vec() })
+    Ok(TripPath {
+        route: link_route(&data, stops, &at),
+        stops: stops.to_vec(),
+    })
 }
 
 /// The lines of a map's timetable on `date` (`YYYY-MM-DD`, the game's default when empty):
 /// the chrono folders active that day add their lines and take theirs off, as the game does
 /// - Spandau's 1991 timetable change replaces line "5 & 5N" and sixteen others.
 pub fn list_lines(map: &str, date: &str) -> Result<Vec<LineInfo>> {
-    let map_dir = resolve_content(map)?.parent().map(|p| p.to_path_buf()).context("map folder")?;
+    let map_dir = resolve_content(map)?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .context("map folder")?;
     lines_on(&map_dir, date)
 }
 
 fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
-    let date = if date.trim().is_empty() { DEFAULT_DATE } else { date.trim() };
-    let code = omsi_map::date_code(date).with_context(|| i18n::trf("'{date}' is not a date (YYYY-MM-DD)", &[("date", &date)]))?;
+    let date = if date.trim().is_empty() {
+        DEFAULT_DATE
+    } else {
+        date.trim()
+    };
+    let code = omsi_map::date_code(date)
+        .with_context(|| i18n::trf("'{date}' is not a date (YYYY-MM-DD)", &[("date", &date)]))?;
     let chrono = omsi_map::active_chrono_dirs(map_dir, code);
     let off = omsi_map::chrono_deactivated_lines(&chrono);
     let data = omsi_timetable::TimetableData::load_with_chrono(map_dir, &chrono, &off);
     // which tours run that day: the tour's mask as the game reads it (bits 0-6 Monday to
     // Sunday, 7 a public holiday, 8 school days, 9 school holidays: the original, #1883)
     let calendar = omsi_map::Calendar::load(&map_dir.join("Holidays.txt")).unwrap_or_default();
-    let day_bit = if calendar.is_holiday(code) { 1 << 7 } else { 1 << weekday(code) };
-    let school_bit = if calendar.in_holiday_range(code) { 1 << 9 } else { 1 << 8 };
+    let day_bit = if calendar.is_holiday(code) {
+        1 << 7
+    } else {
+        1 << weekday(code)
+    };
+    let school_bit = if calendar.in_holiday_range(code) {
+        1 << 9
+    } else {
+        1 << 8
+    };
     let mut out = Vec::new();
     for l in &data.lines {
         let mut termini: Vec<String> = Vec::new();
@@ -205,30 +277,65 @@ fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
         for (index, t) in l.tours.iter().enumerate() {
             let mask = t.extra.trim().parse::<i32>().unwrap_or(1023);
             let runs_on = |c: i32| {
-                let day = if calendar.is_holiday(c) { 1 << 7 } else { 1 << weekday(c) };
-                let school = if calendar.in_holiday_range(c) { 1 << 9 } else { 1 << 8 };
+                let day = if calendar.is_holiday(c) {
+                    1 << 7
+                } else {
+                    1 << weekday(c)
+                };
+                let school = if calendar.in_holiday_range(c) {
+                    1 << 9
+                } else {
+                    1 << 8
+                };
                 mask & day != 0 && mask & school != 0
             };
             // (and yesterday's night tour: its trips past 24:00 run today, #1576)
             let night = t.trips.iter().any(|tt| tt.departure >= 24.0 * 60.0);
-            let runs = (mask & day_bit != 0 && mask & school_bit != 0) || (night && runs_on(day_before(code)));
-            let next_run = (0..400).map(|k| add_days(code, k)).find(|c| runs_on(*c)).map(|c| format!("{:04}-{:02}-{:02}", c / 10000, c / 100 % 100, c % 100));
+            let runs = (mask & day_bit != 0 && mask & school_bit != 0)
+                || (night && runs_on(day_before(code)));
+            let next_run = (0..400)
+                .map(|k| add_days(code, k))
+                .find(|c| runs_on(*c))
+                .map(|c| format!("{:04}-{:02}-{:02}", c / 10000, c / 100 % 100, c % 100));
             let mut trips = Vec::new();
             for tt in &t.trips {
-                let Some(trip) = data.trips.iter().find(|x| x.is_named(&tt.trip)) else { continue };
+                let Some(trip) = data.trips.iter().find(|x| x.is_named(&tt.trip)) else {
+                    continue;
+                };
                 let departure = tt.departure as f64 * 60.0;
-                let duration = trip.profiles.get(tt.profile.max(0) as usize).or(trip.profiles.first()).map(|p| p.factor as f64 * 60.0).filter(|d| *d > 0.0).unwrap_or(600.0);
+                let duration = trip
+                    .profiles
+                    .get(tt.profile.max(0) as usize)
+                    .or(trip.profiles.first())
+                    .map(|p| p.factor as f64 * 60.0)
+                    .filter(|d| *d > 0.0)
+                    .unwrap_or(600.0);
                 // its stations: [station_typ2] objects, or the [station] records of a type-1
                 // trip (all of Novi Sad), which carry their stop's name themselves
                 let legacy: Vec<(i64, String)> = trip
                     .stations_legacy
                     .iter()
-                    .filter_map(|r| Some((r.first()?.trim().parse::<i64>().ok()?, r.get(2).map(|n| n.trim().to_string()).unwrap_or_default())))
+                    .filter_map(|r| {
+                        Some((
+                            r.first()?.trim().parse::<i64>().ok()?,
+                            r.get(2).map(|n| n.trim().to_string()).unwrap_or_default(),
+                        ))
+                    })
                     .collect();
-                let stations: Vec<i64> = if trip.stations.is_empty() { legacy.iter().map(|x| x.0).collect() } else { trip.stations.clone() };
+                let stations: Vec<i64> = if trip.stations.is_empty() {
+                    legacy.iter().map(|x| x.0).collect()
+                } else {
+                    trip.stations.clone()
+                };
                 let mut lens = Vec::new();
                 for w in stations.windows(2) {
-                    lens.push(data.stn_links.iter().find(|k| k.from_id == w[0] && k.to_id == w[1]).map(|k| k.length.max(1.0)).unwrap_or(500.0));
+                    lens.push(
+                        data.stn_links
+                            .iter()
+                            .find(|k| k.from_id == w[0] && k.to_id == w[1])
+                            .map(|k| k.length.max(1.0))
+                            .unwrap_or(500.0),
+                    );
                 }
                 let total: f64 = lens.iter().sum::<f64>().max(1.0);
                 let mut acc = 0.0;
@@ -240,22 +347,48 @@ fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
                         .iter()
                         .find(|b| b.object_id == *id)
                         .map(|b| b.name.trim().to_string())
-                        .or_else(|| legacy.iter().find(|x| x.0 == *id).map(|x| x.1.clone()).filter(|n| !n.is_empty()))
+                        .or_else(|| {
+                            legacy
+                                .iter()
+                                .find(|x| x.0 == *id)
+                                .map(|x| x.1.clone())
+                                .filter(|n| !n.is_empty())
+                        })
                         .unwrap_or_else(|| i18n::trf("stop {id}", &[("id", &id)]));
-                    stops.push(StopInfo { name, arr: t_at, dep: if i == 0 { departure } else { t_at } });
+                    stops.push(StopInfo {
+                        name,
+                        arr: t_at,
+                        dep: if i == 0 { departure } else { t_at },
+                    });
                     if i < lens.len() {
                         acc += lens[i];
                     }
                 }
-                if !trip.terminus.trim().is_empty() && !termini.iter().any(|x| x == trip.terminus.trim()) {
+                if !trip.terminus.trim().is_empty()
+                    && !termini.iter().any(|x| x == trip.terminus.trim())
+                {
                     termini.push(trip.terminus.trim().to_string());
                 }
                 let from = stops.first().map(|s| s.name.clone()).unwrap_or_default();
                 if stops.len() >= 2 && ends.as_ref().is_none_or(|e| stops.len() > e.0) {
-                    ends = Some((stops.len(), from.clone(), stops.last().map(|s| s.name.clone()).unwrap_or_default()));
+                    ends = Some((
+                        stops.len(),
+                        from.clone(),
+                        stops.last().map(|s| s.name.clone()).unwrap_or_default(),
+                    ));
                 }
                 let index = trips.len() + 1;
-                trips.push(TripInfo { name: trip.name.clone(), index, line: trip.line.trim().to_string(), from, terminus: trip.terminus.trim().to_string(), departure, arrival: departure + duration, stops, km: total / 1000.0 });
+                trips.push(TripInfo {
+                    name: trip.name.clone(),
+                    index,
+                    line: trip.line.trim().to_string(),
+                    from,
+                    terminus: trip.terminus.trim().to_string(),
+                    departure,
+                    arrival: departure + duration,
+                    stops,
+                    km: total / 1000.0,
+                });
             }
             // (a tour with no trip the timetable knows cannot be driven: not offered)
             if trips.is_empty() {
@@ -264,13 +397,32 @@ fn lines_on(map_dir: &Path, date: &str) -> Result<Vec<LineInfo>> {
             let first = trips.first().map(|t| t.departure).unwrap_or(0.0);
             let last = trips.last().map(|t| t.arrival).unwrap_or(0.0);
             let id = serde_json::to_string(&(index, &t.number, &t.ai_group, &t.extra))?;
-            tours.push(TourInfo { id, number: t.number.clone(), ai_group: t.ai_group.clone(), first, last, days: days_of(mask), runs, next_run, trips });
+            tours.push(TourInfo {
+                id,
+                number: t.number.clone(),
+                ai_group: t.ai_group.clone(),
+                first,
+                last,
+                days: days_of(mask),
+                runs,
+                next_run,
+                trips,
+            });
         }
         tours.sort_by(|a, b| a.first.total_cmp(&b.first));
         if let Some((_, first, last)) = ends {
-            termini = if first == last { vec![first] } else { vec![first, last] };
+            termini = if first == last {
+                vec![first]
+            } else {
+                vec![first, last]
+            };
         }
-        out.push(LineInfo { name: l.name.clone(), user_allowed: l.user_allowed, termini, tours });
+        out.push(LineInfo {
+            name: l.name.clone(),
+            user_allowed: l.user_allowed,
+            termini,
+            tours,
+        });
     }
     out.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
     Ok(out)
@@ -303,30 +455,63 @@ pub struct IbisRoute {
     pub terminus: String,
 }
 
-pub fn ibis_info(bus: &str, hof_name: &str, line: &str, terminus: &str, stops: &[String]) -> Result<IbisInfo> {
+pub fn ibis_info(
+    bus: &str,
+    hof_name: &str,
+    line: &str,
+    terminus: &str,
+    stops: &[String],
+) -> Result<IbisInfo> {
     let bus_path = resolve_content(bus)?;
     let dir = bus_path.parent().context("bus folder")?;
     // the bus's own depot file of that name (every content root's copy of its folder), else
     // the one another bus brings (the game borrows it the same way), else the bus's first
     let hof = omsi_vehicle::hof::depot_in(dir, hof_name)
         .or_else(|| omsi_vehicle::hof::depot_anywhere(hof_name))
-        .or_else(|| omsi_vehicle::hof::depot_files(dir).iter().find_map(|f| omsi_vehicle::Hof::load(f).ok()))
+        .or_else(|| {
+            omsi_vehicle::hof::depot_files(dir)
+                .iter()
+                .find_map(|f| omsi_vehicle::Hof::load(f).ok())
+        })
         .with_context(|| i18n::tr("no depot file next to the bus"))?;
     let hof = &hof;
     let line_digits: String = line.chars().take_while(|c| c.is_ascii_digit()).collect();
     let mut routes = Vec::new();
     for t in &hof.info_trips {
-        let matches = t.line.trim().eq_ignore_ascii_case(line.trim()) || (!line_digits.is_empty() && t.code.trim_start_matches('0').starts_with(line_digits.trim_start_matches('0')) && t.code.len() >= line_digits.len());
+        let matches = t.line.trim().eq_ignore_ascii_case(line.trim())
+            || (!line_digits.is_empty()
+                && t.code
+                    .trim_start_matches('0')
+                    .starts_with(line_digits.trim_start_matches('0'))
+                && t.code.len() >= line_digits.len());
         if !matches {
             continue;
         }
         let code = omsi_cfg::parse_i32(&t.route);
-        let terminus = hof.termini.iter().find(|x| x.code == code).and_then(|x| x.strings.first().cloned()).unwrap_or_default();
-        routes.push(IbisRoute { code: t.code.clone(), route: t.route.clone(), name: t.name.clone(), terminus_code: code, terminus });
+        let terminus = hof
+            .termini
+            .iter()
+            .find(|x| x.code == code)
+            .and_then(|x| x.strings.first().cloned())
+            .unwrap_or_default();
+        routes.push(IbisRoute {
+            code: t.code.clone(),
+            route: t.route.clone(),
+            name: t.name.clone(),
+            terminus_code: code,
+            terminus,
+        });
     }
     let stops: Vec<&str> = stops.iter().map(String::as_str).collect();
-    let trip_route = (!terminus.trim().is_empty()).then(|| omsi_vehicle::hof::trip_terminus(hof, line, terminus, &stops)).flatten().and_then(|(_, r)| r).map(|r| hof.info_trips[r].code.clone());
-    Ok(IbisInfo { hof: hof.name.clone(), line_code: line_digits, routes, trip_route })
+    let trip_route = (!terminus.trim().is_empty())
+        .then(|| omsi_vehicle::hof::trip_terminus(hof, line, terminus, &stops))
+        .flatten()
+        .and_then(|(_, r)| r)
+        .map(|r| hof.info_trips[r].code.clone());
+    Ok(IbisInfo {
+        hof: hof.name.clone(),
+        line_code: line_digits,
+        routes,
+        trip_route,
+    })
 }
-
-

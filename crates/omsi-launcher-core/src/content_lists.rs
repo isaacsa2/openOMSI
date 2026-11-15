@@ -32,7 +32,11 @@ pub(super) fn year_span_of(g: &omsi_map::GlobalCfg) -> Option<(i32, i32)> {
         (first, last) if first <= 0 && last <= 0 => None,
         (first, last) => {
             let from = if first > 0 { first } else { i32::MIN };
-            let to = if last > 0 && last >= from { last } else { i32::MAX };
+            let to = if last > 0 && last >= from {
+                last
+            } else {
+                i32::MAX
+            };
             Some((from, to))
         }
     }
@@ -48,14 +52,20 @@ fn is_leap_year(y: i32) -> bool {
 /// span, or one that is no date, is kept.
 pub fn fit_date_to_years(date: &str, span: Option<(i32, i32)>) -> String {
     let mut fields = date.trim().splitn(3, '-').map(|f| f.trim().parse::<i32>());
-    let (Some((from, to)), Some(Ok(year)), Some(Ok(month)), Some(Ok(day))) = (span, fields.next(), fields.next(), fields.next()) else {
+    let (Some((from, to)), Some(Ok(year)), Some(Ok(month)), Some(Ok(day))) =
+        (span, fields.next(), fields.next(), fields.next())
+    else {
         return date.to_string();
     };
     if (from..=to).contains(&year) {
         return date.to_string();
     }
     let year = year.clamp(from, to);
-    let day = if (month, day) == (2, 29) && !is_leap_year(year) { 28 } else { day };
+    let day = if (month, day) == (2, 29) && !is_leap_year(year) {
+        28
+    } else {
+        day
+    };
     format!("{year:04}-{month:02}-{day:02}")
 }
 
@@ -83,9 +93,19 @@ pub fn list_maps() -> Result<Vec<MapInfo>> {
     let mut keys = Vec::new();
     for (folder, dirs) in merged_folders("maps") {
         // a map is one folder: the first copy that has a global.cfg
-        let Some(d) = dirs.into_iter().find(|d| omsi_cfg::vfs::is_file(&omsi_cfg::oi::global_path(d))) else { continue };
+        let Some(d) = dirs
+            .into_iter()
+            .find(|d| omsi_cfg::vfs::is_file(&omsi_cfg::oi::global_path(d)))
+        else {
+            continue;
+        };
         let key = format!("map|{lang}|{}", d.display());
-        let mut stamped = vec![d.clone(), omsi_cfg::oi::global_path(&d), d.join("ailists.cfg"), d.join(omsi_proton::depot::NAME_FILE)];
+        let mut stamped = vec![
+            d.clone(),
+            omsi_cfg::oi::global_path(&d),
+            d.join("ailists.cfg"),
+            d.join(omsi_proton::depot::NAME_FILE),
+        ];
         stamped.extend(dsc_candidates(&omsi_cfg::oi::global_path(&d), lang));
         let stamp = index::files_stamp(&stamped);
         keys.push(key.clone());
@@ -108,11 +128,25 @@ fn log_empty(rel: &str, what: &str) {
             let d = b.join(rel);
             match omsi_cfg::vfs::list_dir(&d) {
                 Some(l) => format!("{} ({} entries)", d.display(), l.len()),
-                None => format!("{} (cannot be read: {})", d.display(), std::fs::read_dir(&d).err().map(|e| e.to_string()).unwrap_or_else(|| "not a folder".into())),
+                None => format!(
+                    "{} (cannot be read: {})",
+                    d.display(),
+                    std::fs::read_dir(&d)
+                        .err()
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "not a folder".into())
+                ),
             }
         })
         .collect();
-    log_line(&format!("{rel}: nothing with a {what} found in {}", if places.is_empty() { "no folder (no OMSI 2 folder and no content folder)".to_string() } else { places.join(", ") }));
+    log_line(&format!(
+        "{rel}: nothing with a {what} found in {}",
+        if places.is_empty() {
+            "no folder (no OMSI 2 folder and no content folder)".to_string()
+        } else {
+            places.join(", ")
+        }
+    ));
 }
 
 /// The map in `d` and the files its entry is read from beyond the stamped ones (the tiles,
@@ -121,7 +155,10 @@ fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf
     let mut g = match omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(d)) {
         Ok(g) => g,
         Err(e) => {
-            log_line(&format!("maps: {} cannot be read ({e:#}) - not listed", omsi_cfg::oi::global_path(d).display()));
+            log_line(&format!(
+                "maps: {} cannot be read ({e:#}) - not listed",
+                omsi_cfg::oi::global_path(d).display()
+            ));
             return (None, Vec::new());
         }
     };
@@ -131,20 +168,40 @@ fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf
     let mut deps = Vec::new();
     if g.entry_points.is_empty() {
         g.add_object_entry_points();
-        deps = g.tiles.iter().map(|t| omsi_cfg::resolve_path(g.dir(), &t.file)).collect();
+        deps = g
+            .tiles
+            .iter()
+            .map(|t| omsi_cfg::resolve_path(g.dir(), &t.file))
+            .collect();
     }
     // `global_ENG.dsc` (the language of the settings) names and describes the map
     let dsc = find_dsc(&omsi_cfg::oi::global_path(d), lang);
-    let friendly = dsc.as_ref().and_then(|x| x.name.first().cloned()).unwrap_or_else(|| g.friendly_name.trim().to_string());
-    let description = dsc.map(|x| x.description).filter(|t| !t.is_empty()).unwrap_or_else(|| g.description.trim().to_string());
-    let mut entries: Vec<EntryInfo> = g.entry_points.iter().map(|e| EntryInfo { index: e.index, name: e.name.trim().to_string() }).collect();
+    let friendly = dsc
+        .as_ref()
+        .and_then(|x| x.name.first().cloned())
+        .unwrap_or_else(|| g.friendly_name.trim().to_string());
+    let description = dsc
+        .map(|x| x.description)
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| g.description.trim().to_string());
+    let mut entries: Vec<EntryInfo> = g
+        .entry_points
+        .iter()
+        .map(|e| EntryInfo {
+            index: e.index,
+            name: e.name.trim().to_string(),
+        })
+        .collect();
     // the game's --entry is the position in the list, not the index field; several
     // entries often share a name (one per stop position), so number them
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let total: std::collections::HashMap<String, usize> = entries.iter().fold(std::collections::HashMap::new(), |mut m, e| {
-        *m.entry(e.name.clone()).or_default() += 1;
-        m
-    });
+    let total: std::collections::HashMap<String, usize> =
+        entries
+            .iter()
+            .fold(std::collections::HashMap::new(), |mut m, e| {
+                *m.entry(e.name.clone()).or_default() += 1;
+                m
+            });
     for (i, e) in entries.iter_mut().enumerate() {
         e.index = i as i32;
         let n = seen.entry(e.name.clone()).or_default();
@@ -154,8 +211,41 @@ fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf
         }
     }
     // (the depot groups' first: a plain car group's name line is no depot)
-    let hof = omsi_map::ailists::AiLists::load(&d.join("ailists.cfg")).ok().and_then(|l| l.groups.iter().filter(|g| g.is_depot).chain(l.groups.iter()).find_map(|g| g.hof.clone())).or_else(|| omsi_proton::depot::installed_name(d)).unwrap_or_default();
-    (Some(MapInfo { name: if g.name.trim().is_empty() { folder.to_string() } else { g.name.trim().to_string() }, friendly, file: format!("maps/{folder}/{}", omsi_cfg::oi::global_path(d).file_name().unwrap_or_default().to_string_lossy()), description, entry_points: entries, hof, installed: in_content(d), year_span: year_span_of(&g), transport: g.transport.iter().map(|m| m.name().to_string()).collect() }), deps)
+    let hof = omsi_map::ailists::AiLists::load(&d.join("ailists.cfg"))
+        .ok()
+        .and_then(|l| {
+            l.groups
+                .iter()
+                .filter(|g| g.is_depot)
+                .chain(l.groups.iter())
+                .find_map(|g| g.hof.clone())
+        })
+        .or_else(|| omsi_proton::depot::installed_name(d))
+        .unwrap_or_default();
+    (
+        Some(MapInfo {
+            name: if g.name.trim().is_empty() {
+                folder.to_string()
+            } else {
+                g.name.trim().to_string()
+            },
+            friendly,
+            file: format!(
+                "maps/{folder}/{}",
+                omsi_cfg::oi::global_path(d)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ),
+            description,
+            entry_points: entries,
+            hof,
+            installed: in_content(d),
+            year_span: year_span_of(&g),
+            transport: g.transport.iter().map(|m| m.name().to_string()).collect(),
+        }),
+        deps,
+    )
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -191,7 +281,11 @@ pub struct VehicleInfo {
 /// Why `vehicle` may not run on `map`, or `None` when it may (a map that names no transport
 /// mode takes every vehicle). The game checks the same rule when it starts.
 pub fn transport_refusal(map: &MapInfo, vehicle: &VehicleInfo) -> Option<String> {
-    let modes = |v: &[String]| -> omsi_cfg::transport::ModeSet { v.iter().filter_map(|n| omsi_cfg::transport::TransportMode::from_name(n)).collect() };
+    let modes = |v: &[String]| -> omsi_cfg::transport::ModeSet {
+        v.iter()
+            .filter_map(|n| omsi_cfg::transport::TransportMode::from_name(n))
+            .collect()
+    };
     match omsi_cfg::transport::admit(modes(&map.transport), modes(&vehicle.transport), false) {
         omsi_cfg::transport::Admission::Allowed => None,
         omsi_cfg::transport::Admission::Refused(why) => Some(why),
@@ -200,7 +294,10 @@ pub fn transport_refusal(map: &MapInfo, vehicle: &VehicleInfo) -> Option<String>
 
 /// Names in older vehicle packs use underscores as spaces.
 pub fn display_bus_name(name: &str) -> String {
-    name.replace('_', " ").split_whitespace().collect::<Vec<_>>().join(" ")
+    name.replace('_', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The displayed vehicle type, using its file name when [friendlyname] leaves it empty.
@@ -214,7 +311,9 @@ pub fn vehicle_type_label(type_name: &str, path: &Path) -> String {
 
 /// The vehicle packs whose parts a model file names and that are installed nowhere.
 fn missing_packs_of(model: &Path) -> Vec<String> {
-    let Ok(text) = omsi_cfg::vfs::read(model) else { return Vec::new() };
+    let Ok(text) = omsi_cfg::vfs::read(model) else {
+        return Vec::new();
+    };
     let text = omsi_cfg::codepage::decode(&text);
     let dir = model.parent().unwrap_or(Path::new("."));
     let mut out: Vec<String> = Vec::new();
@@ -244,9 +343,13 @@ fn missing_packs_of(model: &Path) -> Vec<String> {
 fn paint_schemes(vehicle: &omsi_vehicle::Vehicle) -> (Vec<String>, Vec<PathBuf>) {
     let mut names: Vec<String> = Vec::new();
     let mut dirs_read: Vec<PathBuf> = Vec::new();
-    let Some(model_rel) = vehicle.model.as_ref() else { return (names, dirs_read) };
+    let Some(model_rel) = vehicle.model.as_ref() else {
+        return (names, dirs_read);
+    };
     let model_path = omsi_cfg::resolve_path(vehicle.dir(), model_rel);
-    let Ok(model) = omsi_model::Model::load(&model_path) else { return (names, dirs_read) };
+    let Ok(model) = omsi_model::Model::load(&model_path) else {
+        return (names, dirs_read);
+    };
     for c in &model.ctc {
         let dir = omsi_cfg::resolve_path(vehicle.dir(), &c.path);
         let mut files: Vec<PathBuf> = Vec::new();
@@ -257,17 +360,34 @@ fn paint_schemes(vehicle: &omsi_vehicle::Vehicle) -> (Vec<String>, Vec<PathBuf>)
         }
         for d in copies {
             dirs_read.push(d.clone());
-            let Some(list) = omsi_cfg::vfs::list_dir(&d) else { continue };
-            let mut here: Vec<PathBuf> = list.into_iter().map(|(n, _)| d.join(n)).filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("cti")).unwrap_or(false)).collect();
+            let Some(list) = omsi_cfg::vfs::list_dir(&d) else {
+                continue;
+            };
+            let mut here: Vec<PathBuf> = list
+                .into_iter()
+                .map(|(n, _)| d.join(n))
+                .filter(|p| {
+                    p.extension()
+                        .map(|e| e.eq_ignore_ascii_case("cti"))
+                        .unwrap_or(false)
+                })
+                .collect();
             here.sort();
             for f in here {
-                if seen.insert(f.file_name().unwrap_or_default().to_string_lossy().to_ascii_lowercase()) {
+                if seen.insert(
+                    f.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_ascii_lowercase(),
+                ) {
                     files.push(f);
                 }
             }
         }
         for f in files {
-            let Ok(cfg) = omsi_cfg::CfgFile::read(&f) else { continue };
+            let Ok(cfg) = omsi_cfg::CfgFile::read(&f) else {
+                continue;
+            };
             let mut r = cfg.reader();
             while let Some(k) = r.next_keyword() {
                 if k == "item" {
@@ -295,7 +415,8 @@ fn shared_depot_names() -> Vec<String> {
         list.sort();
         for (n, is_dir) in list {
             let file = n.to_string_lossy().to_ascii_lowercase();
-            if is_dir || !(file.ends_with(".hof") || file.ends_with(".hofoi")) || !seen.insert(file) {
+            if is_dir || !(file.ends_with(".hof") || file.ends_with(".hofoi")) || !seen.insert(file)
+            {
                 continue;
             }
             if let Some(name) = omsi_vehicle::Hof::read_name(&dir.join(&n)) {
@@ -310,8 +431,15 @@ fn shared_depot_names() -> Vec<String> {
 pub(super) fn log_line(line: &str) {
     use std::io::Write;
     let p = data_dir().join("launcher.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         let _ = writeln!(f, "{now} {line}");
     }
 }
@@ -324,7 +452,8 @@ pub fn list_vehicles() -> Result<Vec<VehicleInfo>> {
 /// trips carry line `line`, the fullest first, read once per file and line.
 pub fn depot_names_with_line(root: &Path, bus: &str, line: &str) -> Vec<String> {
     type Cache = std::collections::HashMap<(PathBuf, String, String), Vec<String>>;
-    static CACHE: std::sync::LazyLock<std::sync::Mutex<Cache>> = std::sync::LazyLock::new(Default::default);
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<Cache>> =
+        std::sync::LazyLock::new(Default::default);
     let key = (root.to_path_buf(), bus.to_string(), line.to_string());
     if let Some(v) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return v.clone();
@@ -339,10 +468,15 @@ pub fn depot_names_with_line(root: &Path, bus: &str, line: &str) -> Vec<String> 
                 .filter(|h| h.has_line(line))
                 .collect();
             hofs.sort_by_key(|h| std::cmp::Reverse(h.info_trips.len()));
-            hofs.into_iter().map(|h| h.name.trim().to_string()).collect()
+            hofs.into_iter()
+                .map(|h| h.name.trim().to_string())
+                .collect()
         })
         .unwrap_or_default();
-    CACHE.lock().unwrap_or_else(|e| e.into_inner()).insert(key, found.clone());
+    CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, found.clone());
     found
 }
 
@@ -351,13 +485,17 @@ pub fn depot_names_with_line(root: &Path, bus: &str, line: &str) -> Vec<String> 
 /// Read once per name and line.
 pub fn depot_has_line(name: &str, line: &str) -> Option<bool> {
     type Cache = std::collections::HashMap<(String, String), Option<bool>>;
-    static CACHE: std::sync::LazyLock<std::sync::Mutex<Cache>> = std::sync::LazyLock::new(Default::default);
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<Cache>> =
+        std::sync::LazyLock::new(Default::default);
     let key = (name.trim().to_ascii_lowercase(), line.to_string());
     if let Some(v) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return *v;
     }
     let found = omsi_vehicle::hof::depot_anywhere(name).map(|h| h.has_line(line));
-    CACHE.lock().unwrap_or_else(|e| e.into_inner()).insert(key, found);
+    CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, found);
     found
 }
 
@@ -365,37 +503,74 @@ pub fn depot_has_line(name: &str, line: &str) -> Option<bool> {
 /// held, how many folders are done and how many there are: a big installation's first
 /// reading (thousands of vehicle folders, nothing in the cache yet) takes minutes, and the
 /// page showed nothing at all until the last folder was read.
-pub fn list_vehicles_progress(progress: impl Fn(&[VehicleInfo], usize, usize)) -> Result<Vec<VehicleInfo>> {
+pub fn list_vehicles_progress(
+    progress: impl Fn(&[VehicleInfo], usize, usize),
+) -> Result<Vec<VehicleInfo>> {
     use rayon::prelude::*;
     root()?;
     let lang = content_language();
     let folders = merged_folders("Vehicles");
     let shared_hofs = shared_depot_names();
-    let keys: Vec<String> = folders.iter().map(|(_, dirs)| format!("bus4|{lang}|{}", dirs.iter().map(|d| d.to_string_lossy()).collect::<Vec<_>>().join("|"))).collect();
+    let keys: Vec<String> = folders
+        .iter()
+        .map(|(_, dirs)| {
+            format!(
+                "bus4|{lang}|{}",
+                dirs.iter()
+                    .map(|d| d.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("|")
+            )
+        })
+        .collect();
     let read = |(folder, dirs): &(String, Vec<PathBuf>), key: &String| -> Vec<VehicleInfo> {
         // the stamp covers every copy of the folder and their direct entries (Model/,
         // Texture/ ...); the paint folders the entry read are its dependencies
         let mut stamped: Vec<PathBuf> = dirs.clone();
         for d in dirs {
             if let Some(list) = omsi_cfg::vfs::list_dir(d) {
-                let mut subs: Vec<PathBuf> = list.into_iter().filter(|(_, is_dir)| *is_dir).map(|(n, _)| d.join(n)).collect();
+                let mut subs: Vec<PathBuf> = list
+                    .into_iter()
+                    .filter(|(_, is_dir)| *is_dir)
+                    .map(|(n, _)| d.join(n))
+                    .collect();
                 subs.sort();
                 stamped.extend(subs);
             }
         }
-        index::cached(key, index::folder_stamp(&stamped), || read_vehicle_folder(folder, dirs, lang))
+        index::cached(key, index::folder_stamp(&stamped), || {
+            read_vehicle_folder(folder, dirs, lang)
+        })
     };
     // folders side by side (the files of one wait for the disk while another's are parsed),
     // a handful of threads so that a hard disk is not sent seeking all over
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8)).build().ok();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .clamp(2, 8),
+        )
+        .build()
+        .ok();
     let mut out = Vec::new();
     let total = folders.len();
     let mut done = 0;
     let mut saved = std::time::Instant::now();
     for (chunk, chunk_keys) in folders.chunks(32).zip(keys.chunks(32)) {
         let lists: Vec<Vec<VehicleInfo>> = match &pool {
-            Some(pool) => pool.install(|| chunk.par_iter().zip(chunk_keys.par_iter()).map(|(f, k)| read(f, k)).collect()),
-            None => chunk.iter().zip(chunk_keys.iter()).map(|(f, k)| read(f, k)).collect(),
+            Some(pool) => pool.install(|| {
+                chunk
+                    .par_iter()
+                    .zip(chunk_keys.par_iter())
+                    .map(|(f, k)| read(f, k))
+                    .collect()
+            }),
+            None => chunk
+                .iter()
+                .zip(chunk_keys.iter())
+                .map(|(f, k)| read(f, k))
+                .collect(),
         };
         let mut batch: Vec<VehicleInfo> = lists.into_iter().flatten().collect();
         // the shared depot files after each bus's own (as the game offers them,
@@ -427,7 +602,11 @@ pub fn list_vehicles_progress(progress: impl Fn(&[VehicleInfo], usize, usize)) -
 
 /// The buses of one vehicle folder (all its copies; a bus file in the content folder hides
 /// the one of the same name in the OMSI folder), and the folders read besides its own.
-fn read_vehicle_folder(folder: &str, dirs: &[PathBuf], lang: &str) -> (Vec<VehicleInfo>, Vec<PathBuf>) {
+fn read_vehicle_folder(
+    folder: &str,
+    dirs: &[PathBuf],
+    lang: &str,
+) -> (Vec<VehicleInfo>, Vec<PathBuf>) {
     // Every file of the folder and of the folders in it, however deep: OMSI's bus list looks
     // for `*.bus` and `*.ovh` under Vehicles to any depth (Omsi.exe 0x67bdf9, the search
     // with depth 255) - `Vehicles\Pack\Variant\x.bus` was not listed here (#137). A file of
@@ -437,7 +616,11 @@ fn read_vehicle_folder(folder: &str, dirs: &[PathBuf], lang: &str) -> (Vec<Vehic
         list.sort();
         for (n, is_dir) in list {
             let name = n.to_string_lossy().to_string();
-            let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            let r = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
             if is_dir {
                 if depth > 0 && !name.starts_with('.') {
                     walk(&d.join(&n), &r, depth - 1, out);
@@ -462,44 +645,126 @@ fn read_vehicle_folder(folder: &str, dirs: &[PathBuf], lang: &str) -> (Vec<Vehic
     }
     let mut out = Vec::new();
     let mut deps = Vec::new();
-    if !files.iter().any(|f| f.extension().map(|e| e.eq_ignore_ascii_case("bus") || e.eq_ignore_ascii_case("busoi") || e.eq_ignore_ascii_case("ovh") || e.eq_ignore_ascii_case("ovhoi")).unwrap_or(false)) {
+    if !files.iter().any(|f| {
+        f.extension()
+            .map(|e| {
+                e.eq_ignore_ascii_case("bus")
+                    || e.eq_ignore_ascii_case("busoi")
+                    || e.eq_ignore_ascii_case("ovh")
+                    || e.eq_ignore_ascii_case("ovhoi")
+            })
+            .unwrap_or(false)
+    }) {
         // textures, or a repaint for a bus that is not installed: nothing to drive
-        log_line(&format!("vehicles: Vehicles/{folder} has no .bus file (a repaint or textures for a bus that is not installed?) - not listed"));
+        log_line(&format!(
+            "vehicles: Vehicles/{folder} has no .bus file (a repaint or textures for a bus that is not installed?) - not listed"
+        ));
         return (out, deps);
     }
     // the depot files beside each bus (a bus in a folder of the pack: those of its folder,
     // else those of the pack's own)
-    let hof_dir = |f: &PathBuf| rel_of.get(f).map(|r| r.rsplit_once('/').map(|(d, _)| d.to_ascii_lowercase()).unwrap_or_default()).unwrap_or_default();
-    let mut hofs_in: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    for f in files.iter().filter(|f| f.extension().map(|e| e.eq_ignore_ascii_case("hof")).unwrap_or(false)) {
+    let hof_dir = |f: &PathBuf| {
+        rel_of
+            .get(f)
+            .map(|r| {
+                r.rsplit_once('/')
+                    .map(|(d, _)| d.to_ascii_lowercase())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default()
+    };
+    let mut hofs_in: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for f in files.iter().filter(|f| {
+        f.extension()
+            .map(|e| e.eq_ignore_ascii_case("hof"))
+            .unwrap_or(false)
+    }) {
         // (the name alone: UK depot files carry megabytes of trips)
         if let Some(name) = omsi_vehicle::Hof::read_name(f) {
-            hofs_in.entry(hof_dir(f)).or_default().push(name.trim().to_string());
+            hofs_in
+                .entry(hof_dir(f))
+                .or_default()
+                .push(name.trim().to_string());
         }
     }
     // OMSI offers what has a [friendlyname]: never the rear section of an articulated bus
     // (its front brings it along), an AI-only variant or a car
     for (f, v) in omsi_vehicle::vehicle::offered_vehicles(&files) {
         let f = &f;
-        let stem = f.file_stem().unwrap().to_string_lossy().to_ascii_lowercase();
+        let stem = f
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_ascii_lowercase();
         // a vehicle file whose model is not there would load as nothing
         let model = v.model.as_ref().map(|m| omsi_cfg::resolve_path(v.dir(), m));
-        if !model.as_ref().map(|m| omsi_cfg::vfs::is_file(m)).unwrap_or(false) {
-            log_line(&format!("vehicles: {} - its model {} is missing, not listed", f.display(), model.map(|m| m.display().to_string()).unwrap_or_else(|| "(none)".into())));
+        if !model
+            .as_ref()
+            .map(|m| omsi_cfg::vfs::is_file(m))
+            .unwrap_or(false)
+        {
+            log_line(&format!(
+                "vehicles: {} - its model {} is missing, not listed",
+                f.display(),
+                model
+                    .map(|m| m.display().to_string())
+                    .unwrap_or_else(|| "(none)".into())
+            ));
             continue;
         }
-        let rel = format!("Vehicles/{}/{}", folder, rel_of.get(f).cloned().unwrap_or_else(|| f.file_name().unwrap().to_string_lossy().to_string()));
-        let hofs = hofs_in.get(&hof_dir(f)).or_else(|| hofs_in.get("")).cloned().unwrap_or_default();
-        let name = format!("{} {}", v.manufacturer.trim(), v.type_name.trim()).trim().to_string();
+        let rel = format!(
+            "Vehicles/{}/{}",
+            folder,
+            rel_of.get(f).cloned().unwrap_or_else(|| f
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string())
+        );
+        let hofs = hofs_in
+            .get(&hof_dir(f))
+            .or_else(|| hofs_in.get(""))
+            .cloned()
+            .unwrap_or_default();
+        let name = format!("{} {}", v.manufacturer.trim(), v.type_name.trim())
+            .trim()
+            .to_string();
         let (paints, paint_dirs) = paint_schemes(&v);
         deps.extend(paint_dirs);
         // `<bus>_ENG.dsc` beside the bus file (the language of the settings) describes it
-        let description = find_dsc(f, lang).map(|x| x.description).filter(|t| !t.is_empty()).unwrap_or_else(|| v.description.trim().to_string());
+        let description = find_dsc(f, lang)
+            .map(|x| x.description)
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| v.description.trim().to_string());
         let missing_packs = model.as_deref().map(missing_packs_of).unwrap_or_default();
         if !missing_packs.is_empty() {
-            log_line(&format!("vehicles: {} borrows parts from packs that are not installed: {}", f.display(), missing_packs.join(", ")));
+            log_line(&format!(
+                "vehicles: {} borrows parts from packs that are not installed: {}",
+                f.display(),
+                missing_packs.join(", ")
+            ));
         }
-        out.push(VehicleInfo { name: if name.is_empty() { stem.clone() } else { name }, manufacturer: v.manufacturer.trim().to_string(), type_name: v.type_name.trim().to_string(), file: rel, folder: folder.to_string(), description, default_paint: v.default_paint.trim().to_string(), paints, hofs, installed: in_content(f), missing_packs, numbers: v.numbers_with_plates().to_vec(), transport: v.transport_modes().0.iter().map(|m| m.name().to_string()).collect() });
+        out.push(VehicleInfo {
+            name: if name.is_empty() { stem.clone() } else { name },
+            manufacturer: v.manufacturer.trim().to_string(),
+            type_name: v.type_name.trim().to_string(),
+            file: rel,
+            folder: folder.to_string(),
+            description,
+            default_paint: v.default_paint.trim().to_string(),
+            paints,
+            hofs,
+            installed: in_content(f),
+            missing_packs,
+            numbers: v.numbers_with_plates().to_vec(),
+            transport: v
+                .transport_modes()
+                .0
+                .iter()
+                .map(|m| m.name().to_string())
+                .collect(),
+        });
     }
     deps.sort();
     deps.dedup();
@@ -526,14 +791,21 @@ pub use omsi_content::weather_choice::metar_airports;
 mod airports;
 pub use airports::nearest_airport;
 mod custom_weather;
-pub use custom_weather::{custom_weather, CustomWeather};
+pub use custom_weather::{CustomWeather, custom_weather};
 
 pub fn list_weather() -> Result<Vec<WeatherInfo>> {
     root()?;
     let mut out = Vec::new();
     let mut keys = Vec::new();
     let lang = content_language();
-    let mut files: Vec<PathBuf> = merged_entries("Weather").into_iter().filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("owt")).unwrap_or(false)).collect();
+    let mut files: Vec<PathBuf> = merged_entries("Weather")
+        .into_iter()
+        .filter(|p| {
+            p.extension()
+                .map(|e| e.eq_ignore_ascii_case("owt"))
+                .unwrap_or(false)
+        })
+        .collect();
     files.sort();
     for f in files {
         // the description in the settings' language lives in `<name>_ENG.dsc`
@@ -541,7 +813,9 @@ pub fn list_weather() -> Result<Vec<WeatherInfo>> {
         stamped.extend(dsc_candidates(&f, lang));
         let key = format!("wx2|{lang}|{}", f.display());
         keys.push(key.clone());
-        let info: Option<WeatherInfo> = index::cached(&key, index::files_stamp(&stamped), || (read_weather(&f, lang), Vec::new()));
+        let info: Option<WeatherInfo> = index::cached(&key, index::files_stamp(&stamped), || {
+            (read_weather(&f, lang), Vec::new())
+        });
         out.extend(info);
     }
     index::save("wx2|", Some(&keys));
@@ -559,12 +833,33 @@ pub fn weather_name(f: &Path) -> String {
 /// OMSI 2's own weathers by their English names (its `_ENG.dsc`), which the interface's
 /// tables translate for the languages OMSI has no descriptions in; listed here so the
 /// translation check knows them as texts the program shows.
-pub const STOCK_WEATHER_NAMES: [&str; 9] = ["Best Weather", "Ground Fog", "Twilight Fog", "Iciness", "Rainy", "Summerlike", "Heavy Snowfall", "Storm", "Freezing Wetness"];
+pub const STOCK_WEATHER_NAMES: [&str; 9] = [
+    "Best Weather",
+    "Ground Fog",
+    "Twilight Fog",
+    "Iciness",
+    "Rainy",
+    "Summerlike",
+    "Heavy Snowfall",
+    "Storm",
+    "Freezing Wetness",
+];
 
 fn weather_name_in(f: &Path, lang: &str) -> String {
-    let stem = f.file_stem().map(|s| s.to_string_lossy().trim_start_matches('#').to_string()).unwrap_or_default();
+    let stem = f
+        .file_stem()
+        .map(|s| s.to_string_lossy().trim_start_matches('#').to_string())
+        .unwrap_or_default();
     find_dsc(f, lang)
-        .and_then(|d| d.name.first().map(|n| n.trim().trim_start_matches('<').trim_end_matches('>').trim().to_string()))
+        .and_then(|d| {
+            d.name.first().map(|n| {
+                n.trim()
+                    .trim_start_matches('<')
+                    .trim_end_matches('>')
+                    .trim()
+                    .to_string()
+            })
+        })
         .filter(|n| !n.is_empty())
         .unwrap_or(stem)
 }
@@ -572,32 +867,65 @@ fn weather_name_in(f: &Path, lang: &str) -> String {
 fn read_weather(f: &Path, lang: &str) -> Option<WeatherInfo> {
     let w = omsi_content::weather::Weather::load(f).ok()?;
     // (the `[name]` of the file is not part of the description: "Ground Fog Heavy ground fog ...")
-    let description = find_dsc(f, lang).map(|x| x.description.replace('\n', " ")).filter(|t| !t.is_empty()).unwrap_or_else(|| w.description.replace('\n', " "));
+    let description = find_dsc(f, lang)
+        .map(|x| x.description.replace('\n', " "))
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| w.description.replace('\n', " "));
     let precip = match w.precip.first().copied().unwrap_or(0.0) as i32 {
-        1 => format!("rain {:.0}%", w.precip.get(1).copied().unwrap_or(0.0) / 255.0 * 100.0),
-        2 => format!("snow {:.0}%", w.precip.get(1).copied().unwrap_or(0.0) / 255.0 * 100.0),
+        1 => format!(
+            "rain {:.0}%",
+            w.precip.get(1).copied().unwrap_or(0.0) / 255.0 * 100.0
+        ),
+        2 => format!(
+            "snow {:.0}%",
+            w.precip.get(1).copied().unwrap_or(0.0) / 255.0 * 100.0
+        ),
         _ => "dry".into(),
     };
-    Some(WeatherInfo { name: weather_name_in(f, lang), file: format!("Weather/{}", f.file_name().unwrap().to_string_lossy()), description, fog_m: w.fog.0, temp: w.temp.0, clouds: if w.clouds.0.trim().starts_with("-1") { "clear".into() } else { w.clouds.0.trim().to_string() }, precip, snow: w.snow, installed: in_content(f) })
+    Some(WeatherInfo {
+        name: weather_name_in(f, lang),
+        file: format!("Weather/{}", f.file_name().unwrap().to_string_lossy()),
+        description,
+        fog_m: w.fog.0,
+        temp: w.temp.0,
+        clouds: if w.clouds.0.trim().starts_with("-1") {
+            "clear".into()
+        } else {
+            w.clouds.0.trim().to_string()
+        },
+        precip,
+        snow: w.snow,
+        installed: in_content(f),
+    })
 }
 
 /// The content language of the settings (`language=`, English by default): which
 /// `<file>_<LANG>.dsc` names and describes maps, buses and weathers.
 pub(super) fn content_language() -> &'static str {
     let text = std::fs::read_to_string(data_dir().join("settings.cfg")).ok();
-    language_code(settings_from_text(text.as_deref())["language"].as_str().unwrap_or("ENG"))
+    language_code(
+        settings_from_text(text.as_deref())["language"]
+            .as_str()
+            .unwrap_or("ENG"),
+    )
 }
 
 /// The description files OMSI reads for `file` (`global.cfg` -> `global_ENG.dsc`), in the
 /// order they are tried: the language itself, then English for a language that has none
 /// (German is the files' own language, so German falls back to the file itself).
 fn dsc_candidates(file: &Path, lang: &str) -> Vec<PathBuf> {
-    let stem = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let stem = file
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
     let mut langs = vec![lang];
     if lang != "DEU" && lang != "ENG" {
         langs.push("ENG");
     }
-    langs.into_iter().map(|l| file.with_file_name(format!("{stem}_{l}.dsc"))).collect()
+    langs
+        .into_iter()
+        .map(|l| file.with_file_name(format!("{stem}_{l}.dsc")))
+        .collect()
 }
 
 /// A `.dsc` file: the `[name]` / `[friendlyname]` lines and the `[description]` text.
@@ -613,13 +941,14 @@ fn parse_dsc(text: &str) -> Dsc {
     for line in text.lines() {
         let t = line.trim();
         if t.starts_with('[') && t.ends_with(']') {
-            section = if t.eq_ignore_ascii_case("[name]") || t.eq_ignore_ascii_case("[friendlyname]") {
-                "name"
-            } else if t.eq_ignore_ascii_case("[description]") {
-                "description"
-            } else {
-                ""
-            };
+            section =
+                if t.eq_ignore_ascii_case("[name]") || t.eq_ignore_ascii_case("[friendlyname]") {
+                    "name"
+                } else if t.eq_ignore_ascii_case("[description]") {
+                    "description"
+                } else {
+                    ""
+                };
             continue;
         }
         match section {
@@ -629,25 +958,35 @@ fn parse_dsc(text: &str) -> Dsc {
             _ => {}
         }
     }
-    Dsc { name, description: desc.join("\n").trim().to_string() }
+    Dsc {
+        name,
+        description: desc.join("\n").trim().to_string(),
+    }
 }
 
 fn find_dsc(file: &Path, lang: &str) -> Option<Dsc> {
-    dsc_candidates(file, lang).iter().find_map(|p| omsi_cfg::vfs::read(p).ok()).map(|b| parse_dsc(&encoding_latin1(&b)))
+    dsc_candidates(file, lang)
+        .iter()
+        .find_map(|p| omsi_cfg::vfs::read(p).ok())
+        .map(|b| parse_dsc(&encoding_latin1(&b)))
 }
 
 /// OMSI's text files are Latin-1, except that some description files were saved as
 /// UTF-16 with a byte-order mark.
 fn encoding_latin1(b: &[u8]) -> String {
     if b.len() >= 2 && b[0] == 0xFF && b[1] == 0xFE {
-        let u: Vec<u16> = b[2..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let u: Vec<u16> = b[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         return String::from_utf16_lossy(&u);
     }
     if b.len() >= 2 && b[0] == 0xFE && b[1] == 0xFF {
-        let u: Vec<u16> = b[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let u: Vec<u16> = b[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
         return String::from_utf16_lossy(&u);
     }
     b.iter().map(|&c| c as char).collect()
 }
-
-

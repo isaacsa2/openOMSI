@@ -217,7 +217,15 @@ pub(super) fn run(job: &Job, content: &Path, root: Option<&Path>) -> Result<()> 
 }
 
 /// Copy selected source files into an isolated staging directory, without publishing them.
-fn unpack_staging(job: &Job, source: &mut Source, entries: &[Entry], plan: &Plan, staging: &Path, content: &Path, moving: bool) -> Result<()> {
+fn unpack_staging(
+    job: &Job,
+    source: &mut Source,
+    entries: &[Entry],
+    plan: &Plan,
+    staging: &Path,
+    content: &Path,
+    moving: bool,
+) -> Result<()> {
     let mut buf = vec![0u8; 1 << 20];
     let mut since_check = 0u64;
     for (mi, m) in plan.maps.iter().enumerate() {
@@ -309,7 +317,14 @@ fn unpack_staging(job: &Job, source: &mut Source, entries: &[Entry], plan: &Plan
 }
 
 /// Atomically integrate converted assets with the ordinary Mods ownership records.
-fn commit_staging(job: &Job, content: &Path, src: &Path, source_name: &str, plan: &Plan, staging: &Path) -> Result<()> {
+fn commit_staging(
+    job: &Job,
+    content: &Path,
+    src: &Path,
+    source_name: &str,
+    plan: &Plan,
+    staging: &Path,
+) -> Result<()> {
     // 4. into place
     job.state("moving", tr("moving the files into the content folder"));
     let mut installed_items = Vec::new();
