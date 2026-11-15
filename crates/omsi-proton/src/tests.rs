@@ -34,7 +34,7 @@ fn a_missing_nested_ai_asset_does_not_abort_or_publish_an_incomplete_map() {
             .iter()
             .any(|w| w.contains("missing AI model") && w.contains("MissingTaxi"))
     );
-    let map = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let map = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
     assert!(map.unscheduled_passengers);
     let traffic = crate::traffic::Manifest::load(&f.0).unwrap();
     assert!(traffic.native_cars && traffic.native_buses);
@@ -131,7 +131,7 @@ fn entry_point_degree_suffixes_keep_the_authored_heading_in_the_native_map() {
     }
     std::fs::write(f.0.join("Town/tiles/0x0/entrypoints.txt"), entries).unwrap();
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
-    let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
     assert_eq!(global.entry_points.len(), 3);
     for (entry, expected) in global.entry_points.iter().zip([-106.885, 32.0, 11.0]) {
         assert_eq!(entry.pos, [299.5, 10.5, 7.0]);
@@ -167,7 +167,7 @@ fn damaged_entry_point_numbers_report_the_file_section_field_and_value() {
             "{error}"
         );
         assert!(error.contains(value), "{error}");
-        assert!(!f.0.join(omsi_cfg::oi::GLOBAL).exists());
+        assert!(!f.0.join("global.cfg").exists());
         assert!(!f.0.join("proton-import").exists());
     }
 }
@@ -178,7 +178,7 @@ fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
     setup(&f);
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.tiles, 2);
-    let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
     assert_eq!(global.tiles.len(), 2);
     assert_eq!(global.entry_points[0].pos, [299.5, 10.5, 7.0]);
     let ep = &global.entry_points[0];
@@ -196,7 +196,7 @@ fn import_roundtrip_keeps_tile_boundaries_height_spawn_and_surface() {
         assert!(sco.surface && sco.abs_height);
         let mesh = omsi_o3d::load_mesh(
             &f.0.join("proton-import/model")
-                .join(format!("tile_{}_{}.o3doi", t.x, t.y)),
+                .join(format!("tile_{}_{}.o3d", t.x, t.y)),
         )
         .unwrap();
         // Exercise the game's geometry loader, not just the raw file parser. O3D stores
@@ -236,7 +236,7 @@ fn inline_base_directory_works() {
     .unwrap();
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
     assert_eq!(report.tiles, 2);
-    assert!(f.0.join("proton-import/model/tile_0_0.o3doi").is_file());
+    assert!(f.0.join("proton-import/model/tile_0_0.o3d").is_file());
 }
 
 #[test]
@@ -390,7 +390,7 @@ fn rejects_damaged_meshes_and_unsafe_or_unsupported_map_configs() {
     assert!(child(&f.0, "C:\\outside").is_err());
     assert!(child(&f.0, "/outside").is_err());
     assert!(import(&f.0, "maps/Proton-Town", || true).is_err());
-    assert!(!f.0.join(omsi_cfg::oi::GLOBAL).exists());
+    assert!(!f.0.join("global.cfg").exists());
     std::fs::write(
         f.0.join("Town.map.txt"),
         "[map]\nbaseDir=../outside\nmapModVersion=4\n[openomsi]\nallowConversion=1\n",
@@ -476,7 +476,7 @@ fn supplied_map_fixture_when_available() {
     let dir = PathBuf::from(dir);
     let name = std::env::var("PROTON_MAP_NAME").unwrap_or_else(|_| "Fixture".into());
     let report = import(&dir, &format!("maps/Proton-{name}"), || false).unwrap();
-    let global = omsi_map::GlobalCfg::load(&dir.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let global = omsi_map::GlobalCfg::load(&dir.join("global.cfg")).unwrap();
     assert!(!global.entry_points.is_empty());
     let hof = omsi_vehicle::Hof::load(&dir.join(depot::FILE)).unwrap();
     assert_eq!(hof.termini.len(), report.destinations_imported);
@@ -542,7 +542,7 @@ fn empty_entry_heading_defaults_to_zero_but_empty_coordinates_are_rejected() {
     )
     .unwrap();
     let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
-    let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
     assert_eq!(global.entry_points[0].quat, [0., 0., 0., 1.]);
     assert!(report.warnings.iter().any(|s| s.contains("empty rotation")));
     assert!(

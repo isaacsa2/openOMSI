@@ -260,7 +260,7 @@ fn install_supplied_proton_zip_when_available() {
         let hof = omsi_vehicle::Hof::load(
             &content
                 .join("HOFs")
-                .join(format!("{}.hofoi", omsi_proton::depot::name(installed))),
+                .join(format!("{}.hof", omsi_proton::depot::name(installed))),
         )
         .unwrap();
         assert_eq!(
@@ -351,7 +351,7 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
     assert_eq!(report.installed, ["maps/Proton-Town", "HOFs"]);
     let map = content.join("maps/Proton-Town");
     let hof = omsi_vehicle::Hof::load(&content.join("HOFs").join(format!(
-        "{}.hofoi",
+        "{}.hof",
         omsi_proton::depot::name("maps/Proton-Town")
     )))
     .unwrap();
@@ -390,10 +390,7 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
     .unwrap();
     let paths = registry["mods"][0]["paths"].as_array().unwrap();
     assert!(paths.iter().any(|p| p.as_str() == Some("maps/Proton-Town")));
-    let owned_hof = format!(
-        "HOFs/{}.hofoi",
-        omsi_proton::depot::name("maps/Proton-Town")
-    );
+    let owned_hof = format!("HOFs/{}.hof", omsi_proton::depot::name("maps/Proton-Town"));
     assert!(paths.iter().any(|p| p.as_str() == Some(&owned_hof)));
     let id = registry["mods"][0]["id"].as_str().unwrap();
     crate::mods::set_enabled(&content, id, false).unwrap();

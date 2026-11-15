@@ -82,7 +82,7 @@ fn phase_31_gps_roads_and_night_lights_survive_conversion_without_helper_meshes(
         data.roads[0].points,
         vec![[310.0, 22.0, 8.0], [299.0, 10.0, 7.0], [310.0, 22.0, 8.0]]
     );
-    let sco = omsi_scenery::SceneryObject::load(&f.0.join("proton-import/tile_1_0.oscoi")).unwrap();
+    let sco = omsi_scenery::SceneryObject::load(&f.0.join("proton-import/tile_1_0.sco")).unwrap();
     assert_eq!(sco.map_lights.len(), 1);
     assert_eq!(sco.map_lights[0].pos, [0.0, 11.0, 7.0]);
     assert_eq!(sco.map_lights[0].radius, 5.0);

@@ -41,7 +41,7 @@ fn objects(f: &Fixture, objects: &[(&str, [f32; 3])]) {
 }
 
 pub(super) fn loaded(f: &Fixture) -> Vec<omsi_map::Tile> {
-    omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL))
+    omsi_map::GlobalCfg::load(&f.0.join("global.cfg"))
         .unwrap()
         .tiles
         .iter()

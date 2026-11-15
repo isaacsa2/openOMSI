@@ -245,7 +245,7 @@ pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> 
             return Err(anyhow!(Cancelled));
         }
         let report = report.with_context(|| format!("converting {}", m.dest))?;
-        let filename = format!("{}.hofoi", omsi_proton::depot::name(&m.dest));
+        let filename = format!("{}.hof", omsi_proton::depot::name(&m.dest));
         std::fs::create_dir_all(&shared)?;
         hof_bytes += std::fs::copy(
             staging.join(i.to_string()).join(omsi_proton::depot::FILE),
@@ -260,7 +260,7 @@ pub(super) fn convert(staging: &Path, plan: &mut Plan, job: &Job) -> Result<()> 
             ));
             p.report.push(format!("{}: {} bus stops, {} traffic segments, {} pedestrian segments, {} signal programs and {} controlled paths", m.dest, report.stops_imported, report.traffic_segments_imported, report.pedestrian_segments_imported, report.signals_imported, report.signal_paths_imported));
             p.report.push(format!("{}: shared HOF with {} textual destinations (generated codes); no timetable or ordered line stops inferred", m.dest, report.destinations_imported));
-            p.report.push(format!("{}: {} prefab instances and {} source AI types imported; OI package for OpenOMSI", m.dest, report.prefabs_imported, report.ai_vehicles_imported));
+            p.report.push(format!("{}: {} prefab instances and {} source AI types imported; native package for openOMSI", m.dest, report.prefabs_imported, report.ai_vehicles_imported));
             p.report.push(format!("{}: {} 3D road faces recognized for the navigator; manual paths remain overview-only",m.dest,report.road_surface_triangles));
             p.warnings.extend(report.warnings);
         });

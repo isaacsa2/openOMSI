@@ -9,9 +9,9 @@ use std::{
 };
 
 /// Generated HOF kept with the map; the installer also publishes it in shared HOFs/.
-pub const FILE: &str = "proton-import/depot.hofoi";
+pub const FILE: &str = "proton-import/depot.hof";
 /// Display name of the shared HOF, used by map-specific depot selection.
-pub const NAME_FILE: &str = "proton-import/depot.cfgoi";
+pub const NAME_FILE: &str = "proton-import/depot.txt";
 
 /// Portable, map-specific name: no source path is interpolated into shared HOFs/.
 pub fn name(installed: &str) -> String {
@@ -24,6 +24,11 @@ pub fn name(installed: &str) -> String {
 /// Read the small display-name hint without loading all HOF destinations.
 pub fn installed_name(dir: &Path) -> Option<String> {
     let file = dir.join(NAME_FILE);
+    let file = if omsi_cfg::vfs::is_file(&file) {
+        file
+    } else {
+        dir.join("proton-import/depot.cfgoi")
+    };
     if omsi_cfg::vfs::file_size(&file)? > 4096 {
         return None;
     }

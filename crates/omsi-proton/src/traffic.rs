@@ -9,7 +9,8 @@ use omsi_o3d::Vertex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const FILE: &str = "proton-import/traffic.jsonoi";
+pub const FILE: &str = "proton-import/traffic.json";
+const LEGACY_FILE: &str = "proton-import/traffic.jsonoi";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Manifest {
@@ -28,7 +29,13 @@ pub struct Vehicle {
 
 impl Manifest {
     pub fn load(map: &Path) -> Result<Self> {
-        let bytes = omsi_cfg::vfs::read(&map.join(FILE))?;
+        let file = map.join(FILE);
+        let file = if omsi_cfg::vfs::is_file(&file) {
+            file
+        } else {
+            map.join(LEGACY_FILE)
+        };
+        let bytes = omsi_cfg::vfs::read(&file)?;
         ensure!(bytes.len() <= 1024 * 1024, "AI manifest exceeds 1 MiB");
         let data: Self = serde_json::from_slice(&bytes)?;
         ensure!(
@@ -40,7 +47,7 @@ impl Manifest {
                 v.file.starts_with("maps/")
                     && !v.file.contains(['\\', ':', '\n', '\r'])
                     && !v.file.split('/').any(|p| p == "..")
-                    && v.file.ends_with(".ovhoi"),
+                    && (v.file.ends_with(".ovh") || v.file.ends_with(".ovhoi")),
                 "unsafe AI vehicle path"
             );
             ensure!(
@@ -229,7 +236,7 @@ pub(crate) fn export(
             sounds(&folder, &cfg, &target, &mut def, report)?;
             crate::text(&target.join("vehicle.ovh"), &def)?;
             data.vehicles.push(Vehicle {
-                file: format!("{installed}/proton-import/ai/{id}/vehicle.ovhoi"),
+                file: format!("{installed}/proton-import/ai/{id}/vehicle.ovh"),
                 buses,
                 weight: number(&cfg, "config", "priority", 1.0)?.clamp(0.0, 100.0),
                 speed_kmh: (number(&cfg, "driving", "speedlimit", 13.0)? * 3.6).clamp(1.0, 180.0),
@@ -349,14 +356,14 @@ mod tests {
         assert_eq!(manifest.vehicles[0].speed_kmh, 36.0);
         assert_eq!(manifest.vehicles[0].weight, 2.0);
         let base = f.0.join("proton-import/ai/0");
-        let def = omsi_vehicle::Vehicle::load(&base.join("vehicle.ovhoi")).unwrap();
+        let def = omsi_vehicle::Vehicle::load(&base.join("vehicle.ovh")).unwrap();
         assert_eq!(def.ai_veh_type, 2);
         assert_eq!(def.mass, 18.0);
-        assert_eq!(def.model.as_deref(), Some("Model/model.cfgoi"));
-        assert_eq!(def.sound_ai.as_deref(), Some("Sound/sound.cfgoi"));
-        let cfg = omsi_cfg::vfs::read_text(&base.join("Model/model.cfgoi")).unwrap();
-        assert!(cfg.contains("body_0.o3doi"));
-        let mesh = omsi_o3d::load_mesh(&base.join("Model/body_0.o3doi")).unwrap();
+        assert_eq!(def.model.as_deref(), Some("Model/model.cfg"));
+        assert_eq!(def.sound_ai.as_deref(), Some("Sound/sound.cfg"));
+        let cfg = omsi_cfg::vfs::read_text(&base.join("Model/model.cfg")).unwrap();
+        assert!(cfg.contains("body_0.o3d"));
+        let mesh = omsi_o3d::load_mesh(&base.join("Model/body_0.o3d")).unwrap();
         assert!(
             mesh.vertices
                 .iter()

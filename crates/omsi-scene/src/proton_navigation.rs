@@ -10,6 +10,11 @@ pub(crate) fn load(
 ) -> Option<Arc<Navigation>> {
     let dir = tiles.first()?.2.parent()?;
     let file = dir.join(omsi_proton::navigation::FILE);
+    let file = if omsi_cfg::vfs::is_file(&file) {
+        file
+    } else {
+        dir.join(omsi_proton::navigation::LEGACY_FILE)
+    };
     let bytes = omsi_cfg::vfs::file_size(&file)?;
     let read = || -> anyhow::Result<Navigation> {
         anyhow::ensure!(

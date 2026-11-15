@@ -47,14 +47,14 @@ fn shared_texture_keeps_blend_cutout_and_untagged_material_slots_distinct() {
         std::fs::write(f.0.join("Town/textures").join(texture), [0]).unwrap();
         let report = import(&f.0, "maps/Proton-Town", || false).unwrap();
         assert!(report.warnings.is_empty());
-        let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+        let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
         for tile in global.tiles {
             let stem = format!("tile_{}_{}", tile.x, tile.y);
             let sco =
-                omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.oscoi")))
+                omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.sco")))
                     .unwrap();
-            let mesh = omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{stem}.o3doi")))
-                .unwrap();
+            let mesh =
+                omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{stem}.o3d"))).unwrap();
             assert_eq!(
                 mesh.materials.len(),
                 3,
@@ -115,11 +115,11 @@ fn exporter_colours_and_white_specular_do_not_wash_out_imported_textures() {
     std::fs::write(f.0.join("Town/tiles/0x0/road.3ds"), bytes).unwrap();
     std::fs::write(f.0.join("Town/textures/wall.png"), [0]).unwrap();
     import(&f.0, "maps/Proton-Town", || false).unwrap();
-    let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
     for tile in global.tiles {
         let stem = format!("tile_{}_{}", tile.x, tile.y);
         let mesh =
-            omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{stem}.o3doi"))).unwrap();
+            omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{stem}.o3d"))).unwrap();
         assert_eq!(mesh.materials.len(), 2, "alpha modes must remain distinct");
         for material in mesh.materials {
             assert_eq!(
@@ -130,9 +130,8 @@ fn exporter_colours_and_white_specular_do_not_wash_out_imported_textures() {
                 }
             );
         }
-        let sco =
-            omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.oscoi")))
-                .unwrap();
+        let sco = omsi_scenery::SceneryObject::load(&f.0.join(format!("proton-import/{stem}.sco")))
+            .unwrap();
         assert_eq!(
             sco.model.meshes[0]
                 .materials
@@ -167,7 +166,7 @@ fn invisible_collider_is_not_rendered_and_retains_clipped_wheel_support() {
                 .count(),
             0
         );
-        let global = omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL)).unwrap();
+        let global = omsi_map::GlobalCfg::load(&f.0.join("global.cfg")).unwrap();
         assert_eq!(global.entry_points[0].pos, [299.5, 10.5, 7.0]);
         let mut area = 0.0;
         let mut ids = std::collections::BTreeSet::new();
@@ -179,7 +178,7 @@ fn invisible_collider_is_not_rendered_and_retains_clipped_wheel_support() {
             }
             let collision = format!("tile_{}_{}_collision", t.x, t.y);
             let sco = omsi_scenery::SceneryObject::load(
-                &f.0.join(format!("proton-import/{collision}.oscoi")),
+                &f.0.join(format!("proton-import/{collision}.sco")),
             )
             .unwrap();
             assert!(
@@ -189,10 +188,10 @@ fn invisible_collider_is_not_rendered_and_retains_clipped_wheel_support() {
             assert!(sco.fixed && sco.abs_height && !sco.no_collision);
             assert_eq!(
                 sco.collision_mesh.as_deref(),
-                Some(format!("{collision}.o3doi").as_str())
+                Some(format!("{collision}.o3d").as_str())
             );
             let mesh =
-                omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{collision}.o3doi")))
+                omsi_o3d::load_mesh(&f.0.join(format!("proton-import/model/{collision}.o3d")))
                     .unwrap();
             assert!(mesh.materials.iter().all(|m| m.texture.is_empty()));
             let geometry = omsi_geometry::mesh_from_o3d(&mesh);
@@ -206,7 +205,7 @@ fn invisible_collider_is_not_rendered_and_retains_clipped_wheel_support() {
             let x = if t.x == 0 { 299.5 } else { 0.1 };
             assert!((surface.drive.probe(x, 10.1, 8.0).below.unwrap() - 7.0).abs() < 1e-5);
             let visible = omsi_o3d::load_mesh(
-                &f.0.join(format!("proton-import/model/tile_{}_{}.o3doi", t.x, t.y)),
+                &f.0.join(format!("proton-import/model/tile_{}_{}.o3d", t.x, t.y)),
             )
             .unwrap();
             assert_eq!(

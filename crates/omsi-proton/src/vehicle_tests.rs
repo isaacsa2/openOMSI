@@ -74,7 +74,7 @@ fn fixture(f: &Fixture, permission: &str) -> std::path::PathBuf {
     main
 }
 fn native(root: &Path) -> omsi_sim::VehicleInstance {
-    let file = root.join("Vehicles/Proton-Fixture/vehicle.busoi");
+    let file = root.join("Vehicles/Proton-Fixture/vehicle.bus");
     let ty = omsi_sim::VehicleType::load(root, &file).unwrap();
     assert!(ty.missing_packs.is_empty());
     assert_eq!(ty.meshes.len(), 10);
@@ -123,7 +123,7 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
         std::fs::read(base.join("Source/LICENSE.txt")).unwrap(),
         b"fixture attribution, keep exactly\r\n"
     );
-    let def = omsi_vehicle::Vehicle::load(&base.join("vehicle.busoi")).unwrap();
+    let def = omsi_vehicle::Vehicle::load(&base.join("vehicle.bus")).unwrap();
     assert_eq!(def.mass, 12.);
     // Box inertia plus the offset to the authored centre of mass, in tonne m².
     assert_eq!(def.moment_of_inertia, [156., 150.25, 18.25]);
@@ -132,11 +132,11 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
     assert!(!def.axles[0].driven && def.axles[1].driven);
     assert_eq!(def.cameras_driver[0].pos, [-0.5, 4., 2.]);
     assert_eq!(
-        omsi_vehicle::vehicle::offered_vehicles(&[base.join("vehicle.busoi")]).len(),
+        omsi_vehicle::vehicle::offered_vehicles(&[base.join("vehicle.bus")]).len(),
         1
     );
     for i in 0..r.meshes {
-        let mesh = omsi_o3d::load_mesh(&base.join(format!("Model/mesh_{i}.o3doi"))).unwrap();
+        let mesh = omsi_o3d::load_mesh(&base.join(format!("Model/mesh_{i}.o3d"))).unwrap();
         assert!(
             mesh.vertices
                 .iter()
@@ -164,7 +164,7 @@ fn conversion_preserves_local_geometry_sources_and_native_vehicle_systems() {
             .any(|m| m.materials.iter().any(|m| m.use_text_texture == Some(0)))
     );
     assert!(v.ty.program.str_var("IBIS_terminus_name").is_some());
-    let sound = omsi_vehicle::SoundCfg::load(&base.join("Sound/sound.cfgoi")).unwrap();
+    let sound = omsi_vehicle::SoundCfg::load(&base.join("Sound/sound.cfg")).unwrap();
     assert_eq!(sound.sounds.len(), 2);
     assert!(
         sound
@@ -330,7 +330,7 @@ fn a_converted_real_map_can_be_read_by_native_parsers() {
         std::env::var("PROTON_CONVERTED_MAP").unwrap_or_else(|_| "Proton-Grande Recife".into());
     assert!(map_name.starts_with("Proton-") && !map_name.contains(['/', '\\', ':']));
     let map = root.join("maps").join(map_name);
-    let global = omsi_map::GlobalCfg::load(&map.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let global = omsi_map::GlobalCfg::load(&map.join("global.cfg")).unwrap();
     assert!(!global.tiles.is_empty() && !global.entry_points.is_empty());
     let navigation = crate::navigation::Navigation::from_bytes(
         &omsi_cfg::vfs::read(&map.join(crate::navigation::FILE)).unwrap(),

@@ -1,141 +1,66 @@
-//! OI envelopes for generated definitions; source assets and credits keep their bytes.
-use crate::oi::{self, Kind};
-use anyhow::{Result, ensure};
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-};
+//! Native openOMSI/OMSI asset validation; generated definitions are not wrapped in OI envelopes.
+//! Keep old OI readers for already-imported packages, but newly converted assets
+//! use the engine's ordinary .cfg, .map, .sco, .o3d, .hof and .bus/.ovh loaders.
+use anyhow::{Context, Result, ensure};
+use std::path::{Path, PathBuf};
 
-fn renamed(rel: &str) -> Option<(String, Kind)> {
-    let (suffix, replacement, kind) = if rel.ends_with(".map.terrain") {
-        (".map.terrain", ".terrainoi", Kind::Terrain)
-    } else if rel.ends_with(".map") {
-        (".map", ".tileoi", Kind::Tile)
-    } else if rel.ends_with(".sco") {
-        (".sco", ".oscoi", Kind::Scenery)
-    } else if rel.ends_with(".o3d") {
-        (".o3d", ".o3doi", Kind::Mesh)
-    } else if rel.ends_with(".hof") {
-        (".hof", ".hofoi", Kind::Depot)
-    } else if rel.ends_with(".cfg") {
-        (".cfg", ".cfgoi", Kind::Config)
-    } else if rel.ends_with(".json") {
-        (".json", ".jsonoi", Kind::Navigation)
-    } else if rel.ends_with(".ovh") {
-        (".ovh", ".ovhoi", Kind::Vehicle)
-    } else if rel == "proton-import/depot.txt" {
-        (".txt", ".cfgoi", Kind::Config)
-    } else if rel == "proton-import/traffic.enabled" {
-        (".enabled", ".cfgoi", Kind::Config)
-    } else {
-        return None;
-    };
-    Some((format!("{}{replacement}", rel.strip_suffix(suffix)?), kind))
-}
-
-fn generated(dir: &Path, rel: &str, out: &mut Vec<String>) -> Result<()> {
-    for entry in std::fs::read_dir(dir.join(rel))? {
-        let entry = entry?;
-        ensure!(!entry.file_type()?.is_symlink(), "link in generated output");
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let name = if rel.is_empty() {
-            name
-        } else {
-            format!("{rel}/{name}")
-        };
-        if entry.file_type()?.is_dir() {
-            if name == "proton-import" || name.starts_with("proton-import/") {
-                generated(dir, &name, out)?;
-            }
-        } else if (rel == "proton-import"
-            || rel.starts_with("proton-import/")
-            || name == "global.cfg"
-            || (rel.is_empty()
-                && name.starts_with("tile_")
-                && (name.ends_with(".map") || name.ends_with(".map.terrain"))))
-            && renamed(&name).is_some()
-        {
-            out.push(name);
-        }
-    }
-    Ok(())
-}
-
-fn rewrite(text: &str, links: &BTreeMap<String, String>) -> String {
-    let mut out = String::new();
-    let mut block = "";
-    let mut offset = 0;
-    for line in text.lines() {
-        if line.starts_with('[') && line.ends_with(']') {
-            block = &line[1..line.len() - 1];
-            offset = 0;
-            out.push_str(line);
-            out.push('\n');
-            continue;
-        }
-        let path_line = match block {
-            "map" => offset == 2,
-            "object" => offset == 1,
-            "mesh" | "collision_mesh" | "passengercabin" | "paths" | "model" | "sound_ai" => {
-                offset == 0
-            }
-            _ => false,
-        };
-        out.push_str(if path_line {
-            links.get(line).map(String::as_str).unwrap_or(line)
-        } else {
-            line
-        });
-        out.push('\n');
-        offset += 1;
-    }
-    out
-}
-
-pub(crate) fn seal(dir: &Path, installed: &str, cancel: &impl Fn() -> bool) -> Result<()> {
-    let mut files = Vec::new();
-    generated(dir, "", &mut files)?;
-    let mut links = BTreeMap::new();
-    for old in &files {
-        let (new, _) = renamed(old).unwrap();
-        for prefix in ["".to_string(), format!("{installed}/")] {
-            links.insert(format!("{prefix}{old}"), format!("{prefix}{new}"));
-        }
-        if let (Some(a), Some(b)) = (Path::new(old).file_name(), Path::new(&new).file_name()) {
-            links.insert(
-                a.to_string_lossy().into_owned(),
-                b.to_string_lossy().into_owned(),
+pub(crate) fn validate_native(
+    dir: &Path,
+    installed: &str,
+    cancel: &impl Fn() -> bool,
+) -> Result<()> {
+    let global = dir.join("global.cfg");
+    ensure!(global.is_file(), "missing native map manifest");
+    let map = omsi_map::GlobalCfg::load(&global).context("validating native map manifest")?;
+    ensure!(!map.tiles.is_empty(), "native map has no tiles");
+    for tile in &map.tiles {
+        ensure!(!cancel(), "map import cancelled");
+        ensure!(
+            tile.file.starts_with("tile_")
+                && tile.file.ends_with(".map")
+                && !tile.file.split('/').any(|part| part == ".."),
+            "generated tile is not a native map file"
+        );
+        let tile_path = dir.join(&tile.file);
+        ensure!(tile_path.is_file(), "missing native tile {}", tile.file);
+        let contents = omsi_map::Tile::load(&tile_path)
+            .with_context(|| format!("validating native tile {}", tile.file))?;
+        for object in contents.objects {
+            let rel = object
+                .file
+                .strip_prefix(installed)
+                .and_then(|p| p.strip_prefix('/'))
+                .context("generated scenery path escapes the imported map")?;
+            ensure!(
+                !rel.is_empty()
+                    && !rel.split('/').any(|part| part == "." || part == "..")
+                    && !rel.contains(['\\', ':', '\0']),
+                "unsafe generated scenery path"
+            );
+            ensure!(
+                rel.ends_with(".sco"),
+                "generated scenery has no native .sco extension"
+            );
+            let file = dir.join(rel);
+            ensure!(
+                file.is_file(),
+                "missing generated scenery: {}",
+                file.display()
+            );
+            ensure!(
+                !std::fs::symlink_metadata(&file)?.file_type().is_symlink(),
+                "generated scenery cannot be a symbolic link"
             );
         }
-        if let Some(suffix) = old.strip_prefix("proton-import/ai/") {
-            if let Some((_, rest)) = suffix.split_once('/') {
-                links.insert(
-                    rest.to_string(),
-                    renamed(rest)
-                        .map(|n| n.0)
-                        .unwrap_or_else(|| rest.to_string()),
-                );
-            }
-        }
     }
-    for old in files {
-        ensure!(!cancel(), "map import cancelled");
-        let (new, kind) = renamed(&old).unwrap();
-        let src = dir.join(&old);
-        let target = dir.join(new);
-        if matches!(
-            kind,
-            Kind::Config | Kind::Tile | Kind::Scenery | Kind::Vehicle
-        ) && !old.ends_with("depot.txt")
-            && !old.ends_with("traffic.enabled")
-        {
-            let text = omsi_cfg::decode_text(&std::fs::read(&src)?);
-            crate::text(&src, &rewrite(&text, &links))?;
-        }
-        oi::encode_file(&src, &target, kind)?;
-        std::fs::remove_file(src)?;
-    }
-    ensure!(dir.join(oi::GLOBAL).is_file(), "missing OI map manifest");
+    ensure!(
+        dir.join(crate::depot::FILE).is_file(),
+        "missing native depot"
+    );
+    ensure!(
+        dir.join(crate::navigation::FILE).is_file(),
+        "missing native navigation metadata"
+    );
     Ok(())
 }
 
@@ -199,7 +124,7 @@ pub fn convert_folder(source: &Path, output: &Path, name: &str) -> Result<crate:
     std::fs::create_dir(&shared)?;
     std::fs::copy(
         map.join(crate::depot::FILE),
-        shared.join(format!("{}.hofoi", crate::depot::name(&installed))),
+        shared.join(format!("{}.hof", crate::depot::name(&installed))),
     )?;
     std::fs::rename(&stage, output)?;
     drop(cleanup);

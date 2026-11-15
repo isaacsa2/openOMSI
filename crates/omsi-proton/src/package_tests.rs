@@ -42,7 +42,7 @@ fn denied_public_import_and_cli_never_create_output_or_edit_source() {
 }
 
 #[test]
-fn source_preserving_package_loads_oi_links_and_keeps_attribution_bytes() {
+fn source_preserving_package_loads_native_links_and_keeps_attribution_bytes() {
     let parent = Fixture::new();
     let source = parent.0.join("source");
     std::fs::create_dir(&source).unwrap();
@@ -67,12 +67,13 @@ fn source_preserving_package_loads_oi_links_and_keeps_attribution_bytes() {
         mesh
     );
     assert!(!source.join("proton-import").exists());
+    assert!(map.join("global.cfg").is_file());
     assert!(!map.join("global.cfg").exists());
-    let global = omsi_map::GlobalCfg::load(&map.join(omsi_cfg::oi::GLOBAL)).unwrap();
+    let global = omsi_map::GlobalCfg::load(&map.join("global.cfg")).unwrap();
     for tile in global.tiles {
-        assert!(tile.file.ends_with(".tileoi"));
+        assert!(tile.file.ends_with(".map"));
         for object in omsi_map::Tile::load(&map.join(tile.file)).unwrap().objects {
-            assert!(object.file.ends_with(".oscoi"));
+            assert!(object.file.ends_with(".sco"));
             assert!(output.join(object.file).is_file());
         }
     }

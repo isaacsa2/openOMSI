@@ -1,5 +1,4 @@
 //! One mesh at a time, shared 3DS/material/O3D conversion, native vehicle definitions.
-use crate::oi::{self, Kind};
 use crate::{
     ini,
     settings::{number, position},
@@ -148,9 +147,7 @@ pub(crate) fn export(
             let name_file = format!("mesh_{}", report.meshes);
             let raw = folder.join(format!("{name_file}.o3d"));
             crate::convert::write_mesh(&raw, &builder.mesh, &builder.mesh.materials)?;
-            oi::encode_file(&raw, &folder.join(format!("{name_file}.o3doi")), Kind::Mesh)?;
-            std::fs::remove_file(raw)?;
-            model.push_str(&format!("[mesh]\n{name_file}.o3doi\n"));
+            model.push_str(&format!("[mesh]\n{name_file}.o3d\n"));
             crate::export::material_overrides(&mut model, &builder.mesh.materials, &builder.modes);
             crate::vehicle_model::append(
                 &mut model,
@@ -174,20 +171,20 @@ pub(crate) fn export(
     let sounds = crate::vehicle_sounds::export(info, target, &mut report)?;
     let mut def = physics.definition(&cfg, info)?;
     if !sounds.is_empty() {
-        def.push_str("[sound]\nSound/sound.cfgoi\n[sound_ai]\nSound/sound.cfgoi\n");
+        def.push_str("[sound]\nSound/sound.cfg\n[sound_ai]\nSound/sound.cfg\n");
     }
     for (path, text) in [
-        ("Model/model.cfgoi", model),
-        ("Model/cabin.cfgoi", cabin_cfg),
-        ("Model/paths.cfgoi", paths),
-        ("Script/main.cfgoi", script),
-        ("Script/variables.cfgoi", vars),
-        ("Script/strings.cfgoi", strings),
-        ("Sound/sound.cfgoi", sounds),
+        ("Model/model.cfg", model),
+        ("Model/cabin.cfg", cabin_cfg),
+        ("Model/paths.cfg", paths),
+        ("Script/main.cfg", script),
+        ("Script/variables.cfg", vars),
+        ("Script/strings.cfg", strings),
+        ("Sound/sound.cfg", sounds),
     ] {
-        vehicle_package::text(&target.join(path), &text, Kind::Config)?;
+        vehicle_package::text(&target.join(path), &text)?;
     }
-    vehicle_package::text(&target.join("vehicle.busoi"), &def, Kind::Vehicle)?;
+    vehicle_package::text(&target.join("vehicle.bus"), &def)?;
     report.doors = info.doors.len();
     report.warnings.extend(material_report.warnings);
     report.warnings.push("Rigid buses use native physics and an approximate automatic transmission. C#/Proton scripts, articulated parts, custom dashboard logic, dynamic destination images, ramps and wet-glass masks are not translated".into());

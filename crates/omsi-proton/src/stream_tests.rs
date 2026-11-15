@@ -84,12 +84,12 @@ fn map_import_repairs_only_non_finite_uvs_and_keeps_strict_3ds_readers() {
     assert_eq!(report.warnings.len(), 1);
     assert!(report.warnings[0].contains("road.3ds"));
     assert!(report.warnings[0].contains("object \"road\""));
-    for tile in omsi_map::GlobalCfg::load(&f.0.join(omsi_cfg::oi::GLOBAL))
+    for tile in omsi_map::GlobalCfg::load(&f.0.join("global.cfg"))
         .unwrap()
         .tiles
     {
         let mesh = omsi_o3d::load_mesh(&f.0.join(format!(
-            "proton-import/model/tile_{}_{}.o3doi",
+            "proton-import/model/tile_{}_{}.o3d",
             tile.x, tile.y
         )))
         .unwrap();
@@ -443,5 +443,5 @@ fn cancelling_a_map_import_removes_the_spool_without_publishing_a_manifest() {
     .unwrap_err();
     assert!(format!("{error:#}").contains("cancelled"));
     assert!(!temp.0.join("proton-import/work").exists());
-    assert!(!temp.0.join(omsi_cfg::oi::GLOBAL).exists());
+    assert!(!temp.0.join("global.cfg").exists());
 }

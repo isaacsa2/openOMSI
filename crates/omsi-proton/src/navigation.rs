@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::navigation_index::TriangleIndex;
 
-pub const FILE: &str = "proton-import/navigation.jsonoi";
+pub const FILE: &str = "proton-import/navigation.json";
+/// Older experimental imports remain readable.
+pub const LEGACY_FILE: &str = "proton-import/navigation.jsonoi";
 pub const MAX_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const MAX_TRIANGLES: usize = 250_000;
 pub(crate) const MAX_POINTS: usize = 250_000;

@@ -1,5 +1,5 @@
 //! Declared conversion of user-supplied Proton Bus phase 2-4 maps. Conversion runs
-//! in staging and emits OpenOMSI-only OI definitions for the native simulation.
+//! in staging and emits native OMSI/openOMSI definitions for the simulation.
 //! Only free driving is supported. Source mods are never embedded in the program.
 mod author_file;
 mod convert;
@@ -574,7 +574,8 @@ pub fn import(dir: &Path, installed_rel: &str, cancel: impl Fn() -> bool) -> Res
         &cancel,
     )
     .context("exporting map AI vehicles")?;
-    package::seal(dir, installed_rel, &cancel).context("sealing converted map files")?;
+    package::validate_native(dir, installed_rel, &cancel)
+        .context("validating converted native map files")?;
     report.tiles = keys.len();
     report.triangles = spool.tiles.values().sum();
     report.warnings.sort();
