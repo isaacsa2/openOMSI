@@ -63,8 +63,22 @@ impl World for Pavement {
 
 #[test]
 fn a_waiting_place_is_lifted_onto_the_pavement_but_never_lowered() {
-    let at = |pavement| raised_by_ground(&Pavement { pavement, ..Default::default() }, 10.0, 0.0, 0.0);
-    assert_eq!(at(Some(10.235)), 10.235, "the pavement 23.5 cm above the place");
+    let at = |pavement| {
+        raised_by_ground(
+            &Pavement {
+                pavement,
+                ..Default::default()
+            },
+            10.0,
+            0.0,
+            0.0,
+        )
+    };
+    assert_eq!(
+        at(Some(10.235)),
+        10.235,
+        "the pavement 23.5 cm above the place"
+    );
     assert_eq!(at(Some(9.85)), 10.0, "the road below the place");
     assert_eq!(at(Some(10.8)), 10.0, "a face more than a step above");
     assert_eq!(at(None), 10.0, "nothing loaded");

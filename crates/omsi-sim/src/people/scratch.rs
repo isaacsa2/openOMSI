@@ -69,7 +69,12 @@ fn reset<K: Copy + Eq + std::hash::Hash>(grid: &mut HashMap<K, Vec<u32>>, cells:
     }
 }
 
-fn file<K: Copy + Eq + std::hash::Hash>(grid: &mut HashMap<K, Vec<u32>>, cells: &mut Vec<K>, at: K, k: usize) {
+fn file<K: Copy + Eq + std::hash::Hash>(
+    grid: &mut HashMap<K, Vec<u32>>,
+    cells: &mut Vec<K>,
+    at: K,
+    k: usize,
+) {
     let v = grid.entry(at).or_default();
     if v.is_empty() {
         cells.push(at);
@@ -85,7 +90,10 @@ impl Scratch {
         reset(&mut self.block_grid, &mut self.block_cells);
         for (k, b) in self.blocks.iter().enumerate() {
             let r = (b.half + DVec2::splat(BLOCK_REACH)).length();
-            let (lo, hi) = (cell(b.center - DVec2::splat(r), BLOCK_CELL), cell(b.center + DVec2::splat(r), BLOCK_CELL));
+            let (lo, hi) = (
+                cell(b.center - DVec2::splat(r), BLOCK_CELL),
+                cell(b.center + DVec2::splat(r), BLOCK_CELL),
+            );
             for x in lo.0..=hi.0 {
                 for y in lo.1..=hi.1 {
                     file(&mut self.block_grid, &mut self.block_cells, (x, y), k);
@@ -97,7 +105,10 @@ impl Scratch {
     /// The vehicles of `blocks` that may lie within `BLOCK_REACH` of `p` (a superset: each
     /// still to be looked at).
     pub fn blocks_at(&self, p: DVec2) -> &[u32] {
-        self.block_grid.get(&cell(p, BLOCK_CELL)).map(|v| &v[..]).unwrap_or(&[])
+        self.block_grid
+            .get(&cell(p, BLOCK_CELL))
+            .map(|v| &v[..])
+            .unwrap_or(&[])
     }
 
     /// The vehicles of `blocks` within `BLOCK_REACH` of somebody of `walkers`, in the order
@@ -107,7 +118,9 @@ impl Scratch {
         self.block_near.clear();
         self.block_near.resize(self.blocks.len(), false);
         for w in walkers {
-            let Some(v) = self.block_grid.get(&cell(w.pos, BLOCK_CELL)) else { continue };
+            let Some(v) = self.block_grid.get(&cell(w.pos, BLOCK_CELL)) else {
+                continue;
+            };
             for &k in v {
                 let k = k as usize;
                 if !self.block_near[k] && self.blocks[k].near(w.pos, BLOCK_REACH) {
@@ -115,10 +128,19 @@ impl Scratch {
                 }
             }
         }
-        out.extend(self.blocks.iter().zip(&self.block_near).filter(|(_, n)| **n).map(|(b, _)| *b));
+        out.extend(
+            self.blocks
+                .iter()
+                .zip(&self.block_near)
+                .filter(|(_, n)| **n)
+                .map(|(b, _)| *b),
+        );
         debug_assert_eq!(
             out.len(),
-            self.blocks.iter().filter(|b| walkers.iter().any(|w| b.near(w.pos, BLOCK_REACH))).count(),
+            self.blocks
+                .iter()
+                .filter(|b| walkers.iter().any(|w| b.near(w.pos, BLOCK_REACH)))
+                .count(),
             "the vehicle grid missed one near the crowd"
         );
     }
@@ -128,7 +150,12 @@ impl Scratch {
     pub fn file_blockers(&mut self, people: &[Person]) {
         reset(&mut self.blocker_grid, &mut self.blocker_cells);
         for (k, p) in people.iter().enumerate() {
-            file(&mut self.blocker_grid, &mut self.blocker_cells, cell(p.position.truncate(), BLOCKER_CELL), k);
+            file(
+                &mut self.blocker_grid,
+                &mut self.blocker_cells,
+                cell(p.position.truncate(), BLOCKER_CELL),
+                k,
+            );
         }
         self.blockers_filed = Some(people.len());
     }
@@ -175,17 +202,31 @@ impl Scratch {
             self.door_at.push(pos);
             match inside {
                 Some(b) => file(&mut self.door_aboard, &mut self.door_buses, b, k),
-                None => file(&mut self.door_grid, &mut self.door_cells, cell(pos.truncate(), DOOR_CELL), k),
+                None => file(
+                    &mut self.door_grid,
+                    &mut self.door_cells,
+                    cell(pos.truncate(), DOOR_CELL),
+                    k,
+                ),
             }
         }
     }
 
     pub fn doorways(&self, bn: &BusNow) -> (Vec<bool>, Vec<bool>) {
         let r = DVec2::splat(door_reach(bn));
-        let (lo, hi) = (cell(bn.pos.truncate() - r, DOOR_CELL), cell(bn.pos.truncate() + r, DOOR_CELL));
+        let (lo, hi) = (
+            cell(bn.pos.truncate() - r, DOOR_CELL),
+            cell(bn.pos.truncate() + r, DOOR_CELL),
+        );
         let aboard = self.door_aboard.get(&bn.id).into_iter().flatten();
-        let outside = (lo.0..=hi.0).flat_map(|x| (lo.1..=hi.1).filter_map(move |y| self.door_grid.get(&(x, y)))).flatten();
-        doorways_taken_partitioned(bn, aboard.map(|&k| &self.door_at[k as usize]), outside.map(|&k| &self.door_at[k as usize]))
+        let outside = (lo.0..=hi.0)
+            .flat_map(|x| (lo.1..=hi.1).filter_map(move |y| self.door_grid.get(&(x, y))))
+            .flatten();
+        doorways_taken_partitioned(
+            bn,
+            aboard.map(|&k| &self.door_at[k as usize]),
+            outside.map(|&k| &self.door_at[k as usize]),
+        )
     }
 }
 
@@ -208,7 +249,11 @@ impl StageStats {
     /// `stage avg/longest ms` of every stage, per frame of the people (`frames`).
     pub fn line(&self, frames: u32) -> String {
         let n = frames.max(1) as f64;
-        self.0.iter().map(|(k, _, sum, worst)| format!("{k} {:.3}/{worst:.1}", sum / n)).collect::<Vec<_>>().join(", ")
+        self.0
+            .iter()
+            .map(|(k, _, sum, worst)| format!("{k} {:.3}/{worst:.1}", sum / n))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -228,7 +273,17 @@ mod tests {
     }
 
     fn walker(pos: DVec2) -> Walker {
-        Walker { pos, vel: DVec2::ZERO, radius: 0.28, want: DVec2::ZERO, give: 1.0, space: 0, fixed: false, ghost: false, corridor: None }
+        Walker {
+            pos,
+            vel: DVec2::ZERO,
+            radius: 0.28,
+            want: DVec2::ZERO,
+            give: 1.0,
+            space: 0,
+            fixed: false,
+            ghost: false,
+            corridor: None,
+        }
     }
 
     #[test]
@@ -239,19 +294,38 @@ mod tests {
             let spread = 50.0 + round as f64 * 40.0;
             for _ in 0..120 {
                 s.blocks.push(Block {
-                    center: DVec2::new(r.f() * spread - spread / 2.0, r.f() * spread - spread / 2.0),
+                    center: DVec2::new(
+                        r.f() * spread - spread / 2.0,
+                        r.f() * spread - spread / 2.0,
+                    ),
                     half: DVec2::new(0.5 + r.f() * 2.0, 1.0 + r.f() * 9.0),
                     heading: r.f() * std::f64::consts::TAU,
                     vel: DVec2::ZERO,
                 });
             }
             s.file_blocks();
-            let walkers: Vec<Walker> = (0..60).map(|_| walker(DVec2::new(r.f() * spread * 1.4 - spread * 0.7, r.f() * spread * 1.4 - spread * 0.7))).collect();
+            let walkers: Vec<Walker> = (0..60)
+                .map(|_| {
+                    walker(DVec2::new(
+                        r.f() * spread * 1.4 - spread * 0.7,
+                        r.f() * spread * 1.4 - spread * 0.7,
+                    ))
+                })
+                .collect();
             let mut near = Vec::new();
             s.blocks_near_crowd(&walkers, &mut near);
-            let all: Vec<Block> = s.blocks.iter().filter(|b| walkers.iter().any(|w| b.near(w.pos, BLOCK_REACH))).copied().collect();
+            let all: Vec<Block> = s
+                .blocks
+                .iter()
+                .filter(|b| walkers.iter().any(|w| b.near(w.pos, BLOCK_REACH)))
+                .copied()
+                .collect();
             assert_eq!(near.len(), all.len());
-            assert!(near.iter().zip(&all).all(|(a, b)| a.center == b.center && a.half == b.half));
+            assert!(
+                near.iter()
+                    .zip(&all)
+                    .all(|(a, b)| a.center == b.center && a.half == b.half)
+            );
             // every vehicle a point lies near (closer than the reach) is in that point's cell
             for _ in 0..200 {
                 let p = DVec2::new(r.f() * spread - spread / 2.0, r.f() * spread - spread / 2.0);
@@ -269,11 +343,18 @@ mod tests {
     fn the_blocker_grid_holds_everybody_within_a_cell() {
         let mut r = Rng(0x2545_f491_4f6c_dd1d);
         let mut s = Scratch::default();
-        let points: Vec<DVec3> = (0..300).map(|_| DVec3::new(r.f() * 60.0 - 30.0, r.f() * 60.0 - 30.0, 0.0)).collect();
+        let points: Vec<DVec3> = (0..300)
+            .map(|_| DVec3::new(r.f() * 60.0 - 30.0, r.f() * 60.0 - 30.0, 0.0))
+            .collect();
         // (filed by hand: `file_blockers` takes people)
         reset(&mut s.blocker_grid, &mut s.blocker_cells);
         for (k, p) in points.iter().enumerate() {
-            file(&mut s.blocker_grid, &mut s.blocker_cells, cell(p.truncate(), BLOCKER_CELL), k);
+            file(
+                &mut s.blocker_grid,
+                &mut s.blocker_cells,
+                cell(p.truncate(), BLOCKER_CELL),
+                k,
+            );
         }
         s.blockers_filed = Some(points.len());
         let mut out = Vec::new();
