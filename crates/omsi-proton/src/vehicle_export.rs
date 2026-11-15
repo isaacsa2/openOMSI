@@ -1,4 +1,5 @@
 //! One mesh at a time, shared 3DS/material/O3D conversion, native vehicle definitions.
+use crate::oi::{self, Kind};
 use crate::{
     ini,
     settings::{number, position},
@@ -7,7 +8,6 @@ use crate::{
     vehicle_physics::Physics,
 };
 use anyhow::{Context, Result, ensure};
-use crate::oi::{self, Kind};
 use std::path::Path;
 
 pub(crate) fn export(

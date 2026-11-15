@@ -1,5 +1,5 @@
 //! OpenOMSI-only envelopes. This is a versioned format, not DRM or authentication.
-use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use std::{
     fs::File,
     io::{self, Read, Write},

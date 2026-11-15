@@ -1,6 +1,6 @@
 //! OI envelopes for generated definitions; source assets and credits keep their bytes.
-use anyhow::{Result, ensure};
 use crate::oi::{self, Kind};
+use anyhow::{Result, ensure};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
