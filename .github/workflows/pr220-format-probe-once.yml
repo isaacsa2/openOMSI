@@ -1,0 +1,46 @@
+name: PR220 format and compile isolated converter
+
+on:
+  push:
+    branches:
+      - preview/next-test-build
+    paths:
+      - .github/workflows/pr220-format-probe-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-probe:
+    if: github.repository == 'isaacsa2/openOMSI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Format recovered Rust files and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt
+          find crates/omsi-proton -type f -name '*.rs' -print0 | xargs -0 rustfmt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/pr220-format-probe-once.yml
+          git add crates/omsi-proton
+          git commit -m "style(proton): format standalone OI codec changes"
+          git push origin HEAD:refs/heads/preview/next-test-build
+      - name: Temporarily register crate without changing repository files
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Cargo.toml')
+          t = p.read_text()
+          needle = 'members = [\n'
+          assert needle in t
+          p.write_text(t.replace(needle, needle + '    "crates/omsi-proton",\n', 1))
+          PY
+      - name: Compile converter against current engine
+        run: cargo check -p omsi-proton --lib --message-format=short
+      - name: Test converter against current engine
+        run: cargo test -p omsi-proton --lib -- --test-threads=1
