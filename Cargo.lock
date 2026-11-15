@@ -4404,6 +4404,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "omsi-proton"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "encoding_rs",
+ "flate2",
+ "glam",
+ "omsi-cfg",
+ "omsi-geometry",
+ "omsi-map",
+ "omsi-o3d",
+ "omsi-scenery",
+ "omsi-sim",
+ "omsi-vehicle",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "omsi-remote"
 version = "0.1.0"
 dependencies = [
