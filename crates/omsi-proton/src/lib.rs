@@ -11,7 +11,7 @@ pub mod itinerary;
 mod materials;
 pub mod navigation;
 mod navigation_index;
-pub mod oi;
+pub use omsi_cfg::oi;
 mod optimise;
 pub mod package;
 mod path_corners;

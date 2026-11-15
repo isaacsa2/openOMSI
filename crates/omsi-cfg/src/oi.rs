@@ -120,11 +120,11 @@ pub fn file_payload_size(path: &Path) -> Option<u64> {
 
 /// Stock OMSI keeps its ordinary manifest. Converted maps have only the OI manifest.
 pub fn global_path(dir: &Path) -> std::path::PathBuf {
-    let native = omsi_cfg::resolve_path(dir, "global.cfg");
-    if omsi_cfg::vfs::is_file(&native) {
+    let native = crate::resolve_path(dir, "global.cfg");
+    if crate::vfs::is_file(&native) {
         native
     } else {
-        omsi_cfg::resolve_path(dir, GLOBAL)
+        crate::resolve_path(dir, GLOBAL)
     }
 }
 
