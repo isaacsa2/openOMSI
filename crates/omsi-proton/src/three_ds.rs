@@ -1,0 +1,415 @@
+//! Static 3DS geometry. Vertex positions in 3DS are already in the file's world frame;
+//! its local-axis matrix describes the object's frame, not another transform to apply.
+use anyhow::{bail, ensure, Context, Result};
+use glam::{Vec2, Vec3};
+use omsi_o3d::Material;
+use std::io::Read;
+use std::path::Path;
+#[path = "three_ds_stream.rs"]
+mod stream;
+pub use stream::Scene;
+
+const FILE_LIMIT_BYTES: u64 = 1024 * 1024 * 1024;
+
+#[derive(Default)]
+pub struct Model {
+    pub materials: Vec<(String, Material)>,
+    pub objects: Vec<Object>,
+    pub trailing_bytes: usize,
+    pub mappings: Vec<UvTransform>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UvTransform {
+    pub scale: Vec2,
+    pub offset: Vec2,
+    pub angle: f32,
+}
+
+impl Default for UvTransform {
+    fn default() -> Self {
+        Self {
+            scale: Vec2::ONE,
+            offset: Vec2::ZERO,
+            angle: 0.0,
+        }
+    }
+}
+
+impl UvTransform {
+    pub fn apply(self, uv: Vec2) -> Vec2 {
+        if self == Self::default() {
+            return uv;
+        }
+        let raw = Vec2::new(uv.x, 1.0 - uv.y) * self.scale;
+        let (s, c) = self.angle.sin_cos();
+        let mapped = Vec2::new(c * raw.x - s * raw.y, s * raw.x + c * raw.y) + self.offset;
+        Vec2::new(mapped.x, 1.0 - mapped.y)
+    }
+    pub(crate) fn key(self) -> [u32; 5] {
+        [
+            self.scale.x,
+            self.scale.y,
+            self.offset.x,
+            self.offset.y,
+            self.angle,
+        ]
+        .map(f32::to_bits)
+    }
+}
+
+#[derive(Default)]
+pub struct Object {
+    pub name: String,
+    pub positions: Vec<Vec3>,
+    pub uv: Vec<Vec2>,
+    pub faces: Vec<[u16; 3]>,
+    pub groups: Vec<(String, Vec<u16>)>,
+    pub smoothing: Vec<u32>,
+}
+
+/// Read the declared model only; opaque trailing data must not consume import memory.
+pub fn load(path: &Path, cancel: &impl Fn() -> bool) -> Result<Model> {
+    let file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    read_model(file, size, cancel)
+}
+
+fn read_model(mut reader: impl Read, size: u64, cancel: &impl Fn() -> bool) -> Result<Model> {
+    ensure!(
+        size <= FILE_LIMIT_BYTES,
+        "3DS file exceeds the 1 GiB import limit"
+    );
+    let mut header = [0; 6];
+    reader.read_exact(&mut header)?;
+    ensure!(header[..2] == [0x4d, 0x4d], "not a 3DS file");
+    let end = u32::from_le_bytes(header[2..6].try_into()?) as u64;
+    ensure!(
+        end >= 6 && end <= size,
+        "invalid 3DS root chunk length {end}"
+    );
+    ensure!(!cancel(), "map import cancelled");
+    let mut bytes = header.to_vec();
+    bytes.try_reserve_exact(end as usize - header.len())?;
+    let mut remaining = end as usize - header.len();
+    while remaining != 0 {
+        ensure!(!cancel(), "map import cancelled");
+        let chunk = remaining.min(1024 * 1024);
+        let start = bytes.len();
+        bytes.resize(start + chunk, 0);
+        reader.read_exact(&mut bytes[start..])?;
+        remaining -= chunk;
+    }
+    let mut model = parse(&bytes)?;
+    model.trailing_bytes = (size - end) as usize;
+    Ok(model)
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn gigabyte_sources_skip_the_tail_and_the_next_byte_is_refused() {
+        // A bounded reader fails if the loader touches the opaque tail. No giant
+        // fixture or disk allocation is needed to verify the source-size boundary.
+        let mut reader = Cursor::new([0x4d, 0x4d, 6, 0, 0, 0]);
+        let model = read_model(&mut reader, FILE_LIMIT_BYTES, &|| false).unwrap();
+        assert_eq!(reader.position(), 6);
+        assert_eq!(model.trailing_bytes as u64, FILE_LIMIT_BYTES - 6);
+        reader.set_position(0);
+        assert!(read_model(&mut reader, FILE_LIMIT_BYTES + 1, &|| false)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("1 GiB"));
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[test]
+    fn declared_chunks_are_still_bounded_and_reads_can_be_cancelled() {
+        let malformed = Cursor::new([0x4d, 0x4d, 20, 0, 0, 0]);
+        assert!(read_model(malformed, 6, &|| false).is_err());
+        let truncated = Cursor::new([0x4d, 0x4d, 20, 0, 0, 0]);
+        assert!(read_model(truncated, 20, &|| false).is_err());
+        let valid = Cursor::new([0x4d, 0x4d, 6, 0, 0, 0]);
+        assert!(read_model(valid, 6, &|| true)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("cancelled"));
+    }
+}
+
+struct Chunk<'a> {
+    tag: u16,
+    data: &'a [u8],
+}
+
+fn chunks(mut b: &[u8]) -> Result<Vec<Chunk<'_>>> {
+    let mut out = Vec::new();
+    while !b.is_empty() {
+        ensure!(b.len() >= 6, "truncated 3DS chunk header");
+        let tag = u16::from_le_bytes(b[..2].try_into()?);
+        let len = u32::from_le_bytes(b[2..6].try_into()?) as usize;
+        ensure!(len >= 6 && len <= b.len(), "invalid 3DS chunk length {len}");
+        out.push(Chunk {
+            tag,
+            data: &b[6..len],
+        });
+        b = &b[len..];
+    }
+    Ok(out)
+}
+
+fn string(b: &[u8]) -> Result<(String, &[u8])> {
+    let n = b
+        .iter()
+        .position(|&v| v == 0)
+        .ok_or_else(|| anyhow::anyhow!("unterminated 3DS name"))?;
+    let s = std::str::from_utf8(&b[..n])
+        .map(str::to_owned)
+        .unwrap_or_else(|_| {
+            encoding_rs::WINDOWS_1252
+                .decode_without_bom_handling(&b[..n])
+                .0
+                .into_owned()
+        });
+    Ok((s, &b[n + 1..]))
+}
+
+fn records(b: &[u8], size: usize) -> Result<(usize, &[u8], &[u8])> {
+    ensure!(b.len() >= 2, "missing 3DS record count");
+    let n = u16::from_le_bytes(b[..2].try_into()?) as usize;
+    let end = 2 + n * size;
+    ensure!(end <= b.len(), "truncated 3DS records");
+    Ok((n, &b[2..end], &b[end..]))
+}
+
+fn float(b: &[u8]) -> Result<f32> {
+    ensure!(b.len() >= 4, "truncated 3DS float");
+    let v = f32::from_le_bytes(b[..4].try_into()?);
+    ensure!(v.is_finite(), "non-finite 3DS coordinate");
+    Ok(v)
+}
+
+fn color(b: &[u8]) -> Result<[f32; 3]> {
+    let mut value = [1.0; 3];
+    for c in chunks(b)? {
+        match c.tag {
+            0x0010 | 0x0013 => {
+                ensure!(c.data.len() >= 12, "truncated 3DS color");
+                value = [float(c.data)?, float(&c.data[4..])?, float(&c.data[8..])?];
+            }
+            0x0011 | 0x0012 => {
+                ensure!(c.data.len() >= 3, "truncated 3DS color");
+                value = [
+                    c.data[0] as f32 / 255.0,
+                    c.data[1] as f32 / 255.0,
+                    c.data[2] as f32 / 255.0,
+                ];
+            }
+            _ => {}
+        }
+    }
+    Ok(value)
+}
+
+fn percent(b: &[u8]) -> Result<f32> {
+    for p in chunks(b)? {
+        match p.tag {
+            0x0030 => {
+                ensure!(p.data.len() >= 2, "truncated percentage");
+                return Ok(u16::from_le_bytes(p.data[..2].try_into()?) as f32 / 100.0);
+            }
+            0x0031 => return float(p.data),
+            _ => {}
+        }
+    }
+    Ok(0.0)
+}
+
+fn material(b: &[u8]) -> Result<(String, Material, UvTransform)> {
+    let mut name = String::new();
+    let mut m = Material::default();
+    let mut uv = UvTransform::default();
+    let mut ambient = [0.0; 3];
+    let mut illumination = 0.0;
+    let mut specular_strength = 1.0;
+    for c in chunks(b)? {
+        match c.tag {
+            0xa000 => name = string(c.data)?.0,
+            0xa010 => ambient = color(c.data)?,
+            0xa020 => m.diffuse[..3].copy_from_slice(&color(c.data)?),
+            0xa030 => m.specular = color(c.data)?,
+            // 3DS stores a percentage, O3D a Phong exponent: this is a basic approximation.
+            0xa040 => m.specular_power = percent(c.data)?.clamp(0.0, 1.0) * 128.0,
+            0xa041 => specular_strength = percent(c.data)?.clamp(0.0, 1.0),
+            0xa080 => illumination = 1.0,
+            0xa084 => illumination = percent(c.data)?.clamp(0.0, 1.0),
+            0xa050 => {
+                m.diffuse[3] = 1.0 - percent(c.data)?.clamp(0.0, 1.0);
+            }
+            0xa200 => {
+                for t in chunks(c.data)? {
+                    match t.tag {
+                        0xa300 => m.texture = string(t.data)?.0,
+                        0xa354 => uv.scale.x = float(t.data)?,
+                        0xa356 => uv.scale.y = float(t.data)?,
+                        0xa358 => uv.offset.x = float(t.data)?,
+                        0xa35a => uv.offset.y = float(t.data)?,
+                        0xa35c => uv.angle = float(t.data)?,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    m.specular = m.specular.map(|v| v * specular_strength);
+    m.emissive = ambient.map(|v| v * illumination);
+    Ok((name, m, uv))
+}
+
+fn geometry(b: &[u8], o: &mut Object) -> Result<()> {
+    geometry_for_import(b, o, false).map(|_| ())
+}
+
+fn geometry_for_import(b: &[u8], o: &mut Object, repair_uvs: bool) -> Result<usize> {
+    let mut repaired = 0;
+    for c in chunks(b)? {
+        match c.tag {
+            0x4110 => {
+                let (_, data, _) = records(c.data, 12)?;
+                for p in data.chunks_exact(12) {
+                    o.positions
+                        .push(Vec3::new(float(p)?, float(&p[4..])?, float(&p[8..])?));
+                }
+            }
+            0x4140 => {
+                let (_, data, _) = records(c.data, 8)?;
+                for p in data.chunks_exact(8) {
+                    let uv = Vec2::new(
+                        f32::from_le_bytes(p[..4].try_into()?),
+                        1.0 - f32::from_le_bytes(p[4..8].try_into()?),
+                    );
+                    if uv.is_finite() {
+                        o.uv.push(uv);
+                    } else {
+                        ensure!(repair_uvs, "non-finite 3DS texture coordinate");
+                        // Keep the surface and collision even when an export lost a
+                        // UV. The importer reports this local repair; strict readers
+                        // still reject it, and bad positions or indices remain fatal.
+                        o.uv.push(Vec2::ZERO);
+                        repaired += 1;
+                    }
+                }
+            }
+            0x4120 => {
+                let (_, data, tail) = records(c.data, 8)?;
+                for f in data.chunks_exact(8) {
+                    o.faces.push([
+                        u16::from_le_bytes(f[..2].try_into()?),
+                        u16::from_le_bytes(f[2..4].try_into()?),
+                        u16::from_le_bytes(f[4..6].try_into()?),
+                    ]);
+                }
+                for g in chunks(tail)? {
+                    match g.tag {
+                        0x4130 => {
+                            let (name, tail) = string(g.data)?;
+                            let (_, data, _) = records(tail, 2)?;
+                            o.groups.push((
+                                name,
+                                data.chunks_exact(2)
+                                    .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                                    .collect(),
+                            ));
+                        }
+                        0x4150 => {
+                            ensure!(
+                                g.data.len() == o.faces.len() * 4,
+                                "invalid smoothing group count"
+                            );
+                            o.smoothing = g
+                                .data
+                                .chunks_exact(4)
+                                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                                .collect();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for f in &o.faces {
+        ensure!(
+            f.iter().all(|&i| (i as usize) < o.positions.len()),
+            "3DS face names a missing vertex"
+        );
+    }
+    for (_, faces) in &o.groups {
+        ensure!(
+            faces.iter().all(|&i| (i as usize) < o.faces.len()),
+            "3DS material names a missing face"
+        );
+    }
+    Ok(repaired)
+}
+
+pub fn parse(bytes: &[u8]) -> Result<Model> {
+    ensure!(
+        bytes.len() >= 6 && bytes[..2] == [0x4d, 0x4d],
+        "not a 3DS file"
+    );
+    let end = u32::from_le_bytes(bytes[2..6].try_into()?) as usize;
+    ensure!(
+        end >= 6 && end <= bytes.len(),
+        "invalid 3DS root chunk length {end}"
+    );
+    // Some files carry extra data after their declared root (Osasco's PFLORA10).
+    // Only the declared root belongs to this model; nested chunks remain strictly bounded.
+    let top = chunks(&bytes[..end])?;
+    let mut m = Model {
+        trailing_bytes: bytes.len() - end,
+        ..Default::default()
+    };
+    for root in chunks(top[0].data)? {
+        if root.tag != 0x3d3d {
+            continue;
+        }
+        for c in chunks(root.data)? {
+            match c.tag {
+                0xafff => {
+                    let (name, mat, uv) = material(c.data)?;
+                    m.materials.push((name, mat));
+                    m.mappings.push(uv);
+                }
+                0x4000 => {
+                    let (name, rest) = string(c.data)?;
+                    let mut o = Object {
+                        name,
+                        ..Default::default()
+                    };
+                    for g in chunks(rest)? {
+                        if g.tag == 0x4100 {
+                            geometry(g.data, &mut o)
+                                .with_context(|| format!("reading 3DS object {:?}", o.name))?;
+                        }
+                    }
+                    if !o.positions.is_empty() {
+                        m.objects.push(o);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if m.materials.len() >= u16::MAX as usize {
+        bail!("too many 3DS materials");
+    }
+    Ok(m)
+}
