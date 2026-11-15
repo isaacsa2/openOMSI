@@ -267,7 +267,7 @@ fn install_supplied_proton_zip_when_available() {
             omsi_proton::depot::installed_name(&map),
             Some(hof.name.clone())
         );
-        let info = crate::read_map(&map, map.file_name().unwrap().to_str().unwrap(), "en").unwrap();
+        let info = crate::read_map(&map, map.file_name().unwrap().to_str().unwrap(), "en").0.unwrap();
         assert_eq!(info.hof, hof.name);
         eprintln!(
             "{}: {} shared HOF destinations and {} stops",
@@ -355,7 +355,7 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
     .unwrap();
     assert_eq!(hof.termini[0].menu_name(), "Centro");
     assert_eq!(
-        crate::read_map(&map, "Proton-Town", "en").unwrap().hof,
+        crate::read_map(&map, "Proton-Town", "en").0.unwrap().hof,
         hof.name
     );
     assert_eq!(
@@ -374,7 +374,7 @@ fn generated_depot_is_published_and_owned_with_its_map_without_editing_buses() {
     )
     .unwrap();
     assert_eq!(
-        crate::read_map(&map, "Proton-Town", "en").unwrap().hof,
+        crate::read_map(&map, "Proton-Town", "en").0.unwrap().hof,
         "Original"
     );
     assert_eq!(
