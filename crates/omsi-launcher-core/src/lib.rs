@@ -867,10 +867,10 @@ pub fn list_maps() -> Result<Vec<MapInfo>> {
     let mut keys = Vec::new();
     for (folder, dirs) in merged_folders("maps") {
         // a map is one folder: the first copy that has a global.cfg
-        let Some(d) = dirs.into_iter().find(|d| omsi_cfg::vfs::is_file(&d.join("global.cfg"))) else { continue };
+        let Some(d) = dirs.into_iter().find(|d| omsi_cfg::vfs::is_file(&omsi_cfg::oi::global_path(d))) else { continue };
         let key = format!("map|{lang}|{}", d.display());
-        let mut stamped = vec![d.clone(), d.join("global.cfg"), d.join("ailists.cfg")];
-        stamped.extend(dsc_candidates(&d.join("global.cfg"), lang));
+        let mut stamped = vec![d.clone(), omsi_cfg::oi::global_path(&d), d.join("ailists.cfg"), d.join(omsi_proton::depot::NAME_FILE)];
+        stamped.extend(dsc_candidates(&omsi_cfg::oi::global_path(&d), lang));
         let stamp = index::files_stamp(&stamped);
         keys.push(key.clone());
         let info: Option<MapInfo> = index::cached(&key, stamp, || read_map(&d, &folder, lang));
@@ -902,10 +902,10 @@ fn log_empty(rel: &str, what: &str) {
 /// The map in `d` and the files its entry is read from beyond the stamped ones (the tiles,
 /// when their entry objects are its entry points).
 fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf>) {
-    let mut g = match omsi_map::GlobalCfg::load(&d.join("global.cfg")) {
+    let mut g = match omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(d)) {
         Ok(g) => g,
         Err(e) => {
-            log_line(&format!("maps: {} cannot be read ({e:#}) - not listed", d.join("global.cfg").display()));
+            log_line(&format!("maps: {} cannot be read ({e:#}) - not listed", omsi_cfg::oi::global_path(d).display()));
             return (None, Vec::new());
         }
     };
@@ -918,7 +918,7 @@ fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf
         deps = g.tiles.iter().map(|t| omsi_cfg::resolve_path(g.dir(), &t.file)).collect();
     }
     // `global_ENG.dsc` (the language of the settings) names and describes the map
-    let dsc = find_dsc(&d.join("global.cfg"), lang);
+    let dsc = find_dsc(&omsi_cfg::oi::global_path(d), lang);
     let friendly = dsc.as_ref().and_then(|x| x.name.first().cloned()).unwrap_or_else(|| g.friendly_name.trim().to_string());
     let description = dsc.map(|x| x.description).filter(|t| !t.is_empty()).unwrap_or_else(|| g.description.trim().to_string());
     let mut entries: Vec<EntryInfo> = g.entry_points.iter().map(|e| EntryInfo { index: e.index, name: e.name.trim().to_string() }).collect();
@@ -938,8 +938,8 @@ fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf
         }
     }
     // (the depot groups' first: a plain car group's name line is no depot)
-    let hof = omsi_map::ailists::AiLists::load(&d.join("ailists.cfg")).ok().and_then(|l| l.groups.iter().filter(|g| g.is_depot).chain(l.groups.iter()).find_map(|g| g.hof.clone())).unwrap_or_default();
-    (Some(MapInfo { name: if g.name.trim().is_empty() { folder.to_string() } else { g.name.trim().to_string() }, friendly, file: format!("maps/{folder}/global.cfg"), description, entry_points: entries, hof, installed: in_content(d), year_span: year_span_of(&g), transport: g.transport.iter().map(|m| m.name().to_string()).collect() }), deps)
+    let hof = omsi_map::ailists::AiLists::load(&d.join("ailists.cfg")).ok().and_then(|l| l.groups.iter().filter(|g| g.is_depot).chain(l.groups.iter()).find_map(|g| g.hof.clone())).or_else(|| omsi_proton::depot::installed_name(d)).unwrap_or_default();
+    (Some(MapInfo { name: if g.name.trim().is_empty() { folder.to_string() } else { g.name.trim().to_string() }, friendly, file: format!("maps/{folder}/{}", omsi_cfg::oi::global_path(d).file_name().unwrap_or_default().to_string_lossy()), description, entry_points: entries, hof, installed: in_content(d), year_span: year_span_of(&g), transport: g.transport.iter().map(|m| m.name().to_string()).collect() }), deps)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -1079,7 +1079,7 @@ fn shared_depot_names() -> Vec<String> {
         list.sort();
         for (n, is_dir) in list {
             let file = n.to_string_lossy().to_ascii_lowercase();
-            if is_dir || !file.ends_with(".hof") || !seen.insert(file) {
+            if is_dir || !(file.ends_with(".hof") || file.ends_with(".hofoi")) || !seen.insert(file) {
                 continue;
             }
             if let Some(name) = omsi_vehicle::Hof::read_name(&dir.join(&n)) {
@@ -1246,7 +1246,7 @@ fn read_vehicle_folder(folder: &str, dirs: &[PathBuf], lang: &str) -> (Vec<Vehic
     }
     let mut out = Vec::new();
     let mut deps = Vec::new();
-    if !files.iter().any(|f| f.extension().map(|e| e.eq_ignore_ascii_case("bus") || e.eq_ignore_ascii_case("ovh")).unwrap_or(false)) {
+    if !files.iter().any(|f| f.extension().map(|e| e.eq_ignore_ascii_case("bus") || e.eq_ignore_ascii_case("busoi") || e.eq_ignore_ascii_case("ovh") || e.eq_ignore_ascii_case("ovhoi")).unwrap_or(false)) {
         // textures, or a repaint for a bus that is not installed: nothing to drive
         log_line(&format!("vehicles: Vehicles/{folder} has no .bus file (a repaint or textures for a bus that is not installed?) - not listed"));
         return (out, deps);
@@ -1550,7 +1550,7 @@ pub fn trip_path(map: &str, date: &str, trip: &str) -> Result<TripPath> {
         t.stations.clone()
     };
     // the tile of a path step is the index of its entry in `[map]`, as the game reads it
-    let tiles = omsi_map::GlobalCfg::load(&map_dir.join("global.cfg")).map(|g| g.raw_tiles).unwrap_or_default();
+    let tiles = omsi_map::GlobalCfg::load(&omsi_cfg::oi::global_path(&map_dir)).map(|g| g.raw_tiles).unwrap_or_default();
     let at = |tile_index: f64| tiles.get(tile_index as usize).copied();
     let track_name = if t.display_name.trim().is_empty() { t.name.trim() } else { t.display_name.trim() };
     if let Some(track) = data.tracks.iter().find(|x| x.path.file_stem().map(|s| s.to_string_lossy().eq_ignore_ascii_case(track_name)).unwrap_or(false)) {
