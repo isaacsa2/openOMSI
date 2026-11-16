@@ -112,15 +112,54 @@ mod tests {
 
     #[test]
     fn driving_authority_is_explicitly_opt_in_and_requires_a_stopped_bus() {
-        let enabled = CoopRoles { driver_handover: true, ..Default::default() };
+        let enabled = CoopRoles {
+            driver_handover: true,
+            ..Default::default()
+        };
         assert!(!may_handover_driver(CoopRoles::default(), driver()));
         assert!(may_handover_driver(enabled, driver()));
-        assert!(!may_handover_driver(enabled, DriverRequest { bus_speed_kmh: 1.0, ..driver() }));
-        assert!(!may_handover_driver(enabled, DriverRequest { bus_speed_kmh: f32::NAN, ..driver() }));
-        assert!(!may_handover_driver(enabled, DriverRequest { owner_consented: false, ..driver() }));
-        assert!(!may_handover_driver(enabled, DriverRequest { bus_content_installed: false, ..driver() }));
-        assert!(!may_handover_driver(enabled, DriverRequest { guest_inside_bus: false, ..driver() }));
-        assert!(!may_handover_driver(enabled, DriverRequest { authority_token: 0, ..driver() }));
+        assert!(!may_handover_driver(
+            enabled,
+            DriverRequest {
+                bus_speed_kmh: 1.0,
+                ..driver()
+            }
+        ));
+        assert!(!may_handover_driver(
+            enabled,
+            DriverRequest {
+                bus_speed_kmh: f32::NAN,
+                ..driver()
+            }
+        ));
+        assert!(!may_handover_driver(
+            enabled,
+            DriverRequest {
+                owner_consented: false,
+                ..driver()
+            }
+        ));
+        assert!(!may_handover_driver(
+            enabled,
+            DriverRequest {
+                bus_content_installed: false,
+                ..driver()
+            }
+        ));
+        assert!(!may_handover_driver(
+            enabled,
+            DriverRequest {
+                guest_inside_bus: false,
+                ..driver()
+            }
+        ));
+        assert!(!may_handover_driver(
+            enabled,
+            DriverRequest {
+                authority_token: 0,
+                ..driver()
+            }
+        ));
     }
 
     fn fare() -> ConductorRequest {
@@ -138,18 +177,70 @@ mod tests {
 
     #[test]
     fn ticket_grants_reject_replays_other_passengers_and_revoked_roles() {
-        let enabled = CoopRoles { conductor: true, ..Default::default() };
-        let grant = FareGrant { actor: 7, epoch: 123, desk: 11, last_seq: 0 };
+        let enabled = CoopRoles {
+            conductor: true,
+            ..Default::default()
+        };
+        let grant = FareGrant {
+            actor: 7,
+            epoch: 123,
+            desk: 11,
+            last_seq: 0,
+        };
         let mut g = grant;
         assert!(!g.authorize(CoopRoles::default(), fare(), FareAction::IssueTicket));
         assert_eq!(g.last_seq, 0);
         assert!(g.authorize(enabled, fare(), FareAction::IssueTicket));
         assert!(!g.authorize(enabled, fare(), FareAction::GiveChange));
-        assert!(!g.authorize(enabled, ConductorRequest { actor: 8, seq: 2, ..fare() }, FareAction::IssueTicket));
-        assert!(!g.authorize(enabled, ConductorRequest { epoch: 124, seq: 2, ..fare() }, FareAction::IssueTicket));
-        assert!(!g.authorize(enabled, ConductorRequest { desk: 12, seq: 2, ..fare() }, FareAction::GiveChange));
-        assert!(!g.authorize(enabled, ConductorRequest { owner_consented: false, seq: 2, ..fare() }, FareAction::GiveChange));
-        assert!(!g.authorize(enabled, ConductorRequest { peer_inside_bus: false, seq: 2, ..fare() }, FareAction::GiveChange));
-        assert!(g.authorize(enabled, ConductorRequest { seq: 2, ..fare() }, FareAction::GiveChange));
+        assert!(!g.authorize(
+            enabled,
+            ConductorRequest {
+                actor: 8,
+                seq: 2,
+                ..fare()
+            },
+            FareAction::IssueTicket
+        ));
+        assert!(!g.authorize(
+            enabled,
+            ConductorRequest {
+                epoch: 124,
+                seq: 2,
+                ..fare()
+            },
+            FareAction::IssueTicket
+        ));
+        assert!(!g.authorize(
+            enabled,
+            ConductorRequest {
+                desk: 12,
+                seq: 2,
+                ..fare()
+            },
+            FareAction::GiveChange
+        ));
+        assert!(!g.authorize(
+            enabled,
+            ConductorRequest {
+                owner_consented: false,
+                seq: 2,
+                ..fare()
+            },
+            FareAction::GiveChange
+        ));
+        assert!(!g.authorize(
+            enabled,
+            ConductorRequest {
+                peer_inside_bus: false,
+                seq: 2,
+                ..fare()
+            },
+            FareAction::GiveChange
+        ));
+        assert!(g.authorize(
+            enabled,
+            ConductorRequest { seq: 2, ..fare() },
+            FareAction::GiveChange
+        ));
     }
 }
