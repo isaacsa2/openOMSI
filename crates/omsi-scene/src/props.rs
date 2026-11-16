@@ -760,23 +760,10 @@ impl World {
                 crate::threads::background_pool().spawn(move || {
                     let tracked = reloads.tracks(&path);
                     let before = tracked.then(|| crate::freetex_reload::FileStamp::read(&path)).flatten();
-                    // Static compressed sources can survive GPU mip eviction in system RAM.
-                    // Never reuse the bytes of a watched, dynamically edited freetex.
-                    let source_before = (!tracked).then(|| crate::texture_ram_cache::source_stamp(&path)).flatten();
-                    let cached = if tracked { None } else { ram_cache.get(&path) };
-                    let hit = cached.is_some();
-                    if let Some(t) = cached.or_else(|| load_texture_key(&path, true).map(Arc::new))
+                    if let Some(t) = ram_cache.prepare(&path, tracked)
                         .filter(|_| !tracked || crate::freetex_reload::FileStamp::read(&path) == before)
                     {
-                        // (a texture over the budget comes back whatever it is, and so
-                        // does one put up at half its size meanwhile: see
-                        // `omsi_texture::gpu::halved_for_now`)
                         if t.format.is_compressed() || restore || (t.width >= 256 && t.height >= 256) {
-                            if !hit {
-                                if let Some(stamp) = source_before {
-                                    ram_cache.insert(&path, t.clone(), stamp);
-                                }
-                            }
                             done.lock().push((path, t, before));
                             return;
                         }
