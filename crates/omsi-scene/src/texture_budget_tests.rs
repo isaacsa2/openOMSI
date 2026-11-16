@@ -192,6 +192,103 @@ fn texture_budget_recovers_a_placeholder_without_room_for_the_full_source() {
 }
 
 #[test]
+fn near_texture_restores_an_intermediate_mip_when_the_full_texture_would_not_fit() {
+    let renderer = renderer();
+    let mut scene = renderer.new_scene();
+    let original = data(1024);
+    let id = renderer.add_texture_data(&mut scene, &original);
+    let mut entry = TexEntry::uploaded(id, &original, &scene);
+    assert!(renderer.drop_top_levels(&mut scene, id, 2));
+    entry.record_upload(&original, &scene);
+    assert_eq!(entry.dropped, 2);
+
+    let room = entry.bytes * 4;
+    assert!(room < entry.full_bytes);
+    let intermediate = fit_upgrade(&Arc::new(data(1024)), room).unwrap();
+    assert_eq!((intermediate.width, intermediate.height), (512, 512));
+
+    let path = PathBuf::from("near-cached.dds");
+    let entries = vec![(2.0, path.clone())];
+    let pending = hashbrown::HashSet::new();
+    let mut gpu = GpuCache::default();
+    gpu.textures.insert(path.clone(), entry);
+    assert_eq!(
+        queue_near_restores(
+            &mut gpu,
+            &pending,
+            &entries,
+            150.0,
+            (room - 1, u64::MAX),
+            std::time::Instant::now(),
+        ),
+        0,
+        "a new allocation must fit before attempting even a partial restore",
+    );
+    assert_eq!(
+        queue_near_restores(
+            &mut gpu,
+            &pending,
+            &entries,
+            150.0,
+            (room, u64::MAX),
+            std::time::Instant::now(),
+        ),
+        1,
+        "the next mip should return even if the full source is too large",
+    );
+    assert_eq!(gpu.wants_restore, [path.clone()]);
+    assert!(gpu.textures[&path].near_restore);
+}
+
+#[test]
+fn emergency_squeezed_near_texture_needs_budget_for_an_intermediate_mip() {
+    let path = PathBuf::from("squeezed.dds");
+    let mut gpu = GpuCache::default();
+    gpu.textures.insert(
+        path.clone(),
+        TexEntry {
+            id: 0,
+            alpha: false,
+            users: 1,
+            texels: 1024 * 1024,
+            bytes: 350_000,
+            full_bytes: 5_500_000,
+            format: omsi_texture::PixelFormat::Rgba8,
+            dropped: 2,
+            retry_after: None,
+            squeezed: true,
+            near_restore: false,
+        },
+    );
+    let entries = [(0.0, path.clone())];
+    let pending = hashbrown::HashSet::new();
+    let next = 350_000 * 4;
+    assert_eq!(
+        queue_near_restores(
+            &mut gpu,
+            &pending,
+            &entries,
+            150.0,
+            (next, next - 350_000 - 1),
+            std::time::Instant::now(),
+        ),
+        0,
+        "squeezed textures must still obey their own texture budget",
+    );
+    assert_eq!(
+        queue_near_restores(
+            &mut gpu,
+            &pending,
+            &entries,
+            150.0,
+            (next, next - 350_000),
+            std::time::Instant::now(),
+        ),
+        1,
+    );
+}
+
+#[test]
 fn texture_restore_headroom_accounts_for_the_rest_of_the_card() {
     let card = omsi_render::GpuMemory {
         textures: 100,
