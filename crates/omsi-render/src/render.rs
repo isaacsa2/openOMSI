@@ -706,6 +706,9 @@ impl Renderer {
         if !self.frame_hooks(scene, &env, with_overlays) {
             return;
         }
+        // Even when the window draws at one steady size with no MSAA, render targets
+        // from a previous resolution/view must not remain resident indefinitely.
+        self.evict_idle_targets();
         // OMSI_GPU_TIMERS: GPU time per pass, one frame at a time
         self.collect_gpu_timers();
         let timer_view = view_index(with_overlays, projection.is_some(), second_eye);
