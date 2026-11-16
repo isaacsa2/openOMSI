@@ -29,6 +29,8 @@ pub struct World {
     pub(super) object_type_loads: super::open::OnceByKey<Option<Arc<ObjectType>>>,
     pub(super) spline_type_loads: super::open::OnceByKey<Option<Arc<SplineType>>>,
     pub textures: Arc<TextureCache>,
+    /// Reusable compressed source textures in bounded system RAM, independent of VRAM.
+    pub(super) texture_ram_cache: Arc<crate::texture_ram_cache::TextureRamCache>,
     /// Alpha coverage belongs to this world, including its background prefetches.
     pub(super) alpha_masks: Arc<vehicle_materials::AlphaMasks>,
     /// What the simulation reads of the map, as one snapshot replaced whole (no lock to
