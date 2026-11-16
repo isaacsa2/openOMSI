@@ -9,7 +9,7 @@ use omsi_texture::gpu::{GpuOptions, PixelFormat, TextureData, gpu_options};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
 
 const DEFAULT_MB: u64 = if cfg!(any(target_os = "android", target_os = "ios")) {
@@ -65,6 +65,12 @@ struct State {
 pub(super) struct TextureRamCache {
     cap: u64,
     state: Mutex<State>,
+}
+
+/// Shared by texture loaders across maps, bounded and source-validated on each hit.
+pub(super) fn global() -> &'static TextureRamCache {
+    static CACHE: OnceLock<TextureRamCache> = OnceLock::new();
+    CACHE.get_or_init(TextureRamCache::default)
 }
 
 impl Default for TextureRamCache {
@@ -147,23 +153,26 @@ impl TextureRamCache {
         state.used += bytes;
     }
 
-    /// Prepare a worker upload, reusing immutable compressed bytes when available.
-    /// Watched freetexes and a disabled cache always take the original load path.
-    pub(super) fn prepare(&self, path: &Path, watched: bool) -> Option<Arc<TextureData>> {
-        if watched || self.cap == 0 {
-            return crate::vehicle_materials::load_texture_key(path, true).map(Arc::new);
+    /// Perform a compressed source load, using RAM on subsequent requests.
+    /// The existing load path is the fallback and stays the only source of truth.
+    pub(super) fn prepare_with(&self, path: &Path, load: impl FnOnce() -> Option<TextureData>) -> Option<TextureData> {
+        if self.cap == 0 {
+            return load();
         }
         let stamp = source_stamp(path);
         if let Some(data) = self.get(path) {
-            return Some(data);
+            return Some(data.as_ref().clone());
         }
-        let data = Arc::new(crate::vehicle_materials::load_texture_key(path, true)?);
-        if let Some(stamp) = stamp {
-            self.insert(path, data.clone(), stamp);
+        let data = load()?;
+        if data.format.is_compressed() {
+            if let Some(stamp) = stamp {
+                self.insert(path, Arc::new(data.clone()), stamp);
+            }
         }
         Some(data)
     }
 
+    #[cfg(test)]
     pub(super) fn usage(&self) -> (u64, usize, u64, u64) {
         let state = self.state.lock();
         (state.used, state.items.len(), state.hits, state.misses)
@@ -273,6 +282,19 @@ mod tests {
         std::fs::remove_file(&source.0).unwrap();
         assert!(cache.get(&source.0).is_none());
         assert_eq!(cache.usage().0, 0);
+    }
+
+    #[test]
+    fn preparing_an_already_cached_source_skips_expensive_work() {
+        let source = Source::new();
+        let cache = TextureRamCache::with_capacity(128);
+        let original = compressed(16);
+        cache.insert(&source.0, original, source.stamp());
+        let source_data = cache.prepare_with(&source.0, || {
+            panic!("a RAM cache hit must not decode the source again");
+        }).unwrap();
+        assert_eq!(source_data.cpu_bytes(), 16);
+        assert_eq!(cache.usage().2, 1);
     }
 
     #[test]
