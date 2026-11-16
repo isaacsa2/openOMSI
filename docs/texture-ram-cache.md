@@ -14,7 +14,7 @@ to draw. The cache cannot make an over-budget full-resolution image fit.
 
 ## Settings
 
-The setting is read at world creation (restart or reload the map to change it).
+The setting is read once on first use in the current process; restart the game to change it.
 
 | Platform | Default | Override |
 | --- | ---: | --- |
@@ -29,20 +29,23 @@ The setting is read at world creation (restart or reload the map to change it).
 - Cached data is already block-compressed (BC format); arbitrary uncompressed
   RGBA and script-generated GPU textures are not held.
 - Least-recently-used entries are evicted to stay within the limit.
-- Watched, dynamically edited freetex data is never read or inserted through
-  this cache. Sealed/virtual private resources and sources without a stable
-  filesystem stamp are not cached.
+- Runtime-generated RGBA script textures are not cached. File-backed textures
+  modified during play are invalidated when their filesystem metadata changes;
+  sealed/virtual private resources and sources without a stable timestamp are
+  never admitted. The existing separate live freetex upload path is unchanged.
 - File size, modification time, content generation and GPU compression
   settings are validated on reuse; an outdated entry is discarded.
-- Entries belong to the loaded World and are dropped when the map is closed.
-- Because the cache is consulted on a worker, it never introduces synchronous
-  texture decoding or disk I/O on the renderer's frame path.
+- Entries are process-wide and bounded; they remain available between maps
+  until evicted, invalidated or the game exits.
+- Cache hits avoid decompression and block recompression. The cache checks
+  filesystem metadata; direct initial uploads may still run on the render
+  thread, so frame-time profiling is required to verify no regression.
 
 ## Observability and testing
 
-The existing scene CPU-memory status now reports RAM cache size, entry count,
-hits and misses. A cold map may show only misses; improvements are expected
-on subsequent restoring/re-uploading of the same static sources.
+The cache has internal hit, miss and usage counters for tests; these are not yet
+presented in the game's HUD or standard status output. A cold map initially
+populates the cache; improvements are expected on repeated loads and restores.
 
 Compare the same route before/after with:
 
@@ -66,8 +69,9 @@ Relevant upstream issue:
 
 ## Limitations
 
-- Only texture workers that call `World::apply_texture_upgrades` populate
-  and reuse this cache. Some initial/direct tile upload paths bypass it.
+- The cache covers calls to `vehicle_materials::load_texture_key` with
+  compression enabled, including background texture restoration and some
+  direct uploads. Fast uncompressed uploads and bump textures bypass it.
 - Textures may still appear blurry if GPU VRAM remains full. Driver-reported
   allocated memory can include pools the application cannot force-reclaim.
 - No cross-session RAM persistence, no network asset exchange, and no
