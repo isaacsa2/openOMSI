@@ -98,7 +98,11 @@ impl TextureRamCache {
         }
         let stamp = source_stamp(path);
         let mut state = self.state.lock();
-        if state.items.get(path).is_some_and(|item| Some(item.stamp) != stamp) {
+        if state
+            .items
+            .get(path)
+            .is_some_and(|item| Some(item.stamp) != stamp)
+        {
             if let Some(old) = state.items.remove(path) {
                 state.used = state.used.saturating_sub(old.bytes);
             }
@@ -133,7 +137,11 @@ impl TextureRamCache {
             state.used = state.used.saturating_sub(old.bytes);
         }
         while state.used.saturating_add(bytes) > self.cap {
-            let oldest = state.items.iter().min_by_key(|(_, item)| item.touched).map(|(p, _)| p.clone());
+            let oldest = state
+                .items
+                .iter()
+                .min_by_key(|(_, item)| item.touched)
+                .map(|(p, _)| p.clone());
             let Some(oldest) = oldest else {
                 return;
             };
@@ -144,18 +152,25 @@ impl TextureRamCache {
         }
         state.tick = state.tick.saturating_add(1);
         let tick = state.tick;
-        state.items.insert(path.to_path_buf(), Item {
-            data,
-            stamp: before,
-            bytes,
-            touched: tick,
-        });
+        state.items.insert(
+            path.to_path_buf(),
+            Item {
+                data,
+                stamp: before,
+                bytes,
+                touched: tick,
+            },
+        );
         state.used += bytes;
     }
 
     /// Perform a compressed source load, using RAM on subsequent requests.
     /// The existing load path is the fallback and stays the only source of truth.
-    pub(super) fn prepare_with(&self, path: &Path, load: impl FnOnce() -> Option<TextureData>) -> Option<TextureData> {
+    pub(super) fn prepare_with(
+        &self,
+        path: &Path,
+        load: impl FnOnce() -> Option<TextureData>,
+    ) -> Option<TextureData> {
         if self.cap == 0 {
             return load();
         }
@@ -192,7 +207,9 @@ mod tests {
         fn new() -> Self {
             let id = NEXT.fetch_add(1, Ordering::Relaxed);
             let p = std::env::temp_dir().join(format!(
-                "openomsi-ram-tex-{}-{}", std::process::id(), id
+                "openomsi-ram-tex-{}-{}",
+                std::process::id(),
+                id
             ));
             std::fs::write(&p, b"original texture").unwrap();
             Self(p)
@@ -235,7 +252,10 @@ mod tests {
         assert!(cache.get(&a.0).is_some());
         cache.insert(&e.0, compressed(40), e.stamp());
         assert!(cache.get(&a.0).is_some());
-        assert!(cache.get(&b.0).is_none(), "least recently accessed entry should go");
+        assert!(
+            cache.get(&b.0).is_none(),
+            "least recently accessed entry should go"
+        );
         assert!(cache.get(&c.0).is_some());
         assert!(cache.get(&d.0).is_some());
         assert!(cache.get(&e.0).is_some());
@@ -250,7 +270,11 @@ mod tests {
         assert!(disabled.get(&source.0).is_none());
         let cache = TextureRamCache::with_capacity(128);
         cache.insert(&source.0, compressed(40), source.stamp());
-        assert_eq!(cache.usage().0, 0, "one entry must fit inside a quarter of the budget");
+        assert_eq!(
+            cache.usage().0,
+            0,
+            "one entry must fit inside a quarter of the budget"
+        );
         cache.insert(&source.0, compressed(16), source.stamp());
         assert_eq!(cache.usage().0, 16);
         cache.insert(
@@ -265,7 +289,11 @@ mod tests {
             }),
             source.stamp(),
         );
-        assert_eq!(cache.usage().0, 16, "RGBA must not replace a compressed entry");
+        assert_eq!(
+            cache.usage().0,
+            16,
+            "RGBA must not replace a compressed entry"
+        );
     }
 
     #[test]
@@ -290,9 +318,11 @@ mod tests {
         let cache = TextureRamCache::with_capacity(128);
         let original = compressed(16);
         cache.insert(&source.0, original, source.stamp());
-        let source_data = cache.prepare_with(&source.0, || {
-            panic!("a RAM cache hit must not decode the source again");
-        }).unwrap();
+        let source_data = cache
+            .prepare_with(&source.0, || {
+                panic!("a RAM cache hit must not decode the source again");
+            })
+            .unwrap();
         assert_eq!(source_data.cpu_bytes(), 16);
         assert_eq!(cache.usage().2, 1);
     }
