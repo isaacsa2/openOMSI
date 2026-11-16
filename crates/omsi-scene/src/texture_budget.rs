@@ -113,6 +113,47 @@ pub(super) fn queue_near_restores(
         gpu.wants_restore.push(p.clone());
         queued += 1;
     }
+    // A nearby texture may not fit back at full resolution, even though the card has
+    // room for its *next* mip level. The upload path already calls fit_upgrade to
+    // select a smaller replacement; without this fallback the texture stays blurry
+    // indefinitely in a busy map while no full-size restore can be queued.
+    //
+    // Do not queue an upgrade when there is no room for a higher mip level:
+    // replace_texture temporarily holds both the old and the new allocation.
+    // Prefer the closest eligible texture, and attempt only one partial upgrade
+    // per pass to avoid a burst of reuploads around the memory limit.
+    if queued == 0 {
+        let partial = entries
+            .iter()
+            .filter(|(d, p)| *d < near && !pending.contains(p) && !gpu.wants_restore.contains(p))
+            .filter_map(|(d, p)| {
+                let e = gpu.textures.get(p)?;
+                if e.dropped == 0 || e.retry_after.is_some_and(|t| t > t0) {
+                    return None;
+                }
+                // One additional mip roughly quadruples the stored area. Use a
+                // conservative bound; the actual upload size is checked again by
+                // fit_upgrade and the renderer before replacing any resource.
+                let peak = if e.bytes == 0 {
+                    e.full_bytes.min(128 * 128 * 4 * 4 / 3)
+                } else {
+                    e.full_bytes.min(e.bytes.saturating_mul(4))
+                };
+                (peak > e.bytes
+                    && peak <= card_room
+                    && (!e.squeezed || peak.saturating_sub(e.bytes) <= squeezed_room))
+                    .then_some((*d, p))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, p)) = partial {
+            if let Some(e) = gpu.textures.get_mut(p) {
+                e.retry_after = None;
+                e.near_restore = true;
+                gpu.wants_restore.push(p.clone());
+                queued = 1;
+            }
+        }
+    }
     queued
 }
 
