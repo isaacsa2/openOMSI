@@ -202,7 +202,7 @@ fn near_texture_restores_an_intermediate_mip_when_the_full_texture_would_not_fit
     entry.record_upload(&original, &scene);
     assert_eq!(entry.dropped, 2);
 
-    let room = entry.bytes * 4;
+    let room = entry.bytes * 4 + 4096;
     assert!(room < entry.full_bytes);
     let intermediate = fit_upgrade(&Arc::new(data(1024)), room).unwrap();
     assert_eq!((intermediate.width, intermediate.height), (512, 512));
@@ -218,7 +218,7 @@ fn near_texture_restores_an_intermediate_mip_when_the_full_texture_would_not_fit
             &pending,
             &entries,
             150.0,
-            (room - 1, u64::MAX),
+            (entry.bytes * 4 + 4095, u64::MAX),
             std::time::Instant::now(),
         ),
         0,
@@ -262,7 +262,7 @@ fn emergency_squeezed_near_texture_needs_budget_for_an_intermediate_mip() {
     );
     let entries = [(0.0, path.clone())];
     let pending = hashbrown::HashSet::new();
-    let next = 350_000 * 4;
+    let next = 350_000 * 4 + 4096;
     assert_eq!(
         queue_near_restores(
             &mut gpu,
