@@ -147,6 +147,23 @@ impl TextureRamCache {
         state.used += bytes;
     }
 
+    /// Prepare a worker upload, reusing immutable compressed bytes when available.
+    /// Watched freetexes and a disabled cache always take the original load path.
+    pub(super) fn prepare(&self, path: &Path, watched: bool) -> Option<Arc<TextureData>> {
+        if watched || self.cap == 0 {
+            return crate::vehicle_materials::load_texture_key(path, true).map(Arc::new);
+        }
+        let stamp = source_stamp(path);
+        if let Some(data) = self.get(path) {
+            return Some(data);
+        }
+        let data = Arc::new(crate::vehicle_materials::load_texture_key(path, true)?);
+        if let Some(stamp) = stamp {
+            self.insert(path, data.clone(), stamp);
+        }
+        Some(data)
+    }
+
     pub(super) fn usage(&self) -> (u64, usize, u64, u64) {
         let state = self.state.lock();
         (state.used, state.items.len(), state.hits, state.misses)
