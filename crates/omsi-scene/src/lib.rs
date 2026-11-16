@@ -48,7 +48,6 @@ pub mod wheel_surface;
 pub mod window_wipers;
 
 mod staging;
-mod texture_ram_cache;
 mod batching;
 mod spline_layers;
 mod terrain_paint;
