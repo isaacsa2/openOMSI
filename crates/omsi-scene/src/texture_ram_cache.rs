@@ -197,18 +197,21 @@ mod tests {
         let a = Source::new();
         let b = Source::new();
         let c = Source::new();
-        let cache = TextureRamCache::with_capacity(120);
-        cache.insert(&a.0, compressed(40), a.stamp());
-        cache.insert(&b.0, compressed(40), b.stamp());
+        let d = Source::new();
+        let e = Source::new();
+        let cache = TextureRamCache::with_capacity(160);
+        for source in [&a, &b, &c, &d] {
+            cache.insert(&source.0, compressed(40), source.stamp());
+        }
+        assert_eq!(cache.usage().0, 160);
         assert!(cache.get(&a.0).is_some());
-        cache.insert(&c.0, compressed(40), c.stamp());
+        cache.insert(&e.0, compressed(40), e.stamp());
         assert!(cache.get(&a.0).is_some());
-        assert!(cache.get(&b.0).is_some());
-        // Three equal entries exactly fit the budget.
-        cache.insert(&a.0, compressed(80), a.stamp());
-        assert!(cache.get(&b.0).is_none());
-        assert_eq!(cache.usage().0, 120);
+        assert!(cache.get(&b.0).is_none(), "least recently accessed entry should go");
         assert!(cache.get(&c.0).is_some());
+        assert!(cache.get(&d.0).is_some());
+        assert!(cache.get(&e.0).is_some());
+        assert_eq!(cache.usage().0, 160);
     }
 
     #[test]
