@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Temporary formatting diagnostic; removed after extracting exact rustfmt output.
-for fmt_file in crates/omsi-scene/src/lib.rs crates/omsi-scene/src/open.rs crates/omsi-scene/src/props.rs crates/omsi-scene/src/texture_ram_cache.rs crates/omsi-scene/src/world.rs; do
+for fmt_file in crates/omsi-scene/src/vehicle_materials.rs; do
     rustfmt --edition 2024 "$fmt_file"
     python3 - "$fmt_file" <<'PY'
 import json
