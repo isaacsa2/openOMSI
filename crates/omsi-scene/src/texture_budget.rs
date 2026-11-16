@@ -146,7 +146,8 @@ pub(super) fn queue_near_restores(
                 let peak = if e.bytes == 0 {
                     e.full_bytes.min(128 * 128 * 4 * 4 / 3)
                 } else {
-                    e.full_bytes.min(e.bytes.saturating_mul(4).saturating_add(4096))
+                    e.full_bytes
+                        .min(e.bytes.saturating_mul(4).saturating_add(4096))
                 };
                 (peak > e.bytes
                     && peak <= card_room
