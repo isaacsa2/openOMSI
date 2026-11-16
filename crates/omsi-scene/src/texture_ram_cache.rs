@@ -25,6 +25,7 @@ pub(super) struct SourceStamp {
     size: u64,
     modified: SystemTime,
     options: GpuOptions,
+    generation: u64,
 }
 
 /// A changed source or GPU compression mode must never reuse a stale upload.
@@ -40,6 +41,7 @@ pub(super) fn source_stamp(path: &Path) -> Option<SourceStamp> {
         size: metadata.len(),
         modified: metadata.modified().ok()?,
         options: gpu_options(),
+        generation: omsi_cfg::content_generation(),
     })
 }
 
