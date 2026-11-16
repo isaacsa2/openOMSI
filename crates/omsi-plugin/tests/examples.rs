@@ -58,7 +58,7 @@ fn the_dispatcher_runs_a_career() {
     // the Career tab, then the Offer tab and a duty taken
     p.ui.borrow_mut().set_control(owner, "main", "tab", 0.5);
     p.frame(&mut g);
-    p.ui.borrow_mut().set_control(owner, "main", "tab", 0.9);
+    p.ui.borrow_mut().set_control(owner, "main", "tab", 0.65);
     p.frame(&mut g);
     p.ui.borrow_mut().click(owner, "main", Some("take1"));
     p.frame(&mut g);
@@ -73,6 +73,47 @@ fn the_dispatcher_runs_a_career() {
     p.finalize();
     let saved = std::fs::read_to_string(dir_of(&p, "ex-dispatcher").join("dispatcher/data/storage.json")).unwrap();
     assert!(saved.contains("\"stops\": 1"), "{saved}");
+}
+
+#[test]
+fn dispatcher_contracts_reward_completed_trips_and_reject_skipped_ones() {
+    use omsi_plugin::InfoValue::{Num, Text};
+    let mut p = load("ex-dispatcher-contracts", "dispatcher");
+    let mut g = Game::new();
+    p.frame(&mut g);
+    let owner = p.ui.borrow().panels()[0].owner;
+
+    // The fourth tab offers contracts for the selected timetable trip.
+    p.ui.borrow_mut().set_control(owner, "main", "tab", 1.0);
+    p.frame(&mut g);
+    p.ui.borrow_mut().click(owner, "main", Some("contract3"));
+    p.frame(&mut g);
+
+    g.events = vec![omsi_plugin::GameEvent {
+        name: "trip_done",
+        args: vec![Num(1.0), Text("arrived".into()), Num(95.0), Num(95.0), Num(90.0)],
+    }];
+    p.frame(&mut g);
+    assert!(p.ui.borrow().toasts().iter().any(|t| t.text.contains("Contract completed")));
+    g.events.clear();
+
+    // A skipped next trip must not earn the contract reward even with high ratings.
+    g.duty.as_mut().unwrap().trip = 2;
+    p.ui.borrow_mut().click(owner, "main", Some("contract1"));
+    p.frame(&mut g);
+    g.events = vec![omsi_plugin::GameEvent {
+        name: "trip_done",
+        args: vec![Num(2.0), Text("skipped".into()), Num(99.0), Num(99.0), Num(99.0)],
+    }];
+    p.frame(&mut g);
+    no_errors(&g);
+    assert!(p.ui.borrow().toasts().iter().any(|t| t.text.contains("Contract not completed")));
+
+    p.finalize();
+    let saved = std::fs::read_to_string(dir_of(&p, "ex-dispatcher-contracts").join("dispatcher/data/storage.json")).unwrap();
+    assert!(saved.contains("\\"contracts_done\\": 1"), "{saved}");
+    assert!(saved.contains("\\"contracts_failed\\": 1"), "{saved}");
+    assert!(!saved.contains("\\"active_contract\\""), "the contract must clear when its trip ends: {saved}");
 }
 
 fn dir_of(_: &Plugins, tag: &str) -> std::path::PathBuf {
