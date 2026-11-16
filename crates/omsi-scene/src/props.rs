@@ -707,6 +707,7 @@ impl World {
             .map(|t| t.heights.capacity() * 4)
             .sum();
         let vehicle_textures = self.vehicle_textures.lock().len();
+        let (ram_bytes, ram_entries, ram_hits, ram_misses) = self.texture_ram_cache.usage();
         format!(
             "CPU: {} object types {:.0} MB of meshes, {} staged tiles {:.0} MB, {} surfaces {:.0} MB rasters + {:.0} MB wheel grids ({} faces), terrains {:.0} MB, decoded textures held {:.0} MB, compressed texture RAM cache {:.0} MB ({} entries, {} hits, {} misses); {} vehicle textures, {} vehicle sets on the GPU",
             types.len(),
@@ -719,10 +720,10 @@ impl World {
             tris,
             mb(terrains),
             mb(self.textures.held_bytes()),
-            mb(self.texture_ram_cache.usage().0 as usize),
-            self.texture_ram_cache.usage().1,
-            self.texture_ram_cache.usage().2,
-            self.texture_ram_cache.usage().3,
+            mb(ram_bytes as usize),
+            ram_entries,
+            ram_hits,
+            ram_misses,
             vehicle_textures,
             self.vehicle_gpu.lock().len()
         )
