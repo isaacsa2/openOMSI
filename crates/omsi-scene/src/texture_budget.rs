@@ -141,12 +141,12 @@ pub(super) fn queue_near_restores(
                     return None;
                 }
                 // One additional mip roughly quadruples the stored area. Use a
-                // conservative bound; the actual upload size is checked again by
+                // conservative bound (with room for mip/block rounding); the upload size is checked again by
                 // fit_upgrade and the renderer before replacing any resource.
                 let peak = if e.bytes == 0 {
                     e.full_bytes.min(128 * 128 * 4 * 4 / 3)
                 } else {
-                    e.full_bytes.min(e.bytes.saturating_mul(4))
+                    e.full_bytes.min(e.bytes.saturating_mul(4).saturating_add(4096))
                 };
                 (peak > e.bytes
                     && peak <= card_room
