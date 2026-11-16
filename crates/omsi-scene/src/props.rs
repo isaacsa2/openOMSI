@@ -707,9 +707,8 @@ impl World {
             .map(|t| t.heights.capacity() * 4)
             .sum();
         let vehicle_textures = self.vehicle_textures.lock().len();
-        let (ram_bytes, ram_entries, ram_hits, ram_misses) = self.texture_ram_cache.usage();
         format!(
-            "CPU: {} object types {:.0} MB of meshes, {} staged tiles {:.0} MB, {} surfaces {:.0} MB rasters + {:.0} MB wheel grids ({} faces), terrains {:.0} MB, decoded textures held {:.0} MB, compressed texture RAM cache {:.0} MB ({} entries, {} hits, {} misses); {} vehicle textures, {} vehicle sets on the GPU",
+            "CPU: {} object types {:.0} MB of meshes, {} staged tiles {:.0} MB, {} surfaces {:.0} MB rasters + {:.0} MB wheel grids ({} faces), terrains {:.0} MB, decoded textures held {:.0} MB; {} vehicle textures, {} vehicle sets on the GPU",
             types.len(),
             mb(type_bytes),
             staged_n,
@@ -720,10 +719,6 @@ impl World {
             tris,
             mb(terrains),
             mb(self.textures.held_bytes()),
-            mb(ram_bytes as usize),
-            ram_entries,
-            ram_hits,
-            ram_misses,
             vehicle_textures,
             self.vehicle_gpu.lock().len()
         )
@@ -755,16 +750,18 @@ impl World {
                 let done = self.upgrades_done.clone();
                 let restore = restores.contains(&path);
                 let reloads = self.freetex_reloads.clone();
-                let ram_cache = self.texture_ram_cache.clone();
                 // (off the frame's pool: see `threads`)
                 crate::threads::background_pool().spawn(move || {
                     let tracked = reloads.tracks(&path);
                     let before = tracked.then(|| crate::freetex_reload::FileStamp::read(&path)).flatten();
-                    if let Some(t) = ram_cache.prepare(&path, tracked)
+                    if let Some(t) = load_texture_key(&path, true)
                         .filter(|_| !tracked || crate::freetex_reload::FileStamp::read(&path) == before)
                     {
+                        // (a texture over the budget comes back whatever it is, and so
+                        // does one put up at half its size meanwhile: see
+                        // `omsi_texture::gpu::halved_for_now`)
                         if t.format.is_compressed() || restore || (t.width >= 256 && t.height >= 256) {
-                            done.lock().push((path, t, before));
+                            done.lock().push((path, Arc::new(t), before));
                             return;
                         }
                     }
