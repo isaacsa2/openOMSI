@@ -127,6 +127,10 @@ impl DiskCache {
     }
 
     fn admit(&self, len: u64) -> bool {
+        // An entry larger than the entire budget must not disable caching of smaller ones.
+        if len > self.cap {
+            return false;
+        }
         let mut budget = self.budget.lock();
         if self.full.load(Ordering::Relaxed) {
             return false;
@@ -672,6 +676,16 @@ mod tests {
         assert!(!left.contains(&names[0]) && !left.contains(&names[1]) && left.contains(&names[3]), "{left:?}");
         assert!(left.contains(&Key::new(&bytes, &path, ON).unwrap().name().to_string()));
         assert!(!stale.exists());
+    }
+
+    #[test]
+    fn an_oversized_entry_does_not_disable_the_cache_for_smaller_ones() {
+        let s = Scratch::new("oversized");
+        let cache = s.cache(128);
+        assert!(!cache.admit(129), "a single entry cannot exceed the entire budget");
+        assert!(!cache.full.load(Ordering::Relaxed), "other entries should still be eligible");
+        assert!(cache.admit(64), "a later, smaller entry should fit");
+        assert_eq!(cache.budget.lock().pending, 64);
     }
 
     #[test]
