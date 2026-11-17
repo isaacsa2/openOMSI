@@ -39,7 +39,49 @@ pub fn seated_pose(model_height: f32, place_height: f32, seat_front: f32, seat_l
     (Vec3::new(0.0, seat_front - 0.03, place_height - seat_lift), lift)
 }
 
+/// Use the remote bus's seat height when loaded. Without it, preserve a
+/// cosmetic seated pose instead of drawing a standing passenger through a bench.
+pub fn remote_seated_height(activity: Activity, seat: Option<usize>, physical_height: Option<f32>) -> Option<f32> {
+    if activity != Activity::Sit || seat.is_none() {
+        return None;
+    }
+    Some(physical_height.filter(|h| h.is_finite() && *h > 0.02 && *h < 2.0).unwrap_or(0.45))
+}
+
 impl Person {
+    /// A mirrored person has no local Pax task. Build a seated visual pose from
+    /// the authoritative LAN packet without changing simulation seat reservations.
+    pub fn mirrored_seat_height(&self, buses: &[BusNow]) -> Option<f32> {
+        if !self.remote {
+            return None;
+        }
+        let Place::Bus(bus, _) = self.place else { return None };
+        let seat = self.remote_seat?;
+        let physical = buses.iter()
+            .find(|bn| bn.id == bus)
+            .and_then(|bn| bn.cabin.seats.get(seat))
+            .filter(|seat| seat.seated)
+            .map(|seat| seat.height);
+        remote_seated_height(self.activity, Some(seat), physical)
+    }
+
+    pub fn pose_facts_with_buses(&self, buses: &[BusNow]) -> PoseFacts {
+        let mut facts = self.pose_facts();
+        if let Some(height) = self.mirrored_seat_height(buses) {
+            let (seat, lift) = seated_pose(
+                self.ty.def.seat_height, height,
+                self.ty.rig.seat_front(), self.ty.rig.seat_lift,
+            );
+            facts.activity = Activity::Sit;
+            facts.seat = Some(seat);
+            facts.reach = None;
+            facts.floor_lift = lift;
+            facts.hold = 0.0;
+            facts.seated_level = Some((self.ty.def.seat_height - height) as f64);
+        }
+        facts
+    }
+
     /// What the enhanced pose reads of this person's state (see [`PoseFacts`]).
     pub fn pose_facts(&self) -> PoseFacts {
         let (activity, seat, reach, floor_lift, hold) = match &self.state {
@@ -84,6 +126,17 @@ impl Person {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mirrored_seat_needs_both_the_authoritative_activity_and_index() {
+        assert_eq!(remote_seated_height(Activity::Sit, Some(12), Some(0.46)), Some(0.46));
+        assert_eq!(remote_seated_height(Activity::Sit, Some(12), None), Some(0.45));
+        assert_eq!(remote_seated_height(Activity::Sit, Some(12), Some(f32::NAN)), Some(0.45));
+        assert_eq!(remote_seated_height(Activity::Sit, Some(12), Some(-2.0)), Some(0.45));
+        assert_eq!(remote_seated_height(Activity::Stand, Some(12), Some(0.46)), None);
+        assert_eq!(remote_seated_height(Activity::Walk, Some(12), None), None);
+        assert_eq!(remote_seated_height(Activity::Sit, None, None), None);
+    }
 
     #[test]
     fn seated_floor_and_pelvis_use_different_seat_heights() {
