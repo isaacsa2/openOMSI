@@ -604,6 +604,7 @@ impl App {
                     h.transfer_percent = if self.args.passenger_connections_allowed(self.net.lan.is_some()) && self.settings.passenger_connections {
                         self.settings.passenger_transfer_percent
                     } else { 0.0 };
+                    h.ambient_talk = self.settings.passenger_ambient_talk;
                     h.visual_hailing = self.settings.passenger_hailing
                         && self.settings.passenger_animation == "enhanced";
                     h.visual_full_bus_reaction = self.settings.passenger_full_bus_reaction
