@@ -2,16 +2,16 @@
 set -euo pipefail
 # Temporary formatting capture for this Draft PR, removed after applying rustfmt.
 for fmt_file in \
-  "crates/omsi-sim/src/people/model.rs"
-  "crates/omsi-sim/src/people/mirror.rs"
-  "crates/omsi-sim/src/people/pose_facts.rs"
-  "crates/omsi-sim/src/people/tick.rs"
-  "crates/omsi-sim/src/people/spawn.rs"
-  "crates/omsi-sim/src/people/bad_driving_tests.rs"
-  "crates/omsi-sim/src/people/brt_tests.rs"
-  "crates/omsi-sim/src/people/pax/tests.rs"
-  "crates/omsi-sim/src/people/population_limit_tests.rs"
-  "crates/omsi-sim/src/people/ticket_hook_tests.rs"
+  "crates/omsi-sim/src/people/model.rs" \
+  "crates/omsi-sim/src/people/mirror.rs" \
+  "crates/omsi-sim/src/people/pose_facts.rs" \
+  "crates/omsi-sim/src/people/tick.rs" \
+  "crates/omsi-sim/src/people/spawn.rs" \
+  "crates/omsi-sim/src/people/bad_driving_tests.rs" \
+  "crates/omsi-sim/src/people/brt_tests.rs" \
+  "crates/omsi-sim/src/people/pax/tests.rs" \
+  "crates/omsi-sim/src/people/population_limit_tests.rs" \
+  "crates/omsi-sim/src/people/ticket_hook_tests.rs" \
   "crates/omsi-sim/src/view_events.rs"; do
   rustfmt --edition 2024 "$fmt_file"
   python3 - "$fmt_file" <<'PY'
