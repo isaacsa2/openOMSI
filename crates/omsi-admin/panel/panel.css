@@ -47,6 +47,11 @@ legend { color: var(--muted); padding: 0 4px; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
+.timings-scroll { overflow-x: auto; }
+#prof-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+#prof-table th, #prof-table td { padding: 5px 7px; border-bottom: 1px solid var(--line); text-align: right; }
+#prof-table th:first-child, #prof-table td:first-child { text-align: left; }
+#prof-table thead { color: var(--muted); }
 .list { list-style: none; margin: 8px 0; padding: 0; max-height: 340px; overflow: auto; border-top: 1px solid var(--line); }
 .list li { padding: 8px 4px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 #players li { cursor: pointer; }
