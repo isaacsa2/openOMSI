@@ -123,28 +123,18 @@ impl Offscreen<'_> {
                 &|x, y, near| crate::server::parked_floor(world, x, y, near),
                 dt,
             );
-            // and their part on the server's own world
-            let jobs = srv_admin.take_world();
-            if !jobs.is_empty() {
-                let resync = |t: &mut crate::traffic::Traffic| {
-                    view_sync::apply_traffic(t, &mut sim_view.traffic, world, renderer, scene)
-                };
-                let mut cars = traffic.as_mut().map(|t| AdminTraffic(t, resync));
-                let mut w = omsi_lan::admin::world::ServerWorld {
-                    lan: l,
-                    shift: &mut srv_admin.shift,
-                    passenger_density: &mut srv_admin.passenger_density,
-                    clock: parse_time(&args.time) + *srv_clock,
-                    traffic: cars
-                        .as_mut()
-                        .map(|c| c as &mut dyn omsi_lan::admin::world::ServerTraffic),
-                    traffic_max: crate::game_lists::TRAFFIC_MAX,
-                };
-                for job in jobs {
-                    let out = omsi_lan::admin::world::apply(&mut w, &job.action);
-                    omsi_lan::admin::report(w.lan, hub, &job.actor, job.record, &out);
-                }
-            }
+            // Renderer dependent traffic changes are adapted only when an
+            // administrative world operation is queued.
+            let resync = |t: &mut crate::traffic::Traffic| {
+                view_sync::apply_traffic(t, &mut sim_view.traffic, world, renderer, scene)
+            };
+            let mut cars = traffic.as_mut().map(|t| AdminTraffic(t, resync));
+            omsi_server::commands::apply_world_jobs(
+                l, srv_admin,
+                cars.as_mut().map(|c| c as &mut dyn omsi_lan::admin::world::ServerTraffic),
+                parse_time(&args.time) + *srv_clock,
+                crate::game_lists::TRAFFIC_MAX, hub,
+            );
         }
         if let Some(t) = traffic.as_mut() {
             let (day_time, jump) = follow_server_clock(

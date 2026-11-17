@@ -105,3 +105,31 @@ pub fn service_commands(
             }
 
 }
+
+/// Apply authoritative world changes only on the server tick, keeping the
+/// existing role restrictions, audit records and traffic limits.
+pub fn apply_world_jobs(
+    lan: &mut LanSession,
+    admin: &mut ServerAdmin,
+    traffic: Option<&mut dyn omsi_lan::admin::world::ServerTraffic>,
+    clock: f64,
+    traffic_max: usize,
+    hub: Option<&omsi_admin::Hub>,
+) {
+    let jobs = admin.take_world();
+    if jobs.is_empty() {
+        return;
+    }
+    let mut world = omsi_lan::admin::world::ServerWorld {
+        lan,
+        shift: &mut admin.shift,
+        passenger_density: &mut admin.passenger_density,
+        clock,
+        traffic,
+        traffic_max,
+    };
+    for job in jobs {
+        let outcome = omsi_lan::admin::world::apply(&mut world, &job.action);
+        omsi_lan::admin::report(world.lan, hub, &job.actor, job.record, &outcome);
+    }
+}
