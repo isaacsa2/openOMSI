@@ -388,6 +388,26 @@ impl PeopleSim {
                         pack,
                     )
                 }
+                _ if p.remote => {
+                    // LAN mirrors are State::Idle, but seated riders still need
+                    // the original OMSI seated skeleton, not its standing pose.
+                    let seat_height = p.mirrored_seat_height(buses);
+                    let v = p.vel.length() as f32;
+                    (
+                        AnimInput {
+                            kind: if seat_height.is_some() { 2 }
+                                else if p.activity == Activity::Walk { 1 } else { 0 },
+                            speed: v,
+                            moved: v * dt,
+                            room_height: if matches!(p.place, Place::Bus(..)) { 2.1 } else { pax::OUTSIDE_ROOM },
+                            seat_height: seat_height.unwrap_or(0.0),
+                            smooth: true,
+                            dt_ms,
+                            ..Default::default()
+                        },
+                        None,
+                    )
+                }
                 _ => {
                     let v = p.vel.length() as f32;
                     (
