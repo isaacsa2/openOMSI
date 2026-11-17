@@ -203,13 +203,30 @@ pub(crate) fn find_root() -> Option<PathBuf> {
 /// game makes its instance (`game_graphics_instance`); the launcher's previews stay on wgpu.
 static MX_GRAPHICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The game's instance: mX's when `setting` says so (`mx_graphics`, read on a Mac only: mX has
-/// drawn the game on Metal, not yet on Direct3D 12 or Vulkan) or `OMSI_MX=on` does, else
-/// `graphics_instance`'s.
+/// Windows mX builds use Direct3D 12. Explicit Vulkan, OpenGL and ANGLE choices
+/// must still reach wgpu rather than silently opening a Direct3D 12 device.
+fn mx_windows_backend(backend: &str) -> bool {
+    matches!(backend.trim().to_ascii_lowercase().as_str(), "" | "auto" | "dx12")
+}
+
+/// The game's instance: mX when enabled on macOS or Windows, or by OMSI_MX.
+/// On Windows, an explicitly selected non-DX12 API stays on wgpu.
 pub(crate) fn game_graphics_instance(setting: bool) -> wgpu::Instance {
-    let on = match omsi_cfg::flags::OMSI_MX.var() {
+    let requested = match omsi_cfg::flags::OMSI_MX.var() {
         Some(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "on" | "true" | "yes"),
-        None => setting && cfg!(target_os = "macos"),
+        None => setting && cfg!(any(target_os = "macos", windows)),
+    };
+    let on = if requested && cfg!(windows) {
+        let backend = omsi_cfg::flags::OMSI_BACKEND.var().map(str::to_owned)
+            .unwrap_or_else(|| crate::settings::Settings::load().graphics_api);
+        if !mx_windows_backend(&backend) {
+            log::info!("graphics: mX Graphics skipped for {backend}; using wgpu for the selected API");
+            false
+        } else {
+            true
+        }
+    } else {
+        requested
     };
     MX_GRAPHICS.store(on, std::sync::atomic::Ordering::Relaxed);
     if on {
@@ -977,6 +994,16 @@ mod own_key_tests {
 #[cfg(test)]
 mod window_tests {
     use super::software_adapter;
+
+    #[test]
+    fn windows_mx_only_takes_auto_or_dx12() {
+        for backend in ["", "auto", "dx12", "DX12"] {
+            assert!(super::mx_windows_backend(backend), "{backend}");
+        }
+        for backend in ["vulkan", "gl", "angle", "dx11", "d3d11"] {
+            assert!(!super::mx_windows_backend(backend), "{backend}");
+        }
+    }
 
     /// The software renderers come after every graphics chip (#770).
     #[test]
