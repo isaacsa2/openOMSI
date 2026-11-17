@@ -10,6 +10,7 @@ pub mod clock;
 pub mod commands;
 pub mod console;
 pub mod fleet;
+pub mod metar;
 pub mod startup;
 pub mod weather;
 pub mod world;

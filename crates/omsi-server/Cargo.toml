@@ -13,8 +13,8 @@ omsi-cfg = { path = "../omsi-cfg" }
 omsi-sim = { path = "../omsi-sim" }
 omsi-map = { path = "../omsi-map" }
 omsi-world = { path = "../omsi-world" }
-omsi-weather = { path = "../omsi-weather" }
 omsi-content = { path = "../omsi-content" }
 anyhow.workspace = true
 log.workspace = true
+ureq.workspace = true
 glam.workspace = true

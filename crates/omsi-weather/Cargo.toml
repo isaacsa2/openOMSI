@@ -13,4 +13,3 @@ omsi-sim = { path = "../omsi-sim" }
 omsi-texture = { path = "../omsi-texture" }
 glam.workspace = true
 log.workspace = true
-ureq.workspace = true

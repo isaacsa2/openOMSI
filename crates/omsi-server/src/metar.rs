@@ -1,4 +1,4 @@
-//! Shared METAR wire format and HTTP retrieval for clients and dedicated servers.
+//! METAR retrieval and wire encoding for the dedicated host, no scenery/texture dependencies.
 
 /// The weather of an airport's METAR report (aviationweather.gov), or a clear day when it
 /// cannot be had (no network, an unknown station).

@@ -4528,7 +4528,7 @@ dependencies = [
  "omsi-net",
  "omsi-sim",
  "omsi-world",
- "omsi-weather",
+ "ureq",
 ]
 
 [[package]]
@@ -4701,7 +4701,6 @@ dependencies = [
  "omsi-map",
  "omsi-sim",
  "omsi-texture",
- "ureq",
 ]
 
 [[package]]

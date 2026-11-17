@@ -24,7 +24,7 @@ pub fn tick_metar(
                     let wait = if report.is_some() { 600 } else { 60 };
                     *due = std::time::Instant::now() + std::time::Duration::from_secs(wait);
                     if let Some(w) = report {
-                        if let Some(wire) = omsi_weather::metar::report_wire(&w) {
+                        if let Some(wire) = crate::metar::report_wire(&w) {
                             if wire != l.weather() {
                                 log::info!(
                                     "server: weather now the METAR report of {icao}: {wire}"
@@ -46,7 +46,7 @@ pub fn tick_metar(
             *rx = Some(rx);
             let icao = icao.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(omsi_weather::metar::try_metar(&icao));
+                let _ = tx.send(crate::metar::try_metar(&icao));
             });
         }
     }
