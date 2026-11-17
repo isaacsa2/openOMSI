@@ -10,7 +10,7 @@ impl Offscreen<'_> {
     pub(super) fn step(&mut self, i: usize) -> Result<bool> {
         let mut step = stages::Step { run: self, i };
         let sequence = if self.server {
-            stages::SERVER_STEP
+            super::SERVER_STEP
         } else {
             stages::OFFSCREEN_STEP
         };

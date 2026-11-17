@@ -16,7 +16,19 @@ mod step;
 
 #[cfg(test)]
 pub(crate) use stages::OffscreenStage;
-pub(crate) use stages::{OFFSCREEN_STEP, SERVER_STEP};
+pub(crate) use stages::OFFSCREEN_STEP;
+
+/// Host-only simulation stages. Capture, local driver and recorder never run
+/// in the dedicated process. Keep the order consistent with OFFSCREEN_STEP.
+pub(crate) const SERVER_STEP: &[stages::OffscreenStage] = &[
+    stages::OffscreenStage::Server,
+    stages::OffscreenStage::Clock,
+    stages::OffscreenStage::Traffic,
+    stages::OffscreenStage::GroundGap,
+    stages::OffscreenStage::Humans,
+    stages::OffscreenStage::Lan,
+    stages::OffscreenStage::Surroundings,
+];
 
 /// What an offscreen run keeps from its start to its picture (the names are the run's
 /// locals when it was one function).
@@ -125,13 +137,34 @@ pub(crate) fn run_offscreen(
     // OMSI_PROFILE: the steps that took long (a stutter the window would show), by name
     let profile = omsi_cfg::flags::OMSI_PROFILE.is_set();
     let mut slow = 0usize;
+    // Only retain the previous aggregate while profiling. No per-tick
+    // allocations or snapshots when timings are disabled.
+    let mut last_stages: Option<crate::profile_keys::ProfileTimes> = None;
     for i in 0..run.total_frames {
         steps += 1;
         let t = std::time::Instant::now();
         let go_on = run.step(i)?;
         if server && go_on {
-            // Measure CPU-stage duration before waiting for the next tick. This
-            // separates work from intentional pacing in the timings report.
+            // OMSI_PROFILE already accumulates every stage's wall time. While
+            // timings is on, subtract the prior snapshot to get this tick's
+            // stage costs without allocating or copying when timings is off.
+            if run.srv_profiler.enabled() {
+                if let Some(previous) = last_stages.as_ref() {
+                    for (key, total) in run.profile.iter() {
+                        let delta = (total - previous.get(key)).max(0.0);
+                        if delta > 0.0 {
+                            run.srv_profiler.stage(
+                                key.name(),
+                                std::time::Duration::from_secs_f64(delta),
+                            );
+                        }
+                    }
+                }
+                last_stages = Some(run.profile.clone());
+            } else {
+                last_stages = None;
+            }
+            // The tick's own latency excludes deliberate pacing.
             run.srv_profiler.tick(t.elapsed());
             std::thread::sleep(run.real_time.wait(std::time::Instant::now(), run.dt));
             run.srv_metrics.completed(std::time::Instant::now());
