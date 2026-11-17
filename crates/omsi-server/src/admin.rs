@@ -181,3 +181,32 @@ pub fn publish_status(
         omsi_lan::admin::publish(&hub, lan, admin, state);
     }
 }
+
+/// The server's status as the web gateway tells it (see `omsi_net::ws::ServerInfo`).
+pub fn info_of(cfg: &ServerCfg, version: &str) -> omsi_net::ws::ServerInfo {
+    omsi_net::ws::ServerInfo {
+        name: cfg.name.clone(),
+        motd: cfg.motd.clone(),
+        map: cfg.map.clone(),
+        players: 0,
+        max_players: cfg.max_players,
+        version: version.to_string(),
+        icon: cfg.icon.clone(),
+        time: cfg.time.clone(),
+        weather: cfg.weather.clone().unwrap_or_default(),
+        password: false,
+        vehicles: cfg.vehicles.clone(),
+        // (announced once checked: `announce_fleet`)
+        fleet: Vec::new(),
+        fleet_version: 0,
+        reached_at: String::new(),
+        players_public: cfg.share_positions,
+        player_list: Vec::new(),
+        local_admin_password: cfg.admin_password.clone(),
+        direct: Some(cfg.public_address.clone())
+            .filter(|a| a != "off")
+            .unwrap_or_default(),
+        ..Default::default()
+    }
+}
+

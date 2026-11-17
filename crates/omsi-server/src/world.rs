@@ -82,3 +82,21 @@ impl HostWorld {
         })
     }
 }
+
+/// The map of `server.cfg` is installed (in the original folder or the content folder), or
+/// what to do: the maps there are.
+pub fn check_map(root: &std::path::Path, map: &str) -> Result<(), String> {
+    let path = omsi_cfg::resolve_path(root, map);
+    if omsi_cfg::vfs::exists(&path) {
+        return Ok(());
+    }
+    Err(format!(
+        "the map {} (server.cfg's map, or --server-map) is not installed ({} not found). Installed maps: {}",
+        map,
+        path.display(),
+        Some(omsi_lan::server_cfg::installed_maps().join(", "))
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| "none".into())
+    ))
+}
+

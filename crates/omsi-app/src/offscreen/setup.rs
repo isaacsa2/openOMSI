@@ -221,7 +221,7 @@ impl<'a> Offscreen<'a> {
         run_clock.advance(service_seconds as f32);
         crate::server::park_buses(server, args, &world);
         let (srv_admin, srv_metar, srv_metar_due, srv_metar_rx, srv_weather_name) =
-            server_administration_state(server, &weather, &mut lan_off);
+            omsi_server::startup::server_administration_state(server, &weather, &mut lan_off);
         let srv_clock = 0.0f64;
         let ground_gap = crate::ground_gap::GroundGap::from_env();
         if let Some(t) = traffic.as_ref() {
@@ -376,48 +376,6 @@ fn initialize_traffic_state(
         t.populate(world, center);
         crate::view_sync::apply_traffic(t, &mut sim_view.traffic, world, renderer, scene);
     }
-}
-
-/// No web request thread touches these values: the dedicated host owns them.
-fn server_administration_state(
-    server: bool,
-    weather: &omsi_content::weather::Weather,
-    lan_off: &mut Option<omsi_net::LanSession>,
-) -> (
-    crate::admin::ServerAdmin,
-    Option<String>,
-    std::time::Instant,
-    Option<std::sync::mpsc::Receiver<Option<omsi_content::weather::Weather>>>,
-    String,
-) {
-    let mut admin = crate::admin::ServerAdmin::default();
-    let metar = if server {
-        crate::server::SERVER_METAR.get().cloned().flatten()
-    } else {
-        None
-    };
-    let due = std::time::Instant::now();
-    let weather_name = if weather.path.to_string_lossy().starts_with("metar:") {
-        weather.name.clone()
-    } else {
-        weather
-            .path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default()
-    };
-    if let (true, Some((password, moderator, speed))) = (server, crate::server::SERVER_ADMIN.get())
-    {
-        admin.password = password.clone();
-        admin.moderator_password = moderator.clone();
-        if let Some((enabled, density)) = crate::server::SERVER_PASSENGERS.get() {
-            (admin.passengers_on, admin.passenger_density) = (*enabled, *density);
-        }
-        if let Some(lan) = lan_off.as_mut() {
-            lan.clock_speed = *speed;
-        }
-    }
-    (admin, metar, due, None, weather_name)
 }
 
 /// Parse the drive-only test harness settings, never used by a dedicated server.

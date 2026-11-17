@@ -19,32 +19,8 @@ pub(crate) use omsi_lan::server_cfg::{SERVER_VEHICLES, ServerCfg, enforce_vehicl
 
 pub(crate) use omsi_server::fleet::announce_fleet;
 
-/// The server's status as the web gateway tells it (see `omsi_net::ws::ServerInfo`).
 pub(crate) fn info_of(cfg: &ServerCfg, _root: &Path) -> omsi_net::ws::ServerInfo {
-    omsi_net::ws::ServerInfo {
-        name: cfg.name.clone(),
-        motd: cfg.motd.clone(),
-        map: cfg.map.clone(),
-        players: 0,
-        max_players: cfg.max_players,
-        version: format!("{} ({})", omsi_platform::VERSION, BUILD),
-        icon: cfg.icon.clone(),
-        time: cfg.time.clone(),
-        weather: cfg.weather.clone().unwrap_or_default(),
-        password: false,
-        vehicles: cfg.vehicles.clone(),
-        // (announced once checked: `announce_fleet`)
-        fleet: Vec::new(),
-        fleet_version: 0,
-        reached_at: String::new(),
-        players_public: cfg.share_positions,
-        player_list: Vec::new(),
-        local_admin_password: cfg.admin_password.clone(),
-        direct: Some(cfg.public_address.clone())
-            .filter(|a| a != "off")
-            .unwrap_or_default(),
-        ..Default::default()
-    }
+    omsi_server::admin::info_of(cfg, &format!("{} ({})", omsi_platform::VERSION, BUILD))
 }
 
 /// The floor nearest the height a parked bus stands at (a bus on the lower of two floors
@@ -113,21 +89,8 @@ pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
 
 pub(crate) use omsi_server::startup::{SERVER_ADMIN, SERVER_METAR, SERVER_PASSENGERS};
 
-/// The map of `server.cfg` is installed (in the original folder or the content folder), or
-/// what to do: the maps there are.
 pub(crate) fn check_map(args: &Args) -> Result<(), String> {
-    let path = omsi_cfg::resolve_path(&args.root, &args.map);
-    if omsi_cfg::vfs::exists(&path) {
-        return Ok(());
-    }
-    Err(format!(
-        "the map {} (server.cfg's map, or --server-map) is not installed ({} not found). Installed maps: {}",
-        args.map,
-        path.display(),
-        Some(installed_maps().join(", "))
-            .filter(|l| !l.is_empty())
-            .unwrap_or_else(|| "none".into())
-    ))
+    omsi_server::world::check_map(&args.root, &args.map)
 }
 
 pub(crate) use omsi_lan::server_cfg::installed_maps;

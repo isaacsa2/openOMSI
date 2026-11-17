@@ -88,3 +88,46 @@ pub fn prepare(
     log::info!("server operator: you are responsible for your players' private data, logs and moderation records");
     Ok(LaunchPlan { config: cfg, weather, ai_limits })
 }
+
+/// No web request thread touches these values: the dedicated host owns them.
+pub fn server_administration_state(
+    server: bool,
+    weather: &omsi_content::weather::Weather,
+    lan_off: &mut Option<omsi_net::LanSession>,
+) -> (
+    omsi_lan::admin::ServerAdmin,
+    Option<String>,
+    std::time::Instant,
+    Option<std::sync::mpsc::Receiver<Option<omsi_content::weather::Weather>>>,
+    String,
+) {
+    let mut admin = omsi_lan::admin::ServerAdmin::default();
+    let metar = if server {
+        SERVER_METAR.get().cloned().flatten()
+    } else {
+        None
+    };
+    let due = std::time::Instant::now();
+    let weather_name = if weather.path.to_string_lossy().starts_with("metar:") {
+        weather.name.clone()
+    } else {
+        weather
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default()
+    };
+    if let (true, Some((password, moderator, speed))) = (server, SERVER_ADMIN.get())
+    {
+        admin.password = password.clone();
+        admin.moderator_password = moderator.clone();
+        if let Some((enabled, density)) = SERVER_PASSENGERS.get() {
+            (admin.passengers_on, admin.passenger_density) = (*enabled, *density);
+        }
+        if let Some(lan) = lan_off.as_mut() {
+            lan.clock_speed = *speed;
+        }
+    }
+    (admin, metar, due, None, weather_name)
+}
+
