@@ -47,6 +47,7 @@ impl Offscreen<'_> {
             ref mut srv_metar_due,
             ref mut srv_metar_rx,
             ref mut srv_weather_name,
+            ref srv_metrics,
             ref mut lan_off,
             ref remotes_off,
             ref mut traffic,
@@ -171,7 +172,7 @@ impl Offscreen<'_> {
                 // and for the admins' panels
                 if let Some(h) = omsi_lan::admin::hub() {
                     let time = parse_time(&args.time) + *srv_clock + srv_admin.shift;
-                    let state = crate::server::admin_state(time, l.clock_speed, srv_weather_name, srv_metar.as_deref(), omsi_net::ws::WorldCounts { cars, buses, dormant, parked, walking, waiting, aboard, traffic: target, passengers, passenger_density });
+                    let state = crate::server::admin_state(time, l.clock_speed, srv_weather_name, srv_metar.as_deref(), omsi_net::ws::WorldCounts { cars, buses, dormant, parked, walking, waiting, aboard, traffic: target, passengers, passenger_density }, srv_metrics);
                     omsi_lan::admin::publish(h, l, srv_admin, state);
                 }
             }
