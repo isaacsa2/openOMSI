@@ -206,16 +206,37 @@ static MX_GRAPHICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// The game's instance: mX's when `setting` says so (`mx_graphics`, read on a Mac only: mX has
 /// drawn the game on Metal, not yet on Direct3D 12 or Vulkan) or `OMSI_MX=on` does, else
 /// `graphics_instance`'s.
+/// Which Windows mX test option matches the backend compiled into this binary.
+/// mX currently chooses DX12 or Vulkan at build time, not at run time.
+fn windows_mx_option(selected: &str) -> bool {
+    match selected.trim().to_ascii_lowercase().as_str() {
+        "mx_dx12" => !cfg!(feature = "mx-vulkan"),
+        "mx_vulkan" => cfg!(feature = "mx-vulkan"),
+        _ => false,
+    }
+}
+
 pub(crate) fn game_graphics_instance(setting: bool, graphics_api: &str) -> wgpu::Instance {
     let selected = omsi_cfg::flags::OMSI_BACKEND.var().unwrap_or(graphics_api);
     let on = match omsi_cfg::flags::OMSI_MX.var() {
         Some(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "on" | "true" | "yes"),
         None => (setting && cfg!(target_os = "macos"))
-            || (cfg!(windows) && selected.eq_ignore_ascii_case("mx_dx12")),
+            || (cfg!(windows) && windows_mx_option(selected)),
     };
     MX_GRAPHICS.store(on, std::sync::atomic::Ordering::Relaxed);
+    if cfg!(windows)
+        && matches!(selected.to_ascii_lowercase().as_str(), "mx_dx12" | "mx_vulkan")
+        && !on
+    {
+        log::warn!(
+            "graphics: requested {selected} is not compiled into this Windows mX build; using wgpu"
+        );
+    }
     if on {
         log::info!("graphics: mX Graphics (experimental) asked for");
+        if cfg!(all(windows, feature = "mx-vulkan")) {
+            log::info!("graphics: mX Vulkan test build (adapter info may still report DX12)");
+        }
     }
     graphics_instance()
 }
@@ -362,7 +383,7 @@ pub(crate) fn backend_order() -> Vec<GraphicsApi> {
         all.push(GraphicsApi::Angle);
     }
     let first = match wanted.trim().to_ascii_lowercase().as_str() {
-        "vulkan" => Some(GraphicsApi::Native(wgpu::Backends::VULKAN)),
+        "vulkan" | "mx_vulkan" => Some(GraphicsApi::Native(wgpu::Backends::VULKAN)),
         "dx12" | "mx_dx12" | "directx" | "d3d12" if cfg!(windows) => Some(GraphicsApi::Native(wgpu::Backends::DX12)),
         "gl" | "opengl" | "gles" => Some(GraphicsApi::Native(wgpu::Backends::GL)),
         "angle" | "dx11" | "d3d11" if all.contains(&GraphicsApi::Angle) => Some(GraphicsApi::Angle),
@@ -979,6 +1000,17 @@ mod own_key_tests {
 #[cfg(test)]
 mod window_tests {
     use super::software_adapter;
+
+    #[test]
+    fn mx_windows_test_options_match_build_backend() {
+        assert!(!super::windows_mx_option("auto"));
+        assert!(!super::windows_mx_option("vulkan"));
+        assert!(!super::windows_mx_option("dx12"));
+        assert!(!super::windows_mx_option("angle"));
+        assert!(!super::windows_mx_option("gl"));
+        assert_eq!(super::windows_mx_option("mx_vulkan"), cfg!(feature = "mx-vulkan"));
+        assert_eq!(super::windows_mx_option("mx_dx12"), !cfg!(feature = "mx-vulkan"));
+    }
 
     /// The software renderers come after every graphics chip (#770).
     #[test]
