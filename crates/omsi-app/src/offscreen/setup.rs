@@ -197,7 +197,7 @@ impl<'a> Offscreen<'a> {
         // LAN in an offscreen run too, so that one game's view of another can be rendered
         // (`OMSI_LAN_AUDIO=1`: with the other buses' sounds, heard at the camera - for the logs)
         let lan_audio =
-            (lan_off.is_some() && omsi_cfg::flags::OMSI_LAN_AUDIO.is_set()).then(|| {
+            (args.server.is_none() && lan_off.is_some() && omsi_cfg::flags::OMSI_LAN_AUDIO.is_set()).then(|| {
                 let a = omsi_audio::AudioEngine::new();
                 a.set_doppler(settings.doppler);
                 a

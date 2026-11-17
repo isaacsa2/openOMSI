@@ -111,6 +111,27 @@ the console reader simply exits while the server continues.
 | `clock <seconds>`, `speed <factor>`, `weather next` | Change the host-world clock or weather if allowed |
 | `stop` | Request the same graceful server exit used for signal shutdown |
 
+### Optional timings / Spark-like profiling
+
+By default, the per-stage profiler is **off**: only the lightweight TPS
+counter runs. On the server terminal, use `timings on`, `timings report`,
+`timings off`, or `timings reset`. The aliases `spark start`,
+`spark report`, `spark stop` and `spark reset` work too.
+
+The authenticated **Server timings** panel offers Start, Stop and Reset to
+admins only. The same-origin JSON endpoint `POST /api/admin/profiler` accepts
+exactly `{"action":"start"}`, `{"action":"stop"}` or
+`{"action":"reset"}` with the existing Bearer token, and queues the change
+for the server's simulation thread. Moderators get HTTP 403. There is no
+new public profiler endpoint, remote command shell or RCON.
+
+A report contains the last 1,024 completed tick durations (average, p95,
+p99 and maximum), total tick count, and the fixed server stages sorted by
+total time with mean/max per-stage duration. A report is retained after
+`timings off`. The stage percentages indicate **wall-clock time spent in
+those stages**, not overall CPU utilization or a full sampling flamegraph.
+Intentional tick waiting is excluded from the stage timings.
+
 Other existing administration commands (e.g. `tell`, `hwban`, `unban`,
 `vmute`, `vunmute`, `unstick` and `service`) remain available through the
 same parser. Passwords do not need to be typed into local stdin.

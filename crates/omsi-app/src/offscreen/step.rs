@@ -75,7 +75,6 @@ impl Offscreen<'_> {
             ref mut scene,
             ref mut sim_view,
             ref humans_off,
-            ref mut real_time,
             ref settings,
             ..
         } = *self;
