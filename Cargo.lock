@@ -4699,6 +4699,7 @@ dependencies = [
  "omsi-map",
  "omsi-sim",
  "omsi-texture",
+ "ureq",
 ]
 
 [[package]]
