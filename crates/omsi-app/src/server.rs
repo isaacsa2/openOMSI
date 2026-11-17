@@ -85,7 +85,12 @@ pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
         cfg.moderator_password.clone(),
         if cfg.real_time { 1.0 } else { cfg.time_speed },
     ));
-    start_administration(&cfg, path);
+    omsi_server::admin::start_administration(
+        &cfg,
+        path,
+        crate::game_lists::TRAFFIC_MAX,
+        &format!("{} ({})", omsi_platform::VERSION, BUILD),
+    );
     console::start();
     omsi_lan::server_cfg::set_server_speed_limit_kmh(cfg.speed_limit_kmh);
     log::info!(
@@ -224,156 +229,13 @@ pub(crate) static SERVER_METAR: std::sync::OnceLock<Option<String>> = std::sync:
 pub(crate) static SERVER_ADMIN: std::sync::OnceLock<(String, String, f64)> =
     std::sync::OnceLock::new();
 
-/// What of a dedicated server's state stays as `server.cfg` says (the rest is the loop's).
-static SERVER_STATE: std::sync::OnceLock<omsi_admin::ServerState> = std::sync::OnceLock::new();
-
-/// The administration's hub (see `omsi_admin`): its records, its sessions, its audit log
-/// (`admin-audit.log` beside `server.cfg`, put aside at 1 MB).
-fn start_administration(cfg: &ServerCfg, path: &Path) {
-    if !cfg.moderator_password.is_empty() && cfg.moderator_password == cfg.admin_password {
-        log::warn!(
-            "server.cfg: moderator_password is the admin_password: it gives the admin's role"
-        );
-    }
-    let pw = omsi_admin::Passwords {
-        admin: cfg.admin_password.clone(),
-        moderator: cfg.moderator_password.clone(),
-    };
-    let audit = path.parent().map(|d| d.join("admin-audit.log"));
-    let hub = std::sync::Arc::new(omsi_admin::Hub::new(
-        omsi_admin::Auth::new(pw, Default::default()),
-        omsi_admin::Audit::new(audit, 1 << 20),
-    ));
-    omsi_lan::admin::install_hub(hub.clone());
-    omsi_net::ws::believe_cf_connecting_ip(cfg.gateway_cf_connecting_ip);
-    // the web panel and its API on the gateway (`admin_web`: who may reach them)
-    let web = omsi_admin::WebCfg {
-        mode: cfg.admin_web,
-        origins: cfg.admin_web_origins.clone(),
-        trusted_proxies: cfg.admin_trusted_proxies.clone(),
-        proxy_header: cfg.admin_proxy_header,
-        traffic_max: crate::game_lists::TRAFFIC_MAX,
-    };
-    let has_password = !cfg.admin_password.is_empty() || !cfg.moderator_password.is_empty();
-    match (web.mode, has_password) {
-        (omsi_admin::WebMode::Off, _) => {
-            log::info!("server: no web administration (admin_web = off)")
-        }
-        (_, false) => log::info!("server: no admin_password: the administration is off"),
-        (omsi_admin::WebMode::Local, true) => log::info!(
-            "server: web administration at http://127.0.0.1:{}/admin/ (from this machine only)",
-            cfg.web_port
-        ),
-        (omsi_admin::WebMode::Remote, true) => log::warn!(
-            "server: web administration at http://127.0.0.1:{}/admin/ and over HTTPS through {:?}{}",
-            cfg.web_port,
-            web.trusted_proxies,
-            if cfg.tunnel {
-                " - with the public tunnel too: only the passwords guard it"
-            } else {
-                ""
-            }
-        ),
-    }
-    omsi_lan::gateway::open_admin_api(hub, web);
-    let _ = SERVER_STATE.set(omsi_admin::ServerState {
-        name: cfg.name.clone(),
-        map: cfg.map.clone(),
-        version: format!("{} ({})", omsi_platform::VERSION, BUILD),
-        max_players: cfg.max_players,
-        real_time: cfg.real_time,
-        traffic_max: crate::game_lists::TRAFFIC_MAX,
-        timetable: cfg.timetable,
-        passenger_density_max: omsi_admin::PASSENGER_DENSITY_MAX,
-        ..Default::default()
-    });
-}
-
-/// The server's state for the admins' panels now (`time`: the clock, s; `world`: as for
-/// `GET /status`).
-pub(crate) fn admin_state(
-    time: f64,
-    speed: f64,
-    weather: &str,
-    metar: Option<&str>,
-    world: omsi_net::ws::WorldCounts,
-    metrics: &omsi_admin::metrics::TickMeter,
-    profiler: &omsi_admin::profiler::Profiler,
-) -> omsi_admin::ServerState {
-    let clock = time.rem_euclid(86_400.0);
-    omsi_admin::ServerState {
-        time: crate::schedule::hhmm(clock),
-        clock,
-        clock_speed: speed,
-        tps: metrics.tps(),
-        target_tps: metrics.target(),
-        profiler: Some(profiler.report()),
-        weather: weather.to_string(),
-        metar: metar.map(str::to_string),
-        traffic: world.traffic,
-        passengers: world.passengers,
-        passenger_density: world.passenger_density,
-        waiting: world.waiting,
-        walking: world.walking,
-        aboard: world.aboard,
-        cars: world.cars,
-        buses: world.buses,
-        ..SERVER_STATE.get().cloned().unwrap_or_default()
-    }
-}
+pub(crate) use omsi_server::admin::{admin_state, tick_status};
 
 /// A dedicated server run: graphics without a device, the whole world by interest.
 pub(crate) static SERVER_MODE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// Every second of a server run: what the status page says (players, time, weather) and
-/// who is where (`GET /players`, when `share_positions` is on).
-pub(crate) fn tick_status(lan: &omsi_net::LanSession, time: f64, weather: &str) {
-    let players = lan.peers().filter(|p| p.has_info).count();
-    // (the admin's clock shift may take the time below 0 or past midnight: 23:08 had come
-    // out as "00:-52")
-    omsi_net::addrs::find_direct(lan, |a| crate::lan::update_server_direct(a));
-    crate::lan::update_server_info(
-        players,
-        &lan.world.date,
-        &crate::schedule::hhmm(time.rem_euclid(86400.0)),
-        weather,
-    );
-    let parked = omsi_lan::parked::server_free();
-    let poses: Vec<&omsi_net::Pose> = lan
-        .peers()
-        .filter(|p| p.has_info && p.has_pose)
-        .map(|p| &p.pose)
-        .chain(&parked)
-        .collect();
-    let list = poses
-        .iter()
-        .filter_map(|q| player_info(q, |id| poses.iter().copied().find(|o| o.id == id)))
-        .collect();
-    crate::lan::update_server_players(list);
-}
-
-/// The public server list's publisher while the server runs (`public_server = 1`).
-static PUBLIC_LIST: std::sync::Mutex<Option<omsi_lan::public_list::Handle>> =
-    std::sync::Mutex::new(None);
-
-/// List the server in the public list if `server.cfg` says so; the log says why it is not.
+/// Start publishing the dedicated host in the public server list.
 pub(crate) fn start_public_list(cfg: &ServerCfg) {
-    if !cfg.public_server {
-        return;
-    }
-    match omsi_lan::public_list::start(cfg, &format!("{} ({})", omsi_platform::VERSION, BUILD)) {
-        Ok(h) => {
-            log::info!(
-                "server: public_server = 1: listing in the public server list (checked first; it appears once the list service has reached the web port or the tunnel)"
-            );
-            if let Ok(mut p) = PUBLIC_LIST.lock() {
-                *p = Some(h);
-            }
-        }
-        Err(why) => {
-            log::warn!("server: not listed in the public server list: {why}");
-            eprintln!("  Not listed in the public server list: {why}");
-        }
-    }
+    omsi_server::admin::start_public_list(cfg, &format!("{} ({})", omsi_platform::VERSION, BUILD));
 }

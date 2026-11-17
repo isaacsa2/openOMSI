@@ -7,3 +7,4 @@
 
 pub mod console;
 pub mod fleet;
+pub mod admin;
