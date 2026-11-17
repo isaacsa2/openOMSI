@@ -49,6 +49,7 @@ impl Offscreen<'_> {
             ref mut srv_metar_rx,
             ref mut srv_weather_name,
             ref srv_metrics,
+            ref mut srv_profiler,
             ref mut srv_report_at,
             ref mut lan_off,
             ref remotes_off,
@@ -128,7 +129,7 @@ impl Offscreen<'_> {
             // simulation thread, not on the stdin reader. They use the same
             // authority checks, command parser and audit trail as the local API.
             for text in crate::server::console::take() {
-                if crate::server::console::run_builtin(&text, l, srv_metrics) {
+                if crate::server::console::run_builtin(&text, l, srv_metrics, srv_profiler) {
                     continue;
                 }
                 if omsi_lan::parked::server_admin(&text, &|x, y, near| crate::server::parked_floor(world, x, y, near)) {
@@ -150,6 +151,15 @@ impl Offscreen<'_> {
                 omsi_lan::admin::server_command(l, crate::admin::LOCAL_ADMIN, &format!("admin {text}"), srv_admin, &positions, &rules, hub);
             }
             if let Some(h) = hub {
+                for request in h.take_profiles() {
+                    use omsi_admin::hub::ProfileAction;
+                    match request.action {
+                        ProfileAction::Start => srv_profiler.start(),
+                        ProfileAction::Stop => srv_profiler.stop(),
+                        ProfileAction::Reset => srv_profiler.reset(),
+                    }
+                    h.note(&request.actor.label, Some(request.actor.role), "profiler", "applied", request.action.name());
+                }
                 for job in h.take(16) {
                     omsi_lan::admin::run_job(l, srv_admin, job, &positions, &rules, h);
                 }
@@ -195,7 +205,7 @@ impl Offscreen<'_> {
                 // and for the admins' panels
                 if let Some(h) = omsi_lan::admin::hub() {
                     let time = parse_time(&args.time) + *srv_clock + srv_admin.shift;
-                    let state = crate::server::admin_state(time, l.clock_speed, srv_weather_name, srv_metar.as_deref(), omsi_net::ws::WorldCounts { cars, buses, dormant, parked, walking, waiting, aboard, traffic: target, passengers, passenger_density }, srv_metrics);
+                    let state = crate::server::admin_state(time, l.clock_speed, srv_weather_name, srv_metar.as_deref(), omsi_net::ws::WorldCounts { cars, buses, dormant, parked, walking, waiting, aboard, traffic: target, passengers, passenger_density }, srv_metrics, srv_profiler);
                     omsi_lan::admin::publish(h, l, srv_admin, state);
                 }
             }

@@ -76,6 +76,10 @@ enum Builtin {
     Status,
     Tps,
     Stop,
+    TimingStart,
+    TimingStop,
+    TimingReset,
+    TimingReport,
 }
 
 fn builtin(command: &str) -> Option<Builtin> {
@@ -85,6 +89,10 @@ fn builtin(command: &str) -> Option<Builtin> {
         "status" => Some(Builtin::Status),
         "tps" => Some(Builtin::Tps),
         "stop" => Some(Builtin::Stop),
+        "timings on" | "timings start" | "spark start" | "profile start" => Some(Builtin::TimingStart),
+        "timings off" | "timings stop" | "spark stop" | "profile stop" => Some(Builtin::TimingStop),
+        "timings reset" | "spark reset" | "profile reset" => Some(Builtin::TimingReset),
+        "timings" | "timings report" | "spark" | "spark report" | "profile" | "profile report" => Some(Builtin::TimingReport),
         _ => None,
     }
 }
@@ -95,10 +103,12 @@ pub(crate) fn run_builtin(
     command: &str,
     lan: &omsi_net::LanSession,
     metrics: &omsi_admin::metrics::TickMeter,
+    profiler: &mut omsi_admin::profiler::Profiler,
 ) -> bool {
     match builtin(command) {
         Some(Builtin::Help) => {
             log::info!("server console commands: help, list, status, tps, stop");
+            log::info!("timings on|off|report|reset (also: spark start|stop|report|reset)");
             log::info!("administration: say <message>, kick <id> [reason], ban <id> [reason], unban <ban-id>, hwban <id> <session|all> [duration] [reason]");
             log::info!("world: clock <seconds>, time <offset-seconds>, speed <factor>, weather next|set <file>, traffic <count|clear>, passengers <density>");
             log::info!("players: tell <id> <message>, vmute <id>, vunmute <id>, unstick <id>, service <repair|refuel|wash> <id|all>");
@@ -119,6 +129,28 @@ pub(crate) fn run_builtin(
             match metrics.tps() {
                 Some(rate) => log::info!("server console: TPS {rate:.1}/{:.0} (completed ticks per wall-clock second)", metrics.target()),
                 None => log::info!("server console: TPS warming up (first one-second sample not finished)"),
+            }
+        }
+        Some(Builtin::TimingStart) => {
+            profiler.start();
+            log::info!("server console: timings enabled (recording a new bounded sample)");
+        }
+        Some(Builtin::TimingStop) => {
+            profiler.stop();
+            log::info!("server console: timings disabled (report retained)");
+        }
+        Some(Builtin::TimingReset) => {
+            profiler.reset();
+            log::info!("server console: timings reset");
+        }
+        Some(Builtin::TimingReport) => {
+            let report = profiler.report();
+            log::info!("server console: timings {}, {} ticks in {:.1} s, tick avg {:.2} ms, p95 {:.2} ms, p99 {:.2} ms, max {:.2} ms",
+                if report.enabled { "running" } else { "stopped" }, report.ticks, report.seconds,
+                report.avg_tick_ms, report.p95_tick_ms, report.p99_tick_ms, report.max_tick_ms);
+            for entry in report.stages {
+                log::info!("server console: {:<18} mean {:.3} ms, max {:.3} ms, total {:.1} ms ({:.1}%), calls {}",
+                    entry.name, entry.avg_ms, entry.max_ms, entry.total_ms, entry.share_pct, entry.calls);
             }
         }
         Some(Builtin::Stop) => {
@@ -147,6 +179,8 @@ mod tests {
         assert_eq!(builtin("stop"), Some(Builtin::Stop));
         assert_eq!(builtin("stop now"), None);
         assert_eq!(builtin("tps"), Some(Builtin::Tps));
+        assert_eq!(builtin("timings on"), Some(Builtin::TimingStart));
+        assert_eq!(builtin("spark stop"), Some(Builtin::TimingStop));
         assert_eq!(builtin("admin password"), None);
     }
 }
