@@ -555,6 +555,7 @@ pub(super) fn sync_live(app: &mut App) {
         h.visual_hailing = s.passenger_hailing && s.passenger_animation == "enhanced";
         h.visual_full_bus_reaction = s.passenger_full_bus_reaction && s.passenger_animation == "enhanced";
         h.bad_driving = s.pax_bad_driving;
+        h.bad_driving_alight = s.pax_bad_driving_alight;
         h.boarding = s.boarding.clone();
         h.stand_chance = s.standing_chance;
         h.short_rides_stand = s.pax_short_rides_stand;
