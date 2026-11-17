@@ -15,10 +15,10 @@ pub mod auth;
 pub mod http;
 pub mod hub;
 pub mod metrics;
-pub mod profiler;
 pub mod op;
 pub mod perm;
 pub mod players;
+pub mod profiler;
 
 pub use audit::{Audit, Entry};
 pub use auth::{Auth, AuthCfg, LoginError, Passwords, SessionInfo};

@@ -209,14 +209,27 @@ pub struct Snapshot {
 
 /// A bounded request from the authenticated admin panel; consumed by the server loop.
 #[derive(Debug, Clone, Copy)]
-pub enum ProfileAction { Start, Stop, Reset }
+pub enum ProfileAction {
+    Start,
+    Stop,
+    Reset,
+}
 
 impl ProfileAction {
     pub fn parse(s: &str) -> Option<Self> {
-        match s { "start" => Some(Self::Start), "stop" => Some(Self::Stop), "reset" => Some(Self::Reset), _ => None }
+        match s {
+            "start" => Some(Self::Start),
+            "stop" => Some(Self::Stop),
+            "reset" => Some(Self::Reset),
+            _ => None,
+        }
     }
     pub fn name(self) -> &'static str {
-        match self { Self::Start => "start", Self::Stop => "stop", Self::Reset => "reset" }
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Reset => "reset",
+        }
     }
 }
 
@@ -257,16 +270,31 @@ impl Hub {
     /// Only the server owner/admin may profile a live instance.
     pub fn submit_profile(&self, actor: Actor, action: ProfileAction) -> Result<(), String> {
         if actor.role != Role::Admin {
-            self.note(&actor.label, Some(actor.role), "profiler", "refused", "admin only");
+            self.note(
+                &actor.label,
+                Some(actor.role),
+                "profiler",
+                "refused",
+                "admin only",
+            );
             return Err("only an administrator may control profiling".into());
         }
         let mut queue = lock(&self.profile_queue);
         if queue.len() >= 16 {
             return Err("profiler command queue is full".into());
         }
-        queue.push_back(ProfileRequest { actor: actor.clone(), action });
+        queue.push_back(ProfileRequest {
+            actor: actor.clone(),
+            action,
+        });
         drop(queue);
-        self.note(&actor.label, Some(actor.role), "profiler", "queued", action.name());
+        self.note(
+            &actor.label,
+            Some(actor.role),
+            "profiler",
+            "queued",
+            action.name(),
+        );
         Ok(())
     }
 

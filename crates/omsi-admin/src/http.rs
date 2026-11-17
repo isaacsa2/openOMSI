@@ -451,15 +451,26 @@ pub fn handle(hub: &Hub, cfg: &WebCfg, req: &Request) -> Option<Response> {
         ("POST", "/api/admin/profiler") => match session(hub, req) {
             Err(r) => r,
             Ok(s) => {
-                let action = body.get("action").and_then(Value::as_str)
+                let action = body
+                    .get("action")
+                    .and_then(Value::as_str)
                     .and_then(crate::hub::ProfileAction::parse);
                 match action {
                     None => error("400 Bad Request", "action must be start, stop or reset"),
                     Some(action) => {
-                        let actor = Actor { label: s.actor, role: s.role, origin: Origin::Web };
+                        let actor = Actor {
+                            label: s.actor,
+                            role: s.role,
+                            origin: Origin::Web,
+                        };
                         match hub.submit_profile(actor, action) {
-                            Ok(()) => json_answer("202 Accepted", json!({ "queued": true, "action": action.name() })),
-                            Err(e) if e.contains("only an administrator") => error("403 Forbidden", e),
+                            Ok(()) => json_answer(
+                                "202 Accepted",
+                                json!({ "queued": true, "action": action.name() }),
+                            ),
+                            Err(e) if e.contains("only an administrator") => {
+                                error("403 Forbidden", e)
+                            }
                             Err(e) => error("503 Service Unavailable", e),
                         }
                     }

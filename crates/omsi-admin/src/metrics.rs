@@ -24,7 +24,11 @@ impl TickMeter {
             since: Instant::now(),
             ticks: 0,
             last: None,
-            target: if target.is_finite() && target > 0.0 { target } else { 60.0 },
+            target: if target.is_finite() && target > 0.0 {
+                target
+            } else {
+                60.0
+            },
         }
     }
 
