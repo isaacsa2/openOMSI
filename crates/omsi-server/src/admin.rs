@@ -159,3 +159,25 @@ pub fn start_public_list(cfg: &ServerCfg, version: &str) {
         }
     }
 }
+
+/// Publish player and simulation summaries once per wall-clock interval.
+/// All snapshots and authorization remain owned by the authoritative host.
+#[allow(clippy::too_many_arguments)]
+pub fn publish_status(
+    lan: &mut omsi_net::LanSession,
+    admin: &mut omsi_lan::admin::ServerAdmin,
+    time: f64,
+    weather: &str,
+    metar: Option<&str>,
+    world: omsi_net::ws::WorldCounts,
+    metrics: &omsi_admin::metrics::TickMeter,
+    profiler: &omsi_admin::profiler::Profiler,
+) {
+    omsi_lan::server_cfg::enforce_vehicles(lan);
+    tick_status(lan, time, weather);
+    omsi_lan::gateway::update_server_world(world);
+    if let Some(hub) = omsi_lan::admin::hub() {
+        let state = admin_state(time, lan.clock_speed, weather, metar, world, metrics, profiler);
+        omsi_lan::admin::publish(&hub, lan, admin, state);
+    }
+}

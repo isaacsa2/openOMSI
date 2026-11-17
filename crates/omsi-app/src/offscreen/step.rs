@@ -170,59 +170,21 @@ impl Offscreen<'_> {
         if i == 0 || srv_report_at.elapsed() >= std::time::Duration::from_secs(1) {
             *srv_report_at = std::time::Instant::now();
             if let Some(l) = lan_off.as_mut() {
-                crate::server::enforce_vehicles(l);
-                crate::server::tick_status(
-                    l,
-                    parse_time(&args.time) + *srv_clock + srv_admin.shift,
-                    srv_weather_name.as_str(),
-                );
-                // the shared world, counted for GET /status
                 let (cars, buses, dormant, parked) =
                     traffic.as_ref().map(|t| t.counts()).unwrap_or_default();
                 let (walking, waiting, aboard) =
                     humans_off.as_ref().map(|h| h.counts()).unwrap_or_default();
-                let target = traffic.as_ref().map(|t| t.target).unwrap_or(0);
-                let (passengers, passenger_density) = (
-                    humans_off.is_some(),
-                    srv_admin.passenger_density.unwrap_or(settings.pax_density),
+                let world_counts = omsi_net::ws::WorldCounts {
+                    cars, buses, dormant, parked, walking, waiting, aboard,
+                    traffic: traffic.as_ref().map(|t| t.target).unwrap_or(0),
+                    passengers: humans_off.is_some(),
+                    passenger_density: srv_admin.passenger_density.unwrap_or(settings.pax_density),
+                };
+                let time = parse_time(&args.time) + *srv_clock + srv_admin.shift;
+                omsi_server::admin::publish_status(
+                    l, srv_admin, time, srv_weather_name, srv_metar.as_deref(),
+                    world_counts, srv_metrics, srv_profiler,
                 );
-                crate::lan::update_server_world(omsi_net::ws::WorldCounts {
-                    cars,
-                    buses,
-                    dormant,
-                    parked,
-                    walking,
-                    waiting,
-                    aboard,
-                    traffic: target,
-                    passengers,
-                    passenger_density,
-                });
-                // and for the admins' panels
-                if let Some(h) = omsi_lan::admin::hub() {
-                    let time = parse_time(&args.time) + *srv_clock + srv_admin.shift;
-                    let state = crate::server::admin_state(
-                        time,
-                        l.clock_speed,
-                        srv_weather_name,
-                        srv_metar.as_deref(),
-                        omsi_net::ws::WorldCounts {
-                            cars,
-                            buses,
-                            dormant,
-                            parked,
-                            walking,
-                            waiting,
-                            aboard,
-                            traffic: target,
-                            passengers,
-                            passenger_density,
-                        },
-                        srv_metrics,
-                        srv_profiler,
-                    );
-                    omsi_lan::admin::publish(h, l, srv_admin, state);
-                }
             }
         }
         // The dedicated loop now owns pacing, outside the timed simulation stages.
