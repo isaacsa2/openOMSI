@@ -155,4 +155,3 @@ pub fn announce_fleet(cfg: &ServerCfg, root: &Path) {
         log::warn!("server fleet: cannot check the fleet: {e}");
     }
 }
-

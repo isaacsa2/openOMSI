@@ -30,7 +30,6 @@ pub fn follow_server_clock(day_time: f64, want: f64) -> (f64, Option<f64>) {
     (want, (jump.abs() >= 120.0).then_some(jump))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::follow_server_clock;
@@ -39,6 +38,9 @@ mod tests {
     fn the_traffic_follows_the_servers_clock_and_a_jump_restarts_the_timetable() {
         assert_eq!(follow_server_clock(54_000.0, 54_000.5), (54_000.5, None));
         assert_eq!(follow_server_clock(54_000.0, 54_119.0), (54_119.0, None));
-        assert_eq!(follow_server_clock(54_000.0, 94_560.0), (94_560.0, Some(40_560.0)));
+        assert_eq!(
+            follow_server_clock(54_000.0, 94_560.0),
+            (94_560.0, Some(40_560.0))
+        );
     }
 }

@@ -5,11 +5,11 @@
 //! The transport, administration and console can be reused by a true headless
 //! runtime while the application-specific world adapters are being extracted.
 
-pub mod console;
+pub mod admin;
 pub mod clock;
 pub mod commands;
+pub mod console;
 pub mod fleet;
 pub mod startup;
 pub mod weather;
 pub mod world;
-pub mod admin;
