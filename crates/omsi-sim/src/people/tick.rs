@@ -105,42 +105,7 @@ impl PeopleSim {
             self.tiles_changed(world);
         }
         stage!("tiles");
-        // tiles brought lanes: their pavements join the network, and stops without one look again
-        if let (Some(pn), Some(n)) = (self.ped.as_mut(), net) {
-            if pn.built < n.lanes.len() {
-                let added = pn.extend(n);
-                if added > 0 {
-                    let ids: Vec<(i64, DVec3)> = self
-                        .stops
-                        .iter()
-                        .filter(|(_, s)| s.lane.is_none())
-                        .map(|(k, s)| (*k, s.pos))
-                        .collect();
-                    for (id, pos) in ids {
-                        let lane = self
-                            .ped
-                            .as_ref()
-                            .and_then(|pn| pn.nearest(n, pos, 12.0))
-                            .map(|(l, s, _)| (l, s));
-                        self.stops.get_mut(&id).unwrap().lane = lane;
-                    }
-                }
-            }
-        }
-        if self.ped.is_none() {
-            if let Some(n) = net {
-                self.ped = Some(PedNet::build(n));
-                let ids: Vec<(i64, DVec3)> = self.stops.iter().map(|(k, s)| (*k, s.pos)).collect();
-                for (id, pos) in ids {
-                    let lane = self
-                        .ped
-                        .as_ref()
-                        .and_then(|pn| pn.nearest(n, pos, 12.0))
-                        .map(|(l, s, _)| (l, s));
-                    self.stops.get_mut(&id).unwrap().lane = lane;
-                }
-            }
-        }
+        self.refresh_pedestrian_network(net);
         stage!("pedestrian network");
         let defer = std::mem::take(&mut self.defer_populate);
         if let Some(n) = net {
@@ -317,49 +282,7 @@ impl PeopleSim {
                 *g = true;
             }
         }
-        // a standing vehicle in the way: wait, then go round it
-        for i in 0..self.people.len() {
-            let p = &self.people[i];
-            if gone[i] || p.puppet.is_some() || p.remote || !matches!(p.state, State::Strolling(_))
-            {
-                continue;
-            }
-            let want = wants[i].vel;
-            let speed = want.length();
-            if speed < 0.2 {
-                self.people[i].car_wait = 0.0;
-                continue;
-            }
-            let ahead = p.position.truncate() + want / speed * 0.9;
-            let blocks = &self.scratch.blocks;
-            let stands_in_way = |b: &Block| {
-                b.vel.length() < 0.5 && b.near(ahead, BODY_OUTSIDE + 0.15) && {
-                    let (q, inside) = b.closest(ahead);
-                    inside || (ahead - q).length() < BODY_OUTSIDE + 0.15
-                }
-            };
-            let in_way = self
-                .scratch
-                .blocks_at(ahead)
-                .iter()
-                .any(|&k| stands_in_way(&blocks[k as usize]));
-            debug_assert_eq!(
-                in_way,
-                blocks.iter().any(stands_in_way),
-                "the vehicle grid missed one in the way"
-            );
-            if !in_way {
-                self.people[i].car_wait = 0.0;
-                continue;
-            }
-            self.people[i].car_wait += dt;
-            if self.people[i].car_wait > 8.0 {
-                self.people[i].detour = self.people[i].detour.max(4.0);
-                self.people[i].car_wait = 0.0;
-            } else if self.people[i].detour <= 0.0 {
-                wants[i].vel = DVec2::ZERO;
-            }
-        }
+        self.avoid_standing_vehicles(dt, &gone, &mut wants);
         // the crowd of the pavements (passengers outside stand in it as they are)
         let mut walkers = std::mem::take(&mut self.scratch.walkers);
         walkers.clear();
@@ -444,6 +367,94 @@ impl PeopleSim {
         self.give_ticket = false;
         stage!("pedestrians");
         taken_ticket
+    }
+
+    /// Extend the pavement graph as tiles arrive, then attach orphaned stops.
+    fn refresh_pedestrian_network(&mut self, net: Option<&Network>) {
+        // tiles brought lanes: their pavements join the network, and stops without one look again
+        if let (Some(pn), Some(n)) = (self.ped.as_mut(), net) {
+            if pn.built < n.lanes.len() {
+                let added = pn.extend(n);
+                if added > 0 {
+                    let ids: Vec<(i64, DVec3)> = self
+                        .stops
+                        .iter()
+                        .filter(|(_, s)| s.lane.is_none())
+                        .map(|(k, s)| (*k, s.pos))
+                        .collect();
+                    for (id, pos) in ids {
+                        let lane = self
+                            .ped
+                            .as_ref()
+                            .and_then(|pn| pn.nearest(n, pos, 12.0))
+                            .map(|(l, s, _)| (l, s));
+                        self.stops.get_mut(&id).unwrap().lane = lane;
+                    }
+                }
+            }
+        }
+        if self.ped.is_none() {
+            if let Some(n) = net {
+                self.ped = Some(PedNet::build(n));
+                let ids: Vec<(i64, DVec3)> = self.stops.iter().map(|(k, s)| (*k, s.pos)).collect();
+                for (id, pos) in ids {
+                    let lane = self
+                        .ped
+                        .as_ref()
+                        .and_then(|pn| pn.nearest(n, pos, 12.0))
+                        .map(|(l, s, _)| (l, s));
+                    self.stops.get_mut(&id).unwrap().lane = lane;
+                }
+            }
+        }
+    }
+
+    /// Keep strolling pedestrians out of stationary vehicles and set a detour
+    /// after a bounded wait. The crowd solver handles movement afterwards.
+    fn avoid_standing_vehicles(&mut self, dt: f32, gone: &[bool], wants: &mut [Want]) {
+        // a standing vehicle in the way: wait, then go round it
+        for i in 0..self.people.len() {
+            let p = &self.people[i];
+            if gone[i] || p.puppet.is_some() || p.remote || !matches!(p.state, State::Strolling(_))
+            {
+                continue;
+            }
+            let want = wants[i].vel;
+            let speed = want.length();
+            if speed < 0.2 {
+                self.people[i].car_wait = 0.0;
+                continue;
+            }
+            let ahead = p.position.truncate() + want / speed * 0.9;
+            let blocks = &self.scratch.blocks;
+            let stands_in_way = |b: &Block| {
+                b.vel.length() < 0.5 && b.near(ahead, BODY_OUTSIDE + 0.15) && {
+                    let (q, inside) = b.closest(ahead);
+                    inside || (ahead - q).length() < BODY_OUTSIDE + 0.15
+                }
+            };
+            let in_way = self
+                .scratch
+                .blocks_at(ahead)
+                .iter()
+                .any(|&k| stands_in_way(&blocks[k as usize]));
+            debug_assert_eq!(
+                in_way,
+                blocks.iter().any(stands_in_way),
+                "the vehicle grid missed one in the way"
+            );
+            if !in_way {
+                self.people[i].car_wait = 0.0;
+                continue;
+            }
+            self.people[i].car_wait += dt;
+            if self.people[i].car_wait > 8.0 {
+                self.people[i].detour = self.people[i].detour.max(4.0);
+                self.people[i].car_wait = 0.0;
+            } else if self.people[i].detour <= 0.0 {
+                wants[i].vel = DVec2::ZERO;
+            }
+        }
     }
 
     /// Everybody's animation this frame (sub_626ae8): the passengers from what their task
