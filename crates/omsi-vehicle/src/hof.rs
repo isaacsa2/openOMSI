@@ -378,8 +378,20 @@ pub fn depot_like(dir: &Path, hints: &[&str]) -> Option<Hof> {
             }
         })
         .collect();
+    // Exact file stems and [name] declarations beat fuzzy word overlap. A map
+    // can share "Berlin"/"Hamburg" with a number of otherwise unrelated HOFs.
+    let exact = files.iter().position(|f| {
+        let stem = f.file_stem().unwrap_or_default().to_string_lossy();
+        hints.iter().any(|hint| !hint.trim().is_empty() && stem.eq_ignore_ascii_case(hint.trim()))
+    }).or_else(|| {
+        files.iter().position(|f| {
+            Hof::read_name(f).is_some_and(|name| hints.iter().any(|hint| {
+                !hint.trim().is_empty() && name.trim().eq_ignore_ascii_case(hint.trim())
+            }))
+        })
+    });
     let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-    closest_name(&refs, hints).and_then(|i| Hof::load(&files[i]).ok())
+    exact.or_else(|| closest_name(&refs, hints)).and_then(|i| Hof::load(&files[i]).ok())
 }
 
 /// The depot file called `name` in the shared `HOFs/` folder, any map folder (`maps/*/`) or any vehicle folder (`Vehicles/*/`) of any content root.
@@ -422,6 +434,12 @@ pub fn depot_anywhere(name: &str) -> Option<Hof> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fuzzy_hof_matching_keeps_unrelated_depots_out() {
+        assert_eq!(closest_name(&["Grundorf default", "Berlin Spandau"], &["Berlin Spandau"]), Some(1));
+        assert_eq!(closest_name(&["Grundorf default", "Hamburg addon"], &["Ahlheim"]), None);
+    }
+
     #[test]
     fn free_text_is_a_destination_of_its_own() {
         let hof = Hof {
