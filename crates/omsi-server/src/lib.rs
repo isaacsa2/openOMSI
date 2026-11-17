@@ -8,6 +8,7 @@
 pub mod console;
 pub mod commands;
 pub mod fleet;
+pub mod startup;
 pub mod weather;
 pub mod world;
 pub mod admin;

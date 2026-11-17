@@ -71,100 +71,33 @@ pub(crate) fn park_buses(server: bool, args: &Args, world: &World) {
     }
 }
 
-/// Set up the arguments for a server run from `server.cfg` (the rest is the offscreen
-/// host loop, see `offscreen::run_offscreen`).
+/// Prepare the legacy offscreen adapter while the new headless engine replaces it.
 pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
-    let mut cfg = ServerCfg::load(path, crate::game_lists::TRAFFIC_MAX)?;
-    // (the map a start script picked, over server.cfg's)
-    if let Some(m) = args.server_map.take().filter(|m| !m.trim().is_empty()) {
-        cfg.map = m.trim().replace('\\', "/");
-    }
-    SERVER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
-    let _ = SERVER_ADMIN.set((
-        cfg.admin_password.clone(),
-        cfg.moderator_password.clone(),
-        if cfg.real_time { 1.0 } else { cfg.time_speed },
-    ));
-    omsi_server::admin::start_administration(
-        &cfg,
-        path,
-        crate::game_lists::TRAFFIC_MAX,
+    let map_override = args.server_map.take();
+    let plan = omsi_server::startup::prepare(
+        path, &args.root, map_override, crate::game_lists::TRAFFIC_MAX,
         &format!("{} ({})", omsi_platform::VERSION, BUILD),
-    );
-    console::start();
-    omsi_lan::server_cfg::set_server_speed_limit_kmh(cfg.speed_limit_kmh);
-    log::info!(
-        "server: RP speed limit: {}",
-        if cfg.speed_limit_kmh == 0 {
-            "disabled".to_string()
-        } else {
-            format!("{} km/h", cfg.speed_limit_kmh)
-        }
-    );
-    omsi_lan::admin::allow_player_teleport(cfg.allow_player_teleport);
-    // the machine bans: this server's list beside server.cfg, and the owner's (all my sessions)
-    omsi_lan::bans::announce_local_hardware_id();
-    omsi_lan::bans::require_hardware_id(cfg.require_hardware_id);
-    omsi_lan::bans::install(omsi_lan::bans::BanStore::open(
-        Some(cfg.dir.join("bans.json")),
-        cfg.owner_bans
-            .clone()
-            .or_else(omsi_lan::bans::BanStore::default_owner_path),
-    ));
+        &|root, map| omsi_launcher_lib::nearest_airport(&root.to_string_lossy(), map),
+    )?;
+    let cfg = plan.config;
+    SERVER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
     crate::real_time::set_server_real(cfg.real_time);
-    let _ = SERVER_VEHICLES.set(cfg.vehicles.clone());
-    cfg.apply_to_mods();
     crate::logmask::keep_whole(cfg.log_addresses);
-    if cfg.log_addresses {
-        log::info!("server: log_addresses = 1: the players' internet addresses are logged whole");
-    }
     args.map = cfg.map.clone();
     args.time = cfg.time.clone();
-    if let Some(d) = &cfg.date {
-        args.date = Some(d.clone());
+    if let Some(date) = &cfg.date {
+        args.date = Some(date.clone());
     }
     if cfg.real_time {
         crate::real_time::start_at_now(args);
     }
-    args.weather = cfg.weather.clone();
-    // the METAR sync: the report's weather from the start (the host loop downloads it again)
-    let station = cfg.metar_sync.then(|| {
-        if cfg.metar_station.is_empty() {
-            omsi_launcher_lib::nearest_airport(&args.root.to_string_lossy(), &args.map)
-        } else {
-            cfg.metar_station.clone()
-        }
-    });
-    if let Some(icao) = station.as_ref() {
-        match crate::weather_setup::try_metar(icao)
-            .and_then(|w| crate::weather_setup::report_wire(&w))
-        {
-            Some(wire) => args.weather = Some(wire),
-            None => log::warn!("server: no METAR report for {icao} yet; trying again soon"),
-        }
-        log::info!("server: the weather follows the METAR report of {icao}");
-    }
-    let _ = SERVER_METAR.set(station);
+    args.weather = plan.weather;
     args.traffic = cfg.traffic;
     args.schedule = cfg.timetable;
     args.ai_drive_through_parked = cfg.ai_drive_through_parked;
-    if cfg.ai_drive_through_parked {
-        log::info!(
-            "server: ai_drive_through_parked = 1: the AI drives on through a parked car standing in its lane, as OMSI 2's does"
-        );
-    }
     args.passengers = cfg.passengers;
-    let _ = SERVER_PASSENGERS.set((cfg.passengers, cfg.passenger_density));
-    if cfg.public_address.is_empty() {
-        omsi_net::addrs::auto_direct(cfg.web_port);
-    }
-    let limits = cfg.ai_limits.settings_lines();
-    if !limits.is_empty() {
-        log::info!(
-            "server: AI limits of server.cfg over settings.cfg: {}",
-            limits.trim_end().replace('\n', ", ")
-        );
-        let _ = crate::settings::SERVER_AI_LIMITS.set(limits);
+    if !plan.ai_limits.is_empty() {
+        let _ = crate::settings::SERVER_AI_LIMITS.set(plan.ai_limits);
     }
     args.lan_host = Some(cfg.port);
     args.lan_join = None;
@@ -175,33 +108,10 @@ pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
     if args.offscreen.is_none() {
         args.offscreen = Some(std::env::temp_dir().join("omsi-server-unused.png"));
     }
-    let density = cfg
-        .passenger_density
-        .map(|d| d.to_string())
-        .unwrap_or_else(|| "as settings.cfg".into());
-    log::info!(
-        "server: you run this server, not openOMSI: you are responsible for the data your players send it (driver names, network addresses, chat, voice) and for what you keep of it, such as logs and bans"
-    );
-    log::info!(
-        "server '{}': map {}, {} at {}, traffic {}, timetable {}, passengers {} (density {density}), UDP {} / web {}, at most {} players",
-        cfg.name,
-        cfg.map,
-        cfg.date.as_deref().unwrap_or("today"),
-        cfg.time,
-        cfg.traffic,
-        cfg.timetable,
-        cfg.passengers,
-        cfg.port,
-        cfg.web_port,
-        cfg.max_players
-    );
     Ok(cfg)
 }
 
-/// A dedicated server's people: whether it has any (`passengers`) and its
-/// `passenger_density` (None: the machine's own passengers setting).
-pub(crate) static SERVER_PASSENGERS: std::sync::OnceLock<(bool, Option<f32>)> =
-    std::sync::OnceLock::new();
+pub(crate) use omsi_server::startup::{SERVER_ADMIN, SERVER_METAR, SERVER_PASSENGERS};
 
 /// The map of `server.cfg` is installed (in the original folder or the content folder), or
 /// what to do: the maps there are.
@@ -221,13 +131,6 @@ pub(crate) fn check_map(args: &Args) -> Result<(), String> {
 }
 
 pub(crate) use omsi_lan::server_cfg::installed_maps;
-
-/// The airport whose METAR report a dedicated server's weather follows (None: no METAR sync).
-pub(crate) static SERVER_METAR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-
-/// A dedicated server's admin and moderator passwords and clock speed (for the host loop).
-pub(crate) static SERVER_ADMIN: std::sync::OnceLock<(String, String, f64)> =
-    std::sync::OnceLock::new();
 
 pub(crate) use omsi_server::admin::{admin_state, tick_status};
 
