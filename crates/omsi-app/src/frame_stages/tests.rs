@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::app_events::{WindowStage, WINDOW_FRAME};
-use crate::offscreen::{OffscreenStage, OFFSCREEN_STEP};
+use crate::offscreen::{OffscreenStage, OFFSCREEN_STEP, SERVER_STEP};
 
 fn names<S: Stage>(list: &[S]) -> Vec<&'static str> {
     list.iter().map(|s| s.info().name).collect()
@@ -43,6 +43,23 @@ fn the_offscreen_step_runs_in_this_order() {
 }
 
 #[test]
+fn dedicated_host_has_its_own_tick_without_player_or_capture_stages() {
+    use OffscreenStage::*;
+    assert_eq!(
+        names(SERVER_STEP),
+        ["server", "clock", "traffic", "ground_gap", "humans", "lan", "surroundings"]
+    );
+    // Reuse the tested offscreen simulation ordering while leaving out everything
+    // that exists only for a local player, recording, or image output.
+    let shared = OFFSCREEN_STEP.iter().copied().filter(|stage| SERVER_STEP.contains(stage)).collect::<Vec<_>>();
+    assert_eq!(shared, SERVER_STEP);
+    for stage in [Startup, Duty, Drive, Snapshot, Record] {
+        assert!(!SERVER_STEP.contains(&stage), "{stage:?} reached the dedicated host");
+    }
+    assert!(SERVER_STEP.iter().all(|stage| stage.info().phase != Phase::Output));
+}
+
+#[test]
 fn every_stage_is_listed_once_under_a_name_of_its_own() {
     fn check<S: Stage + PartialEq>(list: &[S]) {
         let mut seen = std::collections::HashSet::new();
@@ -53,6 +70,7 @@ fn every_stage_is_listed_once_under_a_name_of_its_own() {
     }
     check(WINDOW_FRAME);
     check(OFFSCREEN_STEP);
+    check(SERVER_STEP);
 }
 
 #[test]
@@ -104,6 +122,7 @@ fn the_simulation_comes_before_what_is_shown_of_it() {
     }
     check(WINDOW_FRAME);
     check(OFFSCREEN_STEP);
+    check(SERVER_STEP);
     // the interface is drawn over the frame's own state, and the picture with it
     use WindowStage::*;
     let w = |s| pos(WINDOW_FRAME, s);
@@ -124,6 +143,7 @@ fn what_a_stage_takes_an_earlier_stage_gave() {
     }
     check(WINDOW_FRAME);
     check(OFFSCREEN_STEP);
+    check(SERVER_STEP);
 }
 
 #[test]
@@ -140,6 +160,7 @@ fn every_stage_says_what_it_works_on_and_how_it_is_timed() {
     }
     check(WINDOW_FRAME);
     check(OFFSCREEN_STEP);
+    check(SERVER_STEP);
 }
 
 /// The window and the offscreen run take the shared work in the same order, but for the
