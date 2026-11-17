@@ -156,17 +156,7 @@ impl<'a> Offscreen<'a> {
         // test harness for crashes, kerbs and reversing: OMSI_DRIVE_PROFILE="t throttle brake
         // [steer]/ …" holds piecewise constant pedals from each t on, OMSI_DRIVE_V0 gives the
         // bus a speed (km/h) on the first frame, OMSI_DEBUG_PHYSICS=secs logs the pose
-        let drive_profile: Vec<[f32; 4]> = omsi_cfg::flags::OMSI_DRIVE_PROFILE.var()
-            .unwrap_or_default()
-            .split(['/', ';'])
-            .filter_map(|s| {
-                let v: Vec<f32> = s
-                    .split_whitespace()
-                    .filter_map(|x| x.parse().ok())
-                    .collect();
-                (v.len() >= 3).then(|| [v[0], v[1], v[2], v.get(3).copied().unwrap_or(0.0)])
-            })
-            .collect();
+        let drive_profile = if server { Vec::new() } else { test_drive_profile() };
         let drive_v0: Option<f32> = omsi_cfg::flags::OMSI_DRIVE_V0.parse();
         let physics_log: f32 = omsi_cfg::flags::OMSI_DEBUG_PHYSICS.parse()
             .unwrap_or(0.0);
@@ -307,6 +297,18 @@ impl<'a> Offscreen<'a> {
             sky,
         })
     }
+}
+
+/// Parse the drive-only test harness settings, never used by a dedicated server.
+fn test_drive_profile() -> Vec<[f32; 4]> {
+    omsi_cfg::flags::OMSI_DRIVE_PROFILE.var()
+        .unwrap_or_default()
+        .split(['/', ';'])
+        .filter_map(|s| {
+            let v: Vec<f32> = s.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            (v.len() >= 3).then(|| [v[0], v[1], v[2], v.get(3).copied().unwrap_or(0.0)])
+        })
+        .collect()
 }
 
 /// The AI traffic (with no cars asked for, the light programs and the lamps only).
