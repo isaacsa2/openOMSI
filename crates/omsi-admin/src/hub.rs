@@ -153,6 +153,10 @@ pub struct ServerState {
     pub version: String,
     pub players: usize,
     pub max_players: usize,
+    /// Completed simulation ticks per wall-clock second; None while warming up.
+    pub tps: Option<f64>,
+    /// Configured simulation tick frequency (not the number measured).
+    pub target_tps: f64,
     /// `HH:MM` and seconds of the day.
     pub time: String,
     pub clock: f64,

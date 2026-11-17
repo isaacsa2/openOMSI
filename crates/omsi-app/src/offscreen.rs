@@ -85,6 +85,10 @@ struct Offscreen<'a> {
     srv_metar_rx: Option<std::sync::mpsc::Receiver<Option<omsi_content::weather::Weather>>>,
     /// the weather's name on the status page
     srv_weather_name: String,
+    /// Real completed dedicated host ticks per wall-clock second.
+    srv_metrics: omsi_admin::metrics::TickMeter,
+    /// Last wall-clock publication of the dedicated host status and web panel.
+    srv_report_at: std::time::Instant,
     ground_gap: Option<crate::ground_gap::GroundGap>,
     spray: puddles::Spray,
     real_time: RealTime,
@@ -123,6 +127,9 @@ pub(crate) fn run_offscreen(
         steps += 1;
         let t = std::time::Instant::now();
         let go_on = run.step(i)?;
+        if server && go_on {
+            run.srv_metrics.completed(std::time::Instant::now());
+        }
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if profile && i > 0 && ms > 50.0 {
             slow += 1;

@@ -14,6 +14,7 @@ pub mod audit;
 pub mod auth;
 pub mod http;
 pub mod hub;
+pub mod metrics;
 pub mod op;
 pub mod perm;
 pub mod players;

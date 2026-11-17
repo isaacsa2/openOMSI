@@ -8,8 +8,8 @@ use crate::view_sync::{self, ViewSync};
 impl Offscreen<'_> {
     /// One step, the `i`-th (false: a server was told to stop).
     pub(super) fn step(&mut self, i: usize) -> Result<bool> {
-        let sequence = if self.server { stages::SERVER_STEP } else { stages::OFFSCREEN_STEP };
         let mut step = stages::Step { run: self, i };
+        let sequence = if self.server { stages::SERVER_STEP } else { stages::OFFSCREEN_STEP };
         Ok(crate::frame_stages::run(&mut step, sequence)? == crate::frame_stages::Flow::Go)
     }
 
@@ -48,6 +48,8 @@ impl Offscreen<'_> {
             ref mut srv_metar_due,
             ref mut srv_metar_rx,
             ref mut srv_weather_name,
+            ref srv_metrics,
+            ref mut srv_report_at,
             ref mut lan_off,
             ref remotes_off,
             ref mut traffic,
@@ -122,6 +124,24 @@ impl Offscreen<'_> {
                 }
             }
             omsi_lan::parked::server_tick(l, dt as f32);
+            // Commands typed into this machine's terminal are executed on the
+            // simulation thread, not on the stdin reader. They use the same
+            // authority checks, command parser and audit trail as the local API.
+            for text in crate::server::console::take() {
+                if crate::server::console::run_builtin(&text, l, srv_metrics) {
+                    continue;
+                }
+                if omsi_lan::parked::server_admin(&text, &|x, y, near| crate::server::parked_floor(world, x, y, near)) {
+                    continue;
+                }
+                if omsi_lan::admin::Action::parse(&text).is_none() {
+                    let verb = text.split_whitespace().next().unwrap_or("");
+                    log::warn!("server console: unknown command {:?} (type help)", omsi_admin::clean(verb, 24));
+                    continue;
+                }
+                srv_admin.admins.insert(omsi_lan::admin::CONSOLE_ADMIN, omsi_admin::Role::Admin);
+                omsi_lan::admin::server_command(l, omsi_lan::admin::CONSOLE_ADMIN, &format!("admin {text}"), srv_admin, &positions, &rules, hub);
+            }
             for text in crate::lan::take_local_admin() {
                 if omsi_lan::parked::server_admin(&text, &|x, y, near| crate::server::parked_floor(world, x, y, near)) {
                     continue;
@@ -155,11 +175,14 @@ impl Offscreen<'_> {
                 view_sync::apply_traffic(t, &mut sim_view.traffic, world, renderer, scene);
             }
         }
-        if quit::requested().is_some() {
+        if quit::requested().is_some() || crate::server::console::stop_requested() {
             log::info!("server: stopping");
             return false;
         }
-        if i.is_multiple_of(super::steps_in(1.0)) {
+        // Publish by elapsed wall time, not by a fixed number of simulation
+        // ticks: on an overloaded host 60 ticks may take several seconds.
+        if i == 0 || srv_report_at.elapsed() >= std::time::Duration::from_secs(1) {
+            *srv_report_at = std::time::Instant::now();
             if let Some(l) = lan_off.as_mut() {
                 crate::server::enforce_vehicles(l);
                 crate::server::tick_status(l, parse_time(&args.time) + *srv_clock + srv_admin.shift, srv_weather_name.as_str());
@@ -172,7 +195,7 @@ impl Offscreen<'_> {
                 // and for the admins' panels
                 if let Some(h) = omsi_lan::admin::hub() {
                     let time = parse_time(&args.time) + *srv_clock + srv_admin.shift;
-                    let state = crate::server::admin_state(time, l.clock_speed, srv_weather_name, srv_metar.as_deref(), omsi_net::ws::WorldCounts { cars, buses, dormant, parked, walking, waiting, aboard, traffic: target, passengers, passenger_density });
+                    let state = crate::server::admin_state(time, l.clock_speed, srv_weather_name, srv_metar.as_deref(), omsi_net::ws::WorldCounts { cars, buses, dormant, parked, walking, waiting, aboard, traffic: target, passengers, passenger_density }, srv_metrics);
                     omsi_lan::admin::publish(h, l, srv_admin, state);
                 }
             }
@@ -924,8 +947,7 @@ impl Offscreen<'_> {
             steps::throw_spray(spray, dt, player.as_ref(), traffic.as_ref(), remotes_off, eye, steps::spray_wind(weather), world, spray_wet, world.settings.rain_quality());
         }
         *wetness = crate::weather_setup::road_wetness(precip_of(weather).1, dt as f64, *wetness);
-        // Road-snow tracks are a renderer-side effect, not part of the host's
-        // authoritative traffic or weather simulation.
+        // Renderer-side snow tracks are not needed for authoritative host simulation.
         if !server {
             let (v, eye) = (omsi_scene::road_snow::vehicles(player.as_ref().map(|p| &p.vehicle), traffic.as_deref()), player.as_ref().map_or(camera.position, |p| p.vehicle.position));
             omsi_scene::road_snow::frame(renderer, dt, Some(weather), eye, traffic.as_ref().map(|t| &t.net), &v);

@@ -34,6 +34,11 @@
   <div id="app" hidden>
     <section class="card" id="overview">
       <h2 data-t="overview">Server</h2>
+      <div class="tick-meter" role="group" aria-label="Server performance">
+        <div class="tick-heading"><strong id="tps-value">—</strong><span data-t="tps-label">Simulation ticks per second</span></div>
+        <progress id="tps-bar" max="60" value="0" aria-label="TPS" hidden></progress>
+        <p class="hint" data-t="tps-help">Actual completed simulation ticks per wall-clock second, not a configured FPS value.</p>
+      </div>
       <dl class="facts" id="facts"></dl>
       <p class="stale" id="stale" hidden data-t="stale">The server has not reported for a while: what you see may be old.</p>
     </section>
