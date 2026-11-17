@@ -13,6 +13,8 @@
 use super::*;
 use std::path::Path;
 
+pub(crate) mod console;
+
 pub(crate) use omsi_lan::server_cfg::{enforce_vehicles, player_info, ServerCfg, SERVER_VEHICLES};
 
 /// Announce the server's own bus paints without allocating GPU resources. Only
@@ -176,6 +178,7 @@ pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
     SERVER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = SERVER_ADMIN.set((cfg.admin_password.clone(), cfg.moderator_password.clone(), if cfg.real_time { 1.0 } else { cfg.time_speed }));
     start_administration(&cfg, path);
+    console::start();
     omsi_lan::server_cfg::set_server_speed_limit_kmh(cfg.speed_limit_kmh);
     log::info!("server: RP speed limit: {}", if cfg.speed_limit_kmh == 0 { "disabled".to_string() } else { format!("{} km/h", cfg.speed_limit_kmh) });
     omsi_lan::admin::allow_player_teleport(cfg.allow_player_teleport);
