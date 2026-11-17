@@ -87,6 +87,8 @@ struct Offscreen<'a> {
     srv_weather_name: String,
     /// Real completed dedicated host ticks per wall-clock second.
     srv_metrics: omsi_admin::metrics::TickMeter,
+    /// Last wall-clock publication of the dedicated host status and web panel.
+    srv_report_at: std::time::Instant,
     ground_gap: Option<crate::ground_gap::GroundGap>,
     spray: puddles::Spray,
     real_time: RealTime,
