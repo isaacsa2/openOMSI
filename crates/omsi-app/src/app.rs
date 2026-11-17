@@ -609,6 +609,7 @@ impl App {
                     h.visual_full_bus_reaction = self.settings.passenger_full_bus_reaction
                         && self.settings.passenger_animation == "enhanced";
                     h.bad_driving = self.settings.pax_bad_driving;
+                    h.bad_driving_alight = self.settings.pax_bad_driving_alight;
                     h.boarding = self.settings.boarding.clone();
                     h.stand_chance = self.settings.standing_chance;
                     h.short_rides_stand = self.settings.pax_short_rides_stand;
