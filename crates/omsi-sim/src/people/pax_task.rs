@@ -622,7 +622,7 @@ impl PeopleSim {
             self.pax_mut(i).unwrap().timer = 1.0;
         }
         let door_open = p.door.map(|d| bn.exit_open.get(d).copied().unwrap_or(false)).unwrap_or(false);
-        let may_leave = door_open && (reg.next.is_some() || p.complaint == 3);
+        let may_leave = door_open && (reg.next.is_some() || (p.complaint == 3 && self.bad_driving_alight));
         self.pax_mut(i).unwrap().short = !may_leave;
         let out = p.st == 7 && bn.speed.abs() < 1.0 && may_leave;
         if !out {
