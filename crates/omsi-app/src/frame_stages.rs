@@ -22,9 +22,9 @@ use std::time::Instant;
 use crate::profile_keys::{ProfKey, ProfileTimes};
 
 #[cfg(test)]
-mod access_tests;
-#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod access_tests;
 
 /// Where in the frame a stage belongs, roughly in the order of the frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -157,14 +157,10 @@ pub(crate) trait Stage: Copy + std::fmt::Debug + 'static {
 
 /// What takes a list's stages: the window's frame, the offscreen run's step.
 pub(crate) trait Host<S: Stage> {
-    fn stopping(&self) -> bool {
-        false
-    }
+    fn stopping(&self) -> bool { false }
     fn run_stage(&mut self, stage: S) -> anyhow::Result<Flow>;
     /// Where the stages' times go (`App::perf.profile`, the offscreen run's own).
     fn profile(&mut self) -> &mut ProfileTimes;
-    /// An optional host-side diagnostics observer (no work for normal gameplay).
-    fn observe_stage(&mut self, _name: &'static str, _elapsed: std::time::Duration) {}
 }
 
 /// The runner: `list`'s stages in their order, each timed under its profile key, until one
@@ -178,10 +174,8 @@ pub(crate) fn run<S: Stage, H: Host<S>>(host: &mut H, list: &[S]) -> anyhow::Res
         let t = Instant::now();
         crate::watchdog::enter(stage.info().name);
         let flow = host.run_stage(stage)?;
-        let elapsed = t.elapsed();
-        host.observe_stage(stage.info().name, elapsed);
         if let Profile::Key(k) = stage.info().profile {
-            host.profile().add(k, elapsed.as_secs_f64());
+            host.profile().add(k, t.elapsed().as_secs_f64());
         }
         if flow == Flow::Stop {
             return Ok(Flow::Stop);
@@ -220,18 +214,8 @@ pub(crate) fn log_order() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     if omsi_cfg::flags::OMSI_FRAME_ORDER.is_set() {
         ONCE.call_once(|| {
-            log::info!(
-                "{}",
-                describe("window frame", crate::app_events::WINDOW_FRAME)
-            );
-            log::info!(
-                "{}",
-                describe("offscreen step", crate::offscreen::OFFSCREEN_STEP)
-            );
-            log::info!(
-                "{}",
-                describe("dedicated server tick", crate::offscreen::SERVER_STEP)
-            );
+            log::info!("{}", describe("window frame", crate::app_events::WINDOW_FRAME));
+            log::info!("{}", describe("offscreen step", crate::offscreen::OFFSCREEN_STEP));
         });
     }
 }

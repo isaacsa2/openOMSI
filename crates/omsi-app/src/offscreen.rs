@@ -124,6 +124,9 @@ pub(crate) fn run_offscreen(
     remotes_off: lan::LanGame,
 ) -> Result<()> {
     crate::frame_stages::log_order();
+    if args.server.is_some() && omsi_cfg::flags::OMSI_FRAME_ORDER.is_set() {
+        log::info!("{}", crate::frame_stages::describe("dedicated server tick", SERVER_STEP));
+    }
     // (a dedicated server lets nobody new in before its world is there: see `set_starting`)
     let server = args.server.is_some();
     if let Some(l) = lan_off.as_mut().filter(|_| server) {
