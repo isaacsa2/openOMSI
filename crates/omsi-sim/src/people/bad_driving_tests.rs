@@ -40,13 +40,16 @@ fn rider() -> Person {
     }
 }
 
-fn emergency_stop(on: bool, alight: bool) -> (u8, f32) {
+fn emergency_stop(on: bool, alight: bool, severe: bool) -> (u8, f32, Task) {
     let world = crate::world_data::WorldData::default();
     let mut h = PeopleSim::new(Path::new("/nonexistent"), 200);
     h.bad_driving = on;
     h.bad_driving_alight = alight;
     h.time = 10.0;
     h.people = vec![rider()];
+    if severe {
+        h.pax_mut(0).unwrap().bad_at = [0.001, 0.002, 0.003];
+    }
     let bus = PlayerBusView {
         position: DVec3::ZERO,
         heading: 0.0,
@@ -69,14 +72,22 @@ fn emergency_stop(on: bool, alight: bool) -> (u8, f32) {
         h.ride_comfort(0.02, Some(&bus), &[], &HashMap::new(), &world);
     }
     let p = h.pax(0).unwrap();
-    (p.complaint, p.discomfort)
+    (p.complaint, p.discomfort, p.task)
 }
 
 #[test]
 fn riders_complain_about_an_emergency_stop_unless_the_setting_is_off() {
-    let (said, toll) = emergency_stop(true, true);
+    let (said, toll, _) = emergency_stop(true, true, false);
     assert_eq!(said, 1);
     assert!(toll > 0.05, "{toll}");
-    assert_eq!(emergency_stop(false, true), (0, 0.0));
-    assert_eq!(emergency_stop(true, false).0, said, "disabling early exit must not silence complaints");
+    assert_eq!(emergency_stop(false, true, false), (0, 0.0, Task::SittingInBus));
+    assert_eq!(emergency_stop(true, false, false).0, said, "disabling early exit must not silence complaints");
+}
+
+#[test]
+fn complain_only_preserves_the_seat_even_after_the_third_complaint() {
+    let (complaints, discomfort, task) = emergency_stop(true, false, true);
+    assert_eq!(complaints, 3);
+    assert!(discomfort > 0.003);
+    assert_eq!(task, Task::SittingInBus);
 }
