@@ -22,7 +22,7 @@ pub struct StageTiming {
     pub share_pct: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
 pub struct ProfileReport {
     pub enabled: bool,
     pub seconds: f64,
