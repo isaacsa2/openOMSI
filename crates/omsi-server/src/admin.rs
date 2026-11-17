@@ -177,7 +177,15 @@ pub fn publish_status(
     tick_status(lan, time, weather);
     omsi_lan::gateway::update_server_world(world);
     if let Some(hub) = omsi_lan::admin::hub() {
-        let state = admin_state(time, lan.clock_speed, weather, metar, world, metrics, profiler);
+        let state = admin_state(
+            time,
+            lan.clock_speed,
+            weather,
+            metar,
+            world,
+            metrics,
+            profiler,
+        );
         omsi_lan::admin::publish(&hub, lan, admin, state);
     }
 }
@@ -209,4 +217,3 @@ pub fn info_of(cfg: &ServerCfg, version: &str) -> omsi_net::ws::ServerInfo {
         ..Default::default()
     }
 }
-

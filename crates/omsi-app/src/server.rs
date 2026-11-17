@@ -51,7 +51,10 @@ pub(crate) fn park_buses(server: bool, args: &Args, world: &World) {
 pub(crate) fn prepare(args: &mut Args, path: &Path) -> Result<ServerCfg> {
     let map_override = args.server_map.take();
     let plan = omsi_server::startup::prepare(
-        path, &args.root, map_override, crate::game_lists::TRAFFIC_MAX,
+        path,
+        &args.root,
+        map_override,
+        crate::game_lists::TRAFFIC_MAX,
         &format!("{} ({})", omsi_platform::VERSION, BUILD),
         &|root, map| omsi_launcher_lib::nearest_airport(&root.to_string_lossy(), map),
     )?;

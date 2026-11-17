@@ -85,13 +85,24 @@ impl Offscreen<'_> {
                 None
             };
         omsi_server::clock::sync_clock(
-            srv_clock, srv_wall, srv_admin, dt as f64,
-            lan_off.as_ref().map(|l| l.clock_speed as f64).unwrap_or(1.0),
-            parse_time(&args.time), real_time_seconds,
+            srv_clock,
+            srv_wall,
+            srv_admin,
+            dt as f64,
+            lan_off
+                .as_ref()
+                .map(|l| l.clock_speed as f64)
+                .unwrap_or(1.0),
+            parse_time(&args.time),
+            real_time_seconds,
         );
         if let Some(l) = lan_off.as_mut() {
             omsi_server::weather::tick_metar(
-                l, srv_metar.as_ref(), srv_metar_rx, srv_metar_due, srv_weather_name,
+                l,
+                srv_metar.as_ref(),
+                srv_metar_rx,
+                srv_metar_due,
+                srv_weather_name,
             );
         }
         if let Some(l) = lan_off.as_mut() {
@@ -121,10 +132,13 @@ impl Offscreen<'_> {
             };
             let mut cars = traffic.as_mut().map(|t| AdminTraffic(t, resync));
             omsi_server::commands::apply_world_jobs(
-                l, srv_admin,
-                cars.as_mut().map(|c| c as &mut dyn omsi_lan::admin::world::ServerTraffic),
+                l,
+                srv_admin,
+                cars.as_mut()
+                    .map(|c| c as &mut dyn omsi_lan::admin::world::ServerTraffic),
                 parse_time(&args.time) + *srv_clock,
-                crate::game_lists::TRAFFIC_MAX, hub,
+                crate::game_lists::TRAFFIC_MAX,
+                hub,
             );
         }
         if let Some(t) = traffic.as_mut() {
@@ -156,15 +170,27 @@ impl Offscreen<'_> {
                 let (walking, waiting, aboard) =
                     humans_off.as_ref().map(|h| h.counts()).unwrap_or_default();
                 let world_counts = omsi_net::ws::WorldCounts {
-                    cars, buses, dormant, parked, walking, waiting, aboard,
+                    cars,
+                    buses,
+                    dormant,
+                    parked,
+                    walking,
+                    waiting,
+                    aboard,
                     traffic: traffic.as_ref().map(|t| t.target).unwrap_or(0),
                     passengers: humans_off.is_some(),
                     passenger_density: srv_admin.passenger_density.unwrap_or(settings.pax_density),
                 };
                 let time = parse_time(&args.time) + *srv_clock + srv_admin.shift;
                 omsi_server::admin::publish_status(
-                    l, srv_admin, time, srv_weather_name, srv_metar.as_deref(),
-                    world_counts, srv_metrics, srv_profiler,
+                    l,
+                    srv_admin,
+                    time,
+                    srv_weather_name,
+                    srv_metar.as_deref(),
+                    world_counts,
+                    srv_metrics,
+                    srv_profiler,
                 );
             }
         }
@@ -1268,4 +1294,3 @@ impl<F: FnMut(&mut crate::traffic::Traffic)> omsi_lan::admin::world::ServerTraff
         ids.len()
     }
 }
-
