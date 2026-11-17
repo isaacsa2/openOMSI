@@ -122,6 +122,24 @@ impl Offscreen<'_> {
                 }
             }
             omsi_lan::parked::server_tick(l, dt as f32);
+            // Commands typed into this machine's terminal are executed on the
+            // simulation thread, not on the stdin reader. They use the same
+            // authority checks, command parser and audit trail as the local API.
+            for text in crate::server::console::take() {
+                if crate::server::console::run_builtin(&text, l, srv_metrics) {
+                    continue;
+                }
+                if omsi_lan::parked::server_admin(&text, &|x, y, near| crate::server::parked_floor(world, x, y, near)) {
+                    continue;
+                }
+                if omsi_lan::admin::Action::parse(&text).is_none() {
+                    let verb = text.split_whitespace().next().unwrap_or("");
+                    log::warn!("server console: unknown command {:?} (type help)", omsi_admin::clean(verb, 24));
+                    continue;
+                }
+                srv_admin.admins.insert(omsi_lan::admin::CONSOLE_ADMIN, omsi_admin::Role::Admin);
+                omsi_lan::admin::server_command(l, omsi_lan::admin::CONSOLE_ADMIN, &format!("admin {text}"), srv_admin, &positions, &rules, hub);
+            }
             for text in crate::lan::take_local_admin() {
                 if omsi_lan::parked::server_admin(&text, &|x, y, near| crate::server::parked_floor(world, x, y, near)) {
                     continue;
@@ -155,7 +173,7 @@ impl Offscreen<'_> {
                 view_sync::apply_traffic(t, &mut sim_view.traffic, world, renderer, scene);
             }
         }
-        if quit::requested().is_some() {
+        if quit::requested().is_some() || crate::server::console::stop_requested() {
             log::info!("server: stopping");
             return false;
         }
