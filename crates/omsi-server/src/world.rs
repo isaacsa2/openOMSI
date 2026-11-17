@@ -49,7 +49,11 @@ impl HostWorld {
                 root: root.to_path_buf(),
                 map_dir: map_dir.clone(),
                 raw_tiles: global.raw_tiles.clone(),
-                tiles: global.tiles.iter().map(|t| ((t.x, t.y), t.file.clone())).collect(),
+                tiles: global
+                    .tiles
+                    .iter()
+                    .map(|t| ((t.x, t.y), t.file.clone()))
+                    .collect(),
                 ailists,
                 date,
                 chrono_dirs,
@@ -65,14 +69,22 @@ impl HostWorld {
         };
         let objects = Arc::make_mut(&mut data.objects);
         objects.add_index(
-            index.objects.iter().map(|(id, (_tile, pos, rot))| (*id, (*pos, *rot))),
-            index.duplicates.iter().map(|(key, (pos, rot))| (*key, (*pos, *rot))),
+            index
+                .objects
+                .iter()
+                .map(|(id, (_tile, pos, rot))| (*id, (*pos, *rot))),
+            index
+                .duplicates
+                .iter()
+                .map(|(key, (pos, rot))| (*key, (*pos, *rot))),
         );
         data.index = Some(Arc::clone(&index));
 
         log::info!(
             "dedicated CPU world: {} tiles indexed, {} unreadable, {} placed objects (no renderer allocated)",
-            index.tiles_read, index.tiles_failed, index.objects.len()
+            index.tiles_read,
+            index.tiles_failed,
+            index.objects.len()
         );
         Ok(Self {
             global,
@@ -99,4 +111,3 @@ pub fn check_map(root: &std::path::Path, map: &str) -> Result<(), String> {
             .unwrap_or_else(|| "none".into())
     ))
 }
-

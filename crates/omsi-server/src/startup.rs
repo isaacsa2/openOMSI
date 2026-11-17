@@ -2,7 +2,7 @@
 //! All persistent moderation, transfer and visibility policy is applied here.
 
 use anyhow::Result;
-use omsi_lan::server_cfg::{ServerCfg, SERVER_VEHICLES};
+use omsi_lan::server_cfg::{SERVER_VEHICLES, ServerCfg};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -44,7 +44,9 @@ pub fn prepare(
     omsi_lan::bans::require_hardware_id(cfg.require_hardware_id);
     omsi_lan::bans::install(omsi_lan::bans::BanStore::open(
         Some(cfg.dir.join("bans.json")),
-        cfg.owner_bans.clone().or_else(omsi_lan::bans::BanStore::default_owner_path),
+        cfg.owner_bans
+            .clone()
+            .or_else(omsi_lan::bans::BanStore::default_owner_path),
     ));
     let _ = SERVER_VEHICLES.set(cfg.vehicles.clone());
     cfg.apply_to_mods();
@@ -72,7 +74,10 @@ pub fn prepare(
     let _ = SERVER_METAR.set(station);
     let ai_limits = cfg.ai_limits.settings_lines();
     if !ai_limits.is_empty() {
-        log::info!("server: AI limits in server.cfg: {}", ai_limits.trim_end().replace('\n', ", "));
+        log::info!(
+            "server: AI limits in server.cfg: {}",
+            ai_limits.trim_end().replace('\n', ", ")
+        );
     }
     if cfg.ai_drive_through_parked {
         log::info!("server: AI drives through blocked parked vehicles (server.cfg)");
@@ -82,11 +87,25 @@ pub fn prepare(
     }
     log::info!(
         "server '{}': map {}, {} at {}, traffic {}, timetable {}, passengers {}, UDP {} / web {}, at most {} players",
-        cfg.name, cfg.map, cfg.date.as_deref().unwrap_or("today"),
-        cfg.time, cfg.traffic, cfg.timetable, cfg.passengers, cfg.port, cfg.web_port, cfg.max_players,
+        cfg.name,
+        cfg.map,
+        cfg.date.as_deref().unwrap_or("today"),
+        cfg.time,
+        cfg.traffic,
+        cfg.timetable,
+        cfg.passengers,
+        cfg.port,
+        cfg.web_port,
+        cfg.max_players,
     );
-    log::info!("server operator: you are responsible for your players' private data, logs and moderation records");
-    Ok(LaunchPlan { config: cfg, weather, ai_limits })
+    log::info!(
+        "server operator: you are responsible for your players' private data, logs and moderation records"
+    );
+    Ok(LaunchPlan {
+        config: cfg,
+        weather,
+        ai_limits,
+    })
 }
 
 /// No web request thread touches these values: the dedicated host owns them.
@@ -117,8 +136,7 @@ pub fn server_administration_state(
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default()
     };
-    if let (true, Some((password, moderator, speed))) = (server, SERVER_ADMIN.get())
-    {
+    if let (true, Some((password, moderator, speed))) = (server, SERVER_ADMIN.get()) {
         admin.password = password.clone();
         admin.moderator_password = moderator.clone();
         if let Some((enabled, density)) = SERVER_PASSENGERS.get() {
@@ -130,4 +148,3 @@ pub fn server_administration_state(
     }
     (admin, metar, due, None, weather_name)
 }
-

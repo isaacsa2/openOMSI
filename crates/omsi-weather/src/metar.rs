@@ -6,7 +6,9 @@ pub fn fetch_metar(icao: &str) -> omsi_content::weather::Weather {
     match try_metar(icao) {
         Some(w) => w,
         None => {
-            log::warn!("current weather at {icao}: no METAR report could be had; a clear day instead");
+            log::warn!(
+                "current weather at {icao}: no METAR report could be had; a clear day instead"
+            );
             omsi_content::weather::from_metar(icao, "CAVOK")
         }
     }
@@ -46,7 +48,10 @@ pub fn report_wire(w: &omsi_content::weather::Weather) -> Option<String> {
     let icao = path.strip_prefix("metar:")?;
     let mut raw: Vec<&str> = Vec::new();
     for t in w.description.split_whitespace() {
-        if matches!(t.trim_end_matches('='), "TEMPO" | "BECMG" | "NOSIG" | "RMK" | "PROB30" | "PROB40") {
+        if matches!(
+            t.trim_end_matches('='),
+            "TEMPO" | "BECMG" | "NOSIG" | "RMK" | "PROB30" | "PROB40"
+        ) {
             break;
         }
         raw.push(t);
@@ -58,4 +63,3 @@ pub fn report_wire(w: &omsi_content::weather::Weather) -> Option<String> {
     // (the network's weather field holds 260 characters)
     Some(format!("{REPORT}{icao} {raw}").chars().take(250).collect())
 }
-
