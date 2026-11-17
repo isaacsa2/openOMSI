@@ -51,8 +51,12 @@ fn dedicated_host_has_its_own_tick_without_player_or_capture_stages() {
     );
     // Reuse the tested offscreen simulation ordering while leaving out everything
     // that exists only for a local player, recording, or image output.
-    let shared = OFFSCREEN_STEP.iter().copied().filter(|stage| SERVER_STEP.contains(stage)).collect::<Vec<_>>();
-    assert_eq!(shared, SERVER_STEP);
+    let shared = OFFSCREEN_STEP
+        .iter()
+        .copied()
+        .filter(|stage| SERVER_STEP.contains(stage))
+        .collect::<Vec<_>>();
+    assert_eq!(shared.as_slice(), SERVER_STEP);
     for stage in [Startup, Duty, Drive, Snapshot, Record] {
         assert!(!SERVER_STEP.contains(&stage), "{stage:?} reached the dedicated host");
     }
