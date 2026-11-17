@@ -56,7 +56,7 @@ fn normalize(text: &str) -> Option<&str> {
         .then_some(text)
 }
 
-pub(super) fn take() -> Vec<String> {
+pub(crate) fn take() -> Vec<String> {
     let Some(queue) = INPUT.get() else { return Vec::new() };
     let Ok(rx) = queue.lock() else { return Vec::new() };
     let mut result = Vec::new();
@@ -91,7 +91,7 @@ fn builtin(command: &str) -> Option<Builtin> {
 
 /// Handle commands that do not alter game state. All other accepted admin
 /// actions are validated and executed by the LAN admin command implementation.
-pub(super) fn run_builtin(
+pub(crate) fn run_builtin(
     command: &str,
     lan: &omsi_net::LanSession,
     metrics: &omsi_admin::metrics::TickMeter,
@@ -130,7 +130,7 @@ pub(super) fn run_builtin(
     true
 }
 
-pub(super) fn stop_requested() -> bool {
+pub(crate) fn stop_requested() -> bool {
     STOP.load(Ordering::SeqCst)
 }
 
