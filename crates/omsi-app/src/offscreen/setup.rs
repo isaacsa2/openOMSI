@@ -296,6 +296,7 @@ impl<'a> Offscreen<'a> {
             srv_metar_due,
             srv_metar_rx,
             srv_weather_name,
+            srv_metrics: omsi_admin::metrics::TickMeter::new(1.0 / f64::from(dt)),
             ground_gap,
             spray,
             real_time,
