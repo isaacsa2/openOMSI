@@ -11,4 +11,7 @@ omsi-net = { path = "../omsi-net" }
 omsi-lan = { path = "../omsi-lan" }
 omsi-cfg = { path = "../omsi-cfg" }
 omsi-sim = { path = "../omsi-sim" }
+omsi-map = { path = "../omsi-map" }
+omsi-world = { path = "../omsi-world" }
+anyhow.workspace = true
 log.workspace = true

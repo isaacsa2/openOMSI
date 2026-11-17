@@ -7,4 +7,5 @@
 
 pub mod console;
 pub mod fleet;
+pub mod world;
 pub mod admin;

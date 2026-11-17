@@ -4517,12 +4517,15 @@ dependencies = [
 name = "omsi-server"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "log",
  "omsi-admin",
  "omsi-cfg",
  "omsi-lan",
+ "omsi-map",
  "omsi-net",
  "omsi-sim",
+ "omsi-world",
 ]
 
 [[package]]
