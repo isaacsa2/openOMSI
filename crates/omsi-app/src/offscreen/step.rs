@@ -48,6 +48,7 @@ impl Offscreen<'_> {
             ref mut srv_metar_rx,
             ref mut srv_weather_name,
             ref srv_metrics,
+            ref mut srv_report_at,
             ref mut lan_off,
             ref remotes_off,
             ref mut traffic,
@@ -177,7 +178,10 @@ impl Offscreen<'_> {
             log::info!("server: stopping");
             return false;
         }
-        if i.is_multiple_of(super::steps_in(1.0)) {
+        // Publish by elapsed wall time, not by a fixed number of simulation
+        // ticks: on an overloaded host 60 ticks may take several seconds.
+        if i == 0 || srv_report_at.elapsed() >= std::time::Duration::from_secs(1) {
+            *srv_report_at = std::time::Instant::now();
             if let Some(l) = lan_off.as_mut() {
                 crate::server::enforce_vehicles(l);
                 crate::server::tick_status(l, parse_time(&args.time) + *srv_clock + srv_admin.shift, srv_weather_name.as_str());
