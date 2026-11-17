@@ -17,7 +17,7 @@ static STOP: AtomicBool = AtomicBool::new(false);
 
 /// Start reading lines in a separate thread. In non-interactive containers with
 /// closed stdin this thread simply exits; the host continues to serve players.
-pub(super) fn start() {
+pub fn start() {
     let (tx, rx) = mpsc::sync_channel(QUEUE_LIMIT);
     if INPUT.set(Mutex::new(rx)).is_err() {
         return;
@@ -58,7 +58,7 @@ fn normalize(text: &str) -> Option<&str> {
         .then_some(text)
 }
 
-pub(crate) fn take() -> Vec<String> {
+pub fn take() -> Vec<String> {
     let Some(queue) = INPUT.get() else {
         return Vec::new();
     };
@@ -109,7 +109,7 @@ fn builtin(command: &str) -> Option<Builtin> {
 
 /// Handle commands that do not alter game state. All other accepted admin
 /// actions are validated and executed by the LAN admin command implementation.
-pub(crate) fn run_builtin(
+pub fn run_builtin(
     command: &str,
     lan: &omsi_net::LanSession,
     metrics: &omsi_admin::metrics::TickMeter,
@@ -217,7 +217,7 @@ pub(crate) fn run_builtin(
     true
 }
 
-pub(crate) fn stop_requested() -> bool {
+pub fn stop_requested() -> bool {
     STOP.load(Ordering::SeqCst)
 }
 

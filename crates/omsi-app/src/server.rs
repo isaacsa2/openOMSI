@@ -13,7 +13,7 @@
 use super::*;
 use std::path::Path;
 
-pub(crate) mod console;
+pub(crate) use omsi_server::console;
 
 pub(crate) use omsi_lan::server_cfg::{SERVER_VEHICLES, ServerCfg, enforce_vehicles, player_info};
 

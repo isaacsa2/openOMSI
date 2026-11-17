@@ -1,0 +1,14 @@
+[package]
+name = "omsi-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Renderer-independent dedicated host core: console, administration and multiplayer orchestration"
+
+[dependencies]
+omsi-admin = { path = "../omsi-admin" }
+omsi-net = { path = "../omsi-net" }
+omsi-lan = { path = "../omsi-lan" }
+omsi-cfg = { path = "../omsi-cfg" }
+omsi-sim = { path = "../omsi-sim" }
+log.workspace = true
