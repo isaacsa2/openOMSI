@@ -6,6 +6,7 @@
 //! runtime while the application-specific world adapters are being extracted.
 
 pub mod console;
+pub mod commands;
 pub mod fleet;
 pub mod world;
 pub mod admin;

@@ -143,93 +143,19 @@ impl Offscreen<'_> {
                     .get(&id)
                     .map(|r| (r.vehicle().position, r.vehicle().heading))
             };
-            srv_admin.prune(l);
-            omsi_lan::bans::sync_host(l);
-            // the administration, whatever way it came (see `omsi_lan::admin::exec`): the
-            // players' games, a tool on this machine (POST /admin, checked by the gateway: an
-            // admin of its own), the web panel's requests
             let hub = omsi_lan::admin::hub().map(|h| &**h);
             let rules = crate::admin::server_rules(srv_metar.is_some());
-            for (from, text) in l.take_commands() {
-                if !omsi_lan::parked::server_command(l, from, &text) {
-                    omsi_lan::admin::server_command(
-                        l, from, &text, srv_admin, &positions, &rules, hub,
-                    );
-                }
-            }
-            omsi_lan::parked::server_tick(l, dt as f32);
-            // Commands typed into this machine's terminal are executed on the
-            // simulation thread, not on the stdin reader. They use the same
-            // authority checks, command parser and audit trail as the local API.
-            for text in crate::server::console::take() {
-                if crate::server::console::run_builtin(&text, l, srv_metrics, srv_profiler) {
-                    continue;
-                }
-                if omsi_lan::parked::server_admin(&text, &|x, y, near| {
-                    crate::server::parked_floor(world, x, y, near)
-                }) {
-                    continue;
-                }
-                if omsi_lan::admin::Action::parse(&text).is_none() {
-                    let verb = text.split_whitespace().next().unwrap_or("");
-                    log::warn!(
-                        "server console: unknown command {:?} (type help)",
-                        omsi_admin::clean(verb, 24)
-                    );
-                    continue;
-                }
-                srv_admin
-                    .admins
-                    .insert(omsi_lan::admin::CONSOLE_ADMIN, omsi_admin::Role::Admin);
-                omsi_lan::admin::server_command(
-                    l,
-                    omsi_lan::admin::CONSOLE_ADMIN,
-                    &format!("admin {text}"),
-                    srv_admin,
-                    &positions,
-                    &rules,
-                    hub,
-                );
-            }
-            for text in crate::lan::take_local_admin() {
-                if omsi_lan::parked::server_admin(&text, &|x, y, near| {
-                    crate::server::parked_floor(world, x, y, near)
-                }) {
-                    continue;
-                }
-                srv_admin
-                    .admins
-                    .insert(crate::admin::LOCAL_ADMIN, omsi_admin::Role::Admin);
-                omsi_lan::admin::server_command(
-                    l,
-                    crate::admin::LOCAL_ADMIN,
-                    &format!("admin {text}"),
-                    srv_admin,
-                    &positions,
-                    &rules,
-                    hub,
-                );
-            }
-            if let Some(h) = hub {
-                for request in h.take_profiles() {
-                    use omsi_admin::hub::ProfileAction;
-                    match request.action {
-                        ProfileAction::Start => srv_profiler.start(),
-                        ProfileAction::Stop => srv_profiler.stop(),
-                        ProfileAction::Reset => srv_profiler.reset(),
-                    }
-                    h.note(
-                        &request.actor.label,
-                        Some(request.actor.role),
-                        "profiler",
-                        "applied",
-                        request.action.name(),
-                    );
-                }
-                for job in h.take(16) {
-                    omsi_lan::admin::run_job(l, srv_admin, job, &positions, &rules, h);
-                }
-            }
+            omsi_server::commands::service_commands(
+                l,
+                srv_admin,
+                srv_metrics,
+                srv_profiler,
+                &positions,
+                &rules,
+                hub,
+                &|x, y, near| crate::server::parked_floor(world, x, y, near),
+                dt,
+            );
             // and their part on the server's own world
             let jobs = srv_admin.take_world();
             if !jobs.is_empty() {

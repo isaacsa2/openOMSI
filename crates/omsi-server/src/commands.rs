@@ -1,0 +1,107 @@
+//! Console and administration on the dedicated server's simulation thread.
+//! Uses the existing moderator rights, ban records and audit log.
+
+use omsi_admin::metrics::TickMeter;
+use omsi_admin::profiler::Profiler;
+use omsi_lan::admin::{ServerAdmin, ServerRules};
+use omsi_net::LanSession;
+
+#[allow(clippy::too_many_arguments)]
+pub fn service_commands(
+    l: &mut LanSession,
+    admin: &mut ServerAdmin,
+    metrics: &TickMeter,
+    profiler: &mut Profiler,
+    positions: &dyn Fn(u32) -> Option<(glam::DVec3, f64)>,
+    rules: &ServerRules<'_>,
+    hub: Option<&omsi_admin::Hub>,
+    floor: &dyn Fn(f64, f64, f64) -> Option<f64>,
+    dt: f32,
+) {
+            admin.prune(l);
+            omsi_lan::bans::sync_host(l);
+            // the administration, whatever way it came (see `omsi_lan::admin::exec`): the
+            // players' games, a tool on this machine (POST /admin, checked by the gateway: an
+            // admin of its own), the web panel's requests
+            for (from, text) in l.take_commands() {
+                if !omsi_lan::parked::server_command(l, from, &text) {
+                    omsi_lan::admin::server_command(
+                        l, from, &text, admin, positions, rules, hub,
+                    );
+                }
+            }
+            omsi_lan::parked::server_tick(l, dt as f32);
+            // Commands typed into this machine's terminal are executed on the
+            // simulation thread, not on the stdin reader. They use the same
+            // authority checks, command parser and audit trail as the local API.
+            for text in crate::console::take() {
+                if crate::console::run_builtin(&text, l, metrics, profiler) {
+                    continue;
+                }
+                if omsi_lan::parked::server_admin(&text, &|x, y, near| {
+                    floor(x, y, near)
+                }) {
+                    continue;
+                }
+                if omsi_lan::admin::Action::parse(&text).is_none() {
+                    let verb = text.split_whitespace().next().unwrap_or("");
+                    log::warn!(
+                        "server console: unknown command {:?} (type help)",
+                        omsi_admin::clean(verb, 24)
+                    );
+                    continue;
+                }
+                admin
+                    .admins
+                    .insert(omsi_lan::admin::CONSOLE_ADMIN, omsi_admin::Role::Admin);
+                omsi_lan::admin::server_command(
+                    l,
+                    omsi_lan::admin::CONSOLE_ADMIN,
+                    &format!("admin {text}"),
+                    admin,
+                    positions,
+                    rules,
+                    hub,
+                );
+            }
+            for text in omsi_lan::gateway::take_local_admin() {
+                if omsi_lan::parked::server_admin(&text, &|x, y, near| {
+                    floor(x, y, near)
+                }) {
+                    continue;
+                }
+                admin
+                    .admins
+                    .insert(omsi_lan::admin::LOCAL_ADMIN, omsi_admin::Role::Admin);
+                omsi_lan::admin::server_command(
+                    l,
+                    omsi_lan::admin::LOCAL_ADMIN,
+                    &format!("admin {text}"),
+                    admin,
+                    positions,
+                    rules,
+                    hub,
+                );
+            }
+            if let Some(h) = hub {
+                for request in h.take_profiles() {
+                    use omsi_admin::hub::ProfileAction;
+                    match request.action {
+                        ProfileAction::Start => profiler.start(),
+                        ProfileAction::Stop => profiler.stop(),
+                        ProfileAction::Reset => profiler.reset(),
+                    }
+                    h.note(
+                        &request.actor.label,
+                        Some(request.actor.role),
+                        "profiler",
+                        "applied",
+                        request.action.name(),
+                    );
+                }
+                for job in h.take(16) {
+                    omsi_lan::admin::run_job(l, admin, job, positions, rules, h);
+                }
+            }
+
+}

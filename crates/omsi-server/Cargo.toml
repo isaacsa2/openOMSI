@@ -15,3 +15,4 @@ omsi-map = { path = "../omsi-map" }
 omsi-world = { path = "../omsi-world" }
 anyhow.workspace = true
 log.workspace = true
+glam.workspace = true
