@@ -161,6 +161,7 @@ impl PeopleSim {
                 }
             }
         }
+        self.tick_ambient_talk();
     }
 
     /// One person's tick (sub_62a6a0 without the street walk).
