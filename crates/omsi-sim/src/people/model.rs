@@ -358,6 +358,10 @@ pub struct PeopleSim {
     pub voices: u8,
     /// When anybody last greeted or complained (seconds of `time`).
     pub last_chat: f64,
+    /// Independent, disabled-by-default ambient speech inside loaded buses.
+    pub ambient_talk: bool,
+    pub ambient_talk_at: f64,
+    pub ambient_talk_reply: Option<(u32, f64)>,
     /// Avatars (the player on foot, other players' walkers): key → person id, and what
     /// the game wants of each this frame.
     pub avatars: HashMap<u32, u32>,
