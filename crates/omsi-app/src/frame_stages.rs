@@ -216,6 +216,7 @@ pub(crate) fn log_order() {
         ONCE.call_once(|| {
             log::info!("{}", describe("window frame", crate::app_events::WINDOW_FRAME));
             log::info!("{}", describe("offscreen step", crate::offscreen::OFFSCREEN_STEP));
+            log::info!("{}", describe("dedicated server tick", crate::offscreen::SERVER_STEP));
         });
     }
 }
