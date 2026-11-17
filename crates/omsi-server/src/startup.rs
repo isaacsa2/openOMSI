@@ -63,9 +63,7 @@ pub fn prepare(
     });
     let mut weather = cfg.weather.clone();
     if let Some(icao) = station.as_ref() {
-        match crate::metar::try_metar(icao)
-            .and_then(|w| crate::metar::report_wire(&w))
-        {
+        match crate::metar::try_metar(icao).and_then(|w| crate::metar::report_wire(&w)) {
             Some(wire) => weather = Some(wire),
             None => log::warn!("server: no METAR report for {icao} yet; trying again soon"),
         }

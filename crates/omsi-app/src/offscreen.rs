@@ -14,9 +14,9 @@ mod setup;
 mod stages;
 mod step;
 
+pub(crate) use stages::OFFSCREEN_STEP;
 #[cfg(test)]
 pub(crate) use stages::OffscreenStage;
-pub(crate) use stages::OFFSCREEN_STEP;
 
 /// Host-only simulation stages. Capture, local driver and recorder never run
 /// in the dedicated process. Keep the order consistent with OFFSCREEN_STEP.
@@ -125,7 +125,10 @@ pub(crate) fn run_offscreen(
 ) -> Result<()> {
     crate::frame_stages::log_order();
     if args.server.is_some() && omsi_cfg::flags::OMSI_FRAME_ORDER.is_set() {
-        log::info!("{}", crate::frame_stages::describe("dedicated server tick", SERVER_STEP));
+        log::info!(
+            "{}",
+            crate::frame_stages::describe("dedicated server tick", SERVER_STEP)
+        );
     }
     // (a dedicated server lets nobody new in before its world is there: see `set_starting`)
     let server = args.server.is_some();
@@ -154,13 +157,19 @@ pub(crate) fn run_offscreen(
             if run.srv_profiler.enabled() {
                 if let Some(previous) = last_stages.as_ref() {
                     use crate::profile_keys::ProfKey as K;
-                    for key in [K::Server, K::Clock, K::Traffic, K::GroundGap, K::Humans, K::Lan, K::Surroundings] {
+                    for key in [
+                        K::Server,
+                        K::Clock,
+                        K::Traffic,
+                        K::GroundGap,
+                        K::Humans,
+                        K::Lan,
+                        K::Surroundings,
+                    ] {
                         let delta = (run.profile.get(key) - previous.get(key)).max(0.0);
                         if delta > 0.0 {
-                            run.srv_profiler.stage(
-                                key.name(),
-                                std::time::Duration::from_secs_f64(delta),
-                            );
+                            run.srv_profiler
+                                .stage(key.name(), std::time::Duration::from_secs_f64(delta));
                         }
                     }
                 }

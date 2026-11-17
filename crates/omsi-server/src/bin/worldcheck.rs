@@ -16,17 +16,25 @@ fn world_path(root: &Path, map: &str) -> PathBuf {
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let (Some(root), Some(map)) = (args.next(), args.next()) else {
-        anyhow::bail!("Usage: omsi-worldcheck <OMSI2-root> <map-directory-or-global.cfg> [YYYYMMDD]");
+        anyhow::bail!(
+            "Usage: omsi-worldcheck <OMSI2-root> <map-directory-or-global.cfg> [YYYYMMDD]"
+        );
     };
     let date = args.next().unwrap_or_else(|| "19890501".to_string());
     anyhow::ensure!(args.next().is_none(), "unexpected extra argument");
     let plain_date = date.replace('-', "");
-    anyhow::ensure!(plain_date.len() == 8 && plain_date.bytes().all(|c| c.is_ascii_digit()), "date must be YYYYMMDD");
+    anyhow::ensure!(
+        plain_date.len() == 8 && plain_date.bytes().all(|c| c.is_ascii_digit()),
+        "date must be YYYYMMDD"
+    );
     let root = PathBuf::from(root);
     let global_path = world_path(&root, &map);
     let world = HostWorld::open(&root, &global_path, plain_date.parse()?)
         .with_context(|| format!("CPU-only map startup failed for {}", global_path.display()))?;
-    anyhow::ensure!(world.index.tiles_read > 0, "no usable OMSI tiles were indexed");
+    anyhow::ensure!(
+        world.index.tiles_read > 0,
+        "no usable OMSI tiles were indexed"
+    );
     println!(
         "CPU-only world check: map='{}', tiles={}, damaged_tiles={}, indexed_objects={}, files={} (renderer/audio not initialized)",
         world.global.name,
