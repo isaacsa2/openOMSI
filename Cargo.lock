@@ -4522,11 +4522,13 @@ dependencies = [
  "log",
  "omsi-admin",
  "omsi-cfg",
+ "omsi-content",
  "omsi-lan",
  "omsi-map",
  "omsi-net",
  "omsi-sim",
  "omsi-world",
+ "omsi-weather",
 ]
 
 [[package]]

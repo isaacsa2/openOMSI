@@ -98,43 +98,10 @@ impl Offscreen<'_> {
                 }
             }
         }
-        if let (Some(icao), Some(l)) = (srv_metar.as_ref(), lan_off.as_mut()) {
-            if srv_metar_rx.is_some() {
-                let got = srv_metar_rx.as_ref().map(|rx| rx.try_recv());
-                match got {
-                    Some(Ok(report)) => {
-                        *srv_metar_rx = None;
-                        // (a failed download is tried again in a minute)
-                        let wait = if report.is_some() { 600 } else { 60 };
-                        *srv_metar_due =
-                            std::time::Instant::now() + std::time::Duration::from_secs(wait);
-                        if let Some(w) = report {
-                            if let Some(wire) = crate::weather_setup::report_wire(&w) {
-                                if wire != l.weather() {
-                                    log::info!(
-                                        "server: weather now the METAR report of {icao}: {wire}"
-                                    );
-                                    l.set_weather(&wire);
-                                }
-                                *srv_weather_name = w.name.clone();
-                            }
-                        }
-                    }
-                    Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
-                        *srv_metar_rx = None;
-                        *srv_metar_due =
-                            std::time::Instant::now() + std::time::Duration::from_secs(60);
-                    }
-                    _ => {}
-                }
-            } else if std::time::Instant::now() >= *srv_metar_due {
-                let (tx, rx) = std::sync::mpsc::channel();
-                *srv_metar_rx = Some(rx);
-                let icao = icao.clone();
-                std::thread::spawn(move || {
-                    let _ = tx.send(crate::weather_setup::try_metar(&icao));
-                });
-            }
+        if let Some(l) = lan_off.as_mut() {
+            omsi_server::weather::tick_metar(
+                l, srv_metar.as_ref(), srv_metar_rx, srv_metar_due, srv_weather_name,
+            );
         }
         if let Some(l) = lan_off.as_mut() {
             let positions = |id: u32| {
