@@ -135,29 +135,7 @@ impl<'a> Offscreen<'a> {
         if let Some(p) = player.as_mut() {
             apply_weather(&mut p.vehicle, &weather, initial_wetness(&weather));
         }
-        // the workshop's waiting time moves the clock on, so the sky has to follow it
-        let mut service_seconds = 0.0f64;
-        let daylight0 = omsi_sim::Daylight::compute(&start_clock(args), envir.as_ref());
-        if let Some(p) = player.as_mut() {
-            p.vehicle.set_var(
-                "Envir_Brightness",
-                daylight0.envir_brightness(world.light_map_light_at(p.vehicle.position)),
-            );
-            let mut clock = p.vehicle.host.clock.clone();
-            let was = clock.time;
-            let at_station = at_petrol_station(&world, &p.vehicle);
-            for line in run_services(
-                args,
-                &mut p.vehicle,
-                &mut clock,
-                world.global.repair_time_min,
-                at_station,
-            ) {
-                log::info!("{line}");
-            }
-            service_seconds = clock.time - was;
-            p.vehicle.host.clock = clock;
-        }
+        let service_seconds = initial_player_services(args, &world, envir.as_ref(), &mut player);
         // one simulation loop for everything: traffic, the player's vehicle (test profile and
         // timed triggers) and the passengers, so that they see each other every frame
         let dt = super::run_dt();
@@ -214,24 +192,7 @@ impl<'a> Offscreen<'a> {
                 }
             }
         }
-        if let Some(t) = traffic.as_mut() {
-            t.day_time = parse_time(&args.time);
-            let daylight = omsi_sim::Daylight::compute(
-                &start_clock(args),
-                omsi_content::Envir::load(&args.root.join("envir.cfg"))
-                    .ok()
-                    .as_ref(),
-            );
-            steps::set_ai_daylight(t, daylight, steps::gloomy_weather(Some(&weather)));
-            t.populate(&world, center);
-            crate::view_sync::apply_traffic(
-                t,
-                &mut sim_view.traffic,
-                &world,
-                &renderer,
-                &mut scene,
-            );
-        }
+        initialize_traffic_state(args, &world, center, &weather, &mut traffic, &renderer, &mut scene, &mut sim_view);
         ground_sample(&world, traffic.as_ref(), center)?;
         // LAN in an offscreen run too, so that one game's view of another can be rendered
         // (`OMSI_LAN_AUDIO=1`: with the other buses' sounds, heard at the camera - for the logs)
@@ -255,40 +216,9 @@ impl<'a> Offscreen<'a> {
         let mut run_clock = start_clock(args);
         run_clock.advance(service_seconds as f32);
         crate::server::park_buses(server, args, &world);
-        // a dedicated server's administration and clock (see `admin`)
-        let mut srv_admin = crate::admin::ServerAdmin::default();
+        let (srv_admin, srv_metar, srv_metar_due, srv_metar_rx, srv_weather_name) =
+            server_administration_state(server, &weather, &mut lan_off);
         let srv_clock = 0.0f64;
-        // the METAR sync of a dedicated server: the report is downloaded in the background (at
-        // once, then every ten minutes) and its values are told to the players
-        let srv_metar: Option<String> = if server {
-            crate::server::SERVER_METAR.get().cloned().flatten()
-        } else {
-            None
-        };
-        let srv_metar_due = std::time::Instant::now();
-        let srv_metar_rx: Option<
-            std::sync::mpsc::Receiver<Option<omsi_content::weather::Weather>>,
-        > = None;
-        // (the weather's name on the status page)
-        let srv_weather_name = if weather.path.to_string_lossy().starts_with("metar:") {
-            weather.name.clone()
-        } else {
-            weather
-                .path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default()
-        };
-        if let (true, Some((pw, moderator, speed))) = (server, crate::server::SERVER_ADMIN.get()) {
-            srv_admin.password = pw.clone();
-            srv_admin.moderator_password = moderator.clone();
-            if let Some((on, density)) = crate::server::SERVER_PASSENGERS.get() {
-                (srv_admin.passengers_on, srv_admin.passenger_density) = (*on, *density);
-            }
-            if let Some(l) = lan_off.as_mut() {
-                l.clock_speed = *speed;
-            }
-        }
         let ground_gap = crate::ground_gap::GroundGap::from_env();
         if let Some(t) = traffic.as_ref() {
             crate::ground_gap::check_lanes(&world.data, t);
@@ -370,6 +300,87 @@ impl<'a> Offscreen<'a> {
             sky,
         })
     }
+}
+
+/// Apply the local driver's start-up services; dedicated hosts have no driver.
+fn initial_player_services(
+    args: &Args,
+    world: &World,
+    envir: Option<&omsi_content::Envir>,
+    player: &mut Option<Player>,
+) -> f64 {
+    let daylight = omsi_sim::Daylight::compute(&start_clock(args), envir);
+    let Some(p) = player.as_mut() else { return 0.0 };
+    p.vehicle.set_var(
+        "Envir_Brightness",
+        daylight.envir_brightness(world.light_map_light_at(p.vehicle.position)),
+    );
+    let mut clock = p.vehicle.host.clock.clone();
+    let before = clock.time;
+    let station = at_petrol_station(world, &p.vehicle);
+    for line in run_services(args, &mut p.vehicle, &mut clock, world.global.repair_time_min, station) {
+        log::info!("{line}");
+    }
+    let delta = clock.time - before;
+    p.vehicle.host.clock = clock;
+    delta
+}
+
+/// Prime the host's traffic state and its temporary visual adapter.
+#[allow(clippy::too_many_arguments)]
+fn initialize_traffic_state(
+    args: &Args,
+    world: &World,
+    center: DVec3,
+    weather: &omsi_content::weather::Weather,
+    traffic: &mut Option<traffic::Traffic>,
+    renderer: &Renderer,
+    scene: &mut Scene,
+    sim_view: &mut crate::view_sync::SimView,
+) {
+    if let Some(t) = traffic.as_mut() {
+        t.day_time = parse_time(&args.time);
+        let daylight = omsi_sim::Daylight::compute(
+            &start_clock(args),
+            omsi_content::Envir::load(&args.root.join("envir.cfg")).ok().as_ref(),
+        );
+        steps::set_ai_daylight(t, daylight, steps::gloomy_weather(Some(weather)));
+        t.populate(world, center);
+        crate::view_sync::apply_traffic(t, &mut sim_view.traffic, world, renderer, scene);
+    }
+}
+
+/// No web request thread touches these values: the dedicated host owns them.
+fn server_administration_state(
+    server: bool,
+    weather: &omsi_content::weather::Weather,
+    lan_off: &mut Option<omsi_net::LanSession>,
+) -> (
+    crate::admin::ServerAdmin,
+    Option<String>,
+    std::time::Instant,
+    Option<std::sync::mpsc::Receiver<Option<omsi_content::weather::Weather>>>,
+    String,
+) {
+    let mut admin = crate::admin::ServerAdmin::default();
+    let metar = if server { crate::server::SERVER_METAR.get().cloned().flatten() } else { None };
+    let due = std::time::Instant::now();
+    let weather_name = if weather.path.to_string_lossy().starts_with("metar:") {
+        weather.name.clone()
+    } else {
+        weather.path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()
+    };
+    if let (true, Some((password, moderator, speed))) = (server, crate::server::SERVER_ADMIN.get()) {
+        admin.password = password.clone();
+        admin.moderator_password = moderator.clone();
+        if let Some((enabled, density)) = crate::server::SERVER_PASSENGERS.get() {
+            (admin.passengers_on, admin.passenger_density) = (*enabled, *density);
+        }
+        if let Some(lan) = lan_off.as_mut() {
+            lan.clock_speed = *speed;
+        }
+    }
+    (admin, metar, due, None, weather_name)
 }
 
 /// Parse the drive-only test harness settings, never used by a dedicated server.
