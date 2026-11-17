@@ -192,12 +192,22 @@ impl<'a> Offscreen<'a> {
                 }
             }
         }
-        initialize_traffic_state(args, &world, center, &weather, &mut traffic, &renderer, &mut scene, &mut sim_view);
+        initialize_traffic_state(
+            args,
+            &world,
+            center,
+            &weather,
+            &mut traffic,
+            &renderer,
+            &mut scene,
+            &mut sim_view,
+        );
         ground_sample(&world, traffic.as_ref(), center)?;
         // LAN in an offscreen run too, so that one game's view of another can be rendered
         // (`OMSI_LAN_AUDIO=1`: with the other buses' sounds, heard at the camera - for the logs)
         let lan_audio =
-            (args.server.is_none() && lan_off.is_some() && omsi_cfg::flags::OMSI_LAN_AUDIO.is_set()).then(|| {
+            (args.server.is_none() && lan_off.is_some() && omsi_cfg::flags::OMSI_LAN_AUDIO.is_set())
+                .then(|| {
                 let a = omsi_audio::AudioEngine::new();
                 a.set_doppler(settings.doppler);
                 a
@@ -310,7 +320,9 @@ fn initial_player_services(
     player: &mut Option<Player>,
 ) -> f64 {
     let daylight = omsi_sim::Daylight::compute(&start_clock(args), envir);
-    let Some(p) = player.as_mut() else { return 0.0 };
+    let Some(p) = player.as_mut() else {
+        return 0.0;
+    };
     p.vehicle.set_var(
         "Envir_Brightness",
         daylight.envir_brightness(world.light_map_light_at(p.vehicle.position)),
@@ -318,7 +330,13 @@ fn initial_player_services(
     let mut clock = p.vehicle.host.clock.clone();
     let before = clock.time;
     let station = at_petrol_station(world, &p.vehicle);
-    for line in run_services(args, &mut p.vehicle, &mut clock, world.global.repair_time_min, station) {
+    for line in run_services(
+        args,
+        &mut p.vehicle,
+        &mut clock,
+        world.global.repair_time_min,
+        station,
+    ) {
         log::info!("{line}");
     }
     let delta = clock.time - before;
@@ -363,14 +381,23 @@ fn server_administration_state(
     String,
 ) {
     let mut admin = crate::admin::ServerAdmin::default();
-    let metar = if server { crate::server::SERVER_METAR.get().cloned().flatten() } else { None };
+    let metar = if server {
+        crate::server::SERVER_METAR.get().cloned().flatten()
+    } else {
+        None
+    };
     let due = std::time::Instant::now();
     let weather_name = if weather.path.to_string_lossy().starts_with("metar:") {
         weather.name.clone()
     } else {
-        weather.path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()
+        weather
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default()
     };
-    if let (true, Some((password, moderator, speed))) = (server, crate::server::SERVER_ADMIN.get()) {
+    if let (true, Some((password, moderator, speed))) = (server, crate::server::SERVER_ADMIN.get())
+    {
         admin.password = password.clone();
         admin.moderator_password = moderator.clone();
         if let Some((enabled, density)) = crate::server::SERVER_PASSENGERS.get() {
