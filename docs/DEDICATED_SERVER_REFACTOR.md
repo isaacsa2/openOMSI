@@ -66,6 +66,55 @@ rename a graphical application, not create a dedicated server.
   memory and tick latency. Player addresses and positions remain subject to
   their current privacy settings.
 
+## Resource utilization and performance objectives
+
+The current wgpu no-op renderer uses no physical GPU, but it still leaves
+renderer/scene, visual vehicle instances and presentation-side bookkeeping in
+the host process. Removing those can save allocations, CPU work, RAM and package
+size; a measured gain is **not guaranteed** and depends on the map, population
+and workload. Avoid treating GPU usage as the only source of overhead.
+
+- **CPU:** profile the tick stages and prioritize simulation and packet work.
+  At 60 TPS the nominal tick budget is 16.67 ms (including the network tick),
+  though elapsed wall time and catch-up behavior must be observed separately.
+  Parallelize only independent workloads (visibility/interest updates, asset
+  metadata I/O and population planning). Entity ownership, script execution
+  ordering and authoritative snapshots must stay deterministic.
+- **Memory:** keep CPU-side world collision, lanes, schedules and required bus
+  scripting data, but do not retain vertex buffers, GPU textures, scene
+  instances, sky lighting atlases or audio buffers. Measure **RSS and peak
+  memory**, not merely reserved virtual address space; expose load progress
+  and memory pressure rather than using memory unnecessarily.
+- **Disk/storage:** ship no unnecessary DX12/Vulkan/Metal/ANGLE libraries,
+  shaders, graphics assets or test recordings in the dedicated package. Keep
+  game content required for AI, collision, scripts and map/vehicle licensing.
+  Read vehicle files/metadata lazily where safe; never infer that removing
+  visuals means private models may be redistributed or shared.
+- **I/O:** cache immutable path/timetable metadata with explicit capacity
+  limits; keep log rotation and audit history bounded. Do not add an
+  unconditional per-tick disk flush or synchronous content scan.
+- **Visibility/interest:** prioritize players' nearby traffic and people.
+  A host-only distant-simulation policy needs tests for bus timetables,
+  spawning, handoffs and shared snapshots before enabling.
+
+### Benchmark contract
+
+For a fixed map, number of AI cars, passengers and clients, compare
+`openomsi --server` and the extracted `omsi-server` on the **same machine**.
+Record warm-up separately from a 10-minute steady-state run and report:
+
+| Metric | How to compare |
+| --- | --- |
+| TPS (avg, minimum, p95 tick duration) | Completed simulation ticks / wall-clock seconds; 60 TPS is nominal target |
+| CPU utilization | Process CPU time and busiest per-thread usage; include total core count |
+| RSS and peak RSS | Real process memory; also report growth after clients disconnect |
+| Disk I/O | Bytes read/written during cold start and steady operation |
+| Server package size | Uncompressed binary + runtime libraries; exclude licensed OMSI 2 assets |
+| Network traffic | Bytes/s at equal client counts and interest ranges |
+| Simulation correctness | Clock, AI vehicles, passengers, lines and remote buses agree across clients |
+
+No target improvement percentage should be advertised until measured.
+
 ## Validation required before switching release artifacts
 
 - Unit tests for host ticking, time-speed changes, map reload/startup errors,
