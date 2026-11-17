@@ -3947,6 +3947,7 @@ dependencies = [
  "omsi-remote",
  "omsi-render",
  "omsi-scene",
+ "omsi-server",
  "omsi-scenery",
  "omsi-script",
  "omsi-settings-ui",
@@ -4510,6 +4511,18 @@ dependencies = [
  "log",
  "omsi-cfg",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "omsi-server"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "omsi-admin",
+ "omsi-cfg",
+ "omsi-lan",
+ "omsi-net",
+ "omsi-sim",
 ]
 
 [[package]]
