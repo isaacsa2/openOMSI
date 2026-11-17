@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 const MAX_STAGE_NAMES: usize = 24;
 const MAX_TICK_SAMPLES: usize = 1024;
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
 pub struct StageTiming {
     pub name: String,
     pub calls: u64,
