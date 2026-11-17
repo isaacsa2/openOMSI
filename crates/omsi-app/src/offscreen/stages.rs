@@ -22,11 +22,21 @@ pub(crate) enum OffscreenStage {
     Record,
 }
 
-/// One step of the offscreen run: the server's work, the traffic, the player's bus, the
-/// people, the LAN, the spray and the snapshots due.
+/// One step of the offscreen capture/test run: the server's work, the traffic, the
+/// player's bus, the people, the LAN, the spray and snapshots due.
 pub(crate) const OFFSCREEN_STEP: &[OffscreenStage] = {
     use OffscreenStage::*;
     &[Server, Clock, Traffic, Startup, Duty, Drive, GroundGap, Humans, Lan, Surroundings, Snapshot, Record]
+};
+
+/// Dedicated host update, independent from the offscreen test/capture pipeline.
+/// A server has no local driver, career, recording or snapshot. Keep Surroundings:
+/// its wetness and road-water hooks are used by the simulation as well.
+/// This is a first step toward extracting a renderer-free server runtime; the
+/// traffic and LAN adapters still depend on the app's presentation layer.
+pub(crate) const SERVER_STEP: &[OffscreenStage] = {
+    use OffscreenStage::*;
+    &[Server, Clock, Traffic, GroundGap, Humans, Lan, Surroundings]
 };
 
 const fn stage(key: ProfKey, phase: Phase, role: Role, reads: &'static [Group], writes: &'static [Group]) -> StageInfo {
