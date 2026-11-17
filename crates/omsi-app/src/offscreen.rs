@@ -14,7 +14,7 @@ mod setup;
 mod stages;
 mod step;
 
-pub(crate) use stages::OFFSCREEN_STEP;
+pub(crate) use stages::{OFFSCREEN_STEP, SERVER_STEP};
 #[cfg(test)]
 pub(crate) use stages::OffscreenStage;
 
