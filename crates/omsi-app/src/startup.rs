@@ -207,8 +207,14 @@ static MX_GRAPHICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// uses Vulkan instead. Other explicit APIs must still reach wgpu.
 fn mx_windows_backend(backend: &str) -> bool {
     let selected = backend.trim();
-    let mx_api = if cfg!(feature = "mx-vulkan") { "vulkan" } else { "dx12" };
-    selected.is_empty() || selected.eq_ignore_ascii_case("auto") || selected.eq_ignore_ascii_case(mx_api)
+    let mx_api = if cfg!(feature = "mx-vulkan") {
+        "vulkan"
+    } else {
+        "dx12"
+    };
+    selected.is_empty()
+        || selected.eq_ignore_ascii_case("auto")
+        || selected.eq_ignore_ascii_case(mx_api)
 }
 
 /// The game's instance: mX when enabled on macOS or Windows, or by OMSI_MX.
@@ -219,10 +225,14 @@ pub(crate) fn game_graphics_instance(setting: bool) -> wgpu::Instance {
         None => setting && cfg!(any(target_os = "macos", windows)),
     };
     let on = if requested && cfg!(windows) {
-        let backend = omsi_cfg::flags::OMSI_BACKEND.var().map(str::to_owned)
+        let backend = omsi_cfg::flags::OMSI_BACKEND
+            .var()
+            .map(str::to_owned)
             .unwrap_or_else(|| crate::settings::Settings::load().graphics_api);
         if !mx_windows_backend(&backend) {
-            log::info!("graphics: mX Graphics skipped for {backend}; using wgpu for the selected API");
+            log::info!(
+                "graphics: mX Graphics skipped for {backend}; using wgpu for the selected API"
+            );
             false
         } else {
             true
@@ -234,7 +244,7 @@ pub(crate) fn game_graphics_instance(setting: bool) -> wgpu::Instance {
     if on {
         log::info!("graphics: mX Graphics (experimental) asked for");
         if cfg!(all(windows, feature = "mx-vulkan")) {
-            log::info!("graphics: mX Vulkan test build (wgpu-mx may report DX12 in adapter metadata)");
+            log::info!("graphics: mX Vulkan test build (adapter metadata may report DX12)");
         }
     }
     graphics_instance()
@@ -1002,8 +1012,16 @@ mod window_tests {
 
     #[test]
     fn windows_mx_respects_selected_api() {
-        let mx_api = if cfg!(feature = "mx-vulkan") { "vulkan" } else { "dx12" };
-        let other_api = if cfg!(feature = "mx-vulkan") { "dx12" } else { "vulkan" };
+        let mx_api = if cfg!(feature = "mx-vulkan") {
+            "vulkan"
+        } else {
+            "dx12"
+        };
+        let other_api = if cfg!(feature = "mx-vulkan") {
+            "dx12"
+        } else {
+            "vulkan"
+        };
         for backend in ["", "auto", "AUTO", mx_api] {
             assert!(super::mx_windows_backend(backend), "{backend}");
         }
