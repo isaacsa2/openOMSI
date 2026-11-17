@@ -290,12 +290,16 @@ impl PeopleSim {
             }
         }
         match pose.aboard {
-            Some((bus, local, lheading, _)) => {
+            Some((bus, local, lheading, seat)) => {
                 p.place = Place::Bus(BusId::Ai(bus), local);
                 p.lheading = lheading;
                 p.vel = DVec2::ZERO;
+                p.remote_seat = if pose.activity == Activity::Sit { seat } else { None };
             }
-            None => p.place = Place::Ground,
+            None => {
+                p.place = Place::Ground;
+                p.remote_seat = None;
+            }
         }
     }
 
