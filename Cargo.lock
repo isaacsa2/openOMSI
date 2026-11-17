@@ -3917,7 +3917,6 @@ dependencies = [
  "libc",
  "log",
  "mimalloc",
- "mx",
  "ndk-context",
  "objc2 0.6.5",
  "omsi-admin",
