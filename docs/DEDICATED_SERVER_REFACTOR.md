@@ -115,6 +115,19 @@ Record warm-up separately from a 10-minute steady-state run and report:
 
 No target improvement percentage should be advertised until measured.
 
+## GPU-free world diagnostics (independent process)
+
+`cargo run -p omsi-server --bin omsi-worldcheck -- /path/to/OMSI2 Maps/Spandau/global.cfg 19890501`
+
+This checks the CPU map index, Chrono selections, tile references and
+object lookup without constructing a wgpu device, scene, player view or audio
+engine. It must work on a VPS without a display. It is intentionally named
+**worldcheck** rather than `omsi-server`, because it does **not** yet host
+players, vehicle scripts, collision tiles, traffic or passengers. The existing
+`openomsi --server` still owns those functions until their headless
+equivalents pass multi-client simulation regression tests. Do not distribute
+the world-check command as if it were a playable server.
+
 ## Validation required before switching release artifacts
 
 - Unit tests for host ticking, time-speed changes, map reload/startup errors,
