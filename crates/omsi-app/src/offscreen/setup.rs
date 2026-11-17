@@ -205,13 +205,7 @@ impl<'a> Offscreen<'a> {
         ground_sample(&world, traffic.as_ref(), center)?;
         // LAN in an offscreen run too, so that one game's view of another can be rendered
         // (`OMSI_LAN_AUDIO=1`: with the other buses' sounds, heard at the camera - for the logs)
-        let lan_audio =
-            (args.server.is_none() && lan_off.is_some() && omsi_cfg::flags::OMSI_LAN_AUDIO.is_set())
-                .then(|| {
-                let a = omsi_audio::AudioEngine::new();
-                a.set_doppler(settings.doppler);
-                a
-            });
+        let lan_audio = initial_lan_audio(server, &settings, lan_off.as_ref());
         if let (Some(l), Some(p)) = (lan_off.as_mut(), player.as_mut()) {
             lan::settle_spawn(
                 l,
@@ -310,6 +304,20 @@ impl<'a> Offscreen<'a> {
             sky,
         })
     }
+}
+
+/// Optional audio belongs to an offscreen player, never to a dedicated host.
+fn initial_lan_audio(
+    server: bool,
+    settings: &settings::Settings,
+    lan: Option<&omsi_net::LanSession>,
+) -> Option<omsi_audio::AudioEngine> {
+    if server || lan.is_none() || !omsi_cfg::flags::OMSI_LAN_AUDIO.is_set() {
+        return None;
+    }
+    let audio = omsi_audio::AudioEngine::new();
+    audio.set_doppler(settings.doppler);
+    Some(audio)
 }
 
 /// Apply the local driver's start-up services; dedicated hosts have no driver.

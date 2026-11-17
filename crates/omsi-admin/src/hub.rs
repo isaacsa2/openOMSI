@@ -512,6 +512,18 @@ mod tests {
         )
     }
 
+    #[test]
+    fn profiler_commands_require_admin_and_are_bounded() {
+        let hub = hub();
+        assert!(hub.submit_profile(actor(Role::Moderator), ProfileAction::Start).is_err());
+        assert!(hub.take_profiles().is_empty());
+        assert!(hub.submit_profile(actor(Role::Admin), ProfileAction::Start).is_ok());
+        let pending = hub.take_profiles();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].action.name(), "start");
+        assert!(hub.take_profiles().is_empty());
+    }
+
     fn actor(role: Role) -> Actor {
         Actor {
             label: format!("web#1 ({})", role.name()),
