@@ -40,10 +40,11 @@ fn rider() -> Person {
     }
 }
 
-fn emergency_stop(on: bool) -> (u8, f32) {
+fn emergency_stop(on: bool, alight: bool) -> (u8, f32) {
     let world = crate::world_data::WorldData::default();
     let mut h = PeopleSim::new(Path::new("/nonexistent"), 200);
     h.bad_driving = on;
+    h.bad_driving_alight = alight;
     h.time = 10.0;
     h.people = vec![rider()];
     let bus = PlayerBusView {
@@ -73,8 +74,9 @@ fn emergency_stop(on: bool) -> (u8, f32) {
 
 #[test]
 fn riders_complain_about_an_emergency_stop_unless_the_setting_is_off() {
-    let (said, toll) = emergency_stop(true);
+    let (said, toll) = emergency_stop(true, true);
     assert_eq!(said, 1);
     assert!(toll > 0.05, "{toll}");
-    assert_eq!(emergency_stop(false), (0, 0.0));
+    assert_eq!(emergency_stop(false, true), (0, 0.0));
+    assert_eq!(emergency_stop(true, false).0, said, "disabling early exit must not silence complaints");
 }
