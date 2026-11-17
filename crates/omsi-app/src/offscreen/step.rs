@@ -8,8 +8,9 @@ use crate::view_sync::{self, ViewSync};
 impl Offscreen<'_> {
     /// One step, the `i`-th (false: a server was told to stop).
     pub(super) fn step(&mut self, i: usize) -> Result<bool> {
+        let sequence = if self.server { stages::SERVER_STEP } else { stages::OFFSCREEN_STEP };
         let mut step = stages::Step { run: self, i };
-        Ok(crate::frame_stages::run(&mut step, stages::OFFSCREEN_STEP)? == crate::frame_stages::Flow::Go)
+        Ok(crate::frame_stages::run(&mut step, sequence)? == crate::frame_stages::Flow::Go)
     }
 
     /// The ground under the vehicles (`OMSI_GROUND_GAP`).
