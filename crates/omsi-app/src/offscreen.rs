@@ -153,8 +153,9 @@ pub(crate) fn run_offscreen(
             // stage costs without allocating or copying when timings is off.
             if run.srv_profiler.enabled() {
                 if let Some(previous) = last_stages.as_ref() {
-                    for (key, total) in run.profile.iter() {
-                        let delta = (total - previous.get(key)).max(0.0);
+                    use crate::profile_keys::ProfKey as K;
+                    for key in [K::Server, K::Clock, K::Traffic, K::GroundGap, K::Humans, K::Lan, K::Surroundings] {
+                        let delta = (run.profile.get(key) - previous.get(key)).max(0.0);
                         if delta > 0.0 {
                             run.srv_profiler.stage(
                                 key.name(),
