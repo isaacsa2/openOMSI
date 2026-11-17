@@ -31,11 +31,17 @@ impl<'a> Offscreen<'a> {
             args.session_settings.render_options(&settings),
         ))?;
         log::info!("adapter: {}", renderer.adapter_name);
-        crate::lights::load_smoke_texture(&mut renderer, &args.root);
-        crate::lights::set_corona_root(&args.root);
+        // A host does not need smoke textures, a corona atlas or visual
+        // navigation arrows. They are only ever used to draw a frame.
+        if args.server.is_none() {
+            crate::lights::load_smoke_texture(&mut renderer, &args.root);
+            crate::lights::set_corona_root(&args.root);
+        }
         let mut scene = renderer.new_scene();
         let (world, camera) = lan::answering_while(&mut lan_off, args.bus.as_deref(), || load_world(args, &renderer, &mut scene))?;
-        world.show_help_arrows(&renderer, &mut scene, settings.nav_map_arrows);
+        if args.server.is_none() {
+            world.show_help_arrows(&renderer, &mut scene, settings.nav_map_arrows);
+        }
         let lan_seed = lan_off.as_ref().map(lan::population_seed);
         // (a player who joins another's game draws the host's traffic in it, whatever their own
         // count says: without it the host's cars had nowhere to go - "passengers, but no
@@ -98,7 +104,9 @@ impl<'a> Offscreen<'a> {
         let envir = omsi_content::Envir::load(&args.root.join("envir.cfg")).ok();
         let (weather, model) = crate::weather_setup::load_weather_run(args);
         let mut sky = crate::weather_setup::SkyState { clouds: None, model, look: args.session_settings };
-        setup_sky(args, &renderer, &mut scene, envir.as_ref(), Some(&weather), &mut sky.clouds);
+        if args.server.is_none() {
+            setup_sky(args, &renderer, &mut scene, envir.as_ref(), Some(&weather), &mut sky.clouds);
+        }
         if let Some(p) = player.as_mut() {
             apply_weather(&mut p.vehicle, &weather, initial_wetness(&weather));
         }

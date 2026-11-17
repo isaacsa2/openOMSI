@@ -130,7 +130,10 @@ pub(crate) fn run_offscreen(
         let t = std::time::Instant::now();
         let go_on = run.step(i)?;
         if server && go_on {
+            // Measure CPU-stage duration before waiting for the next tick. This
+            // separates work from intentional pacing in the timings report.
             run.srv_profiler.tick(t.elapsed());
+            std::thread::sleep(run.real_time.wait(std::time::Instant::now(), run.dt));
             run.srv_metrics.completed(std::time::Instant::now());
         }
         let ms = t.elapsed().as_secs_f64() * 1000.0;

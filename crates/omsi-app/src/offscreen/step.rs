@@ -210,9 +210,7 @@ impl Offscreen<'_> {
                 }
             }
         }
-        if lan_off.is_none() {
-            std::thread::sleep(real_time.wait(Instant::now(), dt));
-        }
+        // The dedicated loop now owns pacing, outside the timed simulation stages.
         true
     }
 
@@ -905,7 +903,9 @@ impl Offscreen<'_> {
                 }
             }
             // the other games run in real time (see `RealTime`)
-            std::thread::sleep(real_time.wait(Instant::now(), dt));
+            if args.server.is_none() {
+                std::thread::sleep(real_time.wait(Instant::now(), dt));
+            }
         }
     }
 
