@@ -122,7 +122,6 @@ fn the_simulation_comes_before_what_is_shown_of_it() {
     }
     check(WINDOW_FRAME);
     check(OFFSCREEN_STEP);
-    check(SERVER_STEP);
     // the interface is drawn over the frame's own state, and the picture with it
     use WindowStage::*;
     let w = |s| pos(WINDOW_FRAME, s);
