@@ -127,6 +127,7 @@ impl App {
         if self.session.humans.is_none() {
             let mut humans = humans::Humans::new(&self.args.root, &mut self.gfx.sim_view.people);
             humans.exact_fare = self.settings.exact_fare;
+            humans.ambient_talk = self.settings.passenger_ambient_talk;
             humans.visual_hailing =
                 self.settings.passenger_hailing && self.settings.passenger_animation == "enhanced";
             humans.bad_driving = self.settings.pax_bad_driving;
