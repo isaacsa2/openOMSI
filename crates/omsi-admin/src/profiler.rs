@@ -111,7 +111,12 @@ impl Profiler {
             s.total = s.total.saturating_add(elapsed);
             s.max = s.max.max(elapsed);
         } else if self.stages.len() < MAX_STAGE_NAMES {
-            self.stages.push(Stage { name, calls: 1, total: elapsed, max: elapsed });
+            self.stages.push(Stage {
+                name,
+                calls: 1,
+                total: elapsed,
+                max: elapsed,
+            });
         }
     }
 
@@ -130,28 +135,55 @@ impl Profiler {
         let mut times: Vec<f64> = self.tick_samples.iter().copied().collect();
         times.sort_by(f64::total_cmp);
         let percentile = |percent: f64| {
-            if times.is_empty() { 0.0 } else {
+            if times.is_empty() {
+                0.0
+            } else {
                 times[((times.len() - 1) as f64 * percent).ceil() as usize]
             }
         };
-        let total = self.stages.iter().map(|s| s.total.as_secs_f64()).sum::<f64>();
-        let mut stages: Vec<_> = self.stages.iter().map(|s| {
-            let seconds = s.total.as_secs_f64();
-            StageTiming {
-                name: s.name.to_string(),
-                calls: s.calls,
-                avg_ms: if s.calls == 0 { 0.0 } else { seconds * 1000.0 / s.calls as f64 },
-                max_ms: s.max.as_secs_f64() * 1000.0,
-                total_ms: seconds * 1000.0,
-                share_pct: if total == 0.0 { 0.0 } else { 100.0 * seconds / total },
-            }
-        }).collect();
+        let total = self
+            .stages
+            .iter()
+            .map(|s| s.total.as_secs_f64())
+            .sum::<f64>();
+        let mut stages: Vec<_> = self
+            .stages
+            .iter()
+            .map(|s| {
+                let seconds = s.total.as_secs_f64();
+                StageTiming {
+                    name: s.name.to_string(),
+                    calls: s.calls,
+                    avg_ms: if s.calls == 0 {
+                        0.0
+                    } else {
+                        seconds * 1000.0 / s.calls as f64
+                    },
+                    max_ms: s.max.as_secs_f64() * 1000.0,
+                    total_ms: seconds * 1000.0,
+                    share_pct: if total == 0.0 {
+                        0.0
+                    } else {
+                        100.0 * seconds / total
+                    },
+                }
+            })
+            .collect();
         stages.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
         ProfileReport {
             enabled: self.enabled,
-            seconds: (if self.enabled { self.started.elapsed() } else { self.stopped }).as_secs_f64(),
+            seconds: (if self.enabled {
+                self.started.elapsed()
+            } else {
+                self.stopped
+            })
+            .as_secs_f64(),
             ticks: self.ticks,
-            avg_tick_ms: if times.is_empty() { 0.0 } else { times.iter().sum::<f64>() / times.len() as f64 },
+            avg_tick_ms: if times.is_empty() {
+                0.0
+            } else {
+                times.iter().sum::<f64>() / times.len() as f64
+            },
             p95_tick_ms: percentile(0.95),
             p99_tick_ms: percentile(0.99),
             max_tick_ms: times.last().copied().unwrap_or_default(),
