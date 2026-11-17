@@ -1276,6 +1276,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_authenticated_administrators_can_control_the_profiler() {
+        let (h, cfg) = (hub(), WebCfg::default());
+        let mod_token = login(&h, &cfg, "mod secret");
+        let admin_token = login(&h, &cfg, "admin secret");
+        let command = |action| R::post("/api/admin/profiler", json!({ "action": action }));
+        assert_eq!(
+            command("start").token(&mod_token).send(&h, &cfg).0,
+            "403 Forbidden"
+        );
+        assert_eq!(
+            command("shell").token(&admin_token).send(&h, &cfg).0,
+            "400 Bad Request"
+        );
+        assert!(h.take_profiles().is_empty());
+        let (status, body) = command("start").token(&admin_token).send(&h, &cfg);
+        assert_eq!(status, "202 Accepted");
+        assert_eq!(body["queued"], true);
+        let queue = h.take_profiles();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].action.name(), "start");
+        assert_eq!(
+            command("stop")
+                .token(&admin_token)
+                .with("Origin: https://evil.example")
+                .send(&h, &cfg)
+                .0,
+            "403 Forbidden"
+        );
+        assert!(h.take_profiles().is_empty());
+    }
+
     /// The role decides on the server, whatever a page shows or sends; an operation is checked
     /// and queued, and its record tells what became of it.
     #[test]
