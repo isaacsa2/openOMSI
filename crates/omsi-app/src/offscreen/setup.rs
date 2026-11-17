@@ -242,7 +242,8 @@ impl<'a> Offscreen<'a> {
         let wetness = initial_wetness(&weather);
         let cabin_air = crate::condensation::CabinAir::new();
         let real_time = RealTime::default();
-        let recorder = record::Recorder::new(out, player.as_mut(), &args.root, settings.doppler);
+        // A dedicated host must not create a film recorder, even when OMSI_RECORD is set.
+        let recorder = if server { None } else { record::Recorder::new(out, player.as_mut(), &args.root, settings.doppler) };
         Ok(Offscreen {
             args,
             out,
