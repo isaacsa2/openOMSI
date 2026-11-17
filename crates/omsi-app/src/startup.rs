@@ -203,22 +203,17 @@ pub(crate) fn find_root() -> Option<PathBuf> {
 /// game makes its instance (`game_graphics_instance`); the launcher's previews stay on wgpu.
 static MX_GRAPHICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The regular Windows mX build uses Direct3D 12; the opt-in mx-vulkan build
-/// uses Vulkan instead. Other explicit APIs must still reach wgpu.
+/// mX does not offer OpenGL or ANGLE. Keep Vulkan and DX12 eligible for
+/// experimental mX; the library's Windows backend is selected at build time.
 fn mx_windows_backend(backend: &str) -> bool {
-    let selected = backend.trim();
-    let mx_api = if cfg!(feature = "mx-vulkan") {
-        "vulkan"
-    } else {
-        "dx12"
-    };
-    selected.is_empty()
-        || selected.eq_ignore_ascii_case("auto")
-        || selected.eq_ignore_ascii_case(mx_api)
+    !matches!(
+        backend.trim().to_ascii_lowercase().as_str(),
+        "gl" | "opengl" | "angle" | "dx11" | "d3d11"
+    )
 }
 
 /// The game's instance: mX when enabled on macOS or Windows, or by OMSI_MX.
-/// On Windows, an explicitly selected API other than this build's mX API uses wgpu.
+/// On Windows, OpenGL and ANGLE bypass mX and continue through wgpu.
 pub(crate) fn game_graphics_instance(setting: bool) -> wgpu::Instance {
     let requested = match omsi_cfg::flags::OMSI_MX.var() {
         Some(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "on" | "true" | "yes"),
@@ -243,9 +238,6 @@ pub(crate) fn game_graphics_instance(setting: bool) -> wgpu::Instance {
     MX_GRAPHICS.store(on, std::sync::atomic::Ordering::Relaxed);
     if on {
         log::info!("graphics: mX Graphics (experimental) asked for");
-        if cfg!(all(windows, feature = "mx-vulkan")) {
-            log::info!("graphics: mX Vulkan test build (adapter metadata may report DX12)");
-        }
     }
     graphics_instance()
 }
@@ -1011,21 +1003,11 @@ mod window_tests {
     use super::software_adapter;
 
     #[test]
-    fn windows_mx_respects_selected_api() {
-        let mx_api = if cfg!(feature = "mx-vulkan") {
-            "vulkan"
-        } else {
-            "dx12"
-        };
-        let other_api = if cfg!(feature = "mx-vulkan") {
-            "dx12"
-        } else {
-            "vulkan"
-        };
-        for backend in ["", "auto", "AUTO", mx_api] {
+    fn windows_mx_only_falls_back_for_gl_and_angle() {
+        for backend in ["", "auto", "dx12", "vulkan", "VULKAN"] {
             assert!(super::mx_windows_backend(backend), "{backend}");
         }
-        for backend in [other_api, "gl", "angle", "dx11", "d3d11"] {
+        for backend in ["gl", "opengl", "angle", "dx11", "d3d11"] {
             assert!(!super::mx_windows_backend(backend), "{backend}");
         }
     }
