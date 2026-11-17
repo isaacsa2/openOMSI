@@ -20,6 +20,7 @@ const T = {
     waiting: "waiting", walking: "walking", aboard: "aboard", off: "off", density: "density", role: "Role",
     driving: "driving", on_foot: "on foot", aboard_of: "aboard #", joining: "joining", admin: "admin", moderator: "moderator",
     online: "online", noPlayers: "Nobody found.", noEvents: "Nothing yet.",
+    "tps-label": "Simulation ticks per second", "tps-help": "Measured from completed server ticks every wall-clock second. Updates with this panel.", "tps-warmup": "Measuring TPS…",
     confirmKick: "Send away {name} (number {id}, connection {conn})?", confirmBan: "Send away {name} (number {id}, connection {conn}) for the rest of this server run?",
     confirmClear: "Take every AI car off the road?", unreachable: "The server does not answer. Trying again…",
     expired: "The session has ended: log in again.", queued: "queued", applied: "applied", pending: "pending", rejected: "rejected",
@@ -47,6 +48,7 @@ const T = {
     waiting: "esperando", walking: "andando", aboard: "a bordo", off: "desligado", density: "densidade", role: "Papel",
     driving: "dirigindo", on_foot: "a pé", aboard_of: "a bordo do #", joining: "entrando", admin: "admin", moderator: "moderador",
     online: "online", noPlayers: "Ninguém encontrado.", noEvents: "Nada ainda.",
+    "tps-label": "Ticks de simulação por segundo", "tps-help": "Medição real dos ticks concluídos por segundo. Atualiza com este painel.", "tps-warmup": "Medindo TPS…",
     confirmKick: "Expulsar {name} (número {id}, conexão {conn})?", confirmBan: "Expulsar {name} (número {id}, conexão {conn}) até o servidor reiniciar?",
     confirmClear: "Tirar todos os carros de IA das ruas?", unreachable: "O servidor não responde. Tentando de novo…",
     expired: "A sessão terminou: entre de novo.", queued: "na fila", applied: "aplicado", pending: "enviado", rejected: "recusado",
@@ -206,6 +208,14 @@ function render() {
   $("who").textContent = sess.actor + " · " + t(sess.role);
   const dl = $("facts");
   dl.replaceChildren();
+  const target = typeof s.target_tps === "number" && Number.isFinite(s.target_tps) && s.target_tps > 0 ? s.target_tps : 60;
+  const measured = typeof s.tps === "number" && Number.isFinite(s.tps) ? s.tps : null;
+  $("tps-value").textContent = measured === null ? t("tps-warmup") : measured.toFixed(1) + " / " + target.toFixed(0) + " TPS";
+  const bar = $("tps-bar");
+  bar.hidden = measured === null;
+  bar.max = target;
+  bar.value = measured === null ? 0 : Math.max(0, Math.min(target, measured));
+  bar.dataset.health = measured === null ? "warming" : measured >= target * 0.90 ? "good" : measured >= target * 0.70 ? "warn" : "low";
   fact(dl, t("map"), s.map);
   fact(dl, t("playersNow"), s.players + " / " + s.max_players);
   fact(dl, t("time"), s.time + "  ×" + s.clock_speed + (s.real_time ? " (" + t("lockedRT") + ")" : ""));
