@@ -304,7 +304,7 @@ fn start_administration(cfg: &ServerCfg, path: &Path) {
 
 /// The server's state for the admins' panels now (`time`: the clock, s; `world`: as for
 /// `GET /status`).
-pub(crate) fn admin_state(time: f64, speed: f64, weather: &str, metar: Option<&str>, world: omsi_net::ws::WorldCounts, metrics: &omsi_admin::metrics::TickMeter) -> omsi_admin::ServerState {
+pub(crate) fn admin_state(time: f64, speed: f64, weather: &str, metar: Option<&str>, world: omsi_net::ws::WorldCounts, metrics: &omsi_admin::metrics::TickMeter, profiler: &omsi_admin::profiler::Profiler) -> omsi_admin::ServerState {
     let clock = time.rem_euclid(86_400.0);
     omsi_admin::ServerState {
         time: crate::schedule::hhmm(clock),
@@ -312,6 +312,7 @@ pub(crate) fn admin_state(time: f64, speed: f64, weather: &str, metar: Option<&s
         clock_speed: speed,
         tps: metrics.tps(),
         target_tps: metrics.target(),
+        profiler: Some(profiler.report()),
         weather: weather.to_string(),
         metar: metar.map(str::to_string),
         traffic: world.traffic,

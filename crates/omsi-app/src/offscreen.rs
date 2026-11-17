@@ -87,6 +87,8 @@ struct Offscreen<'a> {
     srv_weather_name: String,
     /// Real completed dedicated host ticks per wall-clock second.
     srv_metrics: omsi_admin::metrics::TickMeter,
+    /// Optional bounded per-stage profiler; default off.
+    srv_profiler: omsi_admin::profiler::Profiler,
     /// Last wall-clock publication of the dedicated host status and web panel.
     srv_report_at: std::time::Instant,
     ground_gap: Option<crate::ground_gap::GroundGap>,
@@ -128,6 +130,7 @@ pub(crate) fn run_offscreen(
         let t = std::time::Instant::now();
         let go_on = run.step(i)?;
         if server && go_on {
+            run.srv_profiler.tick(t.elapsed());
             run.srv_metrics.completed(std::time::Instant::now());
         }
         let ms = t.elapsed().as_secs_f64() * 1000.0;

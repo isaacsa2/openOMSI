@@ -98,6 +98,12 @@ impl frame_stages::Host<OffscreenStage> for Step<'_, '_> {
         Ok(Flow::Go)
     }
 
+    fn observe_stage(&mut self, name: &'static str, elapsed: std::time::Duration) {
+        if self.run.server {
+            self.run.srv_profiler.stage(name, elapsed);
+        }
+    }
+
     fn profile(&mut self) -> &mut ProfileTimes {
         &mut self.run.profile
     }
