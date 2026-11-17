@@ -42,8 +42,8 @@ pub fn tick_metar(
                 _ => {}
             }
         } else if std::time::Instant::now() >= *due {
-            let (tx, rx) = std::sync::mpsc::channel();
-            *rx = Some(rx);
+            let (tx, receiver) = std::sync::mpsc::channel();
+            *rx = Some(receiver);
             let icao = icao.clone();
             std::thread::spawn(move || {
                 let _ = tx.send(crate::metar::try_metar(&icao));

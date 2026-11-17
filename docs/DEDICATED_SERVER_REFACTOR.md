@@ -117,7 +117,7 @@ No target improvement percentage should be advertised until measured.
 
 ## GPU-free world diagnostics (independent process)
 
-`cargo run -p omsi-server --bin omsi-worldcheck -- /path/to/OMSI2 Maps/Spandau/global.cfg 19890501`
+`cargo run -p omsi-server --bin worldcheck -- /path/to/OMSI2 Maps/Spandau/global.cfg 19890501`
 
 This checks the CPU map index, Chrono selections, tile references and
 object lookup without constructing a wgpu device, scene, player view or audio

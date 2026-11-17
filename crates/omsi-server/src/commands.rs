@@ -101,10 +101,10 @@ pub fn service_commands(
 
 /// Apply authoritative world changes only on the server tick, keeping the
 /// existing role restrictions, audit records and traffic limits.
-pub fn apply_world_jobs(
-    lan: &mut LanSession,
-    admin: &mut ServerAdmin,
-    traffic: Option<&mut dyn omsi_lan::admin::world::ServerTraffic>,
+pub fn apply_world_jobs<'a>(
+    lan: &'a mut LanSession,
+    admin: &'a mut ServerAdmin,
+    traffic: Option<&'a mut dyn omsi_lan::admin::world::ServerTraffic>,
     clock: f64,
     traffic_max: usize,
     hub: Option<&omsi_admin::Hub>,
