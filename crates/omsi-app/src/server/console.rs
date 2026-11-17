@@ -6,7 +6,7 @@
 
 use std::io::{self, BufRead};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, mpsc};
 
 const QUEUE_LIMIT: usize = 128;
 const LINE_LIMIT: usize = 512;
@@ -29,7 +29,9 @@ pub(super) fn start() {
             for line in stdin.lock().lines() {
                 match line {
                     Ok(text) => {
-                        let Some(command) = normalize(&text) else { continue };
+                        let Some(command) = normalize(&text) else {
+                            continue;
+                        };
                         if tx.try_send(command.to_owned()).is_err() {
                             log::warn!("server console: command queue full or closed");
                         }
@@ -57,8 +59,12 @@ fn normalize(text: &str) -> Option<&str> {
 }
 
 pub(crate) fn take() -> Vec<String> {
-    let Some(queue) = INPUT.get() else { return Vec::new() };
-    let Ok(rx) = queue.lock() else { return Vec::new() };
+    let Some(queue) = INPUT.get() else {
+        return Vec::new();
+    };
+    let Ok(rx) = queue.lock() else {
+        return Vec::new();
+    };
     let mut result = Vec::new();
     for _ in 0..PER_TICK {
         match rx.try_recv() {
@@ -89,10 +95,14 @@ fn builtin(command: &str) -> Option<Builtin> {
         "status" => Some(Builtin::Status),
         "tps" => Some(Builtin::Tps),
         "stop" => Some(Builtin::Stop),
-        "timings on" | "timings start" | "spark start" | "profile start" => Some(Builtin::TimingStart),
+        "timings on" | "timings start" | "spark start" | "profile start" => {
+            Some(Builtin::TimingStart)
+        }
         "timings off" | "timings stop" | "spark stop" | "profile stop" => Some(Builtin::TimingStop),
         "timings reset" | "spark reset" | "profile reset" => Some(Builtin::TimingReset),
-        "timings" | "timings report" | "spark" | "spark report" | "profile" | "profile report" => Some(Builtin::TimingReport),
+        "timings" | "timings report" | "spark" | "spark report" | "profile" | "profile report" => {
+            Some(Builtin::TimingReport)
+        }
         _ => None,
     }
 }
@@ -109,28 +119,59 @@ pub(crate) fn run_builtin(
         Some(Builtin::Help) => {
             log::info!("server console commands: help, list, status, tps, stop");
             log::info!("timings on|off|report|reset (also: spark start|stop|report|reset)");
-            log::info!("administration: say <message>, kick <id> [reason], ban <id> [reason], unban <ban-id>, hwban <id> <session|all> [duration] [reason]");
-            log::info!("world: clock <seconds>, time <offset-seconds>, speed <factor>, weather next|set <file>, traffic <count|clear>, passengers <density>");
-            log::info!("players: tell <id> <message>, vmute <id>, vunmute <id>, unstick <id>, service <repair|refuel|wash> <id|all>");
+            log::info!(
+                "administration: say <message>, kick <id> [reason], ban <id> [reason], unban <ban-id>, hwban <id> <session|all> [duration] [reason]"
+            );
+            log::info!(
+                "world: clock <seconds>, time <offset-seconds>, speed <factor>, weather next|set <file>, traffic <count|clear>, passengers <density>"
+            );
+            log::info!(
+                "players: tell <id> <message>, vmute <id>, vunmute <id>, unstick <id>, service <repair|refuel|wash> <id|all>"
+            );
         }
         Some(Builtin::List) => {
-            let players: Vec<_> = lan.peers()
+            let players: Vec<_> = lan
+                .peers()
                 .filter(|p| p.has_info)
-                .map(|p| format!("{} (#{}): {}", omsi_admin::clean(&p.pose.name, 64), p.pose.id, omsi_admin::clean(&p.pose.bus, 100)))
+                .map(|p| {
+                    format!(
+                        "{} (#{}): {}",
+                        omsi_admin::clean(&p.pose.name, 64),
+                        p.pose.id,
+                        omsi_admin::clean(&p.pose.bus, 100)
+                    )
+                })
                 .collect();
-            log::info!("server console: {} player(s): {}", players.len(), if players.is_empty() { "none".into() } else { players.join(", ") });
+            log::info!(
+                "server console: {} player(s): {}",
+                players.len(),
+                if players.is_empty() {
+                    "none".into()
+                } else {
+                    players.join(", ")
+                }
+            );
         }
         Some(Builtin::Status) => {
             let players = lan.peers().filter(|p| p.has_info).count();
-            let tps = metrics.tps().map(|v| format!("{v:.1}")).unwrap_or_else(|| "warming up".into());
-            log::info!("server console: online, {players} players, TPS {tps}/{:.0}", metrics.target());
+            let tps = metrics
+                .tps()
+                .map(|v| format!("{v:.1}"))
+                .unwrap_or_else(|| "warming up".into());
+            log::info!(
+                "server console: online, {players} players, TPS {tps}/{:.0}",
+                metrics.target()
+            );
         }
-        Some(Builtin::Tps) => {
-            match metrics.tps() {
-                Some(rate) => log::info!("server console: TPS {rate:.1}/{:.0} (completed ticks per wall-clock second)", metrics.target()),
-                None => log::info!("server console: TPS warming up (first one-second sample not finished)"),
+        Some(Builtin::Tps) => match metrics.tps() {
+            Some(rate) => log::info!(
+                "server console: TPS {rate:.1}/{:.0} (completed ticks per wall-clock second)",
+                metrics.target()
+            ),
+            None => {
+                log::info!("server console: TPS warming up (first one-second sample not finished)")
             }
-        }
+        },
         Some(Builtin::TimingStart) => {
             profiler.start();
             log::info!("server console: timings enabled (recording a new bounded sample)");
@@ -145,12 +186,26 @@ pub(crate) fn run_builtin(
         }
         Some(Builtin::TimingReport) => {
             let report = profiler.report();
-            log::info!("server console: timings {}, {} ticks in {:.1} s, tick avg {:.2} ms, p95 {:.2} ms, p99 {:.2} ms, max {:.2} ms",
-                if report.enabled { "running" } else { "stopped" }, report.ticks, report.seconds,
-                report.avg_tick_ms, report.p95_tick_ms, report.p99_tick_ms, report.max_tick_ms);
+            log::info!(
+                "server console: timings {}, {} ticks in {:.1} s, tick avg {:.2} ms, p95 {:.2} ms, p99 {:.2} ms, max {:.2} ms",
+                if report.enabled { "running" } else { "stopped" },
+                report.ticks,
+                report.seconds,
+                report.avg_tick_ms,
+                report.p95_tick_ms,
+                report.p99_tick_ms,
+                report.max_tick_ms
+            );
             for entry in report.stages {
-                log::info!("server console: {:<18} mean {:.3} ms, max {:.3} ms, total {:.1} ms ({:.1}%), calls {}",
-                    entry.name, entry.avg_ms, entry.max_ms, entry.total_ms, entry.share_pct, entry.calls);
+                log::info!(
+                    "server console: {:<18} mean {:.3} ms, max {:.3} ms, total {:.1} ms ({:.1}%), calls {}",
+                    entry.name,
+                    entry.avg_ms,
+                    entry.max_ms,
+                    entry.total_ms,
+                    entry.share_pct,
+                    entry.calls
+                );
             }
         }
         Some(Builtin::Stop) => {
