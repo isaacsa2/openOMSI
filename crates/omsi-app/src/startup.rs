@@ -203,37 +203,15 @@ pub(crate) fn find_root() -> Option<PathBuf> {
 /// game makes its instance (`game_graphics_instance`); the launcher's previews stay on wgpu.
 static MX_GRAPHICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// mX does not offer OpenGL or ANGLE. Keep Vulkan and DX12 eligible for
-/// experimental mX; the library's Windows backend is selected at build time.
-fn mx_windows_backend(backend: &str) -> bool {
-    !matches!(
-        backend.trim().to_ascii_lowercase().as_str(),
-        "gl" | "opengl" | "angle" | "dx11" | "d3d11"
-    )
-}
-
-/// The game's instance: mX when enabled on macOS or Windows, or by OMSI_MX.
-/// On Windows, OpenGL and ANGLE bypass mX and continue through wgpu.
-pub(crate) fn game_graphics_instance(setting: bool) -> wgpu::Instance {
-    let requested = match omsi_cfg::flags::OMSI_MX.var() {
+/// The game's instance: mX's when `setting` says so (`mx_graphics`, read on a Mac only: mX has
+/// drawn the game on Metal, not yet on Direct3D 12 or Vulkan) or `OMSI_MX=on` does, else
+/// `graphics_instance`'s.
+pub(crate) fn game_graphics_instance(setting: bool, graphics_api: &str) -> wgpu::Instance {
+    let selected = omsi_cfg::flags::OMSI_BACKEND.var().unwrap_or(graphics_api);
+    let on = match omsi_cfg::flags::OMSI_MX.var() {
         Some(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "on" | "true" | "yes"),
-        None => setting && cfg!(any(target_os = "macos", windows)),
-    };
-    let on = if requested && cfg!(windows) {
-        let backend = omsi_cfg::flags::OMSI_BACKEND
-            .var()
-            .map(str::to_owned)
-            .unwrap_or_else(|| crate::settings::Settings::load().graphics_api);
-        if !mx_windows_backend(&backend) {
-            log::info!(
-                "graphics: mX Graphics skipped for {backend}; using wgpu for the selected API"
-            );
-            false
-        } else {
-            true
-        }
-    } else {
-        requested
+        None => (setting && cfg!(target_os = "macos"))
+            || (cfg!(windows) && selected.eq_ignore_ascii_case("mx_dx12")),
     };
     MX_GRAPHICS.store(on, std::sync::atomic::Ordering::Relaxed);
     if on {
@@ -385,7 +363,7 @@ pub(crate) fn backend_order() -> Vec<GraphicsApi> {
     }
     let first = match wanted.trim().to_ascii_lowercase().as_str() {
         "vulkan" => Some(GraphicsApi::Native(wgpu::Backends::VULKAN)),
-        "dx12" | "directx" | "d3d12" if cfg!(windows) => Some(GraphicsApi::Native(wgpu::Backends::DX12)),
+        "dx12" | "mx_dx12" | "directx" | "d3d12" if cfg!(windows) => Some(GraphicsApi::Native(wgpu::Backends::DX12)),
         "gl" | "opengl" | "gles" => Some(GraphicsApi::Native(wgpu::Backends::GL)),
         "angle" | "dx11" | "d3d11" if all.contains(&GraphicsApi::Angle) => Some(GraphicsApi::Angle),
         _ => None,
@@ -1001,16 +979,6 @@ mod own_key_tests {
 #[cfg(test)]
 mod window_tests {
     use super::software_adapter;
-
-    #[test]
-    fn windows_mx_only_falls_back_for_gl_and_angle() {
-        for backend in ["", "auto", "dx12", "vulkan", "VULKAN"] {
-            assert!(super::mx_windows_backend(backend), "{backend}");
-        }
-        for backend in ["gl", "opengl", "angle", "dx11", "d3d11"] {
-            assert!(!super::mx_windows_backend(backend), "{backend}");
-        }
-    }
 
     /// The software renderers come after every graphics chip (#770).
     #[test]
