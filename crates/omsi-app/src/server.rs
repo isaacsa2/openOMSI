@@ -95,8 +95,6 @@ pub(crate) fn check_map(args: &Args) -> Result<(), String> {
 
 pub(crate) use omsi_lan::server_cfg::installed_maps;
 
-pub(crate) use omsi_server::admin::{admin_state, tick_status};
-
 /// A dedicated server run: graphics without a device, the whole world by interest.
 pub(crate) static SERVER_MODE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
