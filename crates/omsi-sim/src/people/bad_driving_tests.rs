@@ -80,8 +80,15 @@ fn riders_complain_about_an_emergency_stop_unless_the_setting_is_off() {
     let (said, toll, _) = emergency_stop(true, true, false);
     assert_eq!(said, 1);
     assert!(toll > 0.05, "{toll}");
-    assert_eq!(emergency_stop(false, true, false), (0, 0.0, Task::SittingInBus));
-    assert_eq!(emergency_stop(true, false, false).0, said, "disabling early exit must not silence complaints");
+    assert_eq!(
+        emergency_stop(false, true, false),
+        (0, 0.0, Task::SittingInBus)
+    );
+    assert_eq!(
+        emergency_stop(true, false, false).0,
+        said,
+        "disabling early exit must not silence complaints"
+    );
 }
 
 #[test]
