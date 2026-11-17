@@ -368,7 +368,9 @@ fn initialize_traffic_state(
         t.day_time = parse_time(&args.time);
         let daylight = omsi_sim::Daylight::compute(
             &start_clock(args),
-            omsi_content::Envir::load(&args.root.join("envir.cfg")).ok().as_ref(),
+            omsi_content::Envir::load(&args.root.join("envir.cfg"))
+                .ok()
+                .as_ref(),
         );
         steps::set_ai_daylight(t, daylight, steps::gloomy_weather(Some(weather)));
         t.populate(world, center);
