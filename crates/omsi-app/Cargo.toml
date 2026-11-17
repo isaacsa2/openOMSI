@@ -18,6 +18,11 @@ path = "src/lib.rs"
 name = "openomsi"
 path = "src/main.rs"
 
+[features]
+# Test-only Windows build: use the Vulkan implementation of mX rather than Direct3D 12.
+# mX backends are chosen at compile time; OpenGL/ANGLE and the other API stay on wgpu.
+mx-vulkan = ["dep:mx"]
+
 [build-dependencies]
 winresource.workspace = true
 
@@ -113,6 +118,9 @@ libc.workspace = true
 
 # Windows: the game controllers through DirectInput, as OMSI reads them (see `dinput`)
 [target.'cfg(windows)'.dependencies]
+# Selects mX's Vulkan backend for the opt-in mx-vulkan test build; the git revision
+# must match wgpu-mx in the workspace so Cargo unifies features on the same mX crate.
+mx = { git = "https://github.com/openOMSI-org/mX", rev = "a5185eb9288f0d7e56c3d18658df69dc928c7ca0", features = ["vulkan"], optional = true }
 windows = { workspace = true, features = ["Win32_Devices_HumanInterfaceDevice", "Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 # Windows: wgpu's OpenGL ES backend on ANGLE's Direct3D 11 renderer (`GraphicsApi::Angle`,
