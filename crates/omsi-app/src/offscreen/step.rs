@@ -924,8 +924,12 @@ impl Offscreen<'_> {
             steps::throw_spray(spray, dt, player.as_ref(), traffic.as_ref(), remotes_off, eye, steps::spray_wind(weather), world, spray_wet, world.settings.rain_quality());
         }
         *wetness = crate::weather_setup::road_wetness(precip_of(weather).1, dt as f64, *wetness);
-        let (v, eye) = (omsi_scene::road_snow::vehicles(player.as_ref().map(|p| &p.vehicle), traffic.as_deref()), player.as_ref().map_or(camera.position, |p| p.vehicle.position));
-        omsi_scene::road_snow::frame(renderer, dt, Some(weather), eye, traffic.as_ref().map(|t| &t.net), &v);
+        // Road-snow tracks are a renderer-side effect, not part of the host's
+        // authoritative traffic or weather simulation.
+        if !server {
+            let (v, eye) = (omsi_scene::road_snow::vehicles(player.as_ref().map(|p| &p.vehicle), traffic.as_deref()), player.as_ref().map_or(camera.position, |p| p.vehicle.position));
+            omsi_scene::road_snow::frame(renderer, dt, Some(weather), eye, traffic.as_ref().map(|t| &t.net), &v);
+        }
     }
 
     /// A snapshot due at `t_s` (`--snapshots`).
