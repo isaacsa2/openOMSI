@@ -385,6 +385,7 @@ const gameplay = {
         { type: 'select', key: 'character_models', label: 'Character models', options: [['original', 'Original'], ['improved', 'High quality (improved)']], help: 'High quality draws the people with the Microsoft Rocketbox avatars and their living faces, on this computer only: servers and other players keep their own. They are downloaded once (about 310 MB).' },
         { type: 'toggle', key: 'exact_fare', label: 'Passengers pay the exact fare' },
         { type: 'toggle', key: 'pax_bad_driving', label: 'Passengers react to bad driving' },
+        { type: 'toggle', key: 'pax_bad_driving_alight', label: 'Riders may leave after rough driving', help: 'Off: passengers complain but stay aboard', when: (s) => !!s.pax_bad_driving },
         { type: 'toggle', key: 'passenger_connections', label: 'Passenger connections between lines', help: 'Optional onward trips in single player only; disabled in multiplayer' },
         { type: 'slider', key: 'passenger_transfer_percent', label: 'Connection chance', min: 0, max: 100, step: 5, def: 20, format: (v) => `${v}%`, when: (s) => !!s.passenger_connections },
         { type: 'toggle', key: 'passenger_hailing', label: 'Passengers signal approaching buses', help: 'Optional visual hailing; only effective with supported natural animations' },

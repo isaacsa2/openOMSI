@@ -164,6 +164,7 @@ impl PeopleSim {
             visual_hailing: false,
             visual_full_bus_reaction: false,
             bad_driving: true,
+            bad_driving_alight: true,
             boarding: "auto".into(),
             stand_chance: 0.05,
             short_rides_stand: false,
@@ -622,7 +623,6 @@ impl PeopleSim {
             why: "",
             puppet: None,
             remote: false,
-            remote_seat: None,
         });
         Some(self.people.len() - 1)
     }

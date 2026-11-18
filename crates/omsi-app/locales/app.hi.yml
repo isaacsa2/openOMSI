@@ -3218,3 +3218,5 @@
 "At most 5": "अधिकतम 5"
 "Folders of objects and splines that no other map uses go with it: {n}, {size}.": "जिन ऑब्जेक्ट और स्प्लाइन फ़ोल्डरों को कोई दूसरा मैप इस्तेमाल नहीं करता, वे भी साथ में हट जाते हैं: {n}, {size}।"
 "Folders of objects and splines that another map still uses stay: {n}.": "जिन ऑब्जेक्ट और स्प्लाइन फ़ोल्डरों को कोई दूसरा मैप अब भी इस्तेमाल करता है, वे बने रहते हैं: {n}।"
+"Riders may leave after rough driving": "खराब ड्राइविंग के बाद यात्री उतर सकते हैं"
+"Off: passengers complain but stay aboard": "बंद: यात्री शिकायत करेंगे लेकिन बस में बने रहेंगे"

@@ -565,6 +565,10 @@ _version: 2
   en: "Passengers pay the exact fare"
 "Passengers react to bad driving":
   en: "Passengers react to bad driving"
+"Riders may leave after rough driving":
+  en: "Riders may leave after rough driving"
+"Off: passengers complain but stay aboard":
+  en: "Off: passengers complain but stay aboard"
 "They complain about rough driving and may get off at the next stop":
   en: "They complain about rough driving and may get off at the next stop"
 "Arrival announcements at the stop":
