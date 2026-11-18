@@ -58,6 +58,24 @@ These are **simulation foundations**, not authorization to call
 and signal records must stay visible as unresolved, not be silently converted
 into boxes, ignored signals or a false-ready server.
 
+## Partial CPU spline road/wheel surfaces
+
+The renderer-free host now builds the production spline triangle meshes and
+uses the same `TileSurface` raster and `DriveGrid` wheel-probe logic for its
+active tiles. The loader includes splines in the neighboring eight tiles so
+a road crossing a tile boundary does not end at the `.map` boundary. It
+preserves the `OMSI_HEIGHTPROFILE_GROUND` switch, alpha-only overlays and
+the overhead-spline exclusion rules. Tests exercise triangle-height sampling
+and road geometry overlapping two adjacent tiles.
+
+**Not yet parity:** the native executable limits its initial world to 64
+map tiles; does not dynamically stream client-interest neighborhoods,
+place scenery `[surface]` road plates/crossings, apply terrain holes and
+height deformations, synchronize all AI/passenger snapshots, or execute
+authoritative bus scripts. Omitted scenery surfaces, invalid splines and
+missing definitions remain visible as unresolved counts. The incomplete
+road mesh must not be treated as proof of full collision parity.
+
 ## Experimental independent host process
 
 The Release CI creates **separate** headless-test ZIPs for Windows x64 and
