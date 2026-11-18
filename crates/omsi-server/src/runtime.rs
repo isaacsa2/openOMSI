@@ -101,6 +101,12 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
         !cfg.accept_uploads && !cfg.share_maps && cfg.parked_buses == 0,
         "experimental relay requires accept_uploads=0, share_maps=0, parked_buses=0"
     );
+    // A configured fleet activates the selected-bus download path. The
+    // experimental relay supports only locally installed vehicles.
+    ensure!(
+        cfg.vehicles.is_empty(),
+        "experimental relay requires an empty vehicles list (no fleet downloads)"
+    );
     ensure!(
         !cfg.public_server && !cfg.tunnel && cfg.public_address.eq_ignore_ascii_case("off"),
         "experimental relay requires public_server=0, tunnel=0, public_address=off"
@@ -192,6 +198,28 @@ pub fn free_roam(
     let mut net = HostTransport::bind_configured(plan, world)
         .with_context(|| format!("binding dedicated UDP port {}", cfg.port))?;
     net.session_mut().clock_speed = cfg.time_speed;
+    // A graphical client ALWAYS requests the host's authenticated TCP
+    // manifest after WELCOME, even when it has the same map and buses.
+    // Reserving TCP in LanSession::host is not enough: the original server
+    // hands that listener to omsi_lan::mods::serve before accepting players.
+    // Keep the very same service alive for this room. With share_maps=0,
+    // accept_uploads=0 and an empty fleet it serves an empty LIST, not files.
+    let listener = net
+        .session_mut()
+        .take_mods_listener()
+        .context("native LAN requires the TCP mod listener for normal clients")?;
+    let host_key = net
+        .session()
+        .host_key()
+        .context("native LAN requires the session authentication key")?;
+    let mods_source = omsi_lan::mods::ModSource {
+        root: root.to_path_buf(),
+        map: cfg.map.clone(),
+        bus: None,
+        weather: None,
+    };
+    let mods_server = omsi_lan::mods::serve(listener, host_key, &mods_source)
+        .context("starting authenticated local-only LAN manifest service")?;
     // Do not open the gateway or allow players during CPU map initialization.
     let info = admin::info_of(cfg, env!("CARGO_PKG_VERSION"));
     omsi_lan::gateway::open_public_gateway(net.session(), info, cfg.web_port, false);
@@ -314,6 +342,7 @@ pub fn free_roam(
         std::thread::sleep(pacer.after_tick(Instant::now()).wait);
     }
     net.session_mut().leave();
+    drop(mods_server);
     omsi_lan::gateway::close_public_gateway();
     eprintln!("Dedicated relay stopped cleanly after {n} ticks");
     Ok(())
@@ -426,6 +455,9 @@ mod tests {
         assert!(allow_free_roam(&cfg).is_err());
         cfg.voice.enabled = false;
         cfg.allow_player_teleport = true;
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.allow_player_teleport = false;
+        cfg.vehicles.push("Vehicles/Private/Bus.bus".into());
         assert!(allow_free_roam(&cfg).is_err());
     }
 }
