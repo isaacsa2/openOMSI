@@ -281,22 +281,9 @@ mod tests {
             .as_nanos();
         let path =
             std::env::temp_dir().join(format!("omsi-headless-{}-{nanos}.cfg", std::process::id()));
-        let config = [
-            "name=isolated-test",
-            "date=1989-05-30",
-            "traffic=0",
-            "timetable=0",
-            "passengers=0",
-            "share_maps=0",
-            "accept_uploads=0",
-            "parked_buses=0",
-            "public_server=0",
-            "tunnel=0",
-            "public_address=off",
-            "real_time=0",
-            "metar_sync=0",
-        ]
-        .join("\n");
+        // Package defaults must pass the same admission guard as production
+        // runtime parsing, preventing accidental unsafe test ZIPs.
+        let config = include_str!("../../../scripts/server-headless/server-test.cfg");
         std::fs::write(&path, config).unwrap();
         let mut cfg = ServerCfg::load(&path, 256).unwrap();
         let _ = std::fs::remove_file(&path);
