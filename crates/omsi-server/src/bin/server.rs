@@ -61,6 +61,19 @@ fn main() -> Result<()> {
     // loads global.cfg. Without this, maps with no [entrypoints] list cannot
     // discover entrypoint .sco definitions via find_in_roots(), and other
     // scenery/vehicle references may be missed by the CPU map index.
+    // Match the legacy graphical server's content search order:
+    // user content, mounted content archives, then the OMSI installation.
+    // The map and its .sco entrypoint objects may live in an overlay.
+    if let Some(content) = omsi_cfg::content_dir() {
+        match omsi_cfg::ensure_content_layout(&content) {
+            Ok(()) => omsi_cfg::add_content_root(content.clone()),
+            Err(error) => log::warn!("content folder {}: {error}", content.display()),
+        }
+    }
+    omsi_cfg::vfs::mount_env_zips();
+    if let Some(content) = omsi_cfg::content_dir() {
+        omsi_cfg::vfs::mount_dir_zips(&content.join("Archives"));
+    }
     omsi_cfg::add_content_root(root.clone());
     // Validate operator restrictions before initializing any administration,
     // global upload policy, gateway or console reader.
