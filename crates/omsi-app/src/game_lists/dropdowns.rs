@@ -1003,6 +1003,7 @@ pub(super) fn sync_live(app: &mut App) {
         } else {
             0.0
         };
+        h.ambient_talk = s.passenger_ambient_talk;
         h.visual_hailing = s.passenger_hailing && s.passenger_animation == "enhanced";
         h.visual_full_bus_reaction =
             s.passenger_full_bus_reaction && s.passenger_animation == "enhanced";

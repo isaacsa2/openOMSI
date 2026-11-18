@@ -41,6 +41,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         switch_row(app, "pax_bad_driving_alight", "Riders may leave after rough driving", "Off: passengers complain but stay aboard").filter(|_| s.pax_bad_driving),
         switch_row(app, "passenger_connections", "Passenger connections between lines", "Optional onward trips in single player only; disabled in multiplayer"),
         slider_row(app, "passenger_transfer_percent", "Connection chance", "Probability for eligible transfers; default 20%", &|v|format!("{v:.0}%")).filter(|_|s.passenger_connections),
+        switch_row(app, "passenger_ambient_talk", "Conversations between seated passengers", "Rare optional conversations using installed voice packs"),
         switch_row(app, "passenger_hailing", "Passengers signal approaching buses", "Optional visual hailing; only effective with supported natural animations"),
         switch_row(app, "passenger_full_bus_reaction", "Passengers react to full buses", "Optional visual acknowledgement when an approaching compatible bus is at passenger capacity"),
         switch_row(app, "pax_short_rides_stand", "Short rides stand by a door", "Passengers with no set stop who ride only a few kilometres take a free standing place near an exit rather than a seat"),

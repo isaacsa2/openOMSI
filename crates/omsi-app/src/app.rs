@@ -825,6 +825,7 @@ impl App {
                     } else {
                         0.0
                     };
+                    h.ambient_talk = self.settings.passenger_ambient_talk;
                     h.visual_hailing = self.settings.passenger_hailing
                         && self.settings.passenger_animation == "enhanced";
                     h.visual_full_bus_reaction = self.settings.passenger_full_bus_reaction

@@ -492,6 +492,7 @@ fn new_humans(
             } else {
                 0.0
             };
+        h.ambient_talk = settings.passenger_ambient_talk;
         h.visual_hailing = settings.passenger_hailing && settings.passenger_animation == "enhanced";
         h.visual_full_bus_reaction =
             settings.passenger_full_bus_reaction && settings.passenger_animation == "enhanced";

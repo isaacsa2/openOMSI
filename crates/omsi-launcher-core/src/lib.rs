@@ -3280,6 +3280,7 @@ fn passenger_defaults(v: &mut Value) {
     v["passenger_connections"] = json!(false);
     v["passenger_transfer_percent"] = json!(20.0);
     v["passenger_hailing"] = json!(false);
+    v["passenger_ambient_talk"] = json!(false);
     v["passenger_full_bus_reaction"] = json!(false);
     v["pax_short_rides_stand"] = json!(false);
 }
@@ -4246,6 +4247,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             | "pax_bad_driving_alight"
             | "passenger_connections"
             | "passenger_hailing"
+            | "passenger_ambient_talk"
             | "passenger_full_bus_reaction"
             | "pax_short_rides_stand"
             | "auto_announce"
@@ -5017,6 +5019,10 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!(
         "passenger_hailing={}\n",
         b("passenger_hailing", false)
+    ));
+    text.push_str(&format!(
+        "passenger_ambient_talk={}\n",
+        b("passenger_ambient_talk", false)
     ));
     text.push_str(&format!(
         "passenger_full_bus_reaction={}\n",

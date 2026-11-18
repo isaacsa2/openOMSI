@@ -511,6 +511,7 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
     let s = &app.settings;
     Some(match id {
         "passenger_connections" => s.passenger_connections,
+        "passenger_ambient_talk" => s.passenger_ambient_talk,
         "passenger_hailing" => s.passenger_hailing,
         "passenger_full_bus_reaction" => s.passenger_full_bus_reaction,
         "pax_short_rides_stand" => s.pax_short_rides_stand,
@@ -662,6 +663,13 @@ pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static 
                 };
             }
             Some(("passenger_connections", bit))
+        }
+        "passenger_ambient_talk" => {
+            app.settings.passenger_ambient_talk = on;
+            if let Some(h) = app.session.humans.as_mut() {
+                h.ambient_talk = on;
+            }
+            Some(("passenger_ambient_talk", bit))
         }
         "passenger_hailing" => {
             app.settings.passenger_hailing = on;
