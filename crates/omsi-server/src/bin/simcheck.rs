@@ -86,6 +86,17 @@ fn main() -> Result<()> {
         .map(|tile| (tile.x, tile.y))
         .collect();
     ensure!(!tile_keys.is_empty(), "map contains no tiles");
+    let surface_counts = world.install_spline_ground_surfaces(&tile_keys);
+    if surface_counts.incomplete() {
+        eprintln!(
+            "partial CPU wheel surface: {} drivable meshes across {} tiles; {} scenery surfaces, {} invalid splines and {} missing spline definitions remain",
+            surface_counts.wheel_meshes,
+            surface_counts.target_tiles,
+            surface_counts.pending_scenery_surfaces,
+            surface_counts.skipped_invalid,
+            surface_counts.missing_definitions,
+        );
+    }
     let stop_counts = world.install_stop_lists(&tile_keys);
     let signal_network = world.network_with_traffic_lights(&tile_keys);
     let signal_count = signal_network.controllers.len();

@@ -210,7 +210,7 @@ impl HostWorld {
     }
 
     /// Load a spline definition at most once per active cache window.
-    fn spline(&mut self, root: &Path, name: &str) -> Option<Arc<Spline>> {
+    pub(crate) fn spline(&mut self, root: &Path, name: &str) -> Option<Arc<Spline>> {
         let key = name.replace('\\', "/").to_ascii_lowercase();
         if let Some(v) = self.spline_defs.get(&key) {
             return v.clone();

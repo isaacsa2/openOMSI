@@ -18,6 +18,7 @@ pub mod metar;
 pub mod runtime;
 pub mod signals;
 pub mod simulation;
+pub mod surfaces;
 pub mod startup;
 pub mod stops;
 pub mod tick;

@@ -101,6 +101,12 @@ pub fn free_roam(
         .map(|t| (t.x, t.y))
         .collect();
     ensure!(!keys.is_empty(), "map has no active tiles");
+    let ground_surfaces = map.install_spline_ground_surfaces(&keys);
+    log::info!(
+        "CPU road surfaces: {} active tiles, {} rasterized spline meshes, {} wheel meshes; {} pending scenery surfaces",
+        ground_surfaces.target_tiles, ground_surfaces.road_meshes,
+        ground_surfaces.wheel_meshes, ground_surfaces.pending_scenery_surfaces
+    );
     let _stops = map.install_stop_lists(&keys);
     let signals = map.network_with_traffic_lights(&keys);
     let collisions = map.install_static_box_collisions(&keys, &signals.network.lanes);
