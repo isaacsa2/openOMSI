@@ -37,12 +37,14 @@ claim of 60 live TPS, passenger correctness or playable multiplayer.
 
 ## Partial CPU static collision and traffic light migration
 
-The headless map loader can publish static `[boundingbox]` obstacles into
+The headless map loader can publish static `[boundingbox]` and decoded `[collision_mesh]` obstacles into
 `WorldData::lists.collision`, using the map's world placement, while
-avoiding oversized road-through boxes that would create invisible walls.
+avoiding oversized road-through boxes that would create invisible walls. Exact
+collision meshes use the existing O3D loader and simulation MeshShape, with a
+bounded cache and rejection of corrupt/oversized files.
 `simcheck` reports the remaining collision meshes, attached objects and
-missing definitions. **It is not yet complete collision parity**: exact
-`[collision_mesh]` triangles, road/crossing surfaces, attached/parked objects
+missing definitions. **It is not yet complete collision parity**: tilted mesh placements,
+road/crossing surfaces, attached/parked objects
 and deformable terrain still require the dedicated CPU placement path.
 
 The CPU lane loader can now assign `[use_traffic_light]` indices to

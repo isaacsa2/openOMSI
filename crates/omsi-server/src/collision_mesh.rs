@@ -61,6 +61,12 @@ fn mesh_shape(mesh: &omsi_o3d::Mesh) -> Option<Arc<MeshShape>> {
         log::warn!("headless collision mesh: too many triangles ({})", mesh.triangles.len());
         return None;
     }
+    if mesh.triangles.iter().any(|t|
+        t.indices.iter().any(|&index| index as usize >= mesh.vertices.len())
+    ) {
+        log::warn!("headless collision mesh: invalid triangle vertex index");
+        return None;
+    }
     let data = omsi_geometry::mesh_from_o3d(mesh);
     let tris = data.indices.chunks_exact(3).filter_map(|i| {
         let (a, b, c) = (
@@ -102,5 +108,14 @@ mod tests {
             ..Default::default()
         };
         assert!(mesh_shape(&mesh).is_none());
+    }
+
+    #[test]
+    fn corrupt_mesh_indices_cannot_panic_on_loading() {
+        let m = omsi_o3d::Mesh {
+            triangles: vec![omsi_o3d::Triangle { indices: [0, 1, 99], material: 0 }],
+            ..Default::default()
+        };
+        assert!(mesh_shape(&m).is_none());
     }
 }

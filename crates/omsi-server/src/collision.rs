@@ -210,6 +210,13 @@ impl HostWorld {
                     };
                     DVec3::new(base.x, base.y, obj.pos[2] + ground)
                 });
+                // Decorative and terrain-render objects are not rigid
+                // obstacles even when their map placement is tilted.
+                if !(def.fixed || def.crash_mode_pole.is_some())
+                    || def.no_collision || def.surface || def.render_type.is_ground_layer()
+                {
+                    continue;
+                }
                 // Tilted collision meshes must be transformed in full 3D:
                 // a yaw-only approximation would make a sloping bridge solid.
                 if obj.rot[1] != 0.0 || obj.rot[2] != 0.0 {

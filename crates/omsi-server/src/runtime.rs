@@ -105,8 +105,9 @@ pub fn free_roam(
     omsi_lan::gateway::open_public_gateway(net.session(), info, cfg.web_port, false);
     // Do not advertise or hash an untransferable bus fleet in relay-only mode.
     log::warn!(
-        "EXPERIMENTAL relay ONLY: {} static boxes, {} unresolved collision meshes, {} attached objects; AI/timetable/passengers disabled",
-        collisions.static_boxes, collisions.pending_meshes, collisions.pending_attachments
+        "EXPERIMENTAL relay ONLY: {} static boxes, {} exact collision meshes; {} unresolved mesh files, {} tilted objects, {} attachments; AI/timetable/passengers disabled",
+        collisions.static_boxes, collisions.static_meshes,
+        collisions.pending_meshes, collisions.pending_tilted, collisions.pending_attachments
     );
     eprintln!("Experimental headless FREE-ROAM relay: no authoritative bus/traffic/passenger simulation parity");
     net.ready();
