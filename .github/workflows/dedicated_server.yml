@@ -32,7 +32,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo tree --locked -p omsi-server --edges normal > /tmp/omsi-server-dependencies.txt
+          cargo tree -p omsi-server --edges normal > /tmp/omsi-server-dependencies.txt
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "=== CARGO_LOCK_PATCH_BEGIN ==="
+            git --no-pager diff -- Cargo.lock
+            echo "=== CARGO_LOCK_PATCH_END ==="
+            exit 1
+          fi
           if grep -E '(omsi-render|omsi-scene|omsi-audio|wgpu|winit) v[0-9]' /tmp/omsi-server-dependencies.txt; then
             echo "::error::Headless server must not pull in the graphical or audio runtime"
             exit 1
