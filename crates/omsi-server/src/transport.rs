@@ -123,6 +123,32 @@ mod tests {
     }
 
     #[test]
+    fn clients_cannot_join_until_the_headless_world_is_ready() {
+        let mut host = HostTransport::bind(0, "Loading", world(), 4).unwrap();
+        let addr = SocketAddr::from(([127, 0, 0, 1], host.session().local_addr().unwrap().port()));
+        let mut client = LanSession::join_addr(vec![addr], None, "early", world()).unwrap();
+        let pose = Pose::default();
+        for _ in 0..35 {
+            host.tick(0.06);
+            client.tick(0.06, &pose);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!client.connected, "a partially loaded map must not accept a player");
+        assert_eq!(host.session().peer_count(), 0, "loading must not allocate a peer");
+        host.ready();
+        for _ in 0..160 {
+            host.tick(0.06);
+            client.tick(0.06, &pose);
+            if client.connected {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(client.connected, "waiting client should join when map loading completes");
+        assert_eq!(host.session().peer_count(), 1);
+    }
+
+    #[test]
     fn zero_players_does_not_create_a_phantom_local_bus() {
         let mut host = HostTransport::bind(0, "Dedicated", world(), 1).unwrap();
         host.ready();
