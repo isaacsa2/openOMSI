@@ -1,162 +1,169 @@
-//! CPU-only whole-pipeline smoke test and offline throughput diagnostic.
-//!
-//! Unlike the future omsi-server process this NEVER opens a multiplayer
-//! listener or accepts clients: road surfaces, traffic lights and schedules
-//! are not yet authoritative. Use only with locally installed licensed OMSI
-//! content. The output is unpaced simulation throughput, not live server TPS.
-
+//! CPU-only real-map smoke test: loads map lanes and advances production AI and people.
+//! NOT an openOMSI server and NOT a valid production benchmark.
 use anyhow::{Context, Result, ensure};
-use omsi_admin::profiler::Profiler;
 use omsi_server::simulation::CpuSimulation;
-use omsi_server::{traffic, world::HostWorld};
+use omsi_server::traffic;
+use omsi_server::world::HostWorld;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+#[derive(Debug)]
 struct Options {
     root: PathBuf,
-    map: PathBuf,
+    map: String,
     date: i32,
     ticks: usize,
     tiles: usize,
+    ai: usize,
 }
 
-fn map_path(root: &Path, map: &str) -> PathBuf {
-    let path = omsi_cfg::resolve_path(root, map);
-    if path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("cfg"))
-    {
-        path
-    } else {
-        omsi_cfg::resolve_path(&path, "global.cfg")
-    }
-}
-
-fn parse_options(args: impl IntoIterator<Item = String>) -> Result<Options> {
-    let mut args = args.into_iter();
-    let root = args.next().context(
-        "usage: simcheck <OMSI2-root> <map-or-global.cfg> [YYYYMMDD] [ticks] [tiles]",
-    )?;
+fn parse(mut args: impl Iterator<Item = String>) -> Result<Options> {
+    let root = PathBuf::from(args.next().context(
+        "Usage: simcheck <OMSI2-root> <map-dir-or-global.cfg> [YYYYMMDD] [ticks] [tiles] [ai]",
+    )?);
     let map = args.next().context(
-        "usage: simcheck <OMSI2-root> <map-or-global.cfg> [YYYYMMDD] [ticks] [tiles]",
+        "Usage: simcheck <OMSI2-root> <map-dir-or-global.cfg> [YYYYMMDD] [ticks] [tiles] [ai]",
     )?;
-    let date = args.next().unwrap_or_else(|| "19890501".into());
-    let date = date.replace('-', "");
+    let date = args.next().unwrap_or_else(|| "19890501".into()).replace('-', "");
     ensure!(
-        date.len() == 8 && date.bytes().all(|digit| digit.is_ascii_digit()),
+        date.len() == 8 && date.bytes().all(|c| c.is_ascii_digit()),
         "date must be YYYYMMDD"
     );
-    let ticks: usize = args
-        .next()
-        .unwrap_or_else(|| "600".into())
-        .parse()
-        .context("ticks must be an integer")?;
-    ensure!((1..=60_000).contains(&ticks), "ticks must be 1..=60000");
-    let tiles: usize = args
-        .next()
-        .unwrap_or_else(|| "16".into())
-        .parse()
-        .context("tiles must be an integer")?;
-    ensure!((1..=64).contains(&tiles), "tiles must be 1..=64");
-    ensure!(args.next().is_none(), "unexpected extra argument");
-    let root = PathBuf::from(root);
-    let map = map_path(&root, &map);
+    let ticks = args.next().unwrap_or_else(|| "600".into()).parse::<usize>()?;
+    let tiles = args.next().unwrap_or_else(|| "16".into()).parse::<usize>()?;
+    let ai = args.next().unwrap_or_else(|| "10".into()).parse::<usize>()?;
+    ensure!(args.next().is_none(), "too many arguments");
+    ensure!((1..=36_000).contains(&ticks), "ticks must be 1..=36000");
+    ensure!((1..=256).contains(&tiles), "tiles must be 1..=256");
+    ensure!(ai <= 200, "ai must be 0..=200");
     Ok(Options {
         root,
         map,
-        date: date.parse().context("invalid date")?,
+        date: date.parse()?,
         ticks,
         tiles,
+        ai,
     })
 }
 
-fn main() -> Result<()> {
-    let opts = parse_options(std::env::args().skip(1))?;
-    ensure!(opts.root.is_dir(), "OMSI root directory does not exist");
-    let started = Instant::now();
-    let mut world = HostWorld::open(&opts.root, &opts.map, opts.date)
-        .with_context(|| format!("opening {}", opts.map.display()))?;
-    ensure!(world.index.tiles_read > 0, "no readable map tiles");
-    let tile_keys: Vec<(i32, i32)> = world
+fn global_path(root: &Path, map: &str) -> PathBuf {
+    let p = omsi_cfg::resolve_path(root, map);
+    if p.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("cfg")) {
+        p
+    } else {
+        omsi_cfg::resolve_path(&p, "global.cfg")
+    }
+}
+
+fn run(opt: Options) -> Result<()> {
+    let global = global_path(&opt.root, &opt.map);
+    let mut world = HostWorld::open(&opt.root, &global, opt.date)
+        .with_context(|| format!("reading CPU-only map {}", global.display()))?;
+    ensure!(world.index.tiles_read > 0, "map has no readable tiles");
+
+    // Bound the expensive map decode and terrain store; this is a smoke test,
+    // not a replacement for interest-based tile streaming in a live server.
+    let keys: Vec<(i32, i32)> = world
         .global
         .tiles
         .iter()
-        .take(opts.tiles)
-        .map(|tile| (tile.x, tile.y))
+        .take(opt.tiles)
+        .map(|t| (t.x, t.y))
         .collect();
-    ensure!(!tile_keys.is_empty(), "map contains no tiles");
-    let network = world.network_for_tiles(&tile_keys);
-    ensure!(!network.lanes.is_empty(), "selected tiles have no drivable or foot paths");
-    let lanes = network.lanes.len();
-    let facts = Arc::clone(&world.data.snapshot().map);
-    let random = traffic::random_types(&opts.root, &world.global, &world.map_dir, &facts.ailists);
-    let ai_types = random.types.len();
-    // Target zero: this tool validates parsers and the CPU simulation, not
-    // actual traffic population, which needs full collisions and timetable.
+    let mut network = world.network_for_tiles(&keys);
+    network.left_hand = world.global.left_hand_traffic;
+    let lane_count = network.lanes.len();
+    let random = {
+        let data = world.data.snapshot();
+        traffic::random_types(
+            &opt.root,
+            &world.global,
+            &world.map_dir,
+            &data.map.ailists,
+        )
+    };
     let traffic = traffic::assemble(
-        &opts.root,
+        &opt.root,
         network,
         random,
         world.global.traffic_density_road.clone(),
-        tile_keys,
-        0,
+        keys,
+        opt.ai,
     );
-    let mut simulation = CpuSimulation::new(&opts.root, Arc::clone(&world.data), traffic, 0);
-    let load_elapsed = started.elapsed();
+    let mut sim = CpuSimulation::new(&opt.root, Arc::clone(&world.data), traffic, 0);
+    sim.traffic.day_time = 9.0 * 3600.0;
 
-    let mut profiler = Profiler::new();
-    profiler.start();
-    let tick_start = Instant::now();
-    for _ in 0..opts.ticks {
-        let before = Instant::now();
-        simulation.step(1.0 / 60.0);
-        simulation.discard_presentation_events_after_publish();
-        profiler.tick(before.elapsed());
+    let started = Instant::now();
+    let mut millis = Vec::with_capacity(opt.ticks);
+    for _ in 0..opt.ticks {
+        let tick = Instant::now();
+        sim.step(1.0 / 60.0);
+        sim.discard_presentation_events_after_publish();
+        millis.push(tick.elapsed().as_secs_f64() * 1000.0);
     }
-    let elapsed = tick_start.elapsed();
-    profiler.stop();
-    let report = profiler.report();
+    let elapsed = started.elapsed();
+    millis.sort_by(f64::total_cmp);
+    let p95 = millis[((millis.len() - 1) * 95) / 100];
+    let max = millis.last().copied().unwrap_or_default();
     println!(
-        "CPU simcheck (NOT a multiplayer server): map={}, tiles={}, lanes={}, AI types={}, load_s={:.3}, ticks={}, sim_s={:.2}, unpaced_tps={:.1}, avg_tick_ms={:.3}, p95_tick_ms={:.3}, p99_tick_ms={:.3}, simulated_people={}",
+        "CPU simcheck: map={}, indexed_tiles={}, sampled_tiles={}, lanes={}, ai_cars={}, people={}, ticks={}, simulated_seconds={:.1}, wall_seconds={:.3}, p95_tick_ms={:.3}, max_tick_ms={:.3}",
         world.global.name,
+        world.index.tiles_read,
         world.loaded_tiles(),
-        lanes,
-        ai_types,
-        load_elapsed.as_secs_f64(),
-        opts.ticks,
-        opts.ticks as f64 / 60.0,
-        opts.ticks as f64 / elapsed.as_secs_f64().max(1e-9),
-        report.avg_tick_ms,
-        report.p95_tick_ms,
-        report.p99_tick_ms,
-        simulation.people.people.len(),
+        lane_count,
+        sim.traffic.cars.len(),
+        sim.people.people.len(),
+        opt.ticks,
+        opt.ticks as f64 / 60.0,
+        elapsed.as_secs_f64(),
+        p95,
+        max
+    );
+    println!(
+        "Diagnostic only: collision meshes, signal programs, scheduled AI, full passenger loading and LAN snapshots are not yet attached. These timing numbers are not production TPS."
     );
     Ok(())
+}
+
+fn main() -> Result<()> {
+    run(parse(std::env::args().skip(1))?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn defaults_are_bounded_and_use_only_local_content() {
-        let opts = parse_options(["/omsi", "Maps/Test"]).unwrap();
-        assert_eq!(opts.ticks, 600);
-        assert_eq!(opts.tiles, 16);
-        assert!(opts.map.ends_with("Maps/Test/global.cfg"));
+    fn options(extra: &[&str]) -> Result<Options> {
+        parse(
+            ["game", "Maps/Grundorf"]
+                .into_iter()
+                .chain(extra.iter().copied())
+                .map(str::to_string),
+        )
     }
 
     #[test]
-    fn invalid_workloads_are_rejected_before_disk_access() {
-        for args in [
-            vec!["/omsi", "Maps/Test", "19890501", "60001"],
-            vec!["/omsi", "Maps/Test", "19890501", "0"],
-            vec!["/omsi", "Maps/Test", "19890501", "600", "65"],
-            vec!["/omsi", "Maps/Test", "19890501", "600", "0"],
-            vec!["/omsi", "Maps/Test", "notadate"],
-        ] {
-            assert!(parse_options(args.into_iter().map(String::from)).is_err());
-        }
+    fn safe_defaults_keep_smoke_test_bounded() {
+        let o = options(&[]).unwrap();
+        assert_eq!((o.date, o.ticks, o.tiles, o.ai), (19890501, 600, 16, 10));
+    }
+
+    #[test]
+    fn invalid_dates_and_resource_limits_are_rejected() {
+        assert!(options(&["abc"]).is_err());
+        assert!(options(&["19890501", "0"]).is_err());
+        assert!(options(&["19890501", "1", "257"]).is_err());
+        assert!(options(&["19890501", "1", "1", "201"]).is_err());
+        assert!(options(&["19890501", "1", "1", "1", "unexpected"]).is_err());
+    }
+
+    #[test]
+    fn options_preserve_custom_limits_and_map_input() {
+        let o = options(&["2026-11-18", "120", "32", "15"]).unwrap();
+        assert_eq!((o.date, o.ticks, o.tiles, o.ai), (20261118, 120, 32, 15));
+        assert!(global_path(&o.root, &o.map).ends_with("Maps/Grundorf/global.cfg"));
+        assert!(global_path(&o.root, "Maps/Grundorf/global.cfg")
+            .ends_with("Maps/Grundorf/global.cfg"));
     }
 }

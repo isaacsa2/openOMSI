@@ -10,7 +10,7 @@ below has been checked on a clean Linux machine without a display or GPU.
 |---|---|---|
 | Rust workspace | `cargo test --locked --workspace --no-fail-fast` | No Rust test regressions |
 | Dedicated server | `cargo test --locked -p omsi-server --all-targets` | Two-client relay, no phantom host bus, tick/profiler, CPU cache, mirrored lanes |
-| Standalone CPU loader | `cargo build --locked -p omsi-server --bin worldcheck` | Binary links without `omsi-render`, `omsi-scene`, `wgpu`, `winit` or `omsi-audio` |
+| Standalone CPU loaders | `cargo build --locked -p omsi-server --bins` | `worldcheck` and `simcheck` link without `omsi-render`, `omsi-scene`, `wgpu`, `winit` or `omsi-audio` |
 | Runtime dependency graph | `cargo tree --locked -p omsi-server --edges normal` | No graphical or audio runtime dependencies |
 | Style and architecture | Existing PR checks | Formatting, file limits, crate-layering and app-growth guards pass |
 | Safety | Existing audit, CodeQL and secret scanning | All checks pass |

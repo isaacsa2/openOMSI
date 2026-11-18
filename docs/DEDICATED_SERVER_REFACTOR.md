@@ -151,3 +151,20 @@ cargo build --locked -p omsi-app
 
 The no-op renderer is still used by the existing entry point. Do not describe
 this stage as GPU-independent or as a completed server extraction.
+
+
+## GPU-free traffic/people CPU simulation smoke test
+
+```sh
+cargo run --locked -p omsi-server --bin simcheck -- /path/to/OMSI2 Maps/Spandau/global.cfg 19890501 600 16 10
+```
+
+Arguments: OMSI 2 root, map path, date, tick count, maximum decoded tiles,
+and AI target. The last four arguments have bounded defaults. The process
+parses an installed map, builds CPU road lanes, initializes production traffic
+and passenger types and advances them for a fixed number of simulation ticks.
+It reports tick p95/max and the loaded lane count without creating a GPU
+device or graphics/audio service. This is **only a diagnostic**: route
+controllers, road collision overlays, scheduled buses, passenger boarding and
+live multiplayer snapshots still need migration. Timing a small tile subset
+without pacing is **not** a valid performance comparison with a playable host.
