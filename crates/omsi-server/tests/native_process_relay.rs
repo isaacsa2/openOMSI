@@ -137,6 +137,23 @@ fn native_binary_relays_two_clients_without_a_host_vehicle() {
         relayed,
         "two LAN sessions did not exchange real poses via the separate native process"
     );
+    // The graphical join also uses an authenticated TCP manifest AFTER
+    // WELCOME, even with local map and vehicle files. UDP-only relay tests
+    // could pass while real games blocked forever on this missing service.
+    let mut installed_map = world.map.clone();
+    let report = omsi_lan::mods::fetch_selected(
+        &server.root,
+        &mut installed_map,
+        addr,
+        alpha.session,
+        None,
+        None,
+        &mut |_, _, _| {},
+    )
+    .expect("native host must answer an authenticated empty mod manifest");
+    assert_eq!(report.fetched, 0, "test server must not share private files");
+    assert_eq!(report.bytes, 0);
+    assert_eq!(installed_map, world.map);
     // The dedicated process never publishes a player-controlled bus of its
     // own; each client should see only the other connected driver.
     assert_eq!(
