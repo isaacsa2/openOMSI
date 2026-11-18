@@ -41,6 +41,12 @@ jobs:
       - name: Headless transport, clock, CPU tiles, lanes and profiler regressions
         run: cargo test --locked -p omsi-server --all-targets -- --test-threads=2
 
+      # The legacy LAN library tests include the optional audio transport,
+      # which compiles cpal/ALSA on Linux. This system package is required
+      # only by that expanded test suite, never by the omsi-server runtime.
+      - name: Install legacy LAN-test system headers
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libasound2-dev
+
       - name: Shared simulation, LAN policy and wire protocol regressions
         run: cargo test --locked -p omsi-sim -p omsi-lan -p omsi-net --lib -- --test-threads=2
 
