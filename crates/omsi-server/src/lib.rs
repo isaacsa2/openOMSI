@@ -7,6 +7,7 @@
 
 pub mod admin;
 pub mod clock;
+pub mod collision;
 pub mod commands;
 pub mod console;
 pub mod fleet;

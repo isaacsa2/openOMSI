@@ -92,6 +92,7 @@ fn main() -> Result<()> {
         !network.lanes.is_empty(),
         "selected tiles have no drivable or foot paths"
     );
+    let colliders = world.install_static_box_collisions(&tile_keys, &network.lanes);
     let lanes = network.lanes.len();
     let facts = Arc::clone(&world.data.snapshot().map);
     let random = traffic::random_types(&opts.root, &world.global, &world.map_dir, &facts.ailists);
@@ -107,6 +108,12 @@ fn main() -> Result<()> {
         0,
     );
     let mut simulation = CpuSimulation::new(&opts.root, Arc::clone(&world.data), traffic, 0);
+    if colliders.incomplete() {
+        eprintln!(
+            "partial static collision: {} bounding boxes; {} collision meshes, {} attachments and {} missing definitions still need CPU placement",
+            colliders.static_boxes, colliders.pending_meshes, colliders.pending_attachments, colliders.missing_definitions
+        );
+    }
     let load_elapsed = started.elapsed();
 
     let mut profiler = Profiler::new();
