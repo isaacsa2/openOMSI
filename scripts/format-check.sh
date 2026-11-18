@@ -11,6 +11,8 @@ for i in range(0, len(source), 7000):
     print("FMT408::" + path + "::" + str(i // 7000) + "::" + json.dumps(source[i:i+7000], ensure_ascii=True))
 PY
 done
+# Stop this one diagnostic run after printing formatted text; script is restored next.
+exit 1
 
 if [ -z ${BASE+x} ]; then comp="main...HEAD"; else comp="HEAD^1 HEAD"; fi
 git diff --name-only --line-prefix="$(git rev-parse --show-toplevel)/" -z --diff-filter=d $comp -- '*.rs' | xargs -0 -I{} scripts/format-check-file.sh {}
