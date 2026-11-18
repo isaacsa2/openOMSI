@@ -39,15 +39,18 @@ impl SurfaceCounts {
 fn overlay_only(def: &omsi_scenery::Spline) -> bool {
     !def.profiles.is_empty()
         && def.profiles.iter().all(|p| {
-            def.textures.get(p.texture).is_some_and(|texture| texture.alpha == 2)
+            def.textures
+                .get(p.texture)
+                .is_some_and(|texture| texture.alpha == 2)
         })
 }
 
 fn overhead_only(def: &omsi_scenery::Spline) -> bool {
     !def.profiles.is_empty()
-        && def.profiles.iter().all(|p| {
-            !p.points.is_empty() && p.points.iter().all(|point| point.z >= 2.0)
-        })
+        && def
+            .profiles
+            .iter()
+            .all(|p| !p.points.is_empty() && p.points.iter().all(|point| point.z >= 2.0))
 }
 
 /// A source spline can reach into a neighboring tile. Check actual world
@@ -81,10 +84,7 @@ impl HostWorld {
     /// Does not unload terrain or collision geometry that in-world vehicles
     /// still need; streamed surface eviction needs a separate entity-aware
     /// policy. This is a partial physics migration, not readiness parity.
-    pub fn install_spline_ground_surfaces(
-        &mut self,
-        active: &[(i32, i32)],
-    ) -> SurfaceCounts {
+    pub fn install_spline_ground_surfaces(&mut self, active: &[(i32, i32)]) -> SurfaceCounts {
         let mut report = SurfaceCounts::default();
         let tiles: BTreeSet<_> = active.iter().copied().collect();
         let root = self.data.snapshot().map.root.clone();
@@ -105,12 +105,10 @@ impl HostWorld {
         }
 
         for key in sources {
-            let Some(tile) = self.load_tile(key) else { continue };
-            let origin = DVec3::new(
-                key.0 as f64 * tile_size(),
-                key.1 as f64 * tile_size(),
-                0.0,
-            );
+            let Some(tile) = self.load_tile(key) else {
+                continue;
+            };
+            let origin = DVec3::new(key.0 as f64 * tile_size(), key.1 as f64 * tile_size(), 0.0);
             for spline in &tile.splines {
                 if spline.deleted || spline.file.trim().is_empty() {
                     continue;
@@ -129,22 +127,16 @@ impl HostWorld {
                 let curve = SplineCurve::from_map(spline, origin.truncate());
                 let drivable = def.paths.iter().any(|p| p.kind == 0 || p.kind == 1);
                 let overlay = overlay_only(&def);
-                let overhead = overhead_only(&def)
-                    && def.height_profiles.is_empty()
-                    && !drivable;
+                let overhead = overhead_only(&def) && def.height_profiles.is_empty() && !drivable;
                 if overlay {
                     report.overlays += 1;
                 }
                 if overhead {
                     report.overhead_only += 1;
                 }
-                let visible = omsi_geometry::build_spline_mesh(
-                    &def, &curve, spline.mirror, origin,
-                );
+                let visible = omsi_geometry::build_spline_mesh(&def, &curve, spline.mirror, origin);
                 let wheel = if omsi_cfg::flags::OMSI_HEIGHTPROFILE_GROUND.is_set() {
-                    omsi_geometry::build_height_profile_mesh(
-                        &def, &curve, spline.mirror, origin,
-                    )
+                    omsi_geometry::build_height_profile_mesh(&def, &curve, spline.mirror, origin)
                 } else {
                     visible.clone()
                 };
@@ -157,8 +149,12 @@ impl HostWorld {
                 for (&target, ts) in &mut rasters {
                     if !overlay && !overhead && overlaps_tile(&visible, origin, target) {
                         ts.rasterize_kind(
-                            &visible, &Mat4::IDENTITY, origin,
-                            target.0, target.1, drivable,
+                            &visible,
+                            &Mat4::IDENTITY,
+                            origin,
+                            target.0,
+                            target.1,
+                            drivable,
                         );
                         report.road_meshes += 1;
                     }
