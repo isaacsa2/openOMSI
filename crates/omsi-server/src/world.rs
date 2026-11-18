@@ -165,10 +165,9 @@ impl HostWorld {
             return Some(tile);
         }
         let path = self.tile_paths.get(&key)?;
-        let mut tile = omsi_world::map_index::read_tile(path, &self.chrono_dirs)?;
-        // [worldcoordinates] maps have row-dependent tile widths. Fit geometry
-        // to the shared world grid exactly as the graphical loader does.
-        tile.fit_to_world_grid(key.1);
+        // read_tile already applies Chrono patches and world-grid scaling.
+        // Never fit a second time: geographic tiles would shift their paths.
+        let tile = omsi_world::map_index::read_tile(path, &self.chrono_dirs)?;
         let source = tile.terrain_from.as_ref().unwrap_or(&tile.path);
         let ground_path = omsi_world::map_index::tile_companion(source, ".terrain");
         let ground = Arc::new(if tile.has_terrain {
