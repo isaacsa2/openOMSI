@@ -70,10 +70,15 @@ fn bind_lanes(
         let Some((controller, path_lights)) = bindings.get(&(key.tile, key.id)) else {
             continue;
         };
+        let Some(program) = lights.get(*controller) else {
+            // A partially loaded map may not have published all its crossing
+            // programs yet; never panic during a network update.
+            continue;
+        };
         let Some(light) = path_lights
             .get(key.path as usize)
             .copied()
-            .filter(|light| *light >= 0 && (*light as usize) < lights[*controller].lights.len())
+            .filter(|light| *light >= 0 && (*light as usize) < program.lights.len())
         else {
             continue;
         };
