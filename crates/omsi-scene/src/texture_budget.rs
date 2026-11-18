@@ -37,11 +37,18 @@ pub(super) fn card_near_room(video_limit: u64, card: omsi_render::GpuMemory) -> 
     }
 }
 
-pub(super) fn card_hard_over(card: omsi_render::GpuMemory, video_limit: u64, card_over: u64, step: u64) -> u64 {
+pub(super) fn card_hard_over(
+    card: omsi_render::GpuMemory,
+    video_limit: u64,
+    card_over: u64,
+    step: u64,
+) -> u64 {
     match (card.budget, video_limit) {
         (None, _) => card_over,
         (Some(budget), 0) => (card.total().saturating_sub(budget) / step * step).min(card_over),
-        (Some(budget), limit) => (card.total().saturating_sub(budget.min(limit)) / step * step).min(card_over),
+        (Some(budget), limit) => {
+            (card.total().saturating_sub(budget.min(limit)) / step * step).min(card_over)
+        }
     }
 }
 
@@ -95,7 +102,9 @@ pub(super) fn queue_near_restores(
         if *d >= near || queued >= 24 || pending.contains(p) || gpu.wants_restore.contains(p) {
             continue;
         }
-        let Some(e) = gpu.textures.get_mut(p) else { continue };
+        let Some(e) = gpu.textures.get_mut(p) else {
+            continue;
+        };
         if e.dropped == 0 || e.retry_after.is_some_and(|t| t > t0) {
             continue;
         }
@@ -112,6 +121,48 @@ pub(super) fn queue_near_restores(
         e.near_restore = true;
         gpu.wants_restore.push(p.clone());
         queued += 1;
+    }
+    // A nearby texture may not fit back at full resolution, even though the card has
+    // room for its *next* mip level. The upload path already calls fit_upgrade to
+    // select a smaller replacement; without this fallback the texture stays blurry
+    // indefinitely in a busy map while no full-size restore can be queued.
+    //
+    // Do not queue an upgrade when there is no room for a higher mip level:
+    // replace_texture temporarily holds both the old and the new allocation.
+    // Prefer the closest eligible texture, and attempt only one partial upgrade
+    // per pass to avoid a burst of reuploads around the memory limit.
+    if queued == 0 {
+        let partial = entries
+            .iter()
+            .filter(|(d, p)| *d < near && !pending.contains(p) && !gpu.wants_restore.contains(p))
+            .filter_map(|(d, p)| {
+                let e = gpu.textures.get(p)?;
+                if e.dropped == 0 || e.retry_after.is_some_and(|t| t > t0) {
+                    return None;
+                }
+                // One additional mip roughly quadruples the stored area. Use a
+                // conservative bound (with room for mip/block rounding); the upload size is checked again by
+                // fit_upgrade and the renderer before replacing any resource.
+                let peak = if e.bytes == 0 {
+                    e.full_bytes.min(128 * 128 * 4 * 4 / 3)
+                } else {
+                    e.full_bytes
+                        .min(e.bytes.saturating_mul(4).saturating_add(4096))
+                };
+                (peak > e.bytes
+                    && peak <= card_room
+                    && (!e.squeezed || peak.saturating_sub(e.bytes) <= squeezed_room))
+                    .then_some((*d, p))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, p)) = partial {
+            if let Some(e) = gpu.textures.get_mut(p) {
+                e.retry_after = None;
+                e.near_restore = true;
+                gpu.wants_restore.push(p.clone());
+                queued = 1;
+            }
+        }
     }
     queued
 }
