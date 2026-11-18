@@ -30,9 +30,7 @@ pub struct CollisionCounts {
 
 impl CollisionCounts {
     pub fn incomplete(&self) -> bool {
-        self.pending_meshes > 0
-            || self.pending_attachments > 0
-            || self.missing_definitions > 0
+        self.pending_meshes > 0 || self.pending_attachments > 0 || self.missing_definitions > 0
     }
 }
 
@@ -46,10 +44,17 @@ struct RoadPoints {
 impl RoadPoints {
     fn build(lanes: &[Lane]) -> Self {
         let mut result = Self::default();
-        for lane in lanes.iter().filter(|lane| matches!(lane.kind, LaneKind::Street)) {
+        for lane in lanes
+            .iter()
+            .filter(|lane| matches!(lane.kind, LaneKind::Street))
+        {
             for &p in &lane.points {
                 if p.is_finite() {
-                    result.cells.entry(Self::cell(p.truncate())).or_default().push(p);
+                    result
+                        .cells
+                        .entry(Self::cell(p.truncate()))
+                        .or_default()
+                        .push(p);
                 }
             }
         }
@@ -57,7 +62,10 @@ impl RoadPoints {
     }
 
     fn cell(p: DVec2) -> (i32, i32) {
-        ((p.x / ROAD_CELL).floor() as i32, (p.y / ROAD_CELL).floor() as i32)
+        (
+            (p.x / ROAD_CELL).floor() as i32,
+            (p.y / ROAD_CELL).floor() as i32,
+        )
     }
 
     fn crosses(&self, box_: &Obb) -> bool {
@@ -67,7 +75,9 @@ impl RoadPoints {
         let [right, forward] = box_.axes();
         for x in min.0..=max.0 {
             for y in min.1..=max.1 {
-                let Some(points) = self.cells.get(&(x, y)) else { continue };
+                let Some(points) = self.cells.get(&(x, y)) else {
+                    continue;
+                };
                 for p in points {
                     let d = p.truncate() - box_.center;
                     // A road on the roof of a bridge (or far below it) must not
@@ -114,7 +124,9 @@ fn static_box(
     if def.collision_mesh.is_some() {
         return Err(Exclusion::MeshRequired);
     }
-    let Some(bb) = def.bounding_box else { return Err(Exclusion::MissingBox) };
+    let Some(bb) = def.bounding_box else {
+        return Err(Exclusion::MissingBox);
+    };
     if !pos.is_finite()
         || !heading.is_finite()
         || !bb.iter().all(|v| v.is_finite())
@@ -150,7 +162,9 @@ impl HostWorld {
         let mut collision = CollisionWorld::default();
 
         for key in keys.iter().copied().collect::<BTreeSet<_>>() {
-            let Some(tile) = self.load_tile(key) else { continue };
+            let Some(tile) = self.load_tile(key) else {
+                continue;
+            };
             stats.loaded_tiles += 1;
             for obj in &tile.objects {
                 if obj.parent_id.is_some() {
@@ -170,14 +184,24 @@ impl HostWorld {
                 );
                 // Index placements include Chrono patches and the original
                 // terrain height. Resolve duplicate numeric IDs by tile.
-                let indexed = self.index.duplicates.get(&(key, obj.id)).map(|(p, _)| *p)
-                    .or_else(|| self.index.objects.get(&obj.id)
-                        .and_then(|(owner, p, _)| (*owner == key).then_some(*p)));
+                let indexed = self
+                    .index
+                    .duplicates
+                    .get(&(key, obj.id))
+                    .map(|(p, _)| *p)
+                    .or_else(|| {
+                        self.index
+                            .objects
+                            .get(&obj.id)
+                            .and_then(|(owner, p, _)| (*owner == key).then_some(*p))
+                    });
                 let pos = indexed.unwrap_or_else(|| {
                     let ground = if def.absolute_height() {
                         0.0
                     } else {
-                        self.terrain_height(base.x, base.y).map(f64::from).unwrap_or(0.0)
+                        self.terrain_height(base.x, base.y)
+                            .map(f64::from)
+                            .unwrap_or(0.0)
                     };
                     DVec3::new(base.x, base.y, obj.pos[2] + ground)
                 });
@@ -204,13 +228,23 @@ mod tests {
     use super::*;
 
     fn box_def(bb: [f32; 6]) -> SceneryObject {
-        SceneryObject { fixed: true, bounding_box: Some(bb), ..Default::default() }
+        SceneryObject {
+            fixed: true,
+            bounding_box: Some(bb),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn publishes_real_boxes_with_ids_without_render_assets() {
-        let box_ = static_box(&box_def([1.0, 2.0, 2.0, 0.0, 0.0, 1.0]),
-            45, DVec3::new(10.0, 20.0, 0.0), 90.0, &RoadPoints::default()).unwrap();
+        let box_ = static_box(
+            &box_def([1.0, 2.0, 2.0, 0.0, 0.0, 1.0]),
+            45,
+            DVec3::new(10.0, 20.0, 0.0),
+            90.0,
+            &RoadPoints::default(),
+        )
+        .unwrap();
         assert_eq!(box_.id, 45);
         assert!((box_.center - DVec2::new(10.0, 20.0)).length() < 1e-6);
     }
@@ -219,30 +253,62 @@ mod tests {
     fn rejects_decals_nonfixed_and_mesh_fallbacks() {
         let mut def = box_def([1.0, 1.0, 0.2, 0.0, 0.0, 0.1]);
         let at = DVec3::ZERO;
-        assert_eq!(static_box(&def, 1, at, 0.0, &RoadPoints::default()).unwrap_err(), Exclusion::UnsafeBox);
+        assert_eq!(
+            static_box(&def, 1, at, 0.0, &RoadPoints::default()).unwrap_err(),
+            Exclusion::UnsafeBox
+        );
         def.bounding_box = Some([2.0, 2.0, 2.0, 0.0, 0.0, 1.0]);
         def.collision_mesh = Some("bridge.o3d".into());
-        assert_eq!(static_box(&def, 1, at, 0.0, &RoadPoints::default()).unwrap_err(), Exclusion::MeshRequired);
+        assert_eq!(
+            static_box(&def, 1, at, 0.0, &RoadPoints::default()).unwrap_err(),
+            Exclusion::MeshRequired
+        );
         def.collision_mesh = None;
         def.fixed = false;
-        assert_eq!(static_box(&def, 1, at, 0.0, &RoadPoints::default()).unwrap_err(), Exclusion::NotSolid);
+        assert_eq!(
+            static_box(&def, 1, at, 0.0, &RoadPoints::default()).unwrap_err(),
+            Exclusion::NotSolid
+        );
     }
 
     #[test]
     fn road_passage_does_not_become_a_wall_or_hide_a_bridge_above_it() {
         let mut roads = RoadPoints::default();
-        roads.cells.insert((0, 0), vec![DVec3::new(10.0, 10.0, 1.0)]);
+        roads
+            .cells
+            .insert((0, 0), vec![DVec3::new(10.0, 10.0, 1.0)]);
         let def = box_def([8.0, 8.0, 3.0, 0.0, 0.0, 1.5]);
         let pos = DVec3::new(10.0, 10.0, 0.0);
-        assert_eq!(static_box(&def, 7, pos, 0.0, &roads).unwrap_err(), Exclusion::RoadThrough);
+        assert_eq!(
+            static_box(&def, 7, pos, 0.0, &roads).unwrap_err(),
+            Exclusion::RoadThrough
+        );
         let high = DVec3::new(10.0, 10.0, 12.0);
         assert!(static_box(&def, 7, high, 0.0, &roads).is_ok());
     }
 
     #[test]
     fn incomplete_world_reports_unresolved_mesh_and_attachment_work() {
-        assert!(!CollisionCounts { static_boxes: 8, ..Default::default() }.incomplete());
-        assert!(CollisionCounts { pending_meshes: 1, ..Default::default() }.incomplete());
-        assert!(CollisionCounts { pending_attachments: 1, ..Default::default() }.incomplete());
+        assert!(
+            !CollisionCounts {
+                static_boxes: 8,
+                ..Default::default()
+            }
+            .incomplete()
+        );
+        assert!(
+            CollisionCounts {
+                pending_meshes: 1,
+                ..Default::default()
+            }
+            .incomplete()
+        );
+        assert!(
+            CollisionCounts {
+                pending_attachments: 1,
+                ..Default::default()
+            }
+            .incomplete()
+        );
     }
 }

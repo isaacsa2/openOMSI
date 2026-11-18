@@ -111,7 +111,10 @@ fn main() -> Result<()> {
     if colliders.incomplete() {
         eprintln!(
             "partial static collision: {} bounding boxes; {} collision meshes, {} attachments and {} missing definitions still need CPU placement",
-            colliders.static_boxes, colliders.pending_meshes, colliders.pending_attachments, colliders.missing_definitions
+            colliders.static_boxes,
+            colliders.pending_meshes,
+            colliders.pending_attachments,
+            colliders.missing_definitions
         );
     }
     let load_elapsed = started.elapsed();
