@@ -237,7 +237,10 @@ fn native_binary_relays_three_drivers_and_updated_vehicle_state() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(pair_ready, "native host did not connect the first two drivers");
+    assert!(
+        pair_ready,
+        "native host did not connect the first two drivers"
+    );
     let mut charlie = LanSession::join_addr(vec![addr], None, "charlie", world).unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(15);
