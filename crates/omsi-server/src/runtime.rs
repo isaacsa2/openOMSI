@@ -300,7 +300,12 @@ mod tests {
         use omsi_map::global::{EntryPoint, MapTileRef};
         let mut global = omsi_map::global::GlobalCfg::default();
         global.tiles = (0..100)
-            .map(|i| MapTileRef { x: i, y: 0, index: i as usize, ..Default::default() })
+            .map(|i| MapTileRef {
+                x: i,
+                y: 0,
+                index: i as usize,
+                ..Default::default()
+            })
             .collect();
         global.raw_tiles = (0..100).map(|x| (x, 0)).collect();
         global.entry_points.push(EntryPoint {
@@ -319,8 +324,14 @@ mod tests {
     fn tiles_keep_map_order_when_no_entrypoint_exists() {
         let mut global = omsi_map::global::GlobalCfg::default();
         global.tiles = vec![
-            omsi_map::global::MapTileRef { x: 10, ..Default::default() },
-            omsi_map::global::MapTileRef { x: 20, ..Default::default() },
+            omsi_map::global::MapTileRef {
+                x: 10,
+                ..Default::default()
+            },
+            omsi_map::global::MapTileRef {
+                x: 20,
+                ..Default::default()
+            },
         ];
         assert_eq!(
             initial_tiles(&global, &omsi_world::map_index::MapIndex::default(), 1),

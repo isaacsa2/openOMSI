@@ -33,7 +33,9 @@ pub(crate) struct ScenerySurfaces {
 
 impl ScenerySurfaces {
     pub(crate) fn new() -> Self {
-        Self { definitions: HashMap::new() }
+        Self {
+            definitions: HashMap::new(),
+        }
     }
 
     fn load(&mut self, def: &SceneryObject) -> SurfaceDef {
@@ -60,7 +62,9 @@ impl ScenerySurfaces {
                 let Ok(model) = Model::load(&path) else {
                     return SurfaceDef::Unsupported;
                 };
-                let Some(dir) = path.parent() else { return SurfaceDef::Unsupported };
+                let Some(dir) = path.parent() else {
+                    return SurfaceDef::Unsupported;
+                };
                 (model, dir.to_path_buf())
             }
             None => (def.model.clone(), parent.to_path_buf()),
@@ -83,7 +87,9 @@ impl ScenerySurfaces {
         } else {
             model.lod_meshes(0).first()
         };
-        let Some(first) = first else { return SurfaceDef::Unsupported };
+        let Some(first) = first else {
+            return SurfaceDef::Unsupported;
+        };
         if !first.animations.is_empty() {
             return SurfaceDef::Unsupported;
         }
@@ -103,7 +109,9 @@ impl ScenerySurfaces {
         };
         if loaded.triangles.len() > MAX_SURFACE_TRIANGLES
             || loaded.triangles.iter().any(|t| {
-                t.indices.iter().any(|&i| i as usize >= loaded.vertices.len())
+                t.indices
+                    .iter()
+                    .any(|&i| i as usize >= loaded.vertices.len())
             })
         {
             return SurfaceDef::Unsupported;
@@ -112,7 +120,10 @@ impl ScenerySurfaces {
         if mesh.indices.is_empty() {
             return SurfaceDef::Unsupported;
         }
-        SurfaceDef::Static { mesh: Arc::new(mesh), drivable: sco.surface }
+        SurfaceDef::Static {
+            mesh: Arc::new(mesh),
+            drivable: sco.surface,
+        }
     }
 }
 
@@ -148,9 +159,17 @@ impl HostWorld {
                 counts.pending_scenery_surfaces += 1;
                 continue;
             }
-            let indexed = self.index.duplicates.get(&(key, obj.id)).copied()
-                .or_else(|| self.index.objects.get(&obj.id)
-                    .and_then(|(owner, pos, rot)| (*owner == key).then_some((*pos, *rot))));
+            let indexed = self
+                .index
+                .duplicates
+                .get(&(key, obj.id))
+                .copied()
+                .or_else(|| {
+                    self.index
+                        .objects
+                        .get(&obj.id)
+                        .and_then(|(owner, pos, rot)| (*owner == key).then_some((*pos, *rot)))
+                });
             let (pos, raw_rot) = match indexed {
                 Some(p) => p,
                 None => {
@@ -158,8 +177,12 @@ impl HostWorld {
                         key.0 as f64 * tile_size() + obj.pos[0],
                         key.1 as f64 * tile_size() + obj.pos[1],
                     );
-                    let height = if def.absolute_height() { 0.0 } else {
-                        self.terrain_height(base.x, base.y).map(f64::from).unwrap_or(0.0)
+                    let height = if def.absolute_height() {
+                        0.0
+                    } else {
+                        self.terrain_height(base.x, base.y)
+                            .map(f64::from)
+                            .unwrap_or(0.0)
                     };
                     (DVec3::new(base.x, base.y, obj.pos[2] + height), obj.rot)
                 }
@@ -168,9 +191,7 @@ impl HostWorld {
                 counts.pending_scenery_surfaces += 1;
                 continue;
             }
-            let rotation = omsi_geometry::object_rotation(
-                omsi_geometry::map_rotation(raw_rot),
-            );
+            let rotation = omsi_geometry::object_rotation(omsi_geometry::map_rotation(raw_rot));
             for (&target, surface) in rasters.iter_mut() {
                 if !raster_overlaps_tile(&mesh, &rotation, pos, target) {
                     continue;

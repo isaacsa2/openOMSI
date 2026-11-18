@@ -78,7 +78,6 @@ fn overlaps_tile(mesh: &MeshData, origin: DVec3, key: (i32, i32)) -> bool {
         && (origin.y + lo.y as f64) <= y0 + tile
 }
 
-
 /// True only when the transformed scene surface reaches the active tile.
 pub(crate) fn raster_overlaps_tile(
     mesh: &MeshData,
@@ -199,9 +198,7 @@ impl HostWorld {
             // Static [surface] objects use only their safe first mesh. Any
             // crossing requiring a deformation mesh or terrain-hole cut is
             // explicitly left pending rather than forming false wheel ground.
-            self.install_scenery_ground(
-                key, &tile, &mut rasters, &mut scenery, &mut report,
-            );
+            self.install_scenery_ground(key, &tile, &mut rasters, &mut scenery, &mut report);
         }
         for raster in rasters.values_mut() {
             raster.finish();
