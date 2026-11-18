@@ -10,6 +10,7 @@ pub mod clock;
 pub mod commands;
 pub mod console;
 pub mod transport;
+pub mod lanes;
 pub mod fleet;
 pub mod metar;
 pub mod startup;
