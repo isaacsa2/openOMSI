@@ -231,7 +231,7 @@ impl HostWorld {
     }
 
     /// Read only .sco path/script metadata; no 3D meshes or textures.
-    fn scenery(&mut self, root: &Path, name: &str) -> Option<Arc<SceneryObject>> {
+    pub(crate) fn scenery(&mut self, root: &Path, name: &str) -> Option<Arc<SceneryObject>> {
         let key = name.replace('\\', "/").to_ascii_lowercase();
         if let Some(v) = self.object_defs.get(&key) {
             return v.clone();

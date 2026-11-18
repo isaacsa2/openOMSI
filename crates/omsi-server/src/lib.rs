@@ -13,6 +13,7 @@ pub mod fleet;
 pub mod lanes;
 pub mod metar;
 pub mod simulation;
+pub mod stops;
 pub mod startup;
 pub mod traffic;
 pub mod transport;
