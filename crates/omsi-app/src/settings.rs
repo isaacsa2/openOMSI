@@ -51,6 +51,8 @@ pub struct Settings {
     pub passenger_transfer_percent: f32,
     /// Opt-in passenger behavior; false preserves original OMSI semantics.
     pub passenger_hailing: bool,
+    /// Rare local conversations between seated riders, opt-in.
+    pub passenger_ambient_talk: bool,
     /// Independent opt-in full-bus visual reaction; off by default.
     pub passenger_full_bus_reaction: bool,
     pub pax_short_rides_stand: bool,
@@ -647,6 +649,7 @@ impl Settings {
             boarding: "auto".into(),
             passenger_animation: "original".into(),
             passenger_hailing: false,
+            passenger_ambient_talk: false,
             passenger_full_bus_reaction: false,
             pax_short_rides_stand: false,
             passenger_connections: false,
@@ -1203,6 +1206,7 @@ impl Settings {
                         .clamp(0.0, 100.0)
                 }
                 "passenger_hailing" => s.passenger_hailing = b(v),
+                "passenger_ambient_talk" => s.passenger_ambient_talk = b(v),
                 "passenger_full_bus_reaction" => s.passenger_full_bus_reaction = b(v),
                 "pax_short_rides_stand" => s.pax_short_rides_stand = b(v),
                 "passenger_animation" => {
@@ -2282,6 +2286,10 @@ impl Settings {
         text.push_str(&format!(
             "passenger_hailing={}\n",
             self.passenger_hailing as u8
+        ));
+        text.push_str(&format!(
+            "passenger_ambient_talk={}\n",
+            self.passenger_ambient_talk as u8
         ));
         text.push_str(&format!(
             "passenger_full_bus_reaction={}\n",

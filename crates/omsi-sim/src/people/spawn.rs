@@ -140,6 +140,9 @@ impl PeopleSim {
             voice_said: HashMap::new(),
             voices: 0,
             last_chat: -1e9,
+            ambient_talk: false,
+            ambient_talk_at: 0.0,
+            ambient_talk_reply: None,
             avatars: HashMap::new(),
             avatar_cmds: HashMap::new(),
             avatar_hidden: HashMap::new(),
@@ -623,6 +626,7 @@ impl PeopleSim {
             why: "",
             puppet: None,
             remote: false,
+            remote_seat: None,
         });
         Some(self.people.len() - 1)
     }
