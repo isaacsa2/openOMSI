@@ -19,6 +19,7 @@ fn world() -> WorldInfo {
 fn driver(name: &str, x: f64) -> Pose {
     Pose {
         bus: format!("Vehicles/{name}.bus"),
+        flags: omsi_net::FLAG_VEHICLE,
         name: name.into(),
         x,
         ..Default::default()
@@ -48,7 +49,7 @@ fn a_departed_client_releases_its_slot_and_its_bus_does_not_become_a_ghost() {
         if a.connected
             && b.connected
             && host.session().peer_count() == 2
-            && a.peers().any(|p| p.has_info && p.pose.name == "beta")
+            && a.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "beta")
         {
             joined = true;
             break;
@@ -81,8 +82,8 @@ fn a_departed_client_releases_its_slot_and_its_bus_does_not_become_a_ghost() {
         c.tick(0.06, &pc);
         if c.connected
             && host.session().peer_count() == 2
-            && a.peers().any(|p| p.has_info && p.pose.name == "charlie")
-            && c.peers().any(|p| p.has_info && p.pose.name == "alpha")
+            && a.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "charlie")
+            && c.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "alpha")
         {
             rejoined = true;
             break;
