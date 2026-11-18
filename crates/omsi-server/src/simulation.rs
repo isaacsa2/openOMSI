@@ -23,12 +23,7 @@ pub struct CpuSimulation {
 }
 
 impl CpuSimulation {
-    pub fn new(
-        root: &Path,
-        world: Arc<WorldCell>,
-        traffic: TrafficSim,
-        max_people: usize,
-    ) -> Self {
+    pub fn new(root: &Path, world: Arc<WorldCell>, traffic: TrafficSim, max_people: usize) -> Self {
         Self {
             world,
             traffic,
