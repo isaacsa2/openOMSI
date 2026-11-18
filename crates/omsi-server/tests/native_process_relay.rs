@@ -36,7 +36,7 @@ impl Drop for FixtureProcess {
     }
 }
 
-fn start_fixture() -> (FixtureProcess, SocketAddr) {
+fn start_fixture(max_players: usize) -> (FixtureProcess, SocketAddr) {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -67,7 +67,7 @@ fn start_fixture() -> (FixtureProcess, SocketAddr) {
     write(
         &cfg,
         &format!(
-            "name = Native UDP Test\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = 09:00\ntraffic = 0\ntimetable = 0\npassengers = 0\nport = {port}\nweb_port = {web_port}\nmax_players = 2\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n"
+            "name = Native UDP Test\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = 09:00\ntraffic = 0\ntimetable = 0\npassengers = 0\nport = {port}\nweb_port = {web_port}\nmax_players = {max_players}\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n"
         ),
     );
     let process = Command::new(env!("CARGO_BIN_EXE_omsi-server"))
@@ -100,7 +100,7 @@ fn driver(name: &str, x: f64) -> Pose {
 
 #[test]
 fn native_binary_relays_two_clients_without_a_host_vehicle() {
-    let (mut server, addr) = start_fixture();
+    let (mut server, addr) = start_fixture(2);
     let world = WorldInfo {
         map: "Maps/Fixture/global.cfg".into(),
         date: "1989-05-30".into(),
@@ -188,5 +188,110 @@ fn native_binary_relays_two_clients_without_a_host_vehicle() {
     );
     assert!(!alpha.peers().any(|p| p.pose.name == "beta"));
     alpha.leave();
+    charlie.leave();
+}
+
+#[test]
+fn native_binary_relays_three_drivers_and_updated_vehicle_state() {
+    let (mut server, addr) = start_fixture(3);
+    let world = WorldInfo {
+        map: "Maps/Fixture/global.cfg".into(),
+        date: "1989-05-30".into(),
+        time: 9.0 * 3600.0,
+        ..Default::default()
+    };
+    let mut alpha = LanSession::join_addr(vec![addr], None, "alpha", world.clone()).unwrap();
+    let mut beta = LanSession::join_addr(vec![addr], None, "beta", world.clone()).unwrap();
+    let mut charlie = LanSession::join_addr(vec![addr], None, "charlie", world).unwrap();
+
+    let mut pa = driver("alpha", 101.0);
+    pa.paint = "Test blue".into();
+    pa.line = "76".into();
+    pa.destination = "Grundorf".into();
+    pa.doors = vec![1.0, 0.0];
+    let pb = driver("beta", 202.0);
+    let pc = driver("charlie", 303.0);
+
+    let sees = |client: &LanSession, name: &str, x: f64| {
+        client.peers().any(|peer| {
+            peer.has_info
+                && peer.has_pose
+                && peer.pose.name == name
+                && (peer.pose.x - x).abs() < 0.5
+        })
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut exchanged = false;
+    while Instant::now() < deadline {
+        if let Some(status) = server.process.try_wait().unwrap() {
+            panic!("native server exited before three-client exchange: {status}");
+        }
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        charlie.tick(0.05, &pc);
+        if alpha.connected
+            && beta.connected
+            && charlie.connected
+            && sees(&alpha, "beta", 202.0)
+            && sees(&alpha, "charlie", 303.0)
+            && sees(&beta, "alpha", 101.0)
+            && sees(&beta, "charlie", 303.0)
+            && sees(&charlie, "alpha", 101.0)
+            && sees(&charlie, "beta", 202.0)
+        {
+            exchanged = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        exchanged,
+        "three independent clients must see both remote drivers through the native executable"
+    );
+    for client in [&alpha, &beta, &charlie] {
+        assert_eq!(
+            client.peers().filter(|p| p.has_info && p.has_pose).count(),
+            2,
+            "the dedicated host must not inject a phantom fourth vehicle"
+        );
+    }
+
+    // Changing a driven bus is more than a static handshake: test both the
+    // high-frequency pose/door state and the slower INFO metadata path.
+    pa.x = 151.0;
+    pa.doors = vec![0.0, 1.0];
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut updated = false;
+    while Instant::now() < deadline {
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        charlie.tick(0.05, &pc);
+        let has_updated_bus = |client: &LanSession| {
+            client.peers().any(|peer| {
+                peer.has_info
+                    && peer.has_pose
+                    && peer.pose.name == "alpha"
+                    && peer.pose.paint == "Test blue"
+                    && peer.pose.line == "76"
+                    && peer.pose.destination == "Grundorf"
+                    && (peer.pose.x - 151.0).abs() < 0.5
+                    && peer.pose.doors.len() == 2
+                    && peer.pose.doors[1] > 0.9
+            })
+        };
+        if has_updated_bus(&beta) && has_updated_bus(&charlie) {
+            updated = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        updated,
+        "native host must relay live movement, door state, paint and destination to both observers"
+    );
+
+    alpha.leave();
+    beta.leave();
     charlie.leave();
 }
