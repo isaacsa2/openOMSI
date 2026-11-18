@@ -271,15 +271,27 @@ mod tests {
     #[test]
     fn experimental_admission_fails_closed_on_public_or_transfer_settings() {
         let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir()
-            .join(format!("omsi-headless-{}-{nanos}.cfg", std::process::id()));
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("omsi-headless-{}-{nanos}.cfg", std::process::id()));
         let config = [
-            "name=isolated-test", "date=1989-05-30", "traffic=0",
-            "timetable=0", "passengers=0", "share_maps=0",
-            "accept_uploads=0", "parked_buses=0", "public_server=0",
-            "tunnel=0", "public_address=off", "real_time=0", "metar_sync=0",
-        ].join("\n");
+            "name=isolated-test",
+            "date=1989-05-30",
+            "traffic=0",
+            "timetable=0",
+            "passengers=0",
+            "share_maps=0",
+            "accept_uploads=0",
+            "parked_buses=0",
+            "public_server=0",
+            "tunnel=0",
+            "public_address=off",
+            "real_time=0",
+            "metar_sync=0",
+        ]
+        .join("\n");
         std::fs::write(&path, config).unwrap();
         let mut cfg = ServerCfg::load(&path, 256).unwrap();
         let _ = std::fs::remove_file(&path);
@@ -296,5 +308,4 @@ mod tests {
         cfg.tunnel = true;
         assert!(allow_free_roam(&cfg).is_err());
     }
-
 }
