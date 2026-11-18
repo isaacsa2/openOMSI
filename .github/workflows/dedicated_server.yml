@@ -47,6 +47,11 @@ jobs:
       - name: Install legacy LAN-test system headers
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libasound2-dev
 
+      - name: Test-only ALSA headers for omsi-sim dev dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+
       - name: Shared simulation, LAN policy and wire protocol regressions
         run: cargo test --locked -p omsi-sim -p omsi-lan -p omsi-net --lib -- --test-threads=2
 
