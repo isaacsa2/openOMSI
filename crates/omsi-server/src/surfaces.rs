@@ -21,6 +21,7 @@ pub struct SurfaceCounts {
     pub target_tiles: usize,
     pub road_meshes: usize,
     pub wheel_meshes: usize,
+    pub placed_scenery_surfaces: usize,
     pub overlays: usize,
     pub overhead_only: usize,
     pub skipped_invalid: usize,
@@ -77,6 +78,36 @@ fn overlaps_tile(mesh: &MeshData, origin: DVec3, key: (i32, i32)) -> bool {
         && (origin.y + lo.y as f64) <= y0 + tile
 }
 
+
+/// True only when the transformed scene surface reaches the active tile.
+pub(crate) fn raster_overlaps_tile(
+    mesh: &MeshData,
+    rot: &Mat4,
+    origin: DVec3,
+    key: (i32, i32),
+) -> bool {
+    if mesh.indices.is_empty() || mesh.positions.is_empty() {
+        return false;
+    }
+    let mut lo = glam::Vec2::splat(f32::INFINITY);
+    let mut hi = glam::Vec2::splat(f32::NEG_INFINITY);
+    for point in &mesh.positions {
+        let p = rot.transform_point3(*point);
+        if !p.is_finite() {
+            return false;
+        }
+        lo = lo.min(p.truncate());
+        hi = hi.max(p.truncate());
+    }
+    let edge = tile_size();
+    let x0 = key.0 as f64 * edge;
+    let y0 = key.1 as f64 * edge;
+    origin.x + hi.x as f64 >= x0
+        && origin.x + lo.x as f64 <= x0 + edge
+        && origin.y + hi.y as f64 >= y0
+        && origin.y + lo.y as f64 <= y0 + edge
+}
+
 impl HostWorld {
     /// Publish an immutable CPU road-surface snapshot for all *active* tiles.
     /// Includes source splines in their immediate neighbors so that road
@@ -89,6 +120,7 @@ impl HostWorld {
         let tiles: BTreeSet<_> = active.iter().copied().collect();
         let root = self.data.snapshot().map.root.clone();
         let mut rasters = HashMap::new();
+        let mut scenery = crate::scenery_ground::ScenerySurfaces::new();
         for key in &tiles {
             if self.load_tile(*key).is_some() {
                 rasters.insert(*key, TileSurface::new(RASTER_SIZE));
@@ -164,19 +196,12 @@ impl HostWorld {
                     }
                 }
             }
-            // Object road plates, deformable crossings and terrain holes need
-            // full CPU object placement. Record them instead of claiming the
-            // incomplete surface raster matches the graphical game's wheel.
-            for obj in &tile.objects {
-                if obj.file.trim().is_empty() {
-                    continue;
-                }
-                if let Some(def) = self.scenery(&root, &obj.file) {
-                    if def.surface || def.render_type.is_ground_layer() {
-                        report.pending_scenery_surfaces += 1;
-                    }
-                }
-            }
+            // Static [surface] objects use only their safe first mesh. Any
+            // crossing requiring a deformation mesh or terrain-hole cut is
+            // explicitly left pending rather than forming false wheel ground.
+            self.install_scenery_ground(
+                key, &tile, &mut rasters, &mut scenery, &mut report,
+            );
         }
         for raster in rasters.values_mut() {
             raster.finish();
