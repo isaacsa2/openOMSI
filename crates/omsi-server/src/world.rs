@@ -10,6 +10,8 @@ use omsi_sim::world_data::{MapFacts, WorldCell, WorldData};
 use omsi_world::map_index::MapIndex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use omsi_map::{Terrain, tile_size, tile::Tile};
 
 /// CPU data that stays alive for the lifetime of a dedicated map session.
 pub struct HostWorld {
@@ -17,6 +19,48 @@ pub struct HostWorld {
     pub map_dir: PathBuf,
     pub data: Arc<WorldCell>,
     pub index: Arc<MapIndex>,
+    /// Bounded, CPU-only tile data; no GPU buffers or material textures.
+    tiles: HostTileCache,
+    tile_paths: HashMap<(i32, i32), PathBuf>,
+    chrono_dirs: Vec<PathBuf>,
+}
+
+/// LRU cache for immutable OMSI tile records. A map can have tens of thousands
+/// of tiles; we must not retain every .map and terrain file in RAM.
+struct HostTileCache {
+    limit: usize,
+    order: VecDeque<(i32, i32)>,
+    loaded: HashMap<(i32, i32), (Arc<Tile>, Arc<Terrain>)>,
+}
+
+impl HostTileCache {
+    fn new(limit: usize) -> Self {
+        Self { limit: limit.clamp(1, 512), order: VecDeque::new(), loaded: HashMap::new() }
+    }
+
+    fn get(&mut self, key: (i32, i32)) -> Option<(Arc<Tile>, Arc<Terrain>)> {
+        let pair = self.loaded.get(&key)?.clone();
+        self.order.retain(|k| *k != key);
+        self.order.push_back(key);
+        Some(pair)
+    }
+
+    fn insert(
+        &mut self,
+        key: (i32, i32),
+        tile: Arc<Tile>,
+        ground: Arc<Terrain>,
+    ) -> Option<(i32, i32)> {
+        self.order.retain(|k| *k != key);
+        self.order.push_back(key);
+        self.loaded.insert(key, (tile, ground));
+        if self.loaded.len() > self.limit {
+            let oldest = self.order.pop_front()?;
+            self.loaded.remove(&oldest);
+            return Some(oldest);
+        }
+        None
+    }
 }
 
 impl HostWorld {
@@ -43,6 +87,7 @@ impl HostWorld {
 
         // CPU indexing is parallel; the resulting data structures are immutable
         // and shared, with no textures/mesh buffers to upload or retain.
+        let tile_paths = files.iter().map(|(_, x, y, p)| ((*x, *y), p.clone())).collect();
         let index = Arc::new(MapIndex::build(&files, &chrono_dirs, root));
         let mut data = WorldData {
             map: Arc::new(MapFacts {
@@ -91,7 +136,67 @@ impl HostWorld {
             map_dir,
             data: Arc::new(WorldCell::new(data)),
             index,
+            tiles: HostTileCache::new(64),
+            tile_paths,
+            chrono_dirs,
         })
+    }
+
+    /// Read one tile including Chrono patches, and publish its terrain into the
+    /// simulation's ground store. CPU map/terrain parsing is lazy; repeated
+    /// queries use a bounded LRU and do not retain any rendering assets.
+    pub fn load_tile(&mut self, key: (i32, i32)) -> Option<Arc<Tile>> {
+        if let Some((tile, _ground)) = self.tiles.get(key) {
+            return Some(tile);
+        }
+        let path = self.tile_paths.get(&key)?;
+        let tile = omsi_world::map_index::read_tile(path, &self.chrono_dirs)?;
+        let source = tile.terrain_from.as_ref().unwrap_or(&tile.path);
+        let ground_path = omsi_world::map_index::tile_companion(source, ".terrain");
+        let ground = Arc::new(
+            if tile.has_terrain {
+                match Terrain::load(&ground_path) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::warn!("dedicated CPU terrain {}: {e}; using flat fallback", ground_path.display());
+                        Terrain::flat()
+                    }
+                }
+            } else {
+                Terrain::flat()
+            },
+        );
+        let tile = Arc::new(tile);
+        let evicted = self.tiles.insert(key, Arc::clone(&tile), Arc::clone(&ground));
+        self.data.update(|data| {
+            let all = Arc::make_mut(&mut data.ground);
+            if let Some(evicted) = evicted {
+                all.terrains.remove(&evicted);
+                all.surfaces.remove(&evicted);
+            }
+            all.terrains.insert(key, ground);
+        });
+        Some(tile)
+    }
+
+    /// Sample CPU terrain below a person or vehicle, even without a render
+    /// device or window. Road collision overlays will be added by the physical
+    /// tile loader, not silently approximated by the terrain.
+    pub fn terrain_height(&mut self, x: f64, y: f64) -> Option<f32> {
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        let key = omsi_sim::world_data::ground::tile_key(x, y);
+        self.load_tile(key)?;
+        let terrain = self.tiles.loaded.get(&key).map(|(_, t)| t)?;
+        Some(terrain.sample(
+            (x - key.0 as f64 * tile_size()) as f32,
+            (y - key.1 as f64 * tile_size()) as f32,
+        ))
+    }
+
+    pub fn loaded_tiles(&self) -> usize {
+        self.tiles.loaded.len()
     }
 }
 
@@ -110,4 +215,30 @@ pub fn check_map(root: &std::path::Path, map: &str) -> Result<(), String> {
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| "none".into())
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_tile_cache_stays_bounded_and_recent_tiles_survive() {
+        let mut cache = HostTileCache::new(2);
+        let tile = Arc::new(Tile::default());
+        let ground = Arc::new(Terrain::flat());
+        assert_eq!(cache.insert((0, 0), Arc::clone(&tile), Arc::clone(&ground)), None);
+        assert_eq!(cache.insert((1, 0), Arc::clone(&tile), Arc::clone(&ground)), None);
+        assert!(cache.get((0, 0)).is_some());
+        assert_eq!(cache.insert((2, 0), tile, ground), Some((1, 0)));
+        assert!(cache.get((1, 0)).is_none());
+        assert!(cache.get((0, 0)).is_some());
+        assert_eq!(cache.loaded.len(), 2);
+        assert_eq!(cache.order.len(), 2);
+    }
+
+    #[test]
+    fn cpu_tile_cache_restricts_untrusted_capacity() {
+        assert_eq!(HostTileCache::new(0).limit, 1);
+        assert_eq!(HostTileCache::new(usize::MAX).limit, 512);
+    }
 }
