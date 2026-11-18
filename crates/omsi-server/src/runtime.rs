@@ -20,6 +20,16 @@ use std::time::{Duration, Instant};
 
 pub const INITIAL_TILE_LIMIT: usize = 64;
 
+/// Measure named stages only while the operator-enabled profiler is running.
+fn profile<T>(profiler: &mut Profiler, name: &'static str, f: impl FnOnce() -> T) -> T {
+    let started = profiler.enabled().then(Instant::now);
+    let result = f();
+    if let Some(started) = started {
+        profiler.stage(name, started.elapsed());
+    }
+    result
+}
+
 /// Bound the experimental loaded area around the map's first real entrypoint,
 /// not the arbitrary ordering of [map] records in global.cfg. Without this a
 /// large map could load 64 distant empty tiles and reject an otherwise valid
@@ -260,12 +270,16 @@ pub fn free_roam(
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         let authoritative = clock + admin_state.shift;
         net.session_mut().set_clock(&date, authoritative);
-        net.tick(FIXED_DT);
-        sim.sync_host_clients(net.session_mut());
+        profile(&mut profiler, "network", || net.tick(FIXED_DT));
+        profile(&mut profiler, "interest", || {
+            sim.sync_host_clients(net.session_mut())
+        });
         // Match LAN clock shifts; TrafficSim advances day_time inside step.
         sim.traffic.day_time = authoritative - f64::from(FIXED_DT) * sim.traffic.time_scale;
-        sim.step(FIXED_DT);
-        world_sync.tick(net.session_mut(), &sim.traffic, FIXED_DT);
+        profile(&mut profiler, "simulation", || sim.step(FIXED_DT));
+        profile(&mut profiler, "world_sync", || {
+            world_sync.tick(net.session_mut(), &sim.traffic, FIXED_DT)
+        });
         // AI vehicle and passenger snapshots remain unsupported in free-roam.
         sim.discard_presentation_events_after_publish();
         profiler.tick(started.elapsed());
@@ -300,6 +314,19 @@ pub fn free_roam(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profiling_is_off_by_default_and_records_cpu_stages_only_after_opt_in() {
+        let mut profiler = Profiler::new();
+        assert_eq!(profile(&mut profiler, "network", || 7_u32), 7);
+        assert!(profiler.report().stages.is_empty());
+        profiler.start();
+        assert_eq!(profile(&mut profiler, "simulation", || 9_u32), 9);
+        assert_eq!(profiler.report().stages[0].name, "simulation");
+        profiler.stop();
+        profile(&mut profiler, "network", || ());
+        assert_eq!(profiler.report().stages.len(), 1);
+    }
 
     #[test]
     fn experimental_initial_tiles_start_near_the_actual_entrypoint() {

@@ -21,7 +21,9 @@ transport with a fixed CPU-side tick and a local server console.
    must permit UDP **27015**, and for WebSocket access TCP **27025**.
 5. Use `list`, `tps`, `status`, `timings on`, `timings report` and
    `stop` in the server console. Profile data is collected only after
-   `timings on`.
+   `timings on`; it now separates `network`, `interest`, `simulation` and
+   `world_sync` execution times. These are stage wall-clock times, not
+   OS process CPU percentages.
 
 ## Linux test / headless VPS
 
