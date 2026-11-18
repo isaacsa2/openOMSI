@@ -139,7 +139,10 @@ fn native_binary_relays_two_clients_without_a_host_vehicle() {
     );
     // The dedicated process never publishes a player-controlled bus of its
     // own; each client should see only the other connected driver.
-    assert_eq!(alpha.peers().filter(|p| p.has_info && p.has_pose).count(), 1);
+    assert_eq!(
+        alpha.peers().filter(|p| p.has_info && p.has_pose).count(),
+        1
+    );
     assert_eq!(beta.peers().filter(|p| p.has_info && p.has_pose).count(), 1);
     alpha.leave();
     beta.leave();
