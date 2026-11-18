@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::collections::{HashMap, VecDeque};
 use omsi_map::{Terrain, tile_size, tile::Tile};
+use glam::{DVec2, DVec3};
+use omsi_scenery::{SceneryObject, Spline};
+use omsi_sim::traffic::{Lane, Network};
+use omsi_geometry::SplineCurve;
 
 /// CPU data that stays alive for the lifetime of a dedicated map session.
 pub struct HostWorld {
@@ -23,6 +27,8 @@ pub struct HostWorld {
     tiles: HostTileCache,
     tile_paths: HashMap<(i32, i32), PathBuf>,
     chrono_dirs: Vec<PathBuf>,
+    spline_defs: HashMap<String, Option<Arc<Spline>>>,
+    object_defs: HashMap<String, Option<Arc<SceneryObject>>>,
 }
 
 /// LRU cache for immutable OMSI tile records. A map can have tens of thousands
@@ -139,6 +145,8 @@ impl HostWorld {
             tiles: HostTileCache::new(64),
             tile_paths,
             chrono_dirs,
+            spline_defs: HashMap::new(),
+            object_defs: HashMap::new(),
         })
     }
 
@@ -193,6 +201,85 @@ impl HostWorld {
             (x - key.0 as f64 * tile_size()) as f32,
             (y - key.1 as f64 * tile_size()) as f32,
         ))
+    }
+
+    /// Load a spline definition at most once per active cache window.
+    fn spline(&mut self, root: &Path, name: &str) -> Option<Arc<Spline>> {
+        let key = name.replace('\\', "/").to_ascii_lowercase();
+        if let Some(v) = self.spline_defs.get(&key) { return v.clone(); }
+        let path = omsi_cfg::resolve_path(root, name);
+        let val = match Spline::load(&path) {
+            Ok(v) => Some(Arc::new(v)),
+            Err(e) => { log::debug!("CPU spline {}: {e}", path.display()); None },
+        };
+        if self.spline_defs.len() >= 256 {
+            self.spline_defs.clear();
+        }
+        self.spline_defs.insert(key, val.clone());
+        val
+    }
+
+    /// Read only .sco path/script metadata; no 3D meshes or textures.
+    fn scenery(&mut self, root: &Path, name: &str) -> Option<Arc<SceneryObject>> {
+        let key = name.replace('\\', "/").to_ascii_lowercase();
+        if let Some(v) = self.object_defs.get(&key) { return v.clone(); }
+        let path = omsi_cfg::resolve_path(root, name);
+        let val = match SceneryObject::load(&path) {
+            Ok(v) => Some(Arc::new(v)),
+            Err(e) => { log::debug!("CPU scenery {}: {e}", path.display()); None },
+        };
+        if self.object_defs.len() >= 256 {
+            self.object_defs.clear();
+        }
+        self.object_defs.insert(key, val.clone());
+        val
+    }
+
+    /// Build AI/pedestrian road lanes from the same .sli/.sco definitions and map
+    /// rules as the game, but without allocating any render/model resources.
+    /// Junction signal controllers and collision meshes are attached later.
+    pub fn lanes_for_tile(&mut self, key: (i32, i32)) -> Option<Vec<Lane>> {
+        let tile = self.load_tile(key)?;
+        let root = self.data.snapshot().map.root.clone();
+        let terrain = self.tiles.loaded.get(&key)?.1.clone();
+        let origin = DVec2::new(key.0 as f64 * tile_size(), key.1 as f64 * tile_size());
+        let mut lanes = Vec::new();
+        for spline in &tile.splines {
+            if spline.deleted || spline.file.trim().is_empty() { continue; }
+            let Some(def) = self.spline(&root, &spline.file) else { continue };
+            if def.paths.is_empty() { continue; }
+            let curve = SplineCurve::from_map(spline, origin);
+            let mut made = crate::lanes::spline_lanes(&def, spline, &curve, key);
+            for lane in &mut made {
+                lane.invisible = def.only_editor;
+            }
+            lanes.extend(made);
+        }
+        for object in &tile.objects {
+            if object.file.trim().is_empty() { continue; }
+            let Some(def) = self.scenery(&root, &object.file) else { continue };
+            if def.paths.is_empty() { continue; }
+            let lx = object.pos[0].clamp(0.0, tile_size()) as f32;
+            let ly = object.pos[1].clamp(0.0, tile_size()) as f32;
+            let height = if def.absolute_height() { 0.0 } else { terrain.sample(lx, ly) as f64 };
+            let place = DVec3::new(
+                origin.x + object.pos[0], origin.y + object.pos[1], object.pos[2] + height
+            );
+            lanes.extend(crate::lanes::object_lanes(&def, place, [object.rot[0], 0.0, 0.0], None, key, object.id, &object.rules));
+        }
+        Some(lanes)
+    }
+
+    /// Link the nearby CPU lanes into the very same traffic network type used
+    /// by the graphical client. Callers control the active tile set.
+    pub fn network_for_tiles(&mut self, keys: &[(i32, i32)]) -> Network {
+        let mut network = Network::default();
+        for &key in keys {
+            if let Some(lanes) = self.lanes_for_tile(key) {
+                network.extend(lanes, omsi_sim::traffic::LINK_TOLERANCE);
+            }
+        }
+        network
     }
 
     pub fn loaded_tiles(&self) -> usize {
