@@ -60,6 +60,13 @@ into boxes, ignored signals or a false-ready server.
 
 ## Experimental independent host process
 
+The Release CI creates **separate** headless-test ZIPs for Windows x64 and
+Linux. These contain `omsi-server`, `server-test.cfg`, a launch script and
+`README.md`. The existing `server-windows` and `server-linux` ZIPs
+remain the original `openomsi --server` build. The native test package is
+not promoted as a supported production host.
+
+
 The first **native renderer-free** `omsi-server` executable now exists. It
 has a 60 Hz loop, actual network relay, restricted admin/console, CPU-only map
 and road data, collision-box checks, traffic-light initialization, and CPU
