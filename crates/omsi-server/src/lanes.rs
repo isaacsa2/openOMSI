@@ -266,6 +266,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mirrored_two_way_spline_keeps_both_lane_directions_and_identity() {
+        let definition = Spline {
+            path: std::path::PathBuf::from("Splines/road.sli"),
+            paths: vec![omsi_scenery::PathDef {
+                kind: 0,
+                direction: 2,
+                width: 3.0,
+                start: [2.0, 0.0, 0.0],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let placed = omsi_map::MapSpline {
+            id: 42,
+            length: 25.0,
+            mirror: true,
+            ..Default::default()
+        };
+        let curve = SplineCurve::from_map(&placed, DVec2::ZERO);
+        let lanes = spline_lanes(&definition, &placed, &curve, (7, 9));
+        assert_eq!(lanes.len(), 2);
+        assert_eq!(lanes[0].key, lanes[1].key);
+        assert_eq!(lanes[0].key.unwrap().tile, (7, 9));
+        assert_eq!(lanes[0].key.unwrap().id, 42);
+        assert!(!lanes[0].reversed);
+        assert!(lanes[1].reversed);
+        assert!((lanes[0].offset - -2.0).abs() < 0.01);
+        assert!(lanes.iter().all(|l| l.points.len() >= 2));
+    }
+
+    #[test]
     fn traffic_group_rules_match_map_semantics() {
         let r = |group: f64, density: f64| omsi_map::MapRule {
             path_index: 1, kind: "trafficdensity".into(), value: density,
