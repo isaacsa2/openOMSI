@@ -63,6 +63,90 @@ pub fn interest_tiles(
     selected
 }
 
+/// Completed CPU map snapshot for the free-roam host. Loading is never
+/// performed on the network tick thread.
+pub struct StreamUpdate {
+    pub keys: Vec<(i32, i32)>,
+    pub signals: crate::signals::SignalNetwork,
+    pub surfaces: crate::surfaces::SurfaceCounts,
+    pub collisions: crate::collision::CollisionCounts,
+}
+
+pub struct StreamWorker {
+    requests: std::sync::mpsc::Sender<Vec<(i32, i32)>>,
+    results: std::sync::mpsc::Receiver<Option<StreamUpdate>>,
+    worker: std::thread::JoinHandle<()>,
+}
+
+impl StreamWorker {
+    /// Own the mutable CPU map on a separate thread. Shared WorldCell data is
+    /// published via immutable snapshots and read by the running simulation.
+    /// The restricted relay has no server-owned AI, so old entities cannot
+    /// retain lane or surface references during a region replacement.
+    pub fn start(mut world: crate::world::HostWorld) -> std::io::Result<Self> {
+        let (requests, pending) = std::sync::mpsc::channel::<Vec<(i32, i32)>>();
+        let (complete, results) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new()
+            .name("omsi-cpu-tile-stream".into())
+            .spawn(move || {
+                while let Ok(keys) = pending.recv() {
+                    let signals = world.network_with_traffic_lights(&keys);
+                    if signals.network.lanes.is_empty() {
+                        log::warn!(
+                            "native tile stream: no road lanes in the selected region"
+                        );
+                        if complete.send(None).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                    let surfaces = world.install_spline_ground_surfaces(&keys);
+                    world.install_stop_lists(&keys);
+                    let collisions =
+                        world.install_static_box_collisions(&keys, &signals.network.lanes);
+                    world.prune_streamed_ground(&keys);
+                    if complete
+                        .send(Some(StreamUpdate {
+                            keys,
+                            signals,
+                            surfaces,
+                            collisions,
+                        }))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })?;
+        Ok(Self {
+            requests,
+            results,
+            worker,
+        })
+    }
+
+    pub fn request(&self, keys: Vec<(i32, i32)>) -> bool {
+        self.requests.send(keys).is_ok()
+    }
+
+    /// Some(None) indicates a rejected region. None means still processing.
+    pub fn poll(&self) -> Option<Option<StreamUpdate>> {
+        self.results.try_recv().ok()
+    }
+
+    pub fn stop(self) {
+        let Self {
+            requests,
+            results: _,
+            worker,
+        } = self;
+        drop(requests);
+        if worker.join().is_err() {
+            log::warn!("native tile stream worker panicked while shutting down");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
