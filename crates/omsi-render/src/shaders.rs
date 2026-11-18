@@ -107,8 +107,11 @@ mod tests {
             "camera uniform must initialize the ground-pass flag to zero and glare in z"
         );
         let render = include_str!("render.rs");
+        // The renderer may be reformatted without changing the GPU uniform write.
+        // Compare non-whitespace tokens instead of depending on one physical line.
+        let tokens: String = render.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(
-            render.contains("(std::mem::offset_of!(CameraUniform, lod) + 4) as u64, bytemuck::bytes_of(&flag)"),
+            tokens.contains("(std::mem::offset_of!(CameraUniform,lod)+4)asu64,bytemuck::bytes_of(&flag)"),
             "the ground pass must set lod.y alone and keep the glare in lod.z"
         );
     }
