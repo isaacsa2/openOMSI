@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn defaults_are_bounded_and_use_only_local_content() {
-        let opts = parse_options(["/omsi", "Maps/Test"]).unwrap();
+        let opts = parse_options(["/omsi", "Maps/Test"].into_iter().map(String::from)).unwrap();
         assert_eq!(opts.ticks, 600);
         assert_eq!(opts.tiles, 16);
         assert!(opts.map.ends_with("Maps/Test/global.cfg"));
