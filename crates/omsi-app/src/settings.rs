@@ -621,25 +621,21 @@ impl Settings {
     pub fn perf_overlay_on(&self) -> bool {
         self.perf_overlay != "off"
     }
-
     /// The launcher setting, with the old environment switch kept for existing VR runs.
     pub fn vr_requested(&self) -> bool {
         cfg!(windows) && (self.vr || omsi_cfg::flags::OMSI_OPENXR.is_set())
     }
-
     /// `~/.openomsi/settings.cfg` (or `%USERPROFILE%` on Windows).
     pub fn path() -> Option<PathBuf> {
         let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
         Some(PathBuf::from(home).join(".openomsi").join("settings.cfg"))
     }
-
     /// The window's size in pixels the settings ask for (`resolution=WxH`, #904); None:
     /// automatic (fitted to the screen, the whole of it under gamescope).
     pub fn resolution() -> Option<(u32, u32)> {
         let text = std::fs::read_to_string(Self::path()?).ok()?;
         resolution_of(&text)
     }
-
     pub fn load() -> Settings {
         let Some(p) = Self::path() else { return Settings::default() };
         let mut text = std::fs::read_to_string(&p).unwrap_or_default();
@@ -672,7 +668,6 @@ impl Settings {
         *LAST.lock() = Some((p, text, s.clone()));
         s
     }
-
     /// One of the Tobii head-tracking lines, the pause menu's shortcuts or the interface theme of the settings file (`from_text`).
     fn read_extra(&mut self, k: &str, v: &str) {
         match k {
@@ -720,7 +715,6 @@ impl Settings {
             _ => self.fsr_sharpness = v.parse::<f32>().ok().filter(|n| n.is_finite()).map(|n| n.clamp(0.0, 1.0)).unwrap_or(0.8),
         }
     }
-
     /// The lit LEDs' glow and mipmaps, the night's brightness and the graphics interface
     /// (`from_text`): an unreadable number keeps the default.
     fn read_graphics(&mut self, k: &str, v: &str) {
@@ -734,7 +728,6 @@ impl Settings {
             _ => {}
         }
     }
-
     pub fn from_text(text: &str) -> Settings {
         let mut s = Settings::default();
         let mut version = 0u32;
@@ -1034,7 +1027,6 @@ impl Settings {
         s.settle_after_reading(graphics, version);
         s
     }
-
     /// One of Enhanced's light options as a settings file says it (`ray_tracing`, `light_shadows`,
     /// `cloud_shadows`, `light_glow`).
     fn set_light_option(&mut self, key: &str, v: &str) {
@@ -1046,7 +1038,6 @@ impl Settings {
             _ => self.light_glow = on,
         }
     }
-
     fn settle_after_reading(&mut self, graphics: Option<String>, version: u32) {
         // `graphics` decides; a file without it (older builds) says only `enhanced`, and
         // its vanilla renderer is what is now called Vanilla+
@@ -1081,7 +1072,6 @@ impl Settings {
             self.passenger_animation = "original".into();
         }
     }
-
     /// The settings as the file holds them. The game only ever reads the file - the
     /// launcher's settings page writes it - so this is here for the round-trip test that
     /// every key read is written back.
@@ -1165,13 +1155,11 @@ impl Settings {
         text.push_str(&format!("units={}\n", self.units));
         text
     }
-
     /// Real-Time Ray Tracing, with Enhanced graphics: ray-traced sun shadows, ambient occlusion
     /// and reflections (and the graded look that goes with them).
     pub fn ray_tracing(&self) -> bool {
         self.graphics == "enhanced" && self.ray_tracing_on
     }
-
     /// The graphics mode the renderer runs in, ray tracing counted as a mode of its own: `vanilla`,
     /// `vanilla_plus`, `enhanced` or `enhanced_plus` (Enhanced with Real-Time Ray Tracing).
     pub fn mode(&self) -> &'static str {

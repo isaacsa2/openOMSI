@@ -71,11 +71,11 @@ jobs:
       # Which crate may depend on which (nothing on omsi-app, the simulation on no renderer,
       # ...) and no change growing the app crate much: scripts/arch-guard.sh, rules in scripts/arch-rules.txt.
       - name: Crate layers
-        if: ${{ !cancelled() && success() }}
+        if: ${{ !cancelled() }}
         run: bash scripts/arch-guard.sh
 
       - name: Drive page layouts
-        if: ${{ !cancelled() && success() }}
+        if: ${{ !cancelled() }}
         run: |
           if git diff --quiet "$BASE" HEAD -- launcher/ui launcher/tests .github/workflows/pr_checks.yml; then
             echo "The launcher's page is not changed."
@@ -88,13 +88,13 @@ jobs:
           fi
 
       - name: AI Lists state
-        if: ${{ !cancelled() && success() }}
+        if: ${{ !cancelled() }}
         run: node launcher/tests/ai-lists-check.mjs
 
       - name: Graphics profile sharing
-        if: ${{ !cancelled() && success() }}
+        if: ${{ !cancelled() }}
         run: node --experimental-websocket launcher/tests/graphics-profile-transfer-check.mjs
 
       - name: Launcher settings startup
-        if: ${{ !cancelled() && success() }}
+        if: ${{ !cancelled() }}
         run: node --experimental-vm-modules --test launcher/tests/*.test.mjs

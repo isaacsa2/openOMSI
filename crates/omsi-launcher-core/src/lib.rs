@@ -41,14 +41,16 @@ pub use graphics_profile_transfer::{export_graphics_profile, import_graphics_pro
 pub use graphics_profiles::*;
 #[rustfmt::skip]
 mod situations;
-pub use situations::{delete_situation, last_situation, rename_situation, saved_situations, SavedSituation};
+pub use situations::{
+    SavedSituation, delete_situation, last_situation, rename_situation, saved_situations,
+};
 
 pub use file_dialog::{pick_file, pick_folder, pick_graphics_profile, pick_hofs, pick_mod};
-pub use hof_sync::{add_shared_hofs, share_map_hofs, MapHofOffer};
+pub use hof_sync::{MapHofOffer, add_shared_hofs, share_map_hofs};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------------------
@@ -1365,7 +1367,7 @@ mod airports;
 pub use airports::nearest_airport;
 #[rustfmt::skip]
 mod custom_weather;
-pub use custom_weather::{custom_weather, CustomWeather};
+pub use custom_weather::{CustomWeather, custom_weather};
 
 #[rustfmt::skip]
 pub fn list_weather() -> Result<Vec<WeatherInfo>> {
@@ -2150,7 +2152,7 @@ fn setting_key(k: &str) -> String {
 }
 
 // (the language table lives in omsi-cfg, below the input crate that needs it too)
-pub use omsi_cfg::lang::{language_code, language_iso, LANGUAGES};
+pub use omsi_cfg::lang::{LANGUAGES, language_code, language_iso};
 
 /// `vanilla` (as OMSI 2), `vanilla_plus`, `enhanced` or `enhanced_plus`, from the ways a file
 /// may spell them (as the game's `settings::graphics_mode`).
@@ -3415,7 +3417,7 @@ pub fn take_in_process_launch() -> Option<Vec<String>> {
 #[rustfmt::skip]
 pub const IN_PROCESS_GAMES: bool = cfg!(any(target_os = "android", target_os = "ios"));
 
-pub use instances::{list as list_instances, log_tail, stop as stop_instance, Instance};
+pub use instances::{Instance, list as list_instances, log_tail, stop as stop_instance};
 
 /// Terminal access to the same functions: `--cli lines '{"map":"maps/Grundorf/global.cfg"}'`.
 #[rustfmt::skip]
@@ -3512,7 +3514,6 @@ pub fn cli(cmd: &str, arg: &str) -> Result<Value> {
         _ => return Err(anyhow!("unknown command {cmd}")),
     })
 }
-
 
 #[cfg(test)]
 mod tests;
