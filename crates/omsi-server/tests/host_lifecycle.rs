@@ -49,7 +49,8 @@ fn a_departed_client_releases_its_slot_and_its_bus_does_not_become_a_ghost() {
         if a.connected
             && b.connected
             && host.session().peer_count() == 2
-            && a.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "beta")
+            && a.peers()
+                .any(|p| p.has_info && p.has_pose && p.pose.name == "beta")
         {
             joined = true;
             break;
@@ -82,8 +83,10 @@ fn a_departed_client_releases_its_slot_and_its_bus_does_not_become_a_ghost() {
         c.tick(0.06, &pc);
         if c.connected
             && host.session().peer_count() == 2
-            && a.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "charlie")
-            && c.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "alpha")
+            && a.peers()
+                .any(|p| p.has_info && p.has_pose && p.pose.name == "charlie")
+            && c.peers()
+                .any(|p| p.has_info && p.has_pose && p.pose.name == "alpha")
         {
             rejoined = true;
             break;
