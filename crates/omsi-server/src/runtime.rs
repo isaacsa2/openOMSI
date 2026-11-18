@@ -158,11 +158,15 @@ pub fn free_roam(
         "Experimental headless FREE-ROAM relay: no authoritative bus/traffic/passenger simulation parity"
     );
     net.ready();
-    log::info!("native headless test host ready; UDP port {}", net.session().local_addr().map_or(cfg.port, |addr| addr.port()));
+    let port = net.session().local_addr().map_or(cfg.port, |addr| addr.port());
+    log::info!("native headless test host ready; UDP port {port}");
     if let Some(code) = net.session().code() {
         log::info!("join code for approved testers: {}", code.encode());
     }
-    log::info!("web gateway configured on TCP port {} (public_address=off does not restrict firewall access)", cfg.web_port);
+    log::info!(
+        "web gateway on TCP port {} (public_address=off does not restrict firewall access)",
+        cfg.web_port
+    );
     let mut meter = TickMeter::new(60.0);
     let mut profiler = Profiler::new();
     let mut admin_state = ServerAdmin::default();
