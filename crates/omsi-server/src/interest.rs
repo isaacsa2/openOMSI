@@ -148,6 +148,74 @@ mod tests {
     }
 
     #[test]
+    fn connected_client_positions_are_the_authoritative_ai_interest_points() {
+        use omsi_net::WorldInfo;
+        use omsi_sim::ai_traffic::setup::RandomTypes;
+        use omsi_sim::traffic::Network;
+        use std::net::SocketAddr;
+        use std::path::Path;
+        use std::time::Duration;
+
+        let mut host = LanSession::host(0, "Dedicated", WorldInfo::default(), true).unwrap();
+        let addr = SocketAddr::from(([127, 0, 0, 1], host.local_addr().unwrap().port()));
+        let mut a = LanSession::join_addr(vec![addr], None, "a", WorldInfo::default()).unwrap();
+        let mut b = LanSession::join_addr(vec![addr], None, "b", WorldInfo::default()).unwrap();
+        let pa = Pose {
+            bus: "Vehicles/BusA.bus".into(),
+            x: 100.0,
+            y: 210.0,
+            width: 2.5,
+            length: 12.0,
+            ..Default::default()
+        };
+        let pb = Pose {
+            bus: "Vehicles/BusB.bus".into(),
+            x: -50.0,
+            y: 20.0,
+            width: 2.5,
+            length: 8.0,
+            ..Default::default()
+        };
+        for _ in 0..180 {
+            host.tick(0.06, &Pose::default());
+            a.tick(0.06, &pa);
+            b.tick(0.06, &pb);
+            if host.peers().filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle()).count() == 2 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let random = RandomTypes {
+            types: Vec::new(),
+            groups: Vec::new(),
+            group_curves: false,
+            group_uvg: Vec::new(),
+            uvg_defaults: Vec::new(),
+        };
+        let mut traffic = crate::traffic::assemble(
+            Path::new("."),
+            Network::default(),
+            random,
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        let mut people = PeopleSim::new(Path::new("."), 0);
+        let status = update_host_interest(&mut host, &mut traffic, &mut people);
+        assert_eq!(status.visible_players, 2);
+        assert_eq!(traffic.lan_eyes.len(), 2);
+        assert_eq!(traffic.others.len(), 2);
+        assert_eq!(people.lan_centers.len(), 2);
+        assert!(traffic.lan_centers.iter().any(|p| (p.x - 100.0).abs() < 0.01));
+        assert!(traffic.lan_centers.iter().any(|p| (p.x + 50.0).abs() < 0.01));
+        host.kick(a.my_id, "disconnected", false);
+        let status = update_host_interest(&mut host, &mut traffic, &mut people);
+        assert_eq!(status.visible_players, 1);
+        assert_eq!(traffic.others.len(), 1);
+        assert_eq!(people.lan_centers.len(), 1);
+    }
+
+    #[test]
     fn absent_vehicle_has_no_ai_obstacle() {
         assert!(vehicle_box(&Pose::default()).is_none());
     }
