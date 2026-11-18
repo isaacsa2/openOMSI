@@ -75,13 +75,20 @@ corrupted and unusually large surface meshes, and leaves terrain-deformed
 crossings and explicit cutter-backed geometry pending rather than placing
 incorrect flat surfaces.
 
-**Not yet parity:** the native executable starts with a maximum of 64
-map tiles selected around the map's first entrypoint; it does not dynamically
-stream client-interest neighborhoods, apply crossing height deformation or
-terrain holes, synchronize all AI/passenger snapshots, or execute
-authoritative bus scripts. Rejected scenery surfaces, invalid splines and
-missing definitions remain visible as unresolved counts. The incomplete
-road mesh must not be treated as proof of full collision parity.
+**Not yet parity:** the native executable starts with up to 64
+entrypoint-oriented tiles. Restricted free-roam now chooses additional tiles
+around connected players (up to 192 active tiles) and rebuilds CPU road lanes,
+surfaces, collisions, stops and traffic-light programs on a background map
+worker. The UDP networking loop continues ticking while this work runs.
+Replaced regions release inactive road rasters and terrain outside the active
+neighborhood; current signal clocks are carried across the lane-network swap.
+
+This streaming path is **experimental**, not complete world authority: active
+AI and passenger entities are intentionally disabled, and there is no full
+entity-aware unloading, crossing height deformation or terrain-hole parity,
+complete AI/passenger snapshots, or authoritative bus scripts. Rejected
+scenery surfaces, invalid splines and missing definitions remain visible
+as unresolved counts; the road mesh is not proof of full collision parity.
 
 ## Native boot smoke fixture
 
