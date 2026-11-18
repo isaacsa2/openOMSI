@@ -16,6 +16,7 @@ pub mod simulation;
 pub mod startup;
 pub mod stops;
 pub mod traffic;
+pub mod tick;
 pub mod transport;
 pub mod weather;
 pub mod world;
