@@ -33,8 +33,10 @@ pub struct CollisionCounts {
 
 impl CollisionCounts {
     pub fn incomplete(&self) -> bool {
-        self.pending_meshes > 0 || self.pending_tilted > 0
-            || self.pending_attachments > 0 || self.missing_definitions > 0
+        self.pending_meshes > 0
+            || self.pending_tilted > 0
+            || self.pending_attachments > 0
+            || self.missing_definitions > 0
     }
 }
 
@@ -213,7 +215,9 @@ impl HostWorld {
                 // Decorative and terrain-render objects are not rigid
                 // obstacles even when their map placement is tilted.
                 if !(def.fixed || def.crash_mode_pole.is_some())
-                    || def.no_collision || def.surface || def.render_type.is_ground_layer()
+                    || def.no_collision
+                    || def.surface
+                    || def.render_type.is_ground_layer()
                 {
                     continue;
                 }
@@ -235,7 +239,7 @@ impl HostWorld {
                         } else {
                             stats.pending_meshes += 1;
                         }
-                    },
+                    }
                     Err(Exclusion::RoadThrough) => stats.avoided_road_walls += 1,
                     Err(Exclusion::NotSolid | Exclusion::MissingBox | Exclusion::UnsafeBox) => {}
                 }

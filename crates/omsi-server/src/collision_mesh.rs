@@ -20,7 +20,9 @@ pub struct MeshCache {
 
 impl MeshCache {
     pub fn new() -> Self {
-        Self { data: HashMap::new() }
+        Self {
+            data: HashMap::new(),
+        }
     }
 
     pub fn load(&mut self, sco: &SceneryObject) -> Option<Arc<MeshShape>> {
@@ -43,7 +45,9 @@ impl MeshCache {
 fn collision_path(sco: &SceneryObject) -> Option<PathBuf> {
     let name = sco.collision_mesh.as_deref()?;
     let parent = sco.path.parent().unwrap_or(Path::new(""));
-    let model_dir = sco.model_file.as_ref()
+    let model_dir = sco
+        .model_file
+        .as_ref()
         .map(|m| omsi_cfg::resolve_path(parent, m))
         .and_then(|p| p.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| parent.to_path_buf());
@@ -58,12 +62,17 @@ fn collision_path(sco: &SceneryObject) -> Option<PathBuf> {
 
 fn mesh_shape(mesh: &omsi_o3d::Mesh) -> Option<Arc<MeshShape>> {
     if mesh.triangles.len() > MAX_TRIANGLES {
-        log::warn!("headless collision mesh: too many triangles ({})", mesh.triangles.len());
+        log::warn!(
+            "headless collision mesh: too many triangles ({})",
+            mesh.triangles.len()
+        );
         return None;
     }
-    if mesh.triangles.iter().any(|t|
-        t.indices.iter().any(|&index| index as usize >= mesh.vertices.len())
-    ) {
+    if mesh.triangles.iter().any(|t| {
+        t.indices
+            .iter()
+            .any(|&index| index as usize >= mesh.vertices.len())
+    }) {
         log::warn!("headless collision mesh: invalid triangle vertex index");
         return None;
     }
@@ -74,8 +83,11 @@ fn mesh_shape(mesh: &omsi_o3d::Mesh) -> Option<Arc<MeshShape>> {
             data.positions.get(i[1] as usize)?,
             data.positions.get(i[2] as usize)?,
         );
-        (a.is_finite() && b.is_finite() && c.is_finite())
-            .then_some([a.as_dvec3(), b.as_dvec3(), c.as_dvec3()])
+        (a.is_finite() && b.is_finite() && c.is_finite()).then_some([
+            a.as_dvec3(),
+            b.as_dvec3(),
+            c.as_dvec3(),
+        ])
     });
     Some(Arc::new(MeshShape::from_triangles(tris, MIN_SOLID_TOP)))
 }
@@ -93,18 +105,30 @@ mod tests {
         };
         let mesh = omsi_o3d::Mesh {
             vertices: vec![p(0.0, 0.0, 2.0), p(2.0, 0.0, 2.0), p(0.0, 2.0, 2.0)],
-            triangles: vec![omsi_o3d::Triangle { indices: [0, 1, 2], material: 0 }],
+            triangles: vec![omsi_o3d::Triangle {
+                indices: [0, 1, 2],
+                material: 0,
+            }],
             ..Default::default()
         };
         let shape = mesh_shape(&mesh).expect("CPU shape");
         assert!(!shape.parts.is_empty(), "the triangle must be kept");
-        assert!(shape.parts.len() < 100, "must not fill an entire bounding box");
+        assert!(
+            shape.parts.len() < 100,
+            "must not fill an entire bounding box"
+        );
     }
 
     #[test]
     fn too_complex_content_does_not_allocate_unbounded_collision_slabs() {
         let mesh = omsi_o3d::Mesh {
-            triangles: vec![omsi_o3d::Triangle { indices: [0, 1, 2], material: 0 }; MAX_TRIANGLES + 1],
+            triangles: vec![
+                omsi_o3d::Triangle {
+                    indices: [0, 1, 2],
+                    material: 0
+                };
+                MAX_TRIANGLES + 1
+            ],
             ..Default::default()
         };
         assert!(mesh_shape(&mesh).is_none());
@@ -113,7 +137,10 @@ mod tests {
     #[test]
     fn corrupt_mesh_indices_cannot_panic_on_loading() {
         let m = omsi_o3d::Mesh {
-            triangles: vec![omsi_o3d::Triangle { indices: [0, 1, 99], material: 0 }],
+            triangles: vec![omsi_o3d::Triangle {
+                indices: [0, 1, 99],
+                material: 0,
+            }],
             ..Default::default()
         };
         assert!(mesh_shape(&m).is_none());
