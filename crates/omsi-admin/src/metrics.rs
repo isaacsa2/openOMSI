@@ -81,8 +81,14 @@ mod tests {
             meter.completed(start + Duration::from_millis(i * 20));
         }
         assert_eq!(meter.tps(), Some(50.0));
-        // The next tick arrives two wall-clock seconds later.
+        // Ten additional ticks completed between 1.0 and 1.2 seconds,
+        // followed by a two-second stall. Count ALL eleven completions
+        // since the previous reporting window: 11 / 2.2 = 5 TPS.
         meter.completed(start + Duration::from_millis(3200));
+        assert_eq!(meter.tps(), Some(5.0));
+        // With no intermediate ticks, an isolated tick following a
+        // two-second stall must report 0.5 TPS, not the nominal 60.
+        meter.completed(start + Duration::from_millis(5200));
         assert_eq!(meter.tps(), Some(0.5));
     }
 
