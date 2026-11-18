@@ -474,10 +474,10 @@ fn new_humans(
     }
 }
 
-    // OMSI_GROUND_SAMPLE=<csv>: what the wheels stand on every metre along the street lanes
-    // within 400 m of the start (lane, s, x, y, lane z, ground z, the id of an object whose
-    // collision mesh stands in the way there) - two builds compared on
-    // the same map show where a change of the ground rules adds or removes a bump
+// OMSI_GROUND_SAMPLE=<csv>: what the wheels stand on every metre along the street lanes
+// within 400 m of the start (lane, s, x, y, lane z, ground z, the id of an object whose
+// collision mesh stands in the way there) - two builds compared on
+// the same map show where a change of the ground rules adds or removes a bump
 #[rustfmt::skip]
 fn ground_sample(world: &World, traffic: Option<&traffic::Traffic>, center: DVec3) -> Result<()> {
     if let (Some(path), Some(t)) = (omsi_cfg::flags::OMSI_GROUND_SAMPLE.var(), traffic.as_ref()) {
