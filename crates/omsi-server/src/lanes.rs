@@ -27,7 +27,11 @@ pub fn path_densities(rules: &[omsi_map::MapRule], path: usize) -> (f32, Vec<(u1
             None => per.push((g, v)),
         }
     }
-    let first = per.iter().find(|(g, _)| *g == 0).map(|e| e.1).unwrap_or(1.0);
+    let first = per
+        .iter()
+        .find(|(g, _)| *g == 0)
+        .map(|e| e.1)
+        .unwrap_or(1.0);
     let density = per.iter().map(|e| e.1).fold(first, f32::max);
     (density, per)
 }
@@ -137,7 +141,6 @@ pub fn spline_lanes(
     out
 }
 
-
 /// Lanes of one placed scenery object: `[path]` arcs in the object frame (x right,
 /// y forward, z up; heading clockwise, radius > 0 right turn) rotated by the object heading.
 pub fn object_lanes(
@@ -202,9 +205,7 @@ pub fn object_lanes(
             .last();
         let (density, group_density) = path_densities(rules, pi);
         let no_cars = rules.iter().any(|r| {
-            r.path_index == pi as i32
-                && r.kind.eq_ignore_ascii_case("no_cars")
-                && !r.kill
+            r.path_index == pi as i32 && r.kind.eq_ignore_ascii_case("no_cars") && !r.kill
         });
         let rule_bus = rule_of("bus").is_some();
         let rule_trucks = rule_of("trucks").is_some();
@@ -212,7 +213,16 @@ pub fn object_lanes(
         // who goes first where this path meets another (`Network::must_yield`)
         let priority = rule_of("priority");
         let mut push = |reverse: bool| {
-            let mut l = LaneBuilder::arc_with_gradients(start, path_heading, length, radius, grad_start, grad_end, kind, p.width);
+            let mut l = LaneBuilder::arc_with_gradients(
+                start,
+                path_heading,
+                length,
+                radius,
+                grad_start,
+                grad_end,
+                kind,
+                p.width,
+            );
             if reverse {
                 let pts: Vec<DVec3> = l.points.iter().rev().copied().collect();
                 l = LaneBuilder::polyline(pts, kind, p.width);
@@ -236,7 +246,16 @@ pub fn object_lanes(
                 id,
                 path: pi as u16,
             });
-            l.blocks = sco.path_blocks.get(pi).map(|b| b.iter().filter(|(n, _)| *n >= 0).map(|(n, _)| *n as u16).collect()).unwrap_or_default();
+            l.blocks = sco
+                .path_blocks
+                .get(pi)
+                .map(|b| {
+                    b.iter()
+                        .filter(|(n, _)| *n >= 0)
+                        .map(|(n, _)| *n as u16)
+                        .collect()
+                })
+                .unwrap_or_default();
             l.crossing_problem = sco.path_crossing_problem.get(pi).copied().unwrap_or(false);
             l.reversed = reverse;
             l.traffic_light = controller.and_then(|c| {
@@ -259,7 +278,6 @@ pub fn object_lanes(
     }
     out
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -299,8 +317,11 @@ mod tests {
     #[test]
     fn traffic_group_rules_match_map_semantics() {
         let r = |group: f64, density: f64| omsi_map::MapRule {
-            path_index: 1, kind: "trafficdensity".into(), value: density,
-            extra: group, ..Default::default()
+            path_index: 1,
+            kind: "trafficdensity".into(),
+            value: density,
+            extra: group,
+            ..Default::default()
         };
         let (density, groups) = path_densities(&[r(0.0, 0.5), r(3.0, 0.1), r(0.0, 0.7)], 1);
         assert!((density - 0.7).abs() < 0.0001);

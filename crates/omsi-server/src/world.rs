@@ -5,17 +5,17 @@
 //! graph. The 3D renderer is not involved in this operation.
 
 use anyhow::{Context, Result};
-use omsi_map::global::GlobalCfg;
-use omsi_sim::world_data::{MapFacts, WorldCell, WorldData};
-use omsi_world::map_index::MapIndex;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::collections::{HashMap, VecDeque};
-use omsi_map::{Terrain, tile_size, tile::Tile};
 use glam::{DVec2, DVec3};
+use omsi_geometry::SplineCurve;
+use omsi_map::global::GlobalCfg;
+use omsi_map::{Terrain, tile::Tile, tile_size};
 use omsi_scenery::{SceneryObject, Spline};
 use omsi_sim::traffic::{Lane, Network};
-use omsi_geometry::SplineCurve;
+use omsi_sim::world_data::{MapFacts, WorldCell, WorldData};
+use omsi_world::map_index::MapIndex;
+use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// CPU data that stays alive for the lifetime of a dedicated map session.
 pub struct HostWorld {
@@ -41,7 +41,11 @@ struct HostTileCache {
 
 impl HostTileCache {
     fn new(limit: usize) -> Self {
-        Self { limit: limit.clamp(1, 512), order: VecDeque::new(), loaded: HashMap::new() }
+        Self {
+            limit: limit.clamp(1, 512),
+            order: VecDeque::new(),
+            loaded: HashMap::new(),
+        }
     }
 
     fn get(&mut self, key: (i32, i32)) -> Option<(Arc<Tile>, Arc<Terrain>)> {
@@ -93,7 +97,10 @@ impl HostWorld {
 
         // CPU indexing is parallel; the resulting data structures are immutable
         // and shared, with no textures/mesh buffers to upload or retain.
-        let tile_paths = files.iter().map(|(_, x, y, p)| ((*x, *y), p.clone())).collect();
+        let tile_paths = files
+            .iter()
+            .map(|(_, x, y, p)| ((*x, *y), p.clone()))
+            .collect();
         let index = Arc::new(MapIndex::build(&files, &chrono_dirs, root));
         let mut data = WorldData {
             map: Arc::new(MapFacts {
@@ -161,21 +168,24 @@ impl HostWorld {
         let tile = omsi_world::map_index::read_tile(path, &self.chrono_dirs)?;
         let source = tile.terrain_from.as_ref().unwrap_or(&tile.path);
         let ground_path = omsi_world::map_index::tile_companion(source, ".terrain");
-        let ground = Arc::new(
-            if tile.has_terrain {
-                match Terrain::load(&ground_path) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        log::warn!("dedicated CPU terrain {}: {e}; using flat fallback", ground_path.display());
-                        Terrain::flat()
-                    }
+        let ground = Arc::new(if tile.has_terrain {
+            match Terrain::load(&ground_path) {
+                Ok(t) => t,
+                Err(e) => {
+                    log::warn!(
+                        "dedicated CPU terrain {}: {e}; using flat fallback",
+                        ground_path.display()
+                    );
+                    Terrain::flat()
                 }
-            } else {
-                Terrain::flat()
-            },
-        );
+            }
+        } else {
+            Terrain::flat()
+        });
         let tile = Arc::new(tile);
-        let evicted = self.tiles.insert(key, Arc::clone(&tile), Arc::clone(&ground));
+        let evicted = self
+            .tiles
+            .insert(key, Arc::clone(&tile), Arc::clone(&ground));
         self.data.update(|data| {
             let all = Arc::make_mut(&mut data.ground);
             if let Some(evicted) = evicted {
@@ -206,11 +216,16 @@ impl HostWorld {
     /// Load a spline definition at most once per active cache window.
     fn spline(&mut self, root: &Path, name: &str) -> Option<Arc<Spline>> {
         let key = name.replace('\\', "/").to_ascii_lowercase();
-        if let Some(v) = self.spline_defs.get(&key) { return v.clone(); }
+        if let Some(v) = self.spline_defs.get(&key) {
+            return v.clone();
+        }
         let path = omsi_cfg::resolve_path(root, name);
         let val = match Spline::load(&path) {
             Ok(v) => Some(Arc::new(v)),
-            Err(e) => { log::debug!("CPU spline {}: {e}", path.display()); None },
+            Err(e) => {
+                log::debug!("CPU spline {}: {e}", path.display());
+                None
+            }
         };
         if self.spline_defs.len() >= 256 {
             self.spline_defs.clear();
@@ -222,11 +237,16 @@ impl HostWorld {
     /// Read only .sco path/script metadata; no 3D meshes or textures.
     fn scenery(&mut self, root: &Path, name: &str) -> Option<Arc<SceneryObject>> {
         let key = name.replace('\\', "/").to_ascii_lowercase();
-        if let Some(v) = self.object_defs.get(&key) { return v.clone(); }
+        if let Some(v) = self.object_defs.get(&key) {
+            return v.clone();
+        }
         let path = omsi_cfg::resolve_path(root, name);
         let val = match SceneryObject::load(&path) {
             Ok(v) => Some(Arc::new(v)),
-            Err(e) => { log::debug!("CPU scenery {}: {e}", path.display()); None },
+            Err(e) => {
+                log::debug!("CPU scenery {}: {e}", path.display());
+                None
+            }
         };
         if self.object_defs.len() >= 256 {
             self.object_defs.clear();
@@ -245,9 +265,15 @@ impl HostWorld {
         let origin = DVec2::new(key.0 as f64 * tile_size(), key.1 as f64 * tile_size());
         let mut lanes = Vec::new();
         for spline in &tile.splines {
-            if spline.deleted || spline.file.trim().is_empty() { continue; }
-            let Some(def) = self.spline(&root, &spline.file) else { continue };
-            if def.paths.is_empty() { continue; }
+            if spline.deleted || spline.file.trim().is_empty() {
+                continue;
+            }
+            let Some(def) = self.spline(&root, &spline.file) else {
+                continue;
+            };
+            if def.paths.is_empty() {
+                continue;
+            }
             let curve = SplineCurve::from_map(spline, origin);
             let mut made = crate::lanes::spline_lanes(&def, spline, &curve, key);
             for lane in &mut made {
@@ -256,16 +282,36 @@ impl HostWorld {
             lanes.extend(made);
         }
         for object in &tile.objects {
-            if object.file.trim().is_empty() { continue; }
-            let Some(def) = self.scenery(&root, &object.file) else { continue };
-            if def.paths.is_empty() { continue; }
+            if object.file.trim().is_empty() {
+                continue;
+            }
+            let Some(def) = self.scenery(&root, &object.file) else {
+                continue;
+            };
+            if def.paths.is_empty() {
+                continue;
+            }
             let lx = object.pos[0].clamp(0.0, tile_size()) as f32;
             let ly = object.pos[1].clamp(0.0, tile_size()) as f32;
-            let height = if def.absolute_height() { 0.0 } else { terrain.sample(lx, ly) as f64 };
+            let height = if def.absolute_height() {
+                0.0
+            } else {
+                terrain.sample(lx, ly) as f64
+            };
             let place = DVec3::new(
-                origin.x + object.pos[0], origin.y + object.pos[1], object.pos[2] + height
+                origin.x + object.pos[0],
+                origin.y + object.pos[1],
+                object.pos[2] + height,
             );
-            lanes.extend(crate::lanes::object_lanes(&def, place, [object.rot[0], 0.0, 0.0], None, key, object.id, &object.rules));
+            lanes.extend(crate::lanes::object_lanes(
+                &def,
+                place,
+                [object.rot[0], 0.0, 0.0],
+                None,
+                key,
+                object.id,
+                &object.rules,
+            ));
         }
         Some(lanes)
     }
@@ -313,8 +359,14 @@ mod tests {
         let mut cache = HostTileCache::new(2);
         let tile = Arc::new(Tile::default());
         let ground = Arc::new(Terrain::flat());
-        assert_eq!(cache.insert((0, 0), Arc::clone(&tile), Arc::clone(&ground)), None);
-        assert_eq!(cache.insert((1, 0), Arc::clone(&tile), Arc::clone(&ground)), None);
+        assert_eq!(
+            cache.insert((0, 0), Arc::clone(&tile), Arc::clone(&ground)),
+            None
+        );
+        assert_eq!(
+            cache.insert((1, 0), Arc::clone(&tile), Arc::clone(&ground)),
+            None
+        );
         assert!(cache.get((0, 0)).is_some());
         assert_eq!(cache.insert((2, 0), tile, ground), Some((1, 0)));
         assert!(cache.get((1, 0)).is_none());

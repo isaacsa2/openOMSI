@@ -15,11 +15,19 @@ pub struct HostTransport {
 
 impl HostTransport {
     /// Reserve UDP and TCP together. Passing port 0 chooses a free one.
-    pub fn bind(port: u16, name: &str, world: WorldInfo, max_players: usize) -> std::io::Result<Self> {
+    pub fn bind(
+        port: u16,
+        name: &str,
+        world: WorldInfo,
+        max_players: usize,
+    ) -> std::io::Result<Self> {
         let mut session = LanSession::host(port, name, world, port == 0)?;
         session.set_peer_limit(max_players);
         session.set_starting(true);
-        Ok(Self { session, host_pose: Pose::default() })
+        Ok(Self {
+            session,
+            host_pose: Pose::default(),
+        })
     }
 
     /// Call this only once the CPU world, collisions, traffic and passenger
@@ -67,22 +75,30 @@ mod tests {
     fn two_clients_exchange_buses_through_a_host_without_a_player() {
         let expected = world();
         let mut host = HostTransport::bind(0, "Dedicated", expected.clone(), 8).unwrap();
-        let addr = SocketAddr::from((
-            [127, 0, 0, 1],
-            host.session().local_addr().unwrap().port(),
-        ));
+        let addr = SocketAddr::from(([127, 0, 0, 1], host.session().local_addr().unwrap().port()));
         // This is the same admission barrier used while the CPU map is loading.
         host.ready();
         let mut a = LanSession::join_addr(vec![addr], None, "alpha", expected.clone()).unwrap();
         let mut b = LanSession::join_addr(vec![addr], None, "beta", expected.clone()).unwrap();
-        let pa = Pose { bus: "Vehicles/Alpha.bus".into(), name: "alpha".into(), x: 101.0, ..Default::default() };
-        let pb = Pose { bus: "Vehicles/Beta.bus".into(), name: "beta".into(), x: 202.0, ..Default::default() };
+        let pa = Pose {
+            bus: "Vehicles/Alpha.bus".into(),
+            name: "alpha".into(),
+            x: 101.0,
+            ..Default::default()
+        };
+        let pb = Pose {
+            bus: "Vehicles/Beta.bus".into(),
+            name: "beta".into(),
+            x: 202.0,
+            ..Default::default()
+        };
         let mut exchanged = false;
         for _ in 0..180 {
             host.tick(0.06);
             a.tick(0.06, &pa);
             b.tick(0.06, &pb);
-            if a.connected && b.connected
+            if a.connected
+                && b.connected
                 && host.session().peer_count() == 2
                 && a.peers().any(|p| p.has_info && p.pose.name == "beta")
                 && b.peers().any(|p| p.has_info && p.pose.name == "alpha")
@@ -92,8 +108,14 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(exchanged, "the headless host must relay two player vehicles");
-        assert_eq!(host.host_pose.bus, "", "a server must not allocate its own bus");
+        assert!(
+            exchanged,
+            "the headless host must relay two player vehicles"
+        );
+        assert_eq!(
+            host.host_pose.bus, "",
+            "a server must not allocate its own bus"
+        );
         let welcome = a.welcome.as_ref().expect("server welcome");
         assert_eq!(welcome.world.map, expected.map);
         assert_eq!(welcome.world.date, expected.date);

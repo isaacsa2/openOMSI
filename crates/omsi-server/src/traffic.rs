@@ -4,12 +4,12 @@
 //! admission rules identical. VehicleType::load_ai reads scripts and driving
 //! configuration; it never creates an omsi-render renderer.
 
+use hashbrown::HashMap;
+use omsi_sim::ai_traffic::TrafficSim;
+use omsi_sim::traffic::{LaneKind, Network};
+use omsi_sim::{VehicleType, ai_traffic::setup::RandomTypes};
 use std::path::Path;
 use std::sync::Arc;
-use omsi_sim::{VehicleType, ai_traffic::setup::RandomTypes};
-use omsi_sim::traffic::{LaneKind, Network};
-use omsi_sim::ai_traffic::TrafficSim;
-use hashbrown::HashMap;
 
 pub fn random_types(
     root: &Path,
@@ -64,7 +64,10 @@ pub fn random_types(
         // or a lorry) in a group of its own had one car in four of that kind (#1025).
         if unscheduled.is_none() && !all_groups {
             if let Some(g) = lists.groups.get(lists.default_group) {
-                log::info!("random traffic: no unsched_vehgroups.txt, only the default AI group {}", g.name);
+                log::info!(
+                    "random traffic: no unsched_vehgroups.txt, only the default AI group {}",
+                    g.name
+                );
             }
         }
         for (_, g) in lists.groups.iter().enumerate().filter(|(i, g)| {
@@ -116,8 +119,20 @@ pub fn random_types(
                 match VehicleType::load_ai(root, &path) {
                     // a vehicle that declares its modes stays off a map built for others (cars and
                     // lorries declare none: they are scenery on any street)
-                    Ok(t) if !t.def.transport.is_empty() && !omsi_cfg::transport::admit(global.transport, t.def.transport, true).is_allowed() => {
-                        log::debug!("AI vehicle {} is made for {}, not for this map", v.file, t.def.transport.describe());
+                    Ok(t)
+                        if !t.def.transport.is_empty()
+                            && !omsi_cfg::transport::admit(
+                                global.transport,
+                                t.def.transport,
+                                true,
+                            )
+                            .is_allowed() =>
+                    {
+                        log::debug!(
+                            "AI vehicle {} is made for {}, not for this map",
+                            v.file,
+                            t.def.transport.describe()
+                        );
                     }
                     Ok(t) => {
                         // rail (only as scheduled trains), 3 = aircraft on flight paths
@@ -125,10 +140,7 @@ pub fn random_types(
                         let air =
                             matches!(t.def.kind, omsi_vehicle::vehicle::VehicleKind::Other(3));
                         if rail {
-                            log::debug!(
-                                "AI vehicle {} is rail-bound, not street traffic",
-                                v.file
-                            );
+                            log::debug!("AI vehicle {} is rail-bound, not street traffic", v.file);
                         } else {
                             types.push((
                                 Arc::new(t),
@@ -143,7 +155,13 @@ pub fn random_types(
             }
         }
     }
-    RandomTypes { types, groups, group_curves, group_uvg, uvg_defaults }
+    RandomTypes {
+        types,
+        groups,
+        group_curves,
+        group_uvg,
+        uvg_defaults,
+    }
 }
 
 /// `OMSI_DEBUG_LANES`: the chosen lanes as the network has them.
@@ -180,11 +198,20 @@ mod tests {
     #[test]
     fn empty_cpu_simulation_needs_no_render_device_or_player() {
         let random = RandomTypes {
-            types: Vec::new(), groups: Vec::new(),
-            group_curves: false, group_uvg: Vec::new(),
+            types: Vec::new(),
+            groups: Vec::new(),
+            group_curves: false,
+            group_uvg: Vec::new(),
             uvg_defaults: Vec::new(),
         };
-        let mut sim = assemble(Path::new("."), Network::default(), random, Vec::new(), Vec::new(), 0);
+        let mut sim = assemble(
+            Path::new("."),
+            Network::default(),
+            random,
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
         assert_eq!(sim.cars.len(), 0);
         sim.advance(1.0 / 60.0, None);
         sim.advance(1.0 / 60.0, None);
