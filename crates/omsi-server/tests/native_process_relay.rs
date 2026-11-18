@@ -182,7 +182,10 @@ fn native_binary_relays_two_clients_without_a_host_vehicle() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(replaced, "native process did not reuse the released player slot");
+    assert!(
+        replaced,
+        "native process did not reuse the released player slot"
+    );
     assert!(!alpha.peers().any(|p| p.pose.name == "beta"));
     alpha.leave();
     charlie.leave();
