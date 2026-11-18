@@ -179,9 +179,12 @@ impl StreamWorker {
         self.requests.send(keys).is_ok()
     }
 
-    /// Some(None) indicates a rejected region. None means still processing.
-    pub fn poll(&self) -> Option<Option<StreamUpdate>> {
-        self.results.try_recv().ok()
+    /// Ok(None) means the worker rejected the requested region; Empty means
+    /// still processing; Disconnected is fatal to future map streaming.
+    pub fn poll(
+        &self,
+    ) -> Result<Option<StreamUpdate>, std::sync::mpsc::TryRecvError> {
+        self.results.try_recv()
     }
 
     pub fn stop(self) {
@@ -253,7 +256,7 @@ mod tests {
         let mut streamed = false;
         while Instant::now() < until {
             match worker.poll() {
-                Some(Some(update)) => {
+                Ok(Some(update)) => {
                     assert_eq!(update.keys, vec![(20, 0)]);
                     assert!(
                         !update.signals.network.lanes.is_empty(),
@@ -263,8 +266,11 @@ mod tests {
                     streamed = true;
                     break;
                 }
-                Some(None) => panic!("stream worker rejected a valid road tile"),
-                None => std::thread::sleep(Duration::from_millis(20)),
+                Ok(None) => panic!("stream worker rejected a valid road tile"),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("stream worker disconnected: {error}"),
             }
         }
         worker.stop();
