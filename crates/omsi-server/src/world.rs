@@ -423,10 +423,9 @@ mod tests {
             ..Default::default()
         };
         let mut index = MapIndex::default();
-        index.objects.insert(
-            77,
-            ((0, 0), DVec3::new(1.0, 2.0, 3.0), [0.0, 0.0, 0.0]),
-        );
+        index
+            .objects
+            .insert(77, ((0, 0), DVec3::new(1.0, 2.0, 3.0), [0.0, 0.0, 0.0]));
         let expected = (DVec3::new(11.0, 22.0, 33.0), [90.0, 0.0, 0.0]);
         index.duplicates.insert(((10, 5), 77), expected);
         assert_eq!(resolve_entry_point(&global, &index, &entry), Some(expected));
