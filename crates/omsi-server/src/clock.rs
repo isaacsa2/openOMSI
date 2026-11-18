@@ -35,6 +35,16 @@ mod tests {
     use super::follow_server_clock;
 
     #[test]
+    fn timetable_jump_threshold_is_symmetric_and_inclusive() {
+        // A 119.999-second correction must not reset departures, but a
+        // 120-second jump in either direction must rebase the timetable.
+        assert_eq!(follow_server_clock(1_000.0, 1_119.999), (1_119.999, None));
+        assert_eq!(follow_server_clock(1_000.0, 880.001), (880.001, None));
+        assert_eq!(follow_server_clock(1_000.0, 1_120.0), (1_120.0, Some(120.0)));
+        assert_eq!(follow_server_clock(1_000.0, 880.0), (880.0, Some(-120.0)));
+    }
+
+    #[test]
     fn the_traffic_follows_the_servers_clock_and_a_jump_restarts_the_timetable() {
         assert_eq!(follow_server_clock(54_000.0, 54_000.5), (54_000.5, None));
         assert_eq!(follow_server_clock(54_000.0, 54_119.0), (54_119.0, None));
