@@ -40,7 +40,10 @@ mod tests {
         // 120-second jump in either direction must rebase the timetable.
         assert_eq!(follow_server_clock(1_000.0, 1_119.999), (1_119.999, None));
         assert_eq!(follow_server_clock(1_000.0, 880.001), (880.001, None));
-        assert_eq!(follow_server_clock(1_000.0, 1_120.0), (1_120.0, Some(120.0)));
+        assert_eq!(
+            follow_server_clock(1_000.0, 1_120.0),
+            (1_120.0, Some(120.0))
+        );
         assert_eq!(follow_server_clock(1_000.0, 880.0), (880.0, Some(-120.0)));
     }
 
