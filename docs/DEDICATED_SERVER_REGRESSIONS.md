@@ -20,6 +20,21 @@ ordinary openOMSI client sessions. It asserts the clients' vehicles propagate,
 they receive the same map/date/weather and the server itself owns no bus. It
 does **not** replace two separate game clients driving a licensed map.
 
+## Licensed-map CPU smoke and load measurements
+
+```sh
+cargo run --locked -p omsi-server --bin simcheck -- /path/to/OMSI2 Maps/Grundorf/global.cfg 19890501 600 16
+```
+
+This bounded, standalone command reads a real map's initial tiles, loads
+`ailists.cfg` AI vehicle types and road path metadata, then advances the
+production traffic and passenger simulation for 600 fixed ticks. It reports
+cold-load duration, sampled tick latency and **unpaced offline throughput**.
+No GPU, audio or multiplayer socket is used. The selected first tiles may not
+represent a populated route and traffic target is deliberately zero while
+road collision and schedules are still being migrated. This is **not** a
+claim of 60 live TPS, passenger correctness or playable multiplayer.
+
 ## Manual end-to-end acceptance gates — blocking
 
 1. **No GPU/no display:** on a clean Linux VPS without X11, Wayland, Vulkan,

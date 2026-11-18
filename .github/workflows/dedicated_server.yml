@@ -41,5 +41,5 @@ jobs:
       - name: Headless transport, clock, CPU tiles, lanes and profiler regressions
         run: cargo test --locked -p omsi-server --all-targets -- --test-threads=2
 
-      - name: Build GPU-free map diagnostic
-        run: cargo build --locked -p omsi-server --bin worldcheck
+      - name: Build GPU-free map and offline simulation diagnostics
+        run: cargo build --locked -p omsi-server --bin worldcheck --bin simcheck
