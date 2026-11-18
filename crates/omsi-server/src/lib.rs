@@ -16,6 +16,7 @@ pub mod interest;
 pub mod lanes;
 pub mod metar;
 pub mod runtime;
+pub mod lan_world;
 mod scenery_ground;
 pub mod signals;
 pub mod simulation;

@@ -159,6 +159,8 @@ pub fn free_roam(
     ai.lights = signals.controllers;
     ai.controller_of_object = signals.controller_of_object;
     let mut sim = CpuSimulation::new(root, Arc::clone(&map.data), ai, 0);
+    sim.traffic.day_time = initial_time;
+    sim.traffic.time_scale = cfg.time_speed;
 
     let world = WorldInfo {
         map: cfg.map.replace('\\', "/"),
@@ -212,6 +214,7 @@ pub fn free_roam(
         notice_ok: &|notice| notice.len() <= 2048,
     };
     let mut pacer = TickPacer::new(Instant::now());
+    let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
     let mut clock = initial_time;
     let mut n = 0_u64;
     let mut report = Instant::now();
@@ -259,8 +262,12 @@ pub fn free_roam(
         net.session_mut().set_clock(&date, authoritative);
         net.tick(FIXED_DT);
         sim.sync_host_clients(net.session_mut());
+        // Match LAN clock shifts; TrafficSim advances day_time inside step.
+        sim.traffic.day_time = authoritative
+            - f64::from(FIXED_DT) * sim.traffic.time_scale;
         sim.step(FIXED_DT);
-        // No custom snapshots are published in this experimental mode.
+        world_sync.tick(net.session_mut(), &sim.traffic, FIXED_DT);
+        // AI vehicle and passenger snapshots remain unsupported in free-roam.
         sim.discard_presentation_events_after_publish();
         profiler.tick(started.elapsed());
         meter.completed(Instant::now());
