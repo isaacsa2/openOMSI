@@ -313,7 +313,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_HARDWARE_ID` | bool | off | once | lan | LAN: the game sends no hardware identifier (a host can then turn the player away, and cannot ban the machine). |
 | `OMSI_NO_INTERP` | bool | off | once | lan | The old way without interpolation, for comparing. |
 | `OMSI_NO_LAMP_SIGHT` | bool | off | use | render | Enhanced by night: every lamp near the line of sight dazzles, hidden or not. |
-| `OMSI_NO_LAN_MODS` | bool | off | use | app, lan, net | LAN: do not exchange mods. |
+| `OMSI_NO_LAN_MODS` | bool | off | use | lan, net, server | LAN: do not exchange mods. |
 | `OMSI_NO_LAN_UPLOADS` | bool | off | use | lan | LAN: a game hosting a session takes no buses from the players who join. |
 | `OMSI_NO_LIGHT_MAP` | bool | off | use | scene | No night light maps on the tiles (A/B). |
 | `OMSI_NO_MATERIAL_SPLINE_BATCHING` | bool | off | use | scene | No batching of splines by material. |
@@ -363,7 +363,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_TERRAIN_ALIGN` | bool | off | use | scene | Align the terrain to the splines again at load (A/B; Omsi.exe does not). |
 | `OMSI_TEXTURE_RAIN` | bool | off | use | scene | OMSI 2's own texture rain on the glass instead of the drops. |
 | `OMSI_TRACKIR_NATIVE` | text | on | use | input | 0 turns the native TrackIR interface off. |
-| `OMSI_TRAFFIC_ALL_GROUPS` | bool | off | use | app | Let restricted AI groups (aircraft, depot fleets) drive everywhere. |
+| `OMSI_TRAFFIC_ALL_GROUPS` | bool | off | use | server | Let restricted AI groups (aircraft, depot fleets) drive everywhere. |
 | `OMSI_TYRE_SUSPENSION` | bool | off | once | sim | The old suspension with wheel mass, tyre and bump stops (A/B). |
 
 ## Tuning

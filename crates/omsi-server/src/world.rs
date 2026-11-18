@@ -185,7 +185,8 @@ impl HostWorld {
             Terrain::flat()
         });
         let tile = Arc::new(tile);
-        self.tiles.insert(key, Arc::clone(&tile), Arc::clone(&ground));
+        self.tiles
+            .insert(key, Arc::clone(&tile), Arc::clone(&ground));
         // Evicting a decoded .map cache entry MUST NOT unload live physics
         // terrain from beneath scheduled traffic or a player. Ground snapshots
         // are retained until a separate, entity-aware unloading policy exists.
@@ -290,7 +291,8 @@ impl HostWorld {
             // original terrain raster remains in the tile's native coordinates.
             let (scale_x, scale_y) = omsi_map::world_tile_scale(key.1);
             let lx = (object.pos[0] / scale_x).clamp(0.0, omsi_map::TILE_SIZE) as f32;
-            let ly = (object.pos[1] / scale_y).clamp(0.0, omsi_map::WORLD_TILE_SIZE.max(tile_size())) as f32;
+            let ly = (object.pos[1] / scale_y)
+                .clamp(0.0, omsi_map::WORLD_TILE_SIZE.max(tile_size())) as f32;
             let height = if def.absolute_height() {
                 0.0
             } else {
