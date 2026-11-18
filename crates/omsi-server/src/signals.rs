@@ -54,7 +54,11 @@ fn controller(def: &SceneryObject) -> TrafficLightController {
 type MapSignal = ((i32, i32), i64);
 type LaneBindings = HashMap<MapSignal, (usize, Vec<i32>)>;
 
-fn bind_lanes(lanes: &mut [Lane], bindings: &LaneBindings, lights: &[TrafficLightController]) -> usize {
+fn bind_lanes(
+    lanes: &mut [Lane],
+    bindings: &LaneBindings,
+    lights: &[TrafficLightController],
+) -> usize {
     let mut count = 0;
     for lane in lanes {
         // Source 2 means a placed scenery object's [path], not a spline or
@@ -93,7 +97,9 @@ impl HostWorld {
         let root = self.data.snapshot().map.root.clone();
 
         for key in keys.iter().copied().collect::<BTreeSet<_>>() {
-            let Some(tile) = self.load_tile(key) else { continue };
+            let Some(tile) = self.load_tile(key) else {
+                continue;
+            };
             for obj in &tile.objects {
                 if obj.parent_id.is_some() {
                     output.attached_objects += 1;
@@ -145,12 +151,20 @@ mod tests {
             LaneKind::Street,
             3.0,
         );
-        a.key = Some(LaneKey { tile: (0, 0), id: 77, path: 0 });
+        a.key = Some(LaneKey {
+            tile: (0, 0),
+            id: 77,
+            path: 0,
+        });
         a.source = 2;
         let mut other = a.clone();
         other.source = 1;
         let mut another_tile = a.clone();
-        another_tile.key = Some(LaneKey { tile: (1, 0), id: 77, path: 0 });
+        another_tile.key = Some(LaneKey {
+            tile: (1, 0),
+            id: 77,
+            path: 0,
+        });
         let mut bindings = LaneBindings::new();
         bindings.insert(((0, 0), 77), (0, vec![0]));
         let lights = vec![TrafficLightController::new(vec![vec![(0, 5.0)]], 5.0)];
@@ -163,17 +177,24 @@ mod tests {
 
     #[test]
     fn invalid_signal_index_cannot_be_attached_to_a_lane() {
-        let mut a = LaneBuilder::polyline(
-            vec![DVec3::ZERO, DVec3::Y],
-            LaneKind::Street,
-            3.0,
-        );
+        let mut a = LaneBuilder::polyline(vec![DVec3::ZERO, DVec3::Y], LaneKind::Street, 3.0);
         a.source = 2;
-        a.key = Some(LaneKey { tile: (0, 0), id: 1, path: 0 });
+        a.key = Some(LaneKey {
+            tile: (0, 0),
+            id: 1,
+            path: 0,
+        });
         let mut bindings = LaneBindings::new();
         bindings.insert(((0, 0), 1), (0, vec![100]));
         let mut lanes = vec![a];
-        assert_eq!(bind_lanes(&mut lanes, &bindings, &[TrafficLightController::new(vec![vec![(0, 5.0)]], 5.0)]), 0);
+        assert_eq!(
+            bind_lanes(
+                &mut lanes,
+                &bindings,
+                &[TrafficLightController::new(vec![vec![(0, 5.0)]], 5.0)]
+            ),
+            0
+        );
         assert!(lanes[0].traffic_light.is_none());
     }
 }
