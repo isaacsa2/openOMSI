@@ -158,7 +158,10 @@ pub fn free_roam(
         "Experimental headless FREE-ROAM relay: no authoritative bus/traffic/passenger simulation parity"
     );
     net.ready();
-    let port = net.session().local_addr().map_or(cfg.port, |addr| addr.port());
+    let port = net
+        .session()
+        .local_addr()
+        .map_or(cfg.port, |addr| addr.port());
     log::info!("native headless test host ready; UDP port {port}");
     if let Some(code) = net.session().code() {
         log::info!("join code for approved testers: {}", code.encode());
