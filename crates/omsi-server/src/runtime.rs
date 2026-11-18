@@ -69,7 +69,10 @@ fn initial_tiles(
         return tiles.into_iter().take(limit).collect();
     }
     let anchors = selected.clone();
-    let mut remaining: Vec<_> = tiles.into_iter().filter(|k| !selected.contains(k)).collect();
+    let mut remaining: Vec<_> = tiles
+        .into_iter()
+        .filter(|k| !selected.contains(k))
+        .collect();
     remaining.sort_by_key(|&(x, y)| {
         anchors
             .iter()
