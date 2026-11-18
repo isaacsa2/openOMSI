@@ -7,6 +7,7 @@ if output=$(rustfmt --check --files-with-diff -- "$file"); then
 else
     if grep -Fxq -- "$file" <<< "$output"; then
         echo "$file is not formatted properly."
+        printf '%s\n' "$output"
         exit 1
     else
         echo "$file is properly formatted, although its children are not. Skipping."
