@@ -217,6 +217,63 @@ mod tests {
     }
 
     #[test]
+    fn worker_builds_a_distant_drivable_cpu_region_without_a_renderer() {
+        use std::fs;
+        use std::time::{Duration, Instant};
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "omsi-stream-{}-{stamp}",
+            std::process::id()
+        ));
+        let map_dir = root.join("Maps/Fixture");
+        fs::create_dir_all(&map_dir).unwrap();
+        fs::create_dir_all(root.join("Splines")).unwrap();
+        fs::write(
+            map_dir.join("global.cfg"),
+            "[name]\\nStreaming Fixture\\n[map]\\n0\\n0\\ntile_0_0.map\\n[map]\\n20\\n0\\ntile_20_0.map\\n",
+        )
+        .unwrap();
+        let tile = "[version]\\n10\\n[spline]\\n0\\nSplines/smoke.sli\\n101\\n-1\\n10\\n0\\n10\\n0\\n40\\n0\\n0\\n0\\n0\\n0\\n0\\n";
+        fs::write(map_dir.join("tile_0_0.map"), tile).unwrap();
+        fs::write(map_dir.join("tile_20_0.map"), tile).unwrap();
+        fs::write(
+            root.join("Splines/smoke.sli"),
+            "[length]\\n40\\n[texture]\\nroad.bmp\\n[profile]\\n0\\n[profilepnt]\\n-1.5\\n0\\n0\\n1\\n[profilepnt]\\n1.5\\n0\\n1\\n1\\n[path]\\n0\\n0\\n0\\n3\\n0\\n",
+        )
+        .unwrap();
+        omsi_cfg::add_content_root(root.clone());
+        let world =
+            crate::world::HostWorld::open(&root, &map_dir.join("global.cfg"), 19890530).unwrap();
+        let worker = StreamWorker::start(world).unwrap();
+        assert!(worker.request(vec![(20, 0)]));
+        let until = Instant::now() + Duration::from_secs(30);
+        let mut streamed = false;
+        while Instant::now() < until {
+            match worker.poll() {
+                Some(Some(update)) => {
+                    assert_eq!(update.keys, vec![(20, 0)]);
+                    assert!(
+                        !update.signals.network.lanes.is_empty(),
+                        "remote tile must have CPU road lanes"
+                    );
+                    assert_eq!(update.surfaces.target_tiles, 1);
+                    streamed = true;
+                    break;
+                }
+                Some(None) => panic!("stream worker rejected a valid road tile"),
+                None => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        worker.stop();
+        omsi_cfg::remove_content_root(&root);
+        fs::remove_dir_all(&root).unwrap();
+        assert!(streamed, "worker did not return the distant CPU map snapshot");
+    }
+
+    #[test]
     fn remote_driver_gets_their_tile_and_neighbors_not_just_spawn_area() {
         let global = fixture();
         let edge = omsi_map::tile_size();
