@@ -385,6 +385,30 @@ impl HostWorld {
         network
     }
 
+    /// The restricted relay has no autonomous AI vehicles or pedestrians.
+    /// Retain terrain in the active region and its immediate neighborhood,
+    /// but release previous road rasters after the clients move away.
+    /// Do not use this with populated authoritative simulation worlds.
+    pub fn prune_streamed_ground(&mut self, active: &[(i32, i32)]) {
+        use std::collections::BTreeSet;
+        let visible: BTreeSet<_> = active.iter().copied().collect();
+        let mut terrain = visible.clone();
+        for &(x, y) in &visible {
+            for dx in -1_i32..=1 {
+                for dy in -1_i32..=1 {
+                    if let (Some(x), Some(y)) = (x.checked_add(dx), y.checked_add(dy)) {
+                        terrain.insert((x, y));
+                    }
+                }
+            }
+        }
+        self.data.update(|data| {
+            let ground = Arc::make_mut(&mut data.ground);
+            ground.surfaces.retain(|key, _| visible.contains(key));
+            ground.terrains.retain(|key, _| terrain.contains(key));
+        });
+    }
+
     pub fn loaded_tiles(&self) -> usize {
         self.tiles.loaded.len()
     }
