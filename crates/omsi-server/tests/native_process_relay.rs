@@ -151,7 +151,10 @@ fn native_binary_relays_two_clients_without_a_host_vehicle() {
         &mut |_, _, _| {},
     )
     .expect("native host must answer an authenticated empty mod manifest");
-    assert_eq!(report.fetched, 0, "test server must not share private files");
+    assert_eq!(
+        report.fetched, 0,
+        "test server must not share private files"
+    );
     assert_eq!(report.bytes, 0);
     assert_eq!(installed_map, world.map);
     // The dedicated process never publishes a player-controlled bus of its
