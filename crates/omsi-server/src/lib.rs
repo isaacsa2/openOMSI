@@ -15,5 +15,6 @@ pub mod metar;
 pub mod startup;
 pub mod traffic;
 pub mod transport;
+pub mod simulation;
 pub mod weather;
 pub mod world;
