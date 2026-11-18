@@ -21,6 +21,7 @@ mod scenery_ground;
 pub mod signals;
 pub mod simulation;
 pub mod startup;
+pub mod streaming;
 pub mod stops;
 pub mod surfaces;
 pub mod tick;
