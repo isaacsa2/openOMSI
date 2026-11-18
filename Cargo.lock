@@ -4519,6 +4519,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "glam",
+ "hashbrown",
  "log",
  "omsi-admin",
  "omsi-cfg",
@@ -4529,6 +4530,7 @@ dependencies = [
  "omsi-net",
  "omsi-scenery",
  "omsi-sim",
+ "omsi-vehicle",
  "omsi-world",
  "ureq",
 ]
