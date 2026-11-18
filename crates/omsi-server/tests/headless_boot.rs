@@ -35,11 +35,16 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
     // x/height/y, heading, length, radius, grades, cant, texture offset.
     write(
         &map.join("tile_0_0.map"),
-        "[version]\n10\n[spline]\n0\nSplines/smoke.sli\n101\n-1\n10\n0\n10\n0\n40\n0\n0\n0\n0\n0\n0\n",
+        "[version]\n10\n[spline]\n0\nSplines/smoke.sli\n101\n-1\n10\n0\n10\n0\n40\n0\n0\n0\n0\n0\n0\n\n[object]\n0\nSceneryobjects\\Generic\\entrypoint_bus.sco\n7\n6.5\n225.5\n0.2\n90\n1\nCI Spawn\n",
     );
     write(
         &root.join("Splines/smoke.sli"),
         "[length]\n40\n[texture]\nroad.bmp\n[profile]\n0\n[profilepnt]\n-1.5\n0\n0\n1\n[profilepnt]\n1.5\n0\n1\n1\n[path]\n0\n0\n0\n3\n0\n",
+    );
+    // No [entrypoints] section: the old server discovers this .sco marker.
+    write(
+        &root.join("Sceneryobjects/Generic/entrypoint_bus.sco"),
+        "[entrypoint]\\n[onlyeditor]\\n",
     );
     let cfg = root.join("server-test.cfg");
     let port = free_port();
@@ -69,6 +74,12 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         "native host failed with code {:?}\nstdout:\n{}\nstderr:\n{}",
         result.status.code(),
         String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("entry points: 1 from the tiles' entry objects"),
+        "headless executable failed to discover the legacy entrypoint: {}",
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(
