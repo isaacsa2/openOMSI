@@ -92,6 +92,14 @@ OMSI map or texture files and checks clean shutdown. This catches missing
 binary packaging and bootstrap dependencies missed by library tests, but
 **does not replace** a licensed real-world map and two game clients.
 
+An additional cross-process regression launches that same native executable
+without a display and connects two independent production-protocol LAN
+sessions through its actual UDP port. It verifies both clients receive each
+other's vehicle pose, the dedicated host adds no local bus, and a departed
+client frees its slot for a replacement. This is synthetic wire-level
+coverage, **not** a substitute for two graphical game clients or complete
+server-side vehicle authority.
+
 ## Experimental independent host process
 
 The Release CI creates **separate** headless-test ZIPs for Windows x64 and
