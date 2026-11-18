@@ -90,7 +90,10 @@ pub(crate) fn resolve_entry_point(
             return Some(*place);
         }
     }
-    let found = index.objects.get(&ep.object_id).map(|(_, pos, rot)| (*pos, *rot));
+    let found = index
+        .objects
+        .get(&ep.object_id)
+        .map(|(_, pos, rot)| (*pos, *rot));
     let recorded = tile
         .filter(|_| ep.pos.iter().chain(ep.quat.iter()).all(|v| v.is_finite()))
         .map(|(tx, ty)| {
@@ -135,7 +138,10 @@ impl HostWorld {
             let added = global.add_object_entry_points();
             log::info!("entry points: {added} from the tiles' entry objects");
         } else {
-            log::info!("entry points: {} listed in global.cfg", global.entry_points.len());
+            log::info!(
+                "entry points: {} listed in global.cfg",
+                global.entry_points.len()
+            );
         }
         let map_dir = global.dir().to_path_buf();
         let chrono_dirs = omsi_map::active_chrono_dirs(&map_dir, date);
