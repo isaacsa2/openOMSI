@@ -97,7 +97,9 @@ pub fn update_host_interest(
             .lan_eyes
             .push(Viewer::lan_player(position, f64::from(peer.pose.heading)));
         traffic.others.push((peer.pose.id, body));
-        traffic.other_blinkers.insert(peer.pose.id, peer.pose.blinker);
+        traffic
+            .other_blinkers
+            .insert(peer.pose.id, peer.pose.blinker);
         people.lan_centers.push(position);
     }
 
@@ -180,7 +182,12 @@ mod tests {
             host.tick(0.06, &Pose::default());
             a.tick(0.06, &pa);
             b.tick(0.06, &pb);
-            if host.peers().filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle()).count() == 2 {
+            if host
+                .peers()
+                .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
+                .count()
+                == 2
+            {
                 break;
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -206,8 +213,18 @@ mod tests {
         assert_eq!(traffic.lan_eyes.len(), 2);
         assert_eq!(traffic.others.len(), 2);
         assert_eq!(people.lan_centers.len(), 2);
-        assert!(traffic.lan_centers.iter().any(|p| (p.x - 100.0).abs() < 0.01));
-        assert!(traffic.lan_centers.iter().any(|p| (p.x + 50.0).abs() < 0.01));
+        assert!(
+            traffic
+                .lan_centers
+                .iter()
+                .any(|p| (p.x - 100.0).abs() < 0.01)
+        );
+        assert!(
+            traffic
+                .lan_centers
+                .iter()
+                .any(|p| (p.x + 50.0).abs() < 0.01)
+        );
         host.kick(a.my_id, "disconnected", false);
         let status = update_host_interest(&mut host, &mut traffic, &mut people);
         assert_eq!(status.visible_players, 1);

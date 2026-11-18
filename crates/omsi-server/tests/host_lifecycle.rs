@@ -111,7 +111,10 @@ fn joining_player_receives_the_latest_authoritative_clock_and_weather() {
         }
         std::thread::sleep(Duration::from_millis(3));
     }
-    let welcome = client.welcome.as_ref().expect("authoritative world welcome");
+    let welcome = client
+        .welcome
+        .as_ref()
+        .expect("authoritative world welcome");
     assert_eq!(welcome.world.map, "Maps/Grundorf/global.cfg");
     assert_eq!(welcome.world.date, "1990-01-05");
     assert_eq!(welcome.world.weather, "Weather/Herbst.owt");
