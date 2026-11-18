@@ -75,9 +75,8 @@ pub(super) fn global() -> &'static TextureRamCache {
 
 impl Default for TextureRamCache {
     fn default() -> Self {
-        let mb = std::env::var("OMSI_TEXTURE_RAM_CACHE_MB")
-            .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok())
+        let mb = omsi_cfg::flags::OMSI_TEXTURE_RAM_CACHE_MB
+            .parse::<u64>()
             .unwrap_or(DEFAULT_MB)
             .min(MAX_MB);
         Self::with_capacity(mb << 20)
