@@ -72,6 +72,60 @@ pub struct StreamUpdate {
     pub collisions: crate::collision::CollisionCounts,
 }
 
+/// Swap the completed lane/signal snapshot on the simulation thread without
+/// restarting the LAN session or resetting the other connected drivers.
+pub fn apply_free_roam_update(
+    sim: &mut crate::simulation::CpuSimulation,
+    root: &std::path::Path,
+    density: &[(f32, f32)],
+    update: StreamUpdate,
+) -> Vec<(i32, i32)> {
+    let old_clocks: Vec<_> = sim
+        .traffic
+        .controller_of_object
+        .iter()
+        .filter_map(|(object, slot)| {
+            sim.traffic
+                .lights
+                .get(*slot)
+                .map(|ctl| (*object, ctl.time, ctl.held))
+        })
+        .collect();
+    let random = omsi_sim::ai_traffic::setup::RandomTypes {
+        types: Vec::new(),
+        groups: Vec::new(),
+        group_curves: false,
+        group_uvg: Vec::new(),
+        uvg_defaults: Vec::new(),
+    };
+    let mut next_traffic = crate::traffic::assemble(
+        root,
+        update.signals.network,
+        random,
+        density.to_vec(),
+        update.keys.clone(),
+        0,
+    );
+    next_traffic.lights = update.signals.controllers;
+    next_traffic.controller_of_object = update.signals.controller_of_object;
+    next_traffic.day_time = sim.traffic.day_time;
+    next_traffic.time_scale = sim.traffic.time_scale;
+    for (object, time, held) in old_clocks {
+        next_traffic.set_light_state(object, time, held);
+    }
+    sim.traffic = next_traffic;
+    log::info!(
+        "native tile stream: {} active tiles, {} road lanes, {} wheel meshes, {} boxes and {} collision meshes, {} pending surfaces",
+        update.keys.len(),
+        sim.traffic.net.lanes.len(),
+        update.surfaces.wheel_meshes,
+        update.collisions.static_boxes,
+        update.collisions.static_meshes,
+        update.surfaces.pending_scenery_surfaces
+    );
+    update.keys
+}
+
 pub struct StreamWorker {
     requests: std::sync::mpsc::Sender<Vec<(i32, i32)>>,
     results: std::sync::mpsc::Receiver<Option<StreamUpdate>>,
