@@ -87,7 +87,9 @@ fn main() -> Result<()> {
         .collect();
     ensure!(!tile_keys.is_empty(), "map contains no tiles");
     let stop_counts = world.install_stop_lists(&tile_keys);
-    let network = world.network_for_tiles(&tile_keys);
+    let signal_network = world.network_with_traffic_lights(&tile_keys);
+    let signal_count = signal_network.controllers.len();
+    let network = signal_network.network;
     ensure!(
         !network.lanes.is_empty(),
         "selected tiles have no drivable or foot paths"
@@ -99,7 +101,7 @@ fn main() -> Result<()> {
     let ai_types = random.types.len();
     // Target zero: this tool validates parsers and the CPU simulation, not
     // actual traffic population, which needs full collisions and timetable.
-    let traffic = traffic::assemble(
+    let mut traffic = traffic::assemble(
         &opts.root,
         network,
         random,
@@ -107,6 +109,8 @@ fn main() -> Result<()> {
         tile_keys,
         0,
     );
+    traffic.lights = signal_network.controllers;
+    traffic.controller_of_object = signal_network.controller_of_object;
     let mut simulation = CpuSimulation::new(&opts.root, Arc::clone(&world.data), traffic, 0);
     if colliders.incomplete() {
         eprintln!(
@@ -132,10 +136,11 @@ fn main() -> Result<()> {
     profiler.stop();
     let report = profiler.report();
     println!(
-        "CPU simcheck (NOT a multiplayer server): map={}, tiles={}, lanes={}, bus_stops={}, waiting_places={}, AI types={}, load_s={:.3}, ticks={}, sim_s={:.2}, unpaced_tps={:.1}, avg_tick_ms={:.3}, p95_tick_ms={:.3}, p99_tick_ms={:.3}, simulated_people={}",
+        "CPU simcheck (NOT a multiplayer server): map={}, tiles={}, lanes={}, signal_programs={}, bus_stops={}, waiting_places={}, AI types={}, load_s={:.3}, ticks={}, sim_s={:.2}, unpaced_tps={:.1}, avg_tick_ms={:.3}, p95_tick_ms={:.3}, p99_tick_ms={:.3}, simulated_people={}",
         world.global.name,
         world.loaded_tiles(),
         lanes,
+        signal_count,
         stop_counts.bus_stops,
         stop_counts.waiting_places,
         ai_types,

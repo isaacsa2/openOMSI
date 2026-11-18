@@ -15,6 +15,7 @@ pub mod interest;
 pub mod lanes;
 pub mod metar;
 pub mod simulation;
+pub mod signals;
 pub mod startup;
 pub mod stops;
 pub mod tick;
