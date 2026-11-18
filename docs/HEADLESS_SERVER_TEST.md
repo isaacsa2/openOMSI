@@ -58,6 +58,59 @@ For a local web admin/TPS panel, set a unique `admin_password` of at least
 admin URL `http://127.0.0.1:27025/admin/` on the server itself. With a blank
 password, web admin is intentionally disabled.
 
+## Real-client multiplayer test procedure (2–3 drivers)
+
+Use the **same PR #405 client build** on every testing PC, preferably the exact
+commit that produced the server package. A stable release may use a different
+network protocol or have a different set of player synchronization fields.
+The native `headless-test` archive contains **only the server**, not the
+graphical clients. Never copy a paid bus or map from one PC to another as a
+substitute for a local, licensed installation.
+
+1. Start the server **before** the game clients. Keep its console open. Check
+   for `native headless test host ready` and the printed UDP port. If it
+   exits during startup, copy the complete console error and stop the test.
+2. Start client **A** and join the host by its direct address, or by the
+   printed session code if that address is reachable. On a private LAN,
+   prefer `<host-local-IP>:27015`. Load the same map installed on the server,
+   choose a bus **already present on A**, and move to a known spawn.
+3. Start client **B** on a different PC or a separate game process using the
+   matching build. Join, load its locally installed bus and park beside A.
+   Both clients must independently see **both buses, not a third phantom host
+   bus**. Move A, then B; verify each remote bus moves on the other screen.
+4. On A change the livery, destination/line and door positions. On B check
+   those visible states; repeat B to A. Capture screenshots of the same scene
+   if either client disagrees. The server currently **relays** these player
+   states; this is not evidence of authoritative server-side vehicle scripts.
+5. Close B's session without stopping the server. Verify B disappears for A.
+   Rejoin as B or a new client **C** and check that the new join receives the
+   surviving bus state. With three simultaneous clients, check each sees
+   exactly two remote players. Keep the server's `max_players` above the
+   number of test clients, but at or below the documented limit.
+6. Run `status`, `list`, `tps` and `timings report` in the host console.
+   Record any unexpected disconnects or server errors. Stop the server with
+   `stop`, not by terminating its process.
+
+| Scenario | Expected | Result to record |
+|---|---|---|
+| Join A then B | Both connect to the same world, date and time | Pass / Fail |
+| Two moving buses | Each client sees the other's motion, no host bus | Pass / Fail |
+| Paint, doors, line, destination | Remote display matches what the sender shows | Pass / Fail, capture mismatch |
+| B leaves and C joins | Departed vehicle is removed; slot can be reused | Pass / Fail |
+| Three simultaneous clients | Each client sees two remote vehicles | Pass / Fail |
+| Security | No map, vehicle, skin or texture transferred by the host | Pass / Fail |
+
+When reporting a failure, include OS, PR commit, map and bus identifiers,
+whether connection used an IP or code, the **first error message** and the
+matching excerpt of the server and client logs. Redact join codes, passwords,
+private addresses and identifying player information before posting publicly.
+
+**Current limits:** AI vehicles, pedestrians, scheduled traffic, server-side
+bus/physics authority, distant-tile streaming and complete map/crossing
+collisions are incomplete or disabled. They are not acceptance expectations
+for this restricted relay test, and passing the table does not make the
+native executable safe for production.
+
 ## Acceptance checklist
 
 - The process loads the licensed map without graphics or sound initialization.
