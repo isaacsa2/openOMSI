@@ -30,8 +30,16 @@ pub fn checked_date(text: &str) -> Result<(i32, String)> {
     let year: u32 = digits[..4].parse()?;
     let month: u32 = digits[4..6].parse()?;
     let day: u32 = digits[6..].parse()?;
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    };
     ensure!(
-        (1900..=2099).contains(&year) && (1..=12).contains(&month) && (1..=31).contains(&day),
+        (1900..=2099).contains(&year) && day > 0 && day <= max_day,
         "invalid date"
     );
     Ok((digits.parse()?, format!("{year:04}-{month:02}-{day:02}")))
@@ -256,5 +264,37 @@ mod tests {
             (19890530, "1989-05-30".into())
         );
         assert!(checked_date("2050-99-01").is_err());
+        assert!(checked_date("2026-02-29").is_err());
+        assert!(checked_date("2024-02-29").is_ok());
+        assert!(checked_date("2024-04-31").is_err());
     }
+    #[test]
+    fn experimental_admission_fails_closed_on_public_or_transfer_settings() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir()
+            .join(format!("omsi-headless-{}-{nanos}.cfg", std::process::id()));
+        let config = [
+            "name=isolated-test", "date=1989-05-30", "traffic=0",
+            "timetable=0", "passengers=0", "share_maps=0",
+            "accept_uploads=0", "parked_buses=0", "public_server=0",
+            "tunnel=0", "public_address=off", "real_time=0", "metar_sync=0",
+        ].join("\n");
+        std::fs::write(&path, config).unwrap();
+        let mut cfg = ServerCfg::load(&path, 256).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(allow_free_roam(&cfg).is_ok());
+        cfg.accept_uploads = true;
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.accept_uploads = false;
+        cfg.share_maps = true;
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.share_maps = false;
+        cfg.public_address.clear();
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.public_address = "off".into();
+        cfg.tunnel = true;
+        assert!(allow_free_roam(&cfg).is_err());
+    }
+
 }
