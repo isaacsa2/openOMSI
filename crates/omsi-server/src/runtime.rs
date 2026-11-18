@@ -76,8 +76,12 @@ pub fn free_roam(
     let collisions = map.install_static_box_collisions(&keys, &signals.network.lanes);
     ensure!(!signals.network.lanes.is_empty(), "no drivable or foot paths in selected tiles");
     // The standalone relay does not invent authoritative timetable or AI cars.
-    let facts = Arc::clone(&map.data.snapshot().map);
-    let random = traffic::random_types(root, &map.global, &map.map_dir, &facts.ailists);
+    // Free-roam has traffic=0. Loading all AI bus scripts and paints here
+    // would waste disk I/O and RAM for vehicles that can never be spawned.
+    let random = omsi_sim::ai_traffic::setup::RandomTypes {
+        types: Vec::new(), groups: Vec::new(), group_curves: false,
+        group_uvg: Vec::new(), uvg_defaults: Vec::new(),
+    };
     let mut ai = traffic::assemble(root, signals.network, random,
         map.global.traffic_density_road.clone(), keys, 0);
     ai.lights = signals.controllers;
@@ -96,7 +100,7 @@ pub fn free_roam(
     // Do not open the gateway or allow players during CPU map initialization.
     let info = admin::info_of(cfg, env!("CARGO_PKG_VERSION"));
     omsi_lan::gateway::open_public_gateway(net.session(), info, cfg.web_port, false);
-    crate::fleet::announce_fleet(cfg, root);
+    // Do not advertise or hash an untransferable bus fleet in relay-only mode.
     log::warn!(
         "EXPERIMENTAL relay ONLY: {} static boxes, {} unresolved collision meshes, {} attached objects; AI/timetable/passengers disabled",
         collisions.static_boxes, collisions.pending_meshes, collisions.pending_attachments
