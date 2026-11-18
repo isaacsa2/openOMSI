@@ -122,15 +122,14 @@ pub(super) fn queue_near_restores(
         gpu.wants_restore.push(p.clone());
         queued += 1;
     }
-    // A nearby texture may not fit back at full resolution, even though the card has
-    // room for its *next* mip level. The upload path already calls fit_upgrade to
-    // select a smaller replacement; without this fallback the texture stays blurry
-    // indefinitely in a busy map while no full-size restore can be queued.
+    // A nearby texture may not fit back at full resolution although a smaller
+    // GPU upload could fit. This fallback offers the closest reduced texture to
+    // the existing fit_upgrade path when no full restore has been queued.
     //
-    // Do not queue an upgrade when there is no room for a higher mip level:
-    // replace_texture temporarily holds both the old and the new allocation.
-    // Prefer the closest eligible texture, and attempt only one partial upgrade
-    // per pass to avoid a burst of reuploads around the memory limit.
+    // This is an admission estimate, not a one-mip upload cap: fit_upgrade may
+    // restore multiple levels if the upload-time GPU budget permits them.
+    // replace_texture briefly holds both allocations. Limit the fallback to
+    // one candidate per pass to avoid bursts near the memory limit.
     if queued == 0 {
         let partial = entries
             .iter()

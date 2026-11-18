@@ -192,7 +192,7 @@ fn texture_budget_recovers_a_placeholder_without_room_for_the_full_source() {
 }
 
 #[test]
-fn near_texture_restores_an_intermediate_mip_when_the_full_texture_would_not_fit() {
+fn near_texture_queues_restore_when_the_full_texture_would_not_fit() {
     let renderer = renderer();
     let mut scene = renderer.new_scene();
     let original = data(1024);
@@ -202,10 +202,9 @@ fn near_texture_restores_an_intermediate_mip_when_the_full_texture_would_not_fit
     entry.record_upload(&original, &scene);
     assert_eq!(entry.dropped, 2);
 
-    let room = entry.bytes * 4 + 4096;
+    let bytes = entry.bytes;
+    let room = bytes * 4 + 4096;
     assert!(room < entry.full_bytes);
-    let intermediate = fit_upgrade(&Arc::new(data(1024)), room).unwrap();
-    assert_eq!((intermediate.width, intermediate.height), (512, 512));
 
     let path = PathBuf::from("near-cached.dds");
     let entries = vec![(2.0, path.clone())];
@@ -218,7 +217,7 @@ fn near_texture_restores_an_intermediate_mip_when_the_full_texture_would_not_fit
             &pending,
             &entries,
             150.0,
-            (entry.bytes * 4 + 4095, u64::MAX),
+            (bytes * 4 + 4095, u64::MAX),
             std::time::Instant::now(),
         ),
         0,
@@ -234,7 +233,7 @@ fn near_texture_restores_an_intermediate_mip_when_the_full_texture_would_not_fit
             std::time::Instant::now(),
         ),
         1,
-        "the next mip should return even if the full source is too large",
+        "a partial restore may be queued even when full detail would not fit",
     );
     assert_eq!(gpu.wants_restore, [path.clone()]);
     assert!(gpu.textures[&path].near_restore);
