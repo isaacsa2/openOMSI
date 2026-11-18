@@ -83,6 +83,15 @@ authoritative bus scripts. Rejected scenery surfaces, invalid splines and
 missing definitions remain visible as unresolved counts. The incomplete
 road mesh must not be treated as proof of full collision parity.
 
+## Native boot smoke fixture
+
+A new all-targets integration test creates a small synthetic OMSI map with a
+single CPU spline and launches the actual native server executable for three
+fixed ticks. It deliberately removes DISPLAY/WAYLAND_DISPLAY, uses no real
+OMSI map or texture files and checks clean shutdown. This catches missing
+binary packaging and bootstrap dependencies missed by library tests, but
+**does not replace** a licensed real-world map and two game clients.
+
 ## Experimental independent host process
 
 The Release CI creates **separate** headless-test ZIPs for Windows x64 and
