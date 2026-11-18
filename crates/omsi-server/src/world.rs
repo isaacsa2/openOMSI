@@ -412,6 +412,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn entrypoint_resolution_matches_graphical_world_for_duplicate_ids() {
+        let mut global = GlobalCfg::default();
+        global.raw_tiles = vec![(0, 0), (10, 5)];
+        let entry = omsi_map::global::EntryPoint {
+            group: 1,
+            object_id: 77,
+            pos: [5.0, 10.0, 3.0],
+            quat: [0.0, 0.0, 0.0, 1.0],
+            ..Default::default()
+        };
+        let mut index = MapIndex::default();
+        index.objects.insert(
+            77,
+            ((0, 0), DVec3::new(1.0, 2.0, 3.0), [0.0, 0.0, 0.0]),
+        );
+        let expected = (DVec3::new(11.0, 22.0, 33.0), [90.0, 0.0, 0.0]);
+        index.duplicates.insert(((10, 5), 77), expected);
+        assert_eq!(resolve_entry_point(&global, &index, &entry), Some(expected));
+    }
+
+    #[test]
+    fn entrypoint_resolution_uses_global_record_when_object_is_missing() {
+        let mut global = GlobalCfg::default();
+        global.raw_tiles = vec![(3, 4)];
+        let half = std::f64::consts::FRAC_PI_4;
+        let entry = omsi_map::global::EntryPoint {
+            group: 0,
+            object_id: 98,
+            pos: [6.5, 225.5, 0.2],
+            quat: [0.0, half.sin(), 0.0, half.cos()],
+            ..Default::default()
+        };
+        let (position, heading) =
+            resolve_entry_point(&global, &MapIndex::default(), &entry).unwrap();
+        assert!((position.x - (3.0 * tile_size() + 6.5)).abs() < 1.0e-6);
+        assert!((position.y - (4.0 * tile_size() + 225.5)).abs() < 1.0e-6);
+        assert_eq!(position.z, 0.2);
+        assert!((heading[0] - 90.0).abs() < 1.0e-6);
+    }
+
+    #[test]
     fn cpu_tile_cache_stays_bounded_and_recent_tiles_survive() {
         let mut cache = HostTileCache::new(2);
         let tile = Arc::new(Tile::default());
