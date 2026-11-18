@@ -402,7 +402,9 @@ pub fn free_roam(
             if next != current {
                 stream_busy = streamer.request(desired);
                 if !stream_busy {
-                    log::warn!("native tile stream worker disconnected; retaining the previous world");
+                    log::warn!(
+                        "native tile stream worker disconnected; retaining the previous world"
+                    );
                 }
             }
         }
