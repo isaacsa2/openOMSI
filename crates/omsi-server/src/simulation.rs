@@ -51,6 +51,11 @@ impl CpuSimulation {
         }
         let started = Instant::now();
         let snapshot = self.world.snapshot();
+        // Mirror the graphical host's ordering: AI road traffic must see
+        // the previous committed pedestrian positions before planning its
+        // own movement. Never reuse stale pedestrian collision buffers.
+        self.people.strollers_into(&mut self.traffic.walkers);
+        self.people.on_foot_into(&mut self.traffic.people);
         self.traffic.advance(dt, None);
         self.people
             .tick_inner(dt, &*snapshot, None, Some(&self.traffic));
@@ -107,6 +112,20 @@ mod tests {
         assert!(host.traffic.cars.is_empty());
         assert!((host.people.time - 1.0).abs() < 0.001);
         assert!(host.people.bodies.ops.is_empty());
+    }
+
+    #[test]
+    fn headless_traffic_never_keeps_ghost_pedestrian_obstacles() {
+        let mut host = empty_simulation();
+        host.traffic.walkers.push((0, 5.0));
+        host.traffic.people.push((
+            glam::DVec3::new(100.0, 100.0, 0.0),
+            glam::DVec2::ZERO,
+            false,
+        ));
+        host.step(1.0 / 60.0);
+        assert!(host.traffic.walkers.is_empty());
+        assert!(host.traffic.people.is_empty());
     }
 
     #[test]
