@@ -9,6 +9,7 @@ use std::path::PathBuf;
 pub const SETTINGS_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq)]
+#[rustfmt::skip]
 pub struct Settings {
     /// Samples per pixel: 1, 2, 4 or 8.
     pub msaa: u32,
@@ -577,6 +578,7 @@ pub struct Settings {
     pub remote_cockpit_port: u16,
 }
 
+#[rustfmt::skip]
 impl Default for Settings {
     fn default() -> Self {
         // a phone's graphics chip and battery: 2x MSAA (cheap on a tiled GPU), no
@@ -589,6 +591,7 @@ impl Default for Settings {
 /// `ai_max_parked`, `ai_max_humans`), as `settings.cfg` lines read after the machine's own.
 pub(crate) static SERVER_AI_LIMITS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+#[rustfmt::skip]
 impl Settings {
     /// HUD coordinates occupy the centre panel by default; world picking always
     /// keeps the full window's physical coordinates.
@@ -613,6 +616,7 @@ impl Settings {
     }
 }
 
+#[rustfmt::skip]
 impl Settings {
     pub fn perf_overlay_on(&self) -> bool {
         self.perf_overlay != "off"
@@ -1277,6 +1281,7 @@ impl Settings {
 }
 
 /// `vanilla`, `vanilla_plus`, `enhanced` or `enhanced_plus` from the ways a file may spell them.
+#[rustfmt::skip]
 pub fn graphics_mode(v: &str) -> &'static str {
     match v.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
         "enhanced_plus" | "enhanced+" | "enhancedplus" | "enhanced_+" | "2" => "enhanced_plus",
@@ -1288,6 +1293,7 @@ pub fn graphics_mode(v: &str) -> &'static str {
 
 /// `gpu_texture_compression` from a settings file: on unless it says off (`0`, `off`, `no`,
 /// `false`, or a test build's `disabled`).
+#[rustfmt::skip]
 pub fn gpu_texture_compression(v: &str) -> bool {
     !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "off" | "no" | "false" | "disabled")
 }
@@ -1315,6 +1321,7 @@ pub fn pad_type(v: &str) -> &'static str {
 
 /// The enhanced clouds' quality from a settings file: `low`, else `high` (an `auto` written by
 /// a test build reads as the default too).
+#[rustfmt::skip]
 pub fn cloud_quality(v: &str) -> &'static str {
     if v.trim().eq_ignore_ascii_case("low") { "low" } else { "high" }
 }
@@ -1348,6 +1355,7 @@ pub fn rain_quality(v: &str) -> &'static str {
 
 /// `view_distance=<metres>` of the settings file: how far around the camera the map's tiles
 /// are kept loaded (OMSI's "visible distance"). None when the file does not say.
+#[rustfmt::skip]
 pub fn view_distance() -> Option<f64> {
     let text = std::fs::read_to_string(Settings::path()?).ok()?;
     text.lines().filter_map(|l| l.trim().split_once('=')).find(|(k, _)| k.trim().eq_ignore_ascii_case("view_distance")).and_then(|(_, v)| v.trim().parse::<f64>().ok()).filter(|v| *v > 0.0)
@@ -1365,6 +1373,7 @@ impl Settings {
 
 /// The player's own turn of a bus's mirrors (degrees yaw, pitch per `[add_camera_reflexion]`),
 /// kept per `.bus` file in `~/.openomsi/mirrors.cfg` as `<bus file>|<mirror>=<yaw>,<pitch>`.
+#[rustfmt::skip]
 pub fn mirror_offsets(bus: &std::path::Path) -> Vec<[f32; 2]> {
     let key = bus.to_string_lossy().to_ascii_lowercase();
     let Some(p) = Settings::path().map(|p| p.with_file_name("mirrors.cfg")) else { return Vec::new() };
@@ -1387,6 +1396,7 @@ pub fn mirror_offsets(bus: &std::path::Path) -> Vec<[f32; 2]> {
 
 /// A bus's mirror shifts (bus frame, m: across, along, up), kept in the same file as the
 /// turns on lines `<bus>|s<n>=x,y,z` (a build that knows only turns skips them).
+#[rustfmt::skip]
 pub fn mirror_shifts(bus: &std::path::Path) -> Vec<[f32; 3]> {
     let key = bus.to_string_lossy().to_ascii_lowercase();
     let Some(p) = Settings::path().map(|p| p.with_file_name("mirrors.cfg")) else { return Vec::new() };
@@ -1410,6 +1420,7 @@ pub fn mirror_shifts(bus: &std::path::Path) -> Vec<[f32; 3]> {
 
 /// A bus's mirror field-of-view changes (degrees added to the mirror camera's), on lines
 /// `<bus>|f<n>=degrees` of the same file.
+#[rustfmt::skip]
 pub fn mirror_fovs(bus: &std::path::Path) -> Vec<f32> {
     let key = bus.to_string_lossy().to_ascii_lowercase();
     let Some(p) = Settings::path().map(|p| p.with_file_name("mirrors.cfg")) else { return Vec::new() };
@@ -1433,6 +1444,7 @@ pub fn mirror_fovs(bus: &std::path::Path) -> Vec<f32> {
 
 /// Keep a bus's mirror turns, shifts and field-of-view changes (see [`mirror_offsets`],
 /// [`mirror_shifts`], [`mirror_fovs`]).
+#[rustfmt::skip]
 pub fn save_mirror_state(bus: &std::path::Path, offsets: &[[f32; 2]], shifts: &[[f32; 3]], fovs: &[f32]) {
     let key = bus.to_string_lossy().to_ascii_lowercase();
     let Some(p) = Settings::path().map(|p| p.with_file_name("mirrors.cfg")) else { return };
@@ -1463,17 +1475,20 @@ pub fn save_mirror_state(bus: &std::path::Path, offsets: &[[f32; 2]], shifts: &[
     let _ = std::fs::write(&p, lines.join("\n") + "\n");
 }
 /// `resolution=` (or `window_size=`) of a settings text, the last one written.
+#[rustfmt::skip]
 pub fn resolution_of(text: &str) -> Option<(u32, u32)> {
     let v = text.lines().filter_map(|l| l.split_once('=')).filter(|(k, _)| matches!(k.trim().to_ascii_lowercase().as_str(), "resolution" | "window_size")).last()?.1;
     let (w, h) = omsi_launcher_lib::resolution_text(v).split_once('x').map(|(w, h)| (w.parse().ok(), h.parse().ok()))?;
     Some((w?, h?))
 }
 
+#[rustfmt::skip]
 pub fn fullscreen_scene_cap(fullscreen: bool, spanned: bool, resolution: Option<(u32, u32)>) -> Option<(u32, u32)> {
     resolution.filter(|_| fullscreen && !spanned)
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod resolution_tests {
     #[test]
     fn the_window_size_is_read_from_the_settings() {
@@ -1494,12 +1509,16 @@ mod resolution_tests {
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod right_stick_look_tests;
 #[cfg(test)]
+#[rustfmt::skip]
 mod sim_thread_tests;
 #[cfg(test)]
+#[rustfmt::skip]
 mod full_tank_tests;
 #[cfg(test)]
+#[rustfmt::skip]
 mod road_snow_tests;
 
 /// The driver's seat per bus (`~/.openomsi/seats.cfg`, a line `bus|x|y|z|pitch` each, the
@@ -1507,6 +1526,7 @@ mod road_snow_tests;
 /// menu was one for every bus: fitted to a Solaris, every other bus put the driver
 /// somewhere else than its `.bus` file does (#1355). A bus that has none takes the
 /// settings' own seat, which is where a seat set before this lives on.
+#[rustfmt::skip]
 pub mod bus_seats {
     use std::path::PathBuf;
 

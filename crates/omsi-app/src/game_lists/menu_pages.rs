@@ -2,6 +2,7 @@
 
 use super::*;
 
+#[rustfmt::skip]
 pub(super) fn options_pages(app: &App) -> Vec<Page> {
     let s = &app.settings;
     let file = settings_file();
@@ -273,6 +274,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
 }
 
 /// Append actions after sliders so their presence does not change other option tabs.
+#[rustfmt::skip]
 fn add_graphics_action_rows(app: &App, file: &serde_json::Value, graphics: &mut Vec<(String, String)>) {
     if app.menus.graphics_before.is_some() {
         graphics.push(button("Apply graphics changes...", "Confirm", "Apply compatible graphics options in-game. Renderer mode and device formats require restart.", "graphics_apply"));
@@ -282,6 +284,7 @@ fn add_graphics_action_rows(app: &App, file: &serde_json::Value, graphics: &mut 
     graphics.splice(at..at, upscaler_rows(app, file));
 }
 
+#[rustfmt::skip]
 pub(super) fn vehicle_pages(app: &App) -> Vec<Page> {
     let has = app.player.is_some();
     let server = crate::input_script::on_server(&app.args);
@@ -348,6 +351,7 @@ pub(super) fn vehicle_pages(app: &App) -> Vec<Page> {
     ]
 }
 
+#[rustfmt::skip]
 pub(super) fn world_pages(app: &App) -> Vec<Page> {
     let client = app.net.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client);
     let pct = |v: f32| format!("{:.0} %", v * 100.0);
@@ -468,6 +472,7 @@ pub(super) fn world_pages(app: &App) -> Vec<Page> {
 }
 
 /// The pages of the settings window `kind` (empty ones left out) and the one shown.
+#[rustfmt::skip]
 pub(super) fn pages_of(app: &App, kind: &ListKind) -> Option<(Vec<Page>, usize)> {
     let (pages, tab) = match kind {
         ListKind::Options(t) => (options_pages(app), *t),
@@ -483,6 +488,7 @@ pub(super) fn pages_of(app: &App, kind: &ListKind) -> Option<(Vec<Page>, usize)>
     Some((pages, tab))
 }
 
+#[rustfmt::skip]
 fn shown_in_mode(mode: &str, key: &str) -> bool {
     let mode = crate::settings::graphics_mode(mode);
     match key {
@@ -498,6 +504,7 @@ fn shown_in_mode(mode: &str, key: &str) -> bool {
 }
 
 /// Which tab of a window (`kind`: Options, World ...) is the one titled `title` (the first if none is).
+#[rustfmt::skip]
 pub(crate) fn tab_of(app: &App, kind: ListKind, title: &str) -> usize {
     pages_of(app, &kind).and_then(|(pages, _)| pages.iter().position(|p| p.0 == title)).unwrap_or(0)
 }
@@ -514,6 +521,7 @@ pub(crate) fn forget_page_titles(app: &App) {
 ///
 /// Asked every frame while a window is open, and building the pages is the work of
 /// all their rows: the answer is kept for a moment.
+#[rustfmt::skip]
 pub(crate) fn page_titles(app: &App, kind: &ListKind) -> Option<(Vec<String>, usize)> {
     let vr_nav_available = app.vr_active() && app.player.is_some();
     if let Some(hit) = app.menus.page_titles.borrow().as_ref().filter(|(k, vr, t, _)| k == kind && *vr == vr_nav_available && t.elapsed().as_millis() < 5000).map(|(_, _, _, r)| r.clone()) {
@@ -526,6 +534,7 @@ pub(crate) fn page_titles(app: &App, kind: &ListKind) -> Option<(Vec<String>, us
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
     use super::shown_in_mode;
     use crate::game_lists::{mode_of_session, text_in_mode};
@@ -568,6 +577,7 @@ mod tests {
 
 /// The upscaler's rows of the graphics page (after the render scale's): the upscaler, and
 /// FSR 1's quality and sharpening while it is chosen.
+#[rustfmt::skip]
 fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
     let fsr = app.settings.upscaler == "fsr1";
     let temporal = app.settings.temporal_upscaling().is_some();
@@ -587,6 +597,7 @@ fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
 }
 
 /// What FSR 1's quality means now: the size the 3D picture is drawn at, and the window's.
+#[rustfmt::skip]
 fn fsr_size(app: &App) -> String {
     let sizes = app.gfx.surface.as_ref().zip(app.renderer.as_ref()).map(|(sf, r)| ((sf.config.width, sf.config.height), r.scene_size(sf.config.width, sf.config.height)));
     match sizes {
@@ -596,18 +607,21 @@ fn fsr_size(app: &App) -> String {
 }
 
 /// Keep all atmospheric controls together after permission and METAR filtering.
+#[rustfmt::skip]
 fn weather_rows(mut weather: Vec<(String, String)>, climate: Vec<(String, String)>) -> Vec<(String, String)> {
     weather.extend(climate);
     sectioned_rows(weather, "Live weather", &[("weather", "Weather preset and clouds"), ("temp", "Temperature and humidity"), ("wind_speed", "Wind")])
 }
 
 /// Group the options tabs without changing the settings commands or their order.
+#[rustfmt::skip]
 fn section_option_rows(title: &str, rows: Vec<(String, String)>) -> Vec<(String, String)> {
     let Some((first, starts)) = omsi_settings_ui::option_sections(title) else { return rows };
     sectioned_rows(rows, first, starts)
 }
 
 /// Insert display-only headings while preserving every command and its relative order.
+#[rustfmt::skip]
 fn sectioned_rows(rows: Vec<(String, String)>, first: &str, starts: &[(&str, &str)]) -> Vec<(String, String)> {
     omsi_settings_ui::sectioned_rows(rows, first, starts, ADJUST).into_iter().flat_map(|(heading, (label, action))| {
         heading.into_iter().map(|title| (row(&title, 'i', "", "", None), HEADING.to_string())).chain(std::iter::once((label, action)))
@@ -615,6 +629,7 @@ fn sectioned_rows(rows: Vec<(String, String)>, first: &str, starts: &[(&str, &st
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod pause_weather_tests {
     use super::*;
 

@@ -79,6 +79,7 @@ pub struct Flag {
     value: OnceLock<Option<OsString>>,
 }
 
+#[rustfmt::skip]
 impl Flag {
     const fn new(name: &'static str, ty: Ty, kind: Kind, read: Read, default: &'static str, doc: &'static str) -> Flag {
         Flag { name, ty, kind, read, default, doc, value: OnceLock::new() }
@@ -115,6 +116,7 @@ impl Flag {
     }
 }
 
+#[rustfmt::skip]
 impl std::fmt::Debug for Flag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Flag").field("name", &self.name).field("ty", &self.ty).field("kind", &self.kind).finish()
@@ -122,6 +124,7 @@ impl std::fmt::Debug for Flag {
 }
 
 /// The registered flag of this name.
+#[rustfmt::skip]
 pub fn find(name: &str) -> Option<&'static Flag> {
     ALL.binary_search_by(|f| f.name.cmp(name)).ok().map(|i| ALL[i])
 }
@@ -537,6 +540,7 @@ flags! {
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};

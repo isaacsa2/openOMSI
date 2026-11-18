@@ -12,6 +12,7 @@ const SLOW_UPLOAD_MB_S: f64 = 300.0;
 /// The loading screen's colour (the sky of its blank camera, see `drive_start`): what the
 /// game's window shows before its renderer is there - the loading screen's own #121212 (in
 /// linear light), so the window does not show a blue-grey before it.
+#[rustfmt::skip]
 const LOADING_BACKGROUND: wgpu::Color = wgpu::Color { r: 0.0060, g: 0.0060, b: 0.0060, a: 1.0 };
 
 /// The game window's start while its renderer is being built (see `App::create_window`).
@@ -30,6 +31,7 @@ pub(crate) struct WindowStart {
 
 /// The log's word on the window's first picture (how long the start took to show anything).
 /// (A hidden window's - OMSI_HIDDEN_WINDOW - is drawn and not shown: said all the same.)
+#[rustfmt::skip]
 fn first_picture(started: Instant, shown: bool) {
     static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if (shown || omsi_cfg::flags::OMSI_HIDDEN_WINDOW.is_set()) && !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -93,6 +95,7 @@ pub(crate) struct App {
     pub(crate) pipeline: crate::sim_thread::Pipeline,
 }
 
+#[rustfmt::skip]
 impl App {
     #[cfg(windows)]
     pub(crate) fn vr_active(&self) -> bool { self.xr.vr.is_some() }
@@ -940,6 +943,7 @@ pub(crate) fn start_centers(args: &Args, cam: &Camera, world: Option<&World>) ->
 /// What the map needs and this installation lacks, said on the screen and written to
 /// `~/.openomsi/missing_content.txt` by add-on folder: a map short of an add-on showed
 /// holes, bare roads and white objects, and nobody could tell that from a fault of the game.
+#[rustfmt::skip]
 pub(crate) fn report_missing_content(w: &World, msg: &mut Option<(String, f32)>) {
     let (files, textures) = w.missing_content();
     if files.is_empty() && textures.is_empty() {
@@ -1026,6 +1030,7 @@ pub(crate) struct CamCarry {
     pub fov: f32,
 }
 
+#[rustfmt::skip]
 impl CamCarry {
     /// `a` minus `b`.
     pub fn between(a: &omsi_render::Camera, b: &omsi_render::Camera) -> Self {
@@ -1068,6 +1073,7 @@ crate::app::stage_ctx!(
 /// the free camera flies off); when the loaded set changed, hand the new data to whatever
 /// keeps its own copy (the bus's obstacles, the traffic network, the navigator, the
 /// street lamps).
+#[rustfmt::skip]
 pub(crate) fn streaming(cx: StreamingCx) {
     let mut centers: Vec<DVec3> = cx.view.camera.iter().map(|c| c.position).collect();
     centers.extend(cx.player.player.iter().map(|p| p.vehicle.position));
