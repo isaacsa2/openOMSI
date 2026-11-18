@@ -133,8 +133,15 @@ mod tests {
             client.tick(0.06, &pose);
             std::thread::sleep(Duration::from_millis(2));
         }
-        assert!(!client.connected, "a partially loaded map must not accept a player");
-        assert_eq!(host.session().peer_count(), 0, "loading must not allocate a peer");
+        assert!(
+            !client.connected,
+            "a partially loaded map must not accept a player"
+        );
+        assert_eq!(
+            host.session().peer_count(),
+            0,
+            "loading must not allocate a peer"
+        );
         host.ready();
         for _ in 0..160 {
             host.tick(0.06);
@@ -144,7 +151,10 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(2));
         }
-        assert!(client.connected, "waiting client should join when map loading completes");
+        assert!(
+            client.connected,
+            "waiting client should join when map loading completes"
+        );
         assert_eq!(host.session().peer_count(), 1);
     }
 

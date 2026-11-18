@@ -35,12 +35,12 @@ fn map_path(root: &Path, map: &str) -> PathBuf {
 
 fn parse_options(args: impl IntoIterator<Item = String>) -> Result<Options> {
     let mut args = args.into_iter();
-    let root = args.next().context(
-        "usage: simcheck <OMSI2-root> <map-or-global.cfg> [YYYYMMDD] [ticks] [tiles]",
-    )?;
-    let map = args.next().context(
-        "usage: simcheck <OMSI2-root> <map-or-global.cfg> [YYYYMMDD] [ticks] [tiles]",
-    )?;
+    let root = args
+        .next()
+        .context("usage: simcheck <OMSI2-root> <map-or-global.cfg> [YYYYMMDD] [ticks] [tiles]")?;
+    let map = args
+        .next()
+        .context("usage: simcheck <OMSI2-root> <map-or-global.cfg> [YYYYMMDD] [ticks] [tiles]")?;
     let date = args.next().unwrap_or_else(|| "19890501".into());
     let date = date.replace('-', "");
     ensure!(
@@ -88,7 +88,10 @@ fn main() -> Result<()> {
     ensure!(!tile_keys.is_empty(), "map contains no tiles");
     let stop_counts = world.install_stop_lists(&tile_keys);
     let network = world.network_for_tiles(&tile_keys);
-    ensure!(!network.lanes.is_empty(), "selected tiles have no drivable or foot paths");
+    ensure!(
+        !network.lanes.is_empty(),
+        "selected tiles have no drivable or foot paths"
+    );
     let lanes = network.lanes.len();
     let facts = Arc::clone(&world.data.snapshot().map);
     let random = traffic::random_types(&opts.root, &world.global, &world.map_dir, &facts.ailists);

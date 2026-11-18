@@ -36,9 +36,14 @@ fn placed_stops(
     cabin: Option<&PassengerCabin>,
 ) -> (Option<BusStop>, Vec<WaitingPlace>) {
     let heading = object.rot[0];
-    let stop = definition
-        .is_bus_stop
-        .then(|| (object.id, world_pos, heading, object.extra.first().cloned().unwrap_or_default()));
+    let stop = definition.is_bus_stop.then(|| {
+        (
+            object.id,
+            world_pos,
+            heading,
+            object.extra.first().cloned().unwrap_or_default(),
+        )
+    });
     let rotation = omsi_geometry::object_rotation(object.rot);
     let waiting = cabin
         .into_iter()
@@ -53,15 +58,29 @@ fn placed_stops(
 
 /// MapIndex resolves terrain height and Chrono placement without borrowing
 /// an object with the same numeric ID from another tile.
-fn indexed_position(index: &omsi_world::map_index::MapIndex, tile: (i32, i32), id: i64) -> Option<DVec3> {
-    index.duplicates.get(&(tile, id)).map(|(pos, _)| *pos).or_else(|| {
-        index.objects.get(&id).and_then(|(owner, pos, _)| (*owner == tile).then_some(*pos))
-    })
+fn indexed_position(
+    index: &omsi_world::map_index::MapIndex,
+    tile: (i32, i32),
+    id: i64,
+) -> Option<DVec3> {
+    index
+        .duplicates
+        .get(&(tile, id))
+        .map(|(pos, _)| *pos)
+        .or_else(|| {
+            index
+                .objects
+                .get(&id)
+                .and_then(|(owner, pos, _)| (*owner == tile).then_some(*pos))
+        })
 }
 
 fn unique_keys(keys: &[(i32, i32)]) -> Vec<(i32, i32)> {
     let mut seen = HashSet::with_capacity(keys.len());
-    keys.iter().copied().filter(|key| seen.insert(*key)).collect()
+    keys.iter()
+        .copied()
+        .filter(|key| seen.insert(*key))
+        .collect()
 }
 
 impl HostWorld {
