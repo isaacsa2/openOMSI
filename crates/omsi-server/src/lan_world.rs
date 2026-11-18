@@ -93,6 +93,78 @@ mod tests {
     }
 
     #[test]
+    fn live_udp_client_receives_cpu_crossing_clock() {
+        use omsi_net::{Pose, WorldInfo, FLAG_VEHICLE};
+        use omsi_sim::ai_traffic::setup::RandomTypes;
+        use omsi_sim::traffic::{LaneBuilder, LaneKind, Network, TrafficLightController};
+        use std::net::SocketAddr;
+        use std::path::Path;
+        use std::time::Duration;
+
+        let mut host = LanSession::host(0, "headless", WorldInfo::default(), true)
+            .expect("bind local LAN host");
+        let addr = SocketAddr::from(([127, 0, 0, 1], host.local_addr().unwrap().port()));
+        let mut client = LanSession::join_addr(
+            vec![addr], None, "tester", WorldInfo::default(),
+        ).expect("connect LAN client");
+        let bus = Pose {
+            bus: "Vehicles/Test/test.bus".into(),
+            flags: FLAG_VEHICLE,
+            x: 12.0,
+            y: 8.0,
+            z: 0.0,
+            ..Default::default()
+        };
+        for _ in 0..200 {
+            host.tick(0.05, &Pose::default());
+            client.tick(0.05, &bus);
+            if host.peers().any(|peer| peer.has_info && peer.has_pose) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(host.peers().any(|peer| peer.has_info && peer.has_pose));
+        let random = RandomTypes {
+            types: Vec::new(),
+            groups: Vec::new(),
+            group_curves: false,
+            group_uvg: Vec::new(),
+            uvg_defaults: Vec::new(),
+        };
+        let mut traffic = crate::traffic::assemble(
+            Path::new("."), Network::default(), random,
+            Vec::new(), Vec::new(), 0,
+        );
+        let mut lane = LaneBuilder::polyline(
+            vec![DVec3::new(0.0, 0.0, 0.0), DVec3::new(40.0, 0.0, 0.0)],
+            LaneKind::Street,
+            3.0,
+        );
+        lane.traffic_light = Some((0, 0));
+        traffic.net.lanes.push(lane);
+        let mut controller = TrafficLightController::new(
+            vec![vec![(1, 20.0), (2, 20.0)]],
+            40.0,
+        );
+        controller.start(5.0);
+        traffic.lights.push(controller);
+        traffic.controller_of_object.insert(512, 0);
+        let mut sync = HeadlessWorldSync::default();
+        assert_eq!(sync.tick(&mut host, &traffic, 0.5), 0);
+        assert!(sync.tick(&mut host, &traffic, 0.5) > 0);
+        let mut received = Vec::new();
+        for _ in 0..60 {
+            client.tick(0.05, &bus);
+            received.extend(client.take_world().into_iter().flat_map(|(_, f)| f.lights));
+            if !received.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(received.iter().any(|l| l.object == 512 && (l.time - 5.0).abs() < 0.1));
+    }
+
+    #[test]
     fn dense_signal_maps_have_a_bounded_snapshot() {
         let frame = light_frame((0..1000).rev().map(|id| (id, id as f64, false)));
         assert_eq!(frame.lights.len(), MAX_LIGHTS_PER_CLIENT);
