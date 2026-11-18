@@ -20,6 +20,34 @@ use std::time::{Duration, Instant};
 
 pub const INITIAL_TILE_LIMIT: usize = 64;
 
+/// Bound the experimental loaded area around the map's first real entrypoint,
+/// not the arbitrary ordering of [map] records in global.cfg. Without this a
+/// large map could load 64 distant empty tiles and reject an otherwise valid
+/// multiplayer test due to missing road paths.
+fn initial_tiles(
+    global: &omsi_map::global::GlobalCfg,
+    index: &omsi_world::map_index::MapIndex,
+    limit: usize,
+) -> Vec<(i32, i32)> {
+    let center = global.entry_points.iter().find_map(|entry| {
+        (entry.group >= 0)
+            .then(|| global.raw_tiles.get(entry.group as usize))
+            .flatten()
+            .copied()
+            .or_else(|| index.objects.get(&entry.object_id).map(|(key, _, _)| *key))
+    });
+    let mut tiles: Vec<_> = global.tiles.iter().map(|t| (t.x, t.y)).collect();
+    if let Some((cx, cy)) = center {
+        tiles.sort_by_key(|&(x, y)| {
+            let dx = (i64::from(x) - i64::from(cx)).unsigned_abs() as u128;
+            let dy = (i64::from(y) - i64::from(cy)).unsigned_abs() as u128;
+            dx * dx + dy * dy
+        });
+    }
+    tiles.truncate(limit);
+    tiles
+}
+
 /// Parse a configured date without inferring locale or system timezone.
 pub fn checked_date(text: &str) -> Result<(i32, String)> {
     let digits = text.replace('-', "");
@@ -93,13 +121,7 @@ pub fn free_roam(
     let mut map = crate::world::HostWorld::open(root, &global, date_num)
         .with_context(|| format!("loading {}", global.display()))?;
     ensure!(map.index.tiles_read > 0, "no readable map tiles");
-    let keys: Vec<(i32, i32)> = map
-        .global
-        .tiles
-        .iter()
-        .take(INITIAL_TILE_LIMIT)
-        .map(|t| (t.x, t.y))
-        .collect();
+    let keys = initial_tiles(&map.global, &map.index, INITIAL_TILE_LIMIT);
     ensure!(!keys.is_empty(), "map has no active tiles");
     let ground_surfaces = map.install_spline_ground_surfaces(&keys);
     log::info!(
@@ -272,6 +294,39 @@ pub fn free_roam(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn experimental_initial_tiles_start_near_the_actual_entrypoint() {
+        use omsi_map::global::{EntryPoint, MapTileRef};
+        let mut global = omsi_map::global::GlobalCfg::default();
+        global.tiles = (0..100)
+            .map(|i| MapTileRef { x: i, y: 0, index: i as usize, ..Default::default() })
+            .collect();
+        global.raw_tiles = (0..100).map(|x| (x, 0)).collect();
+        global.entry_points.push(EntryPoint {
+            group: 80,
+            object_id: 95,
+            ..Default::default()
+        });
+        let index = omsi_world::map_index::MapIndex::default();
+        let selected = initial_tiles(&global, &index, 5);
+        assert_eq!(selected.len(), 5);
+        assert_eq!(selected[0], (80, 0));
+        assert!(selected.iter().all(|&(x, y)| (x - 80).abs() <= 3 && y == 0));
+    }
+
+    #[test]
+    fn tiles_keep_map_order_when_no_entrypoint_exists() {
+        let mut global = omsi_map::global::GlobalCfg::default();
+        global.tiles = vec![
+            omsi_map::global::MapTileRef { x: 10, ..Default::default() },
+            omsi_map::global::MapTileRef { x: 20, ..Default::default() },
+        ];
+        assert_eq!(
+            initial_tiles(&global, &omsi_world::map_index::MapIndex::default(), 1),
+            vec![(10, 0)]
+        );
+    }
 
     #[test]
     fn invalid_time_and_date_cannot_start_a_session() {
