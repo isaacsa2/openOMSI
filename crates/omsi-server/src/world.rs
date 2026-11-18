@@ -73,6 +73,54 @@ impl HostTileCache {
     }
 }
 
+/// Locate a map entry point using the same rules as the graphical World:
+/// resolve duplicate object IDs on the record's own tile first, then the
+/// indexed object, and finally global.cfg's recorded position and heading.
+pub(crate) fn resolve_entry_point(
+    global: &GlobalCfg,
+    index: &MapIndex,
+    ep: &omsi_map::global::EntryPoint,
+) -> Option<(DVec3, [f64; 3])> {
+    let tile = usize::try_from(ep.group)
+        .ok()
+        .and_then(|i| global.raw_tiles.get(i))
+        .copied();
+    if let Some(key) = tile {
+        if let Some(place) = index.duplicates.get(&(key, ep.object_id)) {
+            return Some(*place);
+        }
+    }
+    let found = index.objects.get(&ep.object_id).map(|(_, pos, rot)| (*pos, *rot));
+    let recorded = tile
+        .filter(|_| ep.pos.iter().chain(ep.quat.iter()).all(|v| v.is_finite()))
+        .map(|(tx, ty)| {
+            let heading = (2.0 * ep.quat[1].atan2(ep.quat[3]))
+                .to_degrees()
+                .rem_euclid(360.0);
+            (
+                DVec3::new(
+                    f64::from(tx) * tile_size() + ep.pos[0],
+                    f64::from(ty) * tile_size() + ep.pos[1],
+                    ep.pos[2],
+                ),
+                [heading, 0.0, 0.0],
+            )
+        });
+    match (found, recorded) {
+        (Some(f), Some(r)) if (f.0.truncate() - r.0.truncate()).length() > 50.0 => {
+            log::info!(
+                "entry point {} \"{}\": object {} is on another tile: using the record's position",
+                ep.index,
+                ep.name,
+                ep.object_id
+            );
+            Some(r)
+        }
+        (Some(f), _) => Some(f),
+        (None, r) => r,
+    }
+}
+
 impl HostWorld {
     /// `date` is the YYYYMMDD date used for OMSI Chrono selections.
     ///
@@ -84,7 +132,10 @@ impl HostWorld {
             .with_context(|| format!("reading map {}", global_path.display()))?;
         omsi_map::configure_grid(&global);
         if global.entry_points.is_empty() {
-            global.add_object_entry_points();
+            let added = global.add_object_entry_points();
+            log::info!("entry points: {added} from the tiles' entry objects");
+        } else {
+            log::info!("entry points: {} listed in global.cfg", global.entry_points.len());
         }
         let map_dir = global.dir().to_path_buf();
         let chrono_dirs = omsi_map::active_chrono_dirs(&map_dir, date);
