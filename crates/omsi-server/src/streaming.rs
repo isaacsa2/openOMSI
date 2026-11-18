@@ -231,15 +231,15 @@ mod tests {
         fs::create_dir_all(root.join("Splines")).unwrap();
         fs::write(
             map_dir.join("global.cfg"),
-            "[name]\\nStreaming Fixture\\n[map]\\n0\\n0\\ntile_0_0.map\\n[map]\\n20\\n0\\ntile_20_0.map\\n",
+            "[name]\nStreaming Fixture\n[map]\n0\n0\ntile_0_0.map\n[map]\n20\n0\ntile_20_0.map\n",
         )
         .unwrap();
-        let tile = "[version]\\n10\\n[spline]\\n0\\nSplines/smoke.sli\\n101\\n-1\\n10\\n0\\n10\\n0\\n40\\n0\\n0\\n0\\n0\\n0\\n0\\n";
+        let tile = "[version]\n10\n[spline]\n0\nSplines/smoke.sli\n101\n-1\n10\n0\n10\n0\n40\n0\n0\n0\n0\n0\n0\n";
         fs::write(map_dir.join("tile_0_0.map"), tile).unwrap();
         fs::write(map_dir.join("tile_20_0.map"), tile).unwrap();
         fs::write(
             root.join("Splines/smoke.sli"),
-            "[length]\\n40\\n[texture]\\nroad.bmp\\n[profile]\\n0\\n[profilepnt]\\n-1.5\\n0\\n0\\n1\\n[profilepnt]\\n1.5\\n0\\n1\\n1\\n[path]\\n0\\n0\\n0\\n3\\n0\\n",
+            "[length]\n40\n[texture]\nroad.bmp\n[profile]\n0\n[profilepnt]\n-1.5\n0\n0\n1\n[profilepnt]\n1.5\n0\n1\n1\n[path]\n0\n0\n0\n3\n0\n",
         )
         .unwrap();
         omsi_cfg::add_content_root(root.clone());
