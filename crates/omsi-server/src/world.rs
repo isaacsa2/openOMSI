@@ -186,7 +186,7 @@ impl HostWorld {
         if !x.is_finite() || !y.is_finite() {
             return None;
         }
-        let key = omsi_sim::world_data::ground::tile_key(x, y);
+        let key = omsi_sim::world_data::tile_key(x, y);
         self.load_tile(key)?;
         let terrain = self.tiles.loaded.get(&key).map(|(_, t)| t)?;
         Some(terrain.sample(
