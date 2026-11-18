@@ -8,12 +8,12 @@ use crate::view_sync::{self, ViewSync};
 impl Offscreen<'_> {
     /// One step, the `i`-th (false: a server was told to stop).
     pub(super) fn step(&mut self, i: usize) -> Result<bool> {
-        let mut step = stages::Step { run: self, i };
         let sequence = if self.server {
             super::SERVER_STEP
         } else {
             stages::OFFSCREEN_STEP
         };
+        let mut step = stages::Step { run: self, i };
         Ok(crate::frame_stages::run(&mut step, sequence)? == crate::frame_stages::Flow::Go)
     }
 
