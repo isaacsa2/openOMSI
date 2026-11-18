@@ -16,10 +16,8 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "openomsi-headless-{}-{nanos}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("openomsi-headless-{}-{nanos}", std::process::id()));
     let map = root.join("Maps/Fixture");
     write(
         &map.join("global.cfg"),
