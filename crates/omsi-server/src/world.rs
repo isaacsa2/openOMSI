@@ -165,7 +165,10 @@ impl HostWorld {
             return Some(tile);
         }
         let path = self.tile_paths.get(&key)?;
-        let tile = omsi_world::map_index::read_tile(path, &self.chrono_dirs)?;
+        let mut tile = omsi_world::map_index::read_tile(path, &self.chrono_dirs)?;
+        // [worldcoordinates] maps have row-dependent tile widths. Fit geometry
+        // to the shared world grid exactly as the graphical loader does.
+        tile.fit_to_world_grid(key.1);
         let source = tile.terrain_from.as_ref().unwrap_or(&tile.path);
         let ground_path = omsi_world::map_index::tile_companion(source, ".terrain");
         let ground = Arc::new(if tile.has_terrain {
@@ -183,16 +186,12 @@ impl HostWorld {
             Terrain::flat()
         });
         let tile = Arc::new(tile);
-        let evicted = self
-            .tiles
-            .insert(key, Arc::clone(&tile), Arc::clone(&ground));
+        self.tiles.insert(key, Arc::clone(&tile), Arc::clone(&ground));
+        // Evicting a decoded .map cache entry MUST NOT unload live physics
+        // terrain from beneath scheduled traffic or a player. Ground snapshots
+        // are retained until a separate, entity-aware unloading policy exists.
         self.data.update(|data| {
-            let all = Arc::make_mut(&mut data.ground);
-            if let Some(evicted) = evicted {
-                all.terrains.remove(&evicted);
-                all.surfaces.remove(&evicted);
-            }
-            all.terrains.insert(key, ground);
+            Arc::make_mut(&mut data.ground).terrains.insert(key, ground);
         });
         Some(tile)
     }
@@ -204,13 +203,10 @@ impl HostWorld {
         if !x.is_finite() || !y.is_finite() {
             return None;
         }
-        let key = omsi_sim::world_data::tile_key(x, y);
+        let (key, (local_x, local_y)) = omsi_map::world_to_tile_local(x, y);
         self.load_tile(key)?;
         let terrain = self.tiles.loaded.get(&key).map(|(_, t)| t)?;
-        Some(terrain.sample(
-            (x - key.0 as f64 * tile_size()) as f32,
-            (y - key.1 as f64 * tile_size()) as f32,
-        ))
+        Some(terrain.sample(local_x as f32, local_y as f32))
     }
 
     /// Load a spline definition at most once per active cache window.
@@ -291,8 +287,11 @@ impl HostWorld {
             if def.paths.is_empty() {
                 continue;
             }
-            let lx = object.pos[0].clamp(0.0, tile_size()) as f32;
-            let ly = object.pos[1].clamp(0.0, tile_size()) as f32;
+            // Tile::fit_to_world_grid scales authored placement, but the
+            // original terrain raster remains in the tile's native coordinates.
+            let (scale_x, scale_y) = omsi_map::world_tile_scale(key.1);
+            let lx = (object.pos[0] / scale_x).clamp(0.0, omsi_map::TILE_SIZE) as f32;
+            let ly = (object.pos[1] / scale_y).clamp(0.0, omsi_map::WORLD_TILE_SIZE.max(tile_size())) as f32;
             let height = if def.absolute_height() {
                 0.0
             } else {
