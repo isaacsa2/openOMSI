@@ -86,6 +86,7 @@ fn main() -> Result<()> {
         .map(|tile| (tile.x, tile.y))
         .collect();
     ensure!(!tile_keys.is_empty(), "map contains no tiles");
+    let stop_counts = world.install_stop_lists(&tile_keys);
     let network = world.network_for_tiles(&tile_keys);
     ensure!(!network.lanes.is_empty(), "selected tiles have no drivable or foot paths");
     let lanes = network.lanes.len();
@@ -118,10 +119,12 @@ fn main() -> Result<()> {
     profiler.stop();
     let report = profiler.report();
     println!(
-        "CPU simcheck (NOT a multiplayer server): map={}, tiles={}, lanes={}, AI types={}, load_s={:.3}, ticks={}, sim_s={:.2}, unpaced_tps={:.1}, avg_tick_ms={:.3}, p95_tick_ms={:.3}, p99_tick_ms={:.3}, simulated_people={}",
+        "CPU simcheck (NOT a multiplayer server): map={}, tiles={}, lanes={}, bus_stops={}, waiting_places={}, AI types={}, load_s={:.3}, ticks={}, sim_s={:.2}, unpaced_tps={:.1}, avg_tick_ms={:.3}, p95_tick_ms={:.3}, p99_tick_ms={:.3}, simulated_people={}",
         world.global.name,
         world.loaded_tiles(),
         lanes,
+        stop_counts.bus_stops,
+        stop_counts.waiting_places,
         ai_types,
         load_elapsed.as_secs_f64(),
         opts.ticks,
