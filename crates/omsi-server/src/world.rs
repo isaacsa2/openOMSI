@@ -10,11 +10,10 @@ use omsi_geometry::SplineCurve;
 use omsi_map::global::GlobalCfg;
 use omsi_map::{Terrain, tile::Tile, tile_size};
 use omsi_scenery::{SceneryObject, Spline};
-use omsi_vehicle::PassengerCabin;
 use omsi_sim::traffic::{Lane, Network};
 use omsi_sim::world_data::{MapFacts, WorldCell, WorldData};
 use omsi_world::map_index::MapIndex;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -30,8 +29,6 @@ pub struct HostWorld {
     chrono_dirs: Vec<PathBuf>,
     spline_defs: HashMap<String, Option<Arc<Spline>>>,
     object_defs: HashMap<String, Option<Arc<SceneryObject>>>,
-    waiting_cabins: HashMap<String, Option<Arc<PassengerCabin>>>,
-    published_objects: HashSet<(i32, i32)>,
 }
 
 /// LRU cache for immutable OMSI tile records. A map can have tens of thousands
@@ -157,8 +154,6 @@ impl HostWorld {
             chrono_dirs,
             spline_defs: HashMap::new(),
             object_defs: HashMap::new(),
-            waiting_cabins: HashMap::new(),
-            published_objects: HashSet::new(),
         })
     }
 
@@ -196,11 +191,8 @@ impl HostWorld {
         // terrain from beneath scheduled traffic or a player. Ground snapshots
         // are retained until a separate, entity-aware unloading policy exists.
         self.data.update(|data| {
-            Arc::make_mut(&mut data.ground)
-                .terrains
-                .insert(key, Arc::clone(&ground));
+            Arc::make_mut(&mut data.ground).terrains.insert(key, ground);
         });
-        self.publish_stop_metadata(key, &tile, &ground);
         Some(tile)
     }
 
@@ -257,114 +249,6 @@ impl HostWorld {
         }
         self.object_defs.insert(key, val.clone());
         val
-    }
-
-    /// A scenery object's waiting positions, read from the same passenger
-    /// cabin definition as the graphical host. Keep metadata cached by path;
-    /// neither meshes nor textures are needed.
-    fn waiting_cabin(&mut self, path: &Path) -> Option<Arc<PassengerCabin>> {
-        let key = path.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
-        if let Some(value) = self.waiting_cabins.get(&key) {
-            return value.clone();
-        }
-        let cabin = match PassengerCabin::load(path) {
-            Ok(cabin) => Some(Arc::new(cabin)),
-            Err(error) => {
-                log::debug!("CPU waiting cabin {}: {error}", path.display());
-                None
-            }
-        };
-        if self.waiting_cabins.len() >= 256 {
-            self.waiting_cabins.clear();
-        }
-        self.waiting_cabins.insert(key, cabin.clone());
-        cabin
-    }
-
-    /// One-time, CPU-only publication of stops and their [passpos] locations.
-    /// This feeds the production PeopleSim and timetable world queries. The
-    /// map-wide object index resolves ground heights and attached objects,
-    /// including IDs reused on another tile.
-    fn publish_stop_metadata(&mut self, key: (i32, i32), tile: &Tile, terrain: &Terrain) {
-        if !self.published_objects.insert(key) {
-            return;
-        }
-        let root = self.data.snapshot().map.root.clone();
-        let origin = DVec2::new(key.0 as f64 * tile_size(), key.1 as f64 * tile_size());
-        let mut stops = Vec::new();
-        let mut waiting = Vec::new();
-        for object in tile.objects.iter().chain(&tile.attach_objects) {
-            if object.file.trim().is_empty() {
-                continue;
-            }
-            let Some(def) = self.scenery(&root, &object.file) else {
-                continue;
-            };
-            if !def.is_bus_stop && def.passenger_cabin.is_none() {
-                continue;
-            }
-            let index_place = self
-                .index
-                .duplicates
-                .get(&(key, object.id))
-                .copied()
-                .or_else(|| {
-                    self.index.objects.get(&object.id).and_then(|(tile, pos, rot)| {
-                        (*tile == key).then_some((*pos, *rot))
-                    })
-                });
-            let (pos, heading) = match index_place {
-                Some((pos, rot)) => (pos, rot[0]),
-                None => {
-                    let (kx, ky) = omsi_map::world_tile_scale(key.1);
-                    let lx = (object.pos[0] / kx).clamp(0.0, omsi_map::TILE_SIZE) as f32;
-                    let ly = (object.pos[1] / ky).clamp(0.0, omsi_map::TILE_SIZE) as f32;
-                    let h = if def.absolute_height() {
-                        0.0
-                    } else {
-                        f64::from(terrain.sample(lx, ly))
-                    };
-                    (
-                        DVec3::new(
-                            origin.x + object.pos[0],
-                            origin.y + object.pos[1],
-                            object.pos[2] + h,
-                        ),
-                        object.rot[0],
-                    )
-                }
-            };
-            if def.is_bus_stop {
-                stops.push((
-                    object.id,
-                    pos,
-                    heading,
-                    object.extra.first().cloned().unwrap_or_default(),
-                ));
-            }
-            if let Some(name) = def.passenger_cabin.as_deref() {
-                let folder = def.path.parent().unwrap_or_else(|| Path::new(""));
-                let path = omsi_cfg::resolve_path(folder, name);
-                if let Some(cabin) = self.waiting_cabin(&path) {
-                    for seat in &cabin.pass_positions {
-                        waiting.push((
-                            object.id,
-                            waiting_position(pos, heading, seat.pos),
-                            heading + f64::from(seat.rot),
-                            seat.height,
-                        ));
-                    }
-                }
-            }
-        }
-        if !stops.is_empty() || !waiting.is_empty() {
-            self.data.update(|data| {
-                let lists = Arc::make_mut(&mut data.lists);
-                lists.bus_stops.extend(stops);
-                lists.waiting_places.extend(waiting);
-                lists.generation = lists.generation.saturating_add(1);
-            });
-        }
     }
 
     /// Build AI/pedestrian road lanes from the same .sli/.sco definitions and map
@@ -449,19 +333,6 @@ impl HostWorld {
     }
 }
 
-/// A passenger-cabin [passpos] transformed from the scenery object's local
-/// right/forward/up frame to the map's east/north/up frame.
-fn waiting_position(origin: DVec3, heading: f64, local: [f32; 3]) -> DVec3 {
-    let (sin, cos) = heading.to_radians().sin_cos();
-    let x = f64::from(local[0]);
-    let y = f64::from(local[1]);
-    DVec3::new(
-        origin.x + x * cos + y * sin,
-        origin.y - x * sin + y * cos,
-        origin.z + f64::from(local[2]),
-    )
-}
-
 /// The map of `server.cfg` is installed (in the original folder or the content folder), or
 /// what to do: the maps there are.
 pub fn check_map(root: &std::path::Path, map: &str) -> Result<(), String> {
@@ -502,15 +373,6 @@ mod tests {
         assert!(cache.get((0, 0)).is_some());
         assert_eq!(cache.loaded.len(), 2);
         assert_eq!(cache.order.len(), 2);
-    }
-
-    #[test]
-    fn waiting_places_respect_scenery_heading_and_height() {
-        let origin = DVec3::new(100.0, 200.0, 3.0);
-        let point = waiting_position(origin, 90.0, [2.0, 4.0, 1.0]);
-        assert!((point - DVec3::new(104.0, 198.0, 4.0)).length() < 0.00001);
-        let point = waiting_position(origin, 0.0, [2.0, 4.0, 1.0]);
-        assert!((point - DVec3::new(102.0, 204.0, 4.0)).length() < 0.00001);
     }
 
     #[test]

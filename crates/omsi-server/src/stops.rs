@@ -51,6 +51,14 @@ fn placed_stops(
     (stop, waiting)
 }
 
+/// MapIndex resolves terrain height and Chrono placement without borrowing
+/// an object with the same numeric ID from another tile.
+fn indexed_position(index: &omsi_world::map_index::MapIndex, tile: (i32, i32), id: i64) -> Option<DVec3> {
+    index.duplicates.get(&(tile, id)).map(|(pos, _)| *pos).or_else(|| {
+        index.objects.get(&id).and_then(|(owner, pos, _)| (*owner == tile).then_some(*pos))
+    })
+}
+
 fn unique_keys(keys: &[(i32, i32)]) -> Vec<(i32, i32)> {
     let mut seen = HashSet::with_capacity(keys.len());
     keys.iter().copied().filter(|key| seen.insert(*key)).collect()
@@ -95,17 +103,15 @@ impl HostWorld {
                 if !x.is_finite() || !y.is_finite() {
                     continue;
                 }
-                let ground = if definition.absolute_height() {
-                    0.0
-                } else {
-                    // Objects may be authored just outside their source tile.
-                    // Sample the tile actually below them, not its neighbour's
-                    // clamped border (same rule as the graphical placement).
-                    self.terrain_height(x, y)
-                        .map(f64::from)
-                        .unwrap_or(0.0)
-                };
-                let position = DVec3::new(x, y, object.pos[2] + ground);
+                let position = indexed_position(&self.index, key, object.id).unwrap_or_else(|| {
+                    let ground = if definition.absolute_height() {
+                        0.0
+                    } else {
+                        // Objects can stand over a neighbouring tile's terrain.
+                        self.terrain_height(x, y).map(f64::from).unwrap_or(0.0)
+                    };
+                    DVec3::new(x, y, object.pos[2] + ground)
+                });
                 if !position.is_finite() {
                     continue;
                 }
@@ -196,6 +202,18 @@ mod tests {
         );
         assert!(stop.is_none());
         assert!(places.is_empty());
+    }
+
+    #[test]
+    fn duplicate_object_ids_do_not_read_the_other_tiles_height() {
+        let mut index = omsi_world::map_index::MapIndex::default();
+        let a = DVec3::new(1.0, 2.0, 3.0);
+        let b = DVec3::new(10.0, 20.0, 30.0);
+        index.objects.insert(42, ((1, 2), a, [0.0; 3]));
+        assert_eq!(indexed_position(&index, (1, 2), 42), Some(a));
+        assert_eq!(indexed_position(&index, (3, 4), 42), None);
+        index.duplicates.insert(((3, 4), 42), (b, [0.0; 3]));
+        assert_eq!(indexed_position(&index, (3, 4), 42), Some(b));
     }
 
     #[test]
