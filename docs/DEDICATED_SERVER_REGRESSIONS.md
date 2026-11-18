@@ -68,11 +68,18 @@ preserves the `OMSI_HEIGHTPROFILE_GROUND` switch, alpha-only overlays and
 the overhead-spline exclusion rules. Tests exercise triangle-height sampling
 and road geometry overlapping two adjacent tiles.
 
-**Not yet parity:** the native executable limits its initial world to 64
-map tiles; does not dynamically stream client-interest neighborhoods,
-place scenery `[surface]` road plates/crossings, apply terrain holes and
-height deformations, synchronize all AI/passenger snapshots, or execute
-authoritative bus scripts. Omitted scenery surfaces, invalid splines and
+Static scenery `[surface]` objects can now contribute their first CPU
+O3D mesh to the road raster and wheel-probe grid, with proper world rotation
+and a bounded mesh-definition cache. The loader rejects animated, missing,
+corrupted and unusually large surface meshes, and leaves terrain-deformed
+crossings and explicit cutter-backed geometry pending rather than placing
+incorrect flat surfaces.
+
+**Not yet parity:** the native executable starts with a maximum of 64
+map tiles selected around the map's first entrypoint; it does not dynamically
+stream client-interest neighborhoods, apply crossing height deformation or
+terrain holes, synchronize all AI/passenger snapshots, or execute
+authoritative bus scripts. Rejected scenery surfaces, invalid splines and
 missing definitions remain visible as unresolved counts. The incomplete
 road mesh must not be treated as proof of full collision parity.
 
