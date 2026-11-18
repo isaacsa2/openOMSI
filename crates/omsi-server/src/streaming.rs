@@ -181,9 +181,7 @@ impl StreamWorker {
 
     /// Ok(None) means the worker rejected the requested region; Empty means
     /// still processing; Disconnected is fatal to future map streaming.
-    pub fn poll(
-        &self,
-    ) -> Result<Option<StreamUpdate>, std::sync::mpsc::TryRecvError> {
+    pub fn poll(&self) -> Result<Option<StreamUpdate>, std::sync::mpsc::TryRecvError> {
         self.results.try_recv()
     }
 
@@ -227,10 +225,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "omsi-stream-{}-{stamp}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("omsi-stream-{}-{stamp}", std::process::id()));
         let map_dir = root.join("Maps/Fixture");
         fs::create_dir_all(&map_dir).unwrap();
         fs::create_dir_all(root.join("Splines")).unwrap();
@@ -276,7 +271,10 @@ mod tests {
         worker.stop();
         omsi_cfg::remove_content_root(&root);
         fs::remove_dir_all(&root).unwrap();
-        assert!(streamed, "worker did not return the distant CPU map snapshot");
+        assert!(
+            streamed,
+            "worker did not return the distant CPU map snapshot"
+        );
     }
 
     #[test]
