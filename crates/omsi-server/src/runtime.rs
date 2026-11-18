@@ -4,6 +4,7 @@
 
 use crate::admin;
 use crate::simulation::CpuSimulation;
+use crate::streaming::{STREAM_TILE_LIMIT, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
 use crate::transport::HostTransport;
 use crate::{console, traffic};
@@ -13,12 +14,13 @@ use omsi_admin::{metrics::TickMeter, profiler::Profiler};
 use omsi_lan::admin::{ServerAdmin, ServerRules};
 use omsi_lan::server_cfg::ServerCfg;
 use omsi_net::{WorldInfo, ws::WorldCounts};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const INITIAL_TILE_LIMIT: usize = 64;
+const STREAM_REFRESH_TICKS: u64 = 180;
 
 /// Measure named stages only while the operator-enabled profiler is running.
 fn profile<T>(profiler: &mut Profiler, name: &'static str, f: impl FnOnce() -> T) -> T {
@@ -238,7 +240,7 @@ pub fn free_roam(
         signals.network,
         random,
         map.global.traffic_density_road.clone(),
-        keys,
+        keys.clone(),
         0,
     );
     ai.lights = signals.controllers;
@@ -322,6 +324,7 @@ pub fn free_roam(
     };
     let mut pacer = TickPacer::new(Instant::now());
     let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
+    let mut active_keys = keys.clone();
     let mut clock = initial_time;
     let mut n = 0_u64;
     let mut report = Instant::now();
@@ -368,6 +371,80 @@ pub fn free_roam(
         let authoritative = clock + admin_state.shift;
         net.session_mut().set_clock(&date, authoritative);
         profile(&mut profiler, "network", || net.tick(FIXED_DT));
+        // Before the next physics tick, make road and collision data available
+        // where the real clients are driving, even when far from the first
+        // entrypoint. The limited relay has no server-owned AI to relocate.
+        // Refresh at most once every three seconds, and only for a changed
+        // active region, to avoid re-parsing the map on every network tick.
+        if n % STREAM_REFRESH_TICKS == 0 {
+            let centers: Vec<(f64, f64)> = net
+                .session()
+                .peers()
+                .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
+                .map(|peer| (peer.pose.x, peer.pose.y))
+                .collect();
+            let desired = interest_tiles(&map.global, &keys, &centers, STREAM_TILE_LIMIT);
+            let current: BTreeSet<_> = active_keys.iter().copied().collect();
+            let next: BTreeSet<_> = desired.iter().copied().collect();
+            if next != current {
+                profile(&mut profiler, "tile_stream", || {
+                    let old_clocks: Vec<_> = sim
+                        .traffic
+                        .controller_of_object
+                        .iter()
+                        .filter_map(|(object, slot)| {
+                            sim.traffic
+                                .lights
+                                .get(*slot)
+                                .map(|ctl| (*object, ctl.time, ctl.held))
+                        })
+                        .collect();
+                    let new_signals = map.network_with_traffic_lights(&desired);
+                    if new_signals.network.lanes.is_empty() {
+                        log::warn!("native tile stream: no road lanes in selected area; keeping the previous network");
+                        return;
+                    }
+                    let surfaces = map.install_spline_ground_surfaces(&desired);
+                    let _stops = map.install_stop_lists(&desired);
+                    let collisions = map
+                        .install_static_box_collisions(&desired, &new_signals.network.lanes);
+                    let random = omsi_sim::ai_traffic::setup::RandomTypes {
+                        types: Vec::new(),
+                        groups: Vec::new(),
+                        group_curves: false,
+                        group_uvg: Vec::new(),
+                        uvg_defaults: Vec::new(),
+                    };
+                    let mut next_traffic = traffic::assemble(
+                        root,
+                        new_signals.network,
+                        random,
+                        map.global.traffic_density_road.clone(),
+                        desired.clone(),
+                        0,
+                    );
+                    next_traffic.lights = new_signals.controllers;
+                    next_traffic.controller_of_object = new_signals.controller_of_object;
+                    next_traffic.day_time = sim.traffic.day_time;
+                    next_traffic.time_scale = sim.traffic.time_scale;
+                    for (object, time, held) in old_clocks {
+                        next_traffic.set_light_state(object, time, held);
+                    }
+                    sim.traffic = next_traffic;
+                    map.prune_streamed_ground(&desired);
+                    log::info!(
+                        "native tile stream: {} active tiles, {} road lanes, {} wheel meshes, {} boxes and {} collision meshes, {} pending surfaces",
+                        desired.len(),
+                        sim.traffic.net.lanes.len(),
+                        surfaces.wheel_meshes,
+                        collisions.static_boxes,
+                        collisions.static_meshes,
+                        surfaces.pending_scenery_surfaces
+                    );
+                    active_keys = desired;
+                });
+            }
+        }
         profile(&mut profiler, "interest", || {
             sim.sync_host_clients(net.session_mut())
         });
