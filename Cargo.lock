@@ -4527,6 +4527,7 @@ dependencies = [
  "omsi-geometry",
  "omsi-lan",
  "omsi-map",
+ "omsi-o3d",
  "omsi-net",
  "omsi-scenery",
  "omsi-sim",

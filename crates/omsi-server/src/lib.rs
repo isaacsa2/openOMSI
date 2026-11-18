@@ -8,6 +8,7 @@
 pub mod admin;
 pub mod clock;
 pub mod collision;
+pub mod collision_mesh;
 pub mod commands;
 pub mod console;
 pub mod fleet;

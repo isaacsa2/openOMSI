@@ -14,6 +14,7 @@ omsi-sim = { path = "../omsi-sim" }
 omsi-map = { path = "../omsi-map" }
 omsi-world = { path = "../omsi-world" }
 omsi-geometry = { path = "../omsi-geometry" }
+omsi-o3d = { path = "../omsi-o3d" }
 omsi-scenery = { path = "../omsi-scenery" }
 omsi-content = { path = "../omsi-content" }
 anyhow.workspace = true

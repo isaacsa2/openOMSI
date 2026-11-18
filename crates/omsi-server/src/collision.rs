@@ -21,6 +21,9 @@ const LOW_OBSTACLE: f32 = 0.5;
 pub struct CollisionCounts {
     pub loaded_tiles: usize,
     pub static_boxes: usize,
+    pub static_meshes: usize,
+    /// Meshes with missing, unsupported or oversized files.
+    pub pending_tilted: usize,
     /// Collision meshes have different shapes and must be loaded as meshes.
     pub pending_meshes: usize,
     pub pending_attachments: usize,
@@ -30,7 +33,8 @@ pub struct CollisionCounts {
 
 impl CollisionCounts {
     pub fn incomplete(&self) -> bool {
-        self.pending_meshes > 0 || self.pending_attachments > 0 || self.missing_definitions > 0
+        self.pending_meshes > 0 || self.pending_tilted > 0
+            || self.pending_attachments > 0 || self.missing_definitions > 0
     }
 }
 
@@ -160,6 +164,7 @@ impl HostWorld {
         let road_points = RoadPoints::build(lanes);
         let root = self.data.snapshot().map.root.clone();
         let mut collision = CollisionWorld::default();
+        let mut meshes = crate::collision_mesh::MeshCache::new();
 
         for key in keys.iter().copied().collect::<BTreeSet<_>>() {
             let Some(tile) = self.load_tile(key) else {
@@ -205,15 +210,32 @@ impl HostWorld {
                     };
                     DVec3::new(base.x, base.y, obj.pos[2] + ground)
                 });
+                // Tilted collision meshes must be transformed in full 3D:
+                // a yaw-only approximation would make a sloping bridge solid.
+                if obj.rot[1] != 0.0 || obj.rot[2] != 0.0 {
+                    stats.pending_tilted += 1;
+                    continue;
+                }
                 match static_box(&def, obj.id, pos, obj.rot[0], &road_points) {
                     Ok(b) => collision.add(b),
-                    Err(Exclusion::MeshRequired) => stats.pending_meshes += 1,
+                    Err(Exclusion::MeshRequired) => {
+                        if let Some(shape) = meshes.load(&def) {
+                            if !shape.parts.is_empty() {
+                                collision.add_mesh(omsi_sim::collision::MeshObstacle::new(
+                                    shape, pos, obj.rot[0], obj.id,
+                                ));
+                            }
+                        } else {
+                            stats.pending_meshes += 1;
+                        }
+                    },
                     Err(Exclusion::RoadThrough) => stats.avoided_road_walls += 1,
                     Err(Exclusion::NotSolid | Exclusion::MissingBox | Exclusion::UnsafeBox) => {}
                 }
             }
         }
         stats.static_boxes = collision.boxes.len();
+        stats.static_meshes = collision.meshes.len();
         self.data.update(|data| {
             let lists = Arc::make_mut(&mut data.lists);
             lists.collision = Arc::new(collision);
