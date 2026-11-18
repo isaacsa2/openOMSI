@@ -43,7 +43,8 @@ impl CpuSimulation {
         let started = Instant::now();
         let snapshot = self.world.snapshot();
         self.traffic.advance(dt, None);
-        self.people.tick_inner(dt, &*snapshot, None, Some(&self.traffic));
+        self.people
+            .tick_inner(dt, &*snapshot, None, Some(&self.traffic));
         self.people
             .tick_done(dt, &*snapshot, started.elapsed().as_secs_f64() * 1000.0);
     }
