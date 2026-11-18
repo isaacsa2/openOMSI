@@ -68,14 +68,20 @@ fn stale_render_targets_are_released_without_a_new_resolution() {
     assert_eq!(renderer.targets.scale_targets.len(), 2);
 
     // No new target is requested after a resize: a steady view still reclaims the old one.
-    renderer.targets.target_use.insert((32, 32), Instant::now() - Duration::from_secs(6));
+    renderer
+        .targets
+        .target_use
+        .insert((32, 32), Instant::now() - Duration::from_secs(6));
     renderer.targets.evicted_at = Instant::now() - Duration::from_secs(2);
     renderer.evict_idle_targets();
     assert!(!renderer.targets.scale_targets.contains_key(&(32, 32)));
     assert!(renderer.targets.scale_targets.contains_key(&(64, 64)));
 
     // Don't scan again on every view (window, mirrors, VR eyes) of the same frame.
-    renderer.targets.target_use.insert((64, 64), Instant::now() - Duration::from_secs(6));
+    renderer
+        .targets
+        .target_use
+        .insert((64, 64), Instant::now() - Duration::from_secs(6));
     renderer.evict_idle_targets();
     assert!(renderer.targets.scale_targets.contains_key(&(64, 64)));
 
