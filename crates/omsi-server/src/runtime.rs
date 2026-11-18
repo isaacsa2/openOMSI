@@ -376,9 +376,9 @@ pub fn free_roam(
         profile(&mut profiler, "network", || net.tick(FIXED_DT));
         // Parse remote tile neighborhoods on a dedicated worker. Never let
         // expensive map IO or collision rebuilding stall UDP keepalives.
-        if let Some(completed) = streamer.poll() {
-            stream_busy = false;
-            if let Some(update) = completed {
+        match streamer.poll() {
+            Ok(Some(update)) => {
+                stream_busy = false;
                 active_keys = profile(&mut profiler, "tile_stream_apply", || {
                     apply_free_roam_update(
                         &mut sim,
@@ -387,6 +387,12 @@ pub fn free_roam(
                         update,
                     )
                 });
+            }
+            Ok(None) => stream_busy = false,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                log::error!("native CPU tile stream worker stopped unexpectedly");
+                break;
             }
         }
         if !stream_busy && n % STREAM_REFRESH_TICKS == 0 {
