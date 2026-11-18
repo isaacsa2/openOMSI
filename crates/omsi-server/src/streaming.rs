@@ -29,9 +29,7 @@ pub fn interest_tiles(
     };
     let centers: Vec<_> = player_positions
         .iter()
-        .filter(|(x, y)| {
-            x.is_finite() && y.is_finite() && x.abs() <= 1.0e8 && y.abs() <= 1.0e8
-        })
+        .filter(|(x, y)| x.is_finite() && y.is_finite() && x.abs() <= 1.0e8 && y.abs() <= 1.0e8)
         .map(|&(x, y)| omsi_map::world_to_tile_local(x, y).0)
         .filter(|key| known.contains(key))
         .collect();
@@ -146,9 +144,7 @@ impl StreamWorker {
                 while let Ok(keys) = pending.recv() {
                     let signals = world.network_with_traffic_lights(&keys);
                     if signals.network.lanes.is_empty() {
-                        log::warn!(
-                            "native tile stream: no road lanes in the selected region"
-                        );
+                        log::warn!("native tile stream: no road lanes in the selected region");
                         if complete.send(None).is_err() {
                             break;
                         }
@@ -233,7 +229,10 @@ mod tests {
         assert_eq!(&selected[..3], &[(15, 15), (0, 0), (1, 0)]);
         assert!(selected.contains(&(14, 15)));
         assert!(selected.contains(&(16, 16)));
-        assert_eq!(selected.len(), selected.iter().copied().collect::<BTreeSet<_>>().len());
+        assert_eq!(
+            selected.len(),
+            selected.iter().copied().collect::<BTreeSet<_>>().len()
+        );
     }
 
     #[test]
@@ -272,6 +271,10 @@ mod tests {
             6,
         );
         assert_eq!(&selected[..2], &[(5, 5), (14, 14)]);
-        assert!(selected.iter().any(|&(x, y)| x.abs_diff(5) == 1 || y.abs_diff(5) == 1));
+        assert!(
+            selected
+                .iter()
+                .any(|&(x, y)| x.abs_diff(5) == 1 || y.abs_diff(5) == 1)
+        );
     }
 }
