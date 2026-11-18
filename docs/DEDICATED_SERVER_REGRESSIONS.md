@@ -35,6 +35,27 @@ represent a populated route and traffic target is deliberately zero while
 road collision and schedules are still being migrated. This is **not** a
 claim of 60 live TPS, passenger correctness or playable multiplayer.
 
+## Partial CPU static collision and traffic light migration
+
+The headless map loader can publish static `[boundingbox]` obstacles into
+`WorldData::lists.collision`, using the map's world placement, while
+avoiding oversized road-through boxes that would create invisible walls.
+`simcheck` reports the remaining collision meshes, attached objects and
+missing definitions. **It is not yet complete collision parity**: exact
+`[collision_mesh]` triangles, road/crossing surfaces, attached/parked objects
+and deformable terrain still require the dedicated CPU placement path.
+
+The CPU lane loader can now assign `[use_traffic_light]` indices to
+crossing-owned `TrafficLightController` programs, retaining the original
+stop/jump phase rules and stable object IDs. The diagnostic assembles these
+controllers into `TrafficSim`. Script-driven signal lamps, parented objects,
+rail interlocks and timetable integration remain required acceptance tests.
+
+These are **simulation foundations**, not authorization to call
+`HostTransport::ready()` for a real map. Missing or unsupported collision
+and signal records must stay visible as unresolved, not be silently converted
+into boxes, ignored signals or a false-ready server.
+
 ## Manual end-to-end acceptance gates — blocking
 
 1. **No GPU/no display:** on a clean Linux VPS without X11, Wayland, Vulkan,
