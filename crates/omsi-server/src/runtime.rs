@@ -4,7 +4,7 @@
 
 use crate::admin;
 use crate::simulation::CpuSimulation;
-use crate::streaming::{STREAM_TILE_LIMIT, interest_tiles};
+use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
 use crate::transport::HostTransport;
 use crate::{console, traffic};
@@ -324,6 +324,9 @@ pub fn free_roam(
     };
     let mut pacer = TickPacer::new(Instant::now());
     let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
+    let stream_global = map.global.clone();
+    let streamer = StreamWorker::start(map).context("starting CPU tile stream worker")?;
+    let mut stream_busy = false;
     let mut active_keys = keys.clone();
     let mut clock = initial_time;
     let mut n = 0_u64;
@@ -371,78 +374,36 @@ pub fn free_roam(
         let authoritative = clock + admin_state.shift;
         net.session_mut().set_clock(&date, authoritative);
         profile(&mut profiler, "network", || net.tick(FIXED_DT));
-        // Before the next physics tick, make road and collision data available
-        // where the real clients are driving, even when far from the first
-        // entrypoint. The limited relay has no server-owned AI to relocate.
-        // Refresh at most once every three seconds, and only for a changed
-        // active region, to avoid re-parsing the map on every network tick.
-        if n % STREAM_REFRESH_TICKS == 0 {
+        // Parse remote tile neighborhoods on a dedicated worker. Never let
+        // expensive map IO or collision rebuilding stall UDP keepalives.
+        if let Some(completed) = streamer.poll() {
+            stream_busy = false;
+            if let Some(update) = completed {
+                active_keys = profile(&mut profiler, "tile_stream_apply", || {
+                    apply_free_roam_update(
+                        &mut sim,
+                        root,
+                        &stream_global.traffic_density_road,
+                        update,
+                    )
+                });
+            }
+        }
+        if !stream_busy && n % STREAM_REFRESH_TICKS == 0 {
             let centers: Vec<(f64, f64)> = net
                 .session()
                 .peers()
                 .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
                 .map(|peer| (peer.pose.x, peer.pose.y))
                 .collect();
-            let desired = interest_tiles(&map.global, &keys, &centers, STREAM_TILE_LIMIT);
+            let desired = interest_tiles(&stream_global, &keys, &centers, STREAM_TILE_LIMIT);
             let current: BTreeSet<_> = active_keys.iter().copied().collect();
             let next: BTreeSet<_> = desired.iter().copied().collect();
             if next != current {
-                profile(&mut profiler, "tile_stream", || {
-                    let old_clocks: Vec<_> = sim
-                        .traffic
-                        .controller_of_object
-                        .iter()
-                        .filter_map(|(object, slot)| {
-                            sim.traffic
-                                .lights
-                                .get(*slot)
-                                .map(|ctl| (*object, ctl.time, ctl.held))
-                        })
-                        .collect();
-                    let new_signals = map.network_with_traffic_lights(&desired);
-                    if new_signals.network.lanes.is_empty() {
-                        log::warn!("native tile stream: no road lanes in selected area; keeping the previous network");
-                        return;
-                    }
-                    let surfaces = map.install_spline_ground_surfaces(&desired);
-                    let _stops = map.install_stop_lists(&desired);
-                    let collisions = map
-                        .install_static_box_collisions(&desired, &new_signals.network.lanes);
-                    let random = omsi_sim::ai_traffic::setup::RandomTypes {
-                        types: Vec::new(),
-                        groups: Vec::new(),
-                        group_curves: false,
-                        group_uvg: Vec::new(),
-                        uvg_defaults: Vec::new(),
-                    };
-                    let mut next_traffic = traffic::assemble(
-                        root,
-                        new_signals.network,
-                        random,
-                        map.global.traffic_density_road.clone(),
-                        desired.clone(),
-                        0,
-                    );
-                    next_traffic.lights = new_signals.controllers;
-                    next_traffic.controller_of_object = new_signals.controller_of_object;
-                    next_traffic.day_time = sim.traffic.day_time;
-                    next_traffic.time_scale = sim.traffic.time_scale;
-                    for (object, time, held) in old_clocks {
-                        next_traffic.set_light_state(object, time, held);
-                    }
-                    sim.traffic = next_traffic;
-                    map.prune_streamed_ground(&desired);
-                    log::info!(
-                        "native tile stream: {} active tiles, {} road lanes, {} wheel meshes, {} boxes and {} collision meshes, {} pending surfaces",
-                        desired.len(),
-                        sim.traffic.net.lanes.len(),
-                        surfaces.wheel_meshes,
-                        collisions.static_boxes,
-                        collisions.static_meshes,
-                        surfaces.pending_scenery_surfaces
-                    );
-                    active_keys = desired;
-                });
+                stream_busy = streamer.request(desired);
+                if !stream_busy {
+                    log::warn!("native tile stream worker disconnected; retaining the previous world");
+                }
             }
         }
         profile(&mut profiler, "interest", || {
@@ -480,6 +441,7 @@ pub fn free_roam(
         std::thread::sleep(pacer.after_tick(Instant::now()).wait);
     }
     net.session_mut().leave();
+    streamer.stop();
     drop(mods_server);
     omsi_lan::gateway::close_public_gateway();
     eprintln!("Dedicated relay stopped cleanly after {n} ticks");
