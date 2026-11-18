@@ -99,12 +99,14 @@ mod tests {
         let mut b = LanSession::join_addr(vec![addr], None, "beta", expected.clone()).unwrap();
         let pa = Pose {
             bus: "Vehicles/Alpha.bus".into(),
+            flags: omsi_net::FLAG_VEHICLE,
             name: "alpha".into(),
             x: 101.0,
             ..Default::default()
         };
         let pb = Pose {
             bus: "Vehicles/Beta.bus".into(),
+            flags: omsi_net::FLAG_VEHICLE,
             name: "beta".into(),
             x: 202.0,
             ..Default::default()
@@ -117,8 +119,8 @@ mod tests {
             if a.connected
                 && b.connected
                 && host.session().peer_count() == 2
-                && a.peers().any(|p| p.has_info && p.pose.name == "beta")
-                && b.peers().any(|p| p.has_info && p.pose.name == "alpha")
+                && a.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "beta")
+                && b.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "alpha")
             {
                 exchanged = true;
                 break;
