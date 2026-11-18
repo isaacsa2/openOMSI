@@ -9,6 +9,7 @@ pub mod admin;
 pub mod clock;
 pub mod commands;
 pub mod console;
+pub mod transport;
 pub mod fleet;
 pub mod metar;
 pub mod startup;
