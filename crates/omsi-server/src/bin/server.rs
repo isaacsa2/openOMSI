@@ -56,5 +56,5 @@ fn main() -> Result<()> {
     runtime::allow_free_roam(&parsed)?;
     let plan = startup::prepare(&config, &root, None, 256, env!("CARGO_PKG_VERSION"),
         &|_, _| String::new())?;
-    runtime::free_roam(&root, &plan.config, plan.weather.as_deref(), max_ticks)
+    runtime::free_roam(&root, &plan, max_ticks)
 }

@@ -46,8 +46,9 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
         "experimental relay requires passengers=0, timetable=0, traffic=0");
     ensure!(!cfg.accept_uploads && !cfg.share_maps && cfg.parked_buses == 0,
         "experimental relay requires accept_uploads=0, share_maps=0, parked_buses=0");
-    ensure!(!cfg.public_server && !cfg.tunnel,
-        "experimental relay must not be listed or tunneled automatically");
+    ensure!(!cfg.public_server && !cfg.tunnel
+        && cfg.public_address.eq_ignore_ascii_case("off"),
+        "experimental relay requires public_server=0, tunnel=0, public_address=off");
     ensure!(!cfg.real_time && !cfg.metar_sync,
         "experimental relay requires real_time=0 and metar_sync=0");
     ensure!(cfg.date.is_some(), "experimental relay requires an explicit server.cfg date");
@@ -57,10 +58,11 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
 /// Launch a bounded CPU map and a LAN host. Explicitly not full sim parity.
 pub fn free_roam(
     root: &Path,
-    cfg: &ServerCfg,
-    weather: Option<&str>,
+    plan: &crate::startup::LaunchPlan,
     max_ticks: Option<u64>,
 ) -> Result<()> {
+    let cfg = &plan.config;
+    let weather = plan.weather.as_deref();
     allow_free_roam(cfg)?;
     let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
     let initial_time = checked_clock(&cfg.time)?;
@@ -93,9 +95,10 @@ pub fn free_roam(
         time: initial_time, weather: weather.unwrap_or_default().to_owned(),
         ..Default::default()
     };
-    let mut net = HostTransport::bind(cfg.port, &cfg.name, world, cfg.max_players)
+    // Use the configured admission path: hardware bans, player limit and
+    // protocol discovery must be the same as the legacy host.
+    let mut net = HostTransport::bind_configured(plan, world)
         .with_context(|| format!("binding dedicated UDP port {}", cfg.port))?;
-    omsi_lan::bans::sync_host(net.session_mut());
     net.session_mut().clock_speed = cfg.time_speed;
     // Do not open the gateway or allow players during CPU map initialization.
     let info = admin::info_of(cfg, env!("CARGO_PKG_VERSION"));
@@ -126,7 +129,9 @@ pub fn free_roam(
         }
         let started = Instant::now();
         let positions: HashMap<u32, (DVec3, f64)> = net.session().peers()
-            .filter(|peer| peer.has_pose && peer.has_info)
+            .filter(|peer| peer.has_pose && peer.has_info
+                && peer.pose.x.is_finite() && peer.pose.y.is_finite()
+                && peer.pose.z.is_finite() && peer.pose.heading.is_finite())
             .map(|peer| (peer.pose.id,
                 (DVec3::new(peer.pose.x, peer.pose.y, peer.pose.z), f64::from(peer.pose.heading))))
             .collect();

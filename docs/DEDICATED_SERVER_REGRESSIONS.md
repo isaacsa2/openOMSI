@@ -68,7 +68,7 @@ snapshot transfer are still incomplete.
 For an **isolated test only**, configure `server.cfg` with:
 `date = 1989-05-30`, `traffic = 0`, `timetable = 0`,
 `passengers = 0`, `share_maps = 0`, `accept_uploads = 0`,
-`parked_buses = 0`, `public_server = 0`, `tunnel = 0`,
+`parked_buses = 0`, `public_server = 0`, `tunnel = 0`, `public_address = off`,
 `real_time = 0` and `metar_sync = 0`. Other values fail closed before
 listening. The server never executes a remote shell and does not advertise
 itself publicly.
