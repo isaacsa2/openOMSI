@@ -57,6 +57,11 @@ fn main() -> Result<()> {
     anyhow::ensure!(root.is_dir(), "OMSI root must be an installed directory");
     let config = PathBuf::from(config);
     anyhow::ensure!(config.is_file(), "server.cfg must already exist");
+    // The graphical server registers its installed content roots before it
+    // loads global.cfg. Without this, maps with no [entrypoints] list cannot
+    // discover entrypoint .sco definitions via find_in_roots(), and other
+    // scenery/vehicle references may be missed by the CPU map index.
+    omsi_cfg::add_content_root(root.clone());
     // Validate operator restrictions before initializing any administration,
     // global upload policy, gateway or console reader.
     let parsed = omsi_lan::server_cfg::ServerCfg::load(&config, 256)?;
