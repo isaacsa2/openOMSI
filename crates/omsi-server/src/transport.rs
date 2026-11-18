@@ -39,6 +39,9 @@ impl HostTransport {
     ) -> std::io::Result<Self> {
         let cfg = &plan.config;
         let mut host = Self::bind(cfg.port, &cfg.name, world, cfg.max_players)?;
+        // The low-level session defaults to voice enabled. A dedicated host
+        // must enforce server.cfg's explicit voice=0 before admitting anyone.
+        host.session.set_voice_policy(cfg.voice);
         omsi_lan::bans::sync_host(&mut host.session);
         host.session.tell_strangers_the_session();
         Ok(host)
