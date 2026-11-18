@@ -11,6 +11,7 @@ pub mod commands;
 pub mod console;
 pub mod fleet;
 pub mod lanes;
+pub mod interest;
 pub mod metar;
 pub mod simulation;
 pub mod startup;

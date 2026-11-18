@@ -23,6 +23,15 @@ pub struct CpuSimulation {
 }
 
 impl CpuSimulation {
+    /// Install authoritative multiplayer interest and passenger ownership
+    /// before the next physics step. A purely offline simulation may omit it.
+    pub fn sync_host_clients(
+        &mut self,
+        session: &mut omsi_net::LanSession,
+    ) -> crate::interest::InterestUpdate {
+        crate::interest::update_host_interest(session, &mut self.traffic, &mut self.people)
+    }
+
     pub fn new(root: &Path, world: Arc<WorldCell>, traffic: TrafficSim, max_people: usize) -> Self {
         Self {
             world,
