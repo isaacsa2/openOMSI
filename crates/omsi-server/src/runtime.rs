@@ -109,11 +109,9 @@ pub fn free_roam(
     net.ready();
     let mut meter = TickMeter::new(60.0);
     let mut profiler = Profiler::new();
-    let mut admin_state = ServerAdmin {
-        password: cfg.admin_password.clone(),
-        moderator_password: cfg.moderator_password.clone(),
-        ..Default::default()
-    };
+    let mut admin_state = ServerAdmin::default();
+    admin_state.password = cfg.admin_password.clone();
+    admin_state.moderator_password = cfg.moderator_password.clone();
     let rules = ServerRules {
         real_time: false, metar: false, traffic_max: 0,
         notice_ok: &|notice| notice.len() <= 2048,
