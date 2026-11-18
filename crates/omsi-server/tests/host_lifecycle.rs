@@ -65,9 +65,7 @@ fn a_departed_client_releases_its_slot_and_its_bus_does_not_become_a_ghost() {
     for _ in 0..120 {
         host.tick(0.06);
         a.tick(0.06, &pa);
-        if host.session().peer_count() == 1
-            && !a.peers().any(|p| p.pose.name == "beta")
-        {
+        if host.session().peer_count() == 1 && !a.peers().any(|p| p.pose.name == "beta") {
             cleaned = true;
             break;
         }
@@ -103,8 +101,7 @@ fn joining_player_receives_the_latest_authoritative_clock_and_weather() {
     host.session_mut().set_weather("Weather/Herbst.owt");
     host.ready();
 
-    let mut client =
-        LanSession::join_addr(vec![address(&host)], None, "alpha", original).unwrap();
+    let mut client = LanSession::join_addr(vec![address(&host)], None, "alpha", original).unwrap();
     let pose = driver("alpha", 20.0);
     for _ in 0..200 {
         host.tick(0.06);
