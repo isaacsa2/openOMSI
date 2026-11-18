@@ -30,6 +30,20 @@ impl HostTransport {
         })
     }
 
+    /// Production entrypoint. Call `startup::prepare` first to install
+    /// the persistent bans, hardware policy and server.cfg transfer rules.
+    /// The bare bind() is suitable for isolated protocol tests only.
+    pub fn bind_configured(
+        plan: &crate::startup::LaunchPlan,
+        world: WorldInfo,
+    ) -> std::io::Result<Self> {
+        let cfg = &plan.config;
+        let mut host = Self::bind(cfg.port, &cfg.name, world, cfg.max_players)?;
+        omsi_lan::bans::sync_host(&mut host.session);
+        host.session.tell_strangers_the_session();
+        Ok(host)
+    }
+
     /// Call this only once the CPU world, collisions, traffic and passenger
     /// simulation are fully installed. This is an explicit admission barrier.
     pub fn ready(&mut self) {
@@ -39,6 +53,9 @@ impl HostTransport {
     /// The networking tick is independent of the render loop. It intentionally
     /// exposes no direct player-supplied script, disk or transfer operation.
     pub fn tick(&mut self, dt_seconds: f32) -> Vec<u32> {
+        // Bans and hardware admission requirements can change while a session
+        // is running. The graphical LAN host refreshes them every frame too.
+        omsi_lan::bans::sync_host(&mut self.session);
         self.session.tick(dt_seconds, &self.host_pose)
     }
 
