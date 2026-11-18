@@ -58,6 +58,28 @@ For a local web admin/TPS panel, set a unique `admin_password` of at least
 admin URL `http://127.0.0.1:27025/admin/` on the server itself. With a blank
 password, web admin is intentionally disabled.
 
+## Streaming-test addendum: drive beyond the starting area
+
+The native experimental host initially loads 64 tiles around the map's
+entrypoints. On a larger map, the CPU world may select up to 192 active tiles,
+prioritizing the tile under every connected driver and filling surrounding
+neighborhoods. A dedicated map worker builds new lanes, road/wheel surfaces,
+stop lists, collisions and traffic-light programs **without blocking UDP
+keepalives**; the simulation installs the completed region on its next tick.
+
+For a manual test, drive away from the starting area in a compatible client.
+Keep another player in the spawn area, then continue across at least several
+tile boundaries. Look for `native tile stream:` in the host console and
+verify that both players stay connected and their buses continue to update.
+Return to the starting area, repeat the journey and reconnect another
+client. Note stalls, new invisible walls, missing signals and unexpected
+terrain or surface heights. These remain open parity risks until tested on
+licensed maps, especially with complex crossings and Chrono content.
+
+This experimental worker is **not** a replacement for scheduled AI or
+passenger streaming. AI, pedestrians and timetables remain disabled, and
+the server does not authoritatively simulate or execute players' bus scripts.
+
 ## Real-client multiplayer test procedure (2–3 drivers)
 
 Use the **same PR #405 client build** on every testing PC, preferably the exact
