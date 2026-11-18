@@ -2,12 +2,20 @@
 //! The synthetic content is used solely inside CI and is not redistributed.
 
 use std::fs;
+use std::net::TcpListener;
 use std::path::Path;
 use std::process::Command;
 
 fn write(path: &Path, content: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, content).unwrap();
+}
+
+/// server.cfg deliberately clamps port=0 to 1. Pick an actual unprivileged
+/// free TCP port for the host and gateway instead.
+fn free_port() -> u16 {
+    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    socket.local_addr().unwrap().port()
 }
 
 #[test]
@@ -34,9 +42,16 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         "[length]\n40\n[texture]\nroad.bmp\n[profile]\n0\n[profilepnt]\n-1.5\n0\n0\n1\n[profilepnt]\n1.5\n0\n1\n1\n[path]\n0\n0\n0\n3\n0\n",
     );
     let cfg = root.join("server-test.cfg");
+    let port = free_port();
+    let mut web_port = free_port();
+    while web_port == port {
+        web_port = free_port();
+    }
     write(
         &cfg,
-        "name = CI Headless Fixture\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = 09:00\ntraffic = 0\ntimetable = 0\npassengers = 0\nport = 0\nweb_port = 0\nmax_players = 2\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n",
+        &format!(
+            "name = CI Headless Fixture\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = 09:00\ntraffic = 0\ntimetable = 0\npassengers = 0\nport = {port}\nweb_port = {web_port}\nmax_players = 2\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n"
+        ),
     );
     let result = Command::new(env!("CARGO_BIN_EXE_omsi-server"))
         .arg(&root)
