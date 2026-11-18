@@ -108,7 +108,7 @@ fn native_binary_relays_two_clients_without_a_host_vehicle() {
         ..Default::default()
     };
     let mut alpha = LanSession::join_addr(vec![addr], None, "alpha", world.clone()).unwrap();
-    let mut beta = LanSession::join_addr(vec![addr], None, "beta", world).unwrap();
+    let mut beta = LanSession::join_addr(vec![addr], None, "beta", world.clone()).unwrap();
     let pa = driver("alpha", 101.0);
     let pb = driver("beta", 202.0);
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -144,6 +144,46 @@ fn native_binary_relays_two_clients_without_a_host_vehicle() {
         1
     );
     assert_eq!(beta.peers().filter(|p| p.has_info && p.has_pose).count(), 1);
-    alpha.leave();
+    // A departed client must free the configured slot in the actual binary,
+    // and no stale vehicle may survive into the next driver's session.
     beta.leave();
+    drop(beta);
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut cleared = false;
+    while Instant::now() < deadline {
+        alpha.tick(0.05, &pa);
+        if !alpha.peers().any(|p| p.pose.name == "beta") {
+            cleared = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(cleared, "native process retained a departed driver");
+    let mut charlie = LanSession::join_addr(vec![addr], None, "charlie", world).unwrap();
+    let pc = driver("charlie", 303.0);
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut replaced = false;
+    while Instant::now() < deadline {
+        if let Some(status) = server.process.try_wait().unwrap() {
+            panic!("native server exited before reconnect: {status}");
+        }
+        alpha.tick(0.05, &pa);
+        charlie.tick(0.05, &pc);
+        if charlie.connected
+            && alpha
+                .peers()
+                .any(|p| p.has_info && p.has_pose && p.pose.name == "charlie")
+            && charlie
+                .peers()
+                .any(|p| p.has_info && p.has_pose && p.pose.name == "alpha")
+        {
+            replaced = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(replaced, "native process did not reuse the released player slot");
+    assert!(!alpha.peers().any(|p| p.pose.name == "beta"));
+    alpha.leave();
+    charlie.leave();
 }
