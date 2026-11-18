@@ -56,6 +56,33 @@ These are **simulation foundations**, not authorization to call
 and signal records must stay visible as unresolved, not be silently converted
 into boxes, ignored signals or a false-ready server.
 
+## Experimental independent host process
+
+The first **native renderer-free** `omsi-server` executable now exists. It
+has a 60 Hz loop, actual network relay, restricted admin/console, CPU-only map
+and road data, collision-box checks, traffic-light initialization, and CPU
+simulation ticks. **This does not constitute full OMSI server parity**:
+vehicle script ownership, full collisions, scheduled AI traffic and passenger
+snapshot transfer are still incomplete.
+
+For an **isolated test only**, configure `server.cfg` with:
+`date = 1989-05-30`, `traffic = 0`, `timetable = 0`,
+`passengers = 0`, `share_maps = 0`, `accept_uploads = 0`,
+`parked_buses = 0`, `public_server = 0`, `tunnel = 0`,
+`real_time = 0` and `metar_sync = 0`. Other values fail closed before
+listening. The server never executes a remote shell and does not advertise
+itself publicly.
+
+```sh
+cargo run --locked -p omsi-server --bin omsi-server -- /path/to/OMSI2 server.cfg --experimental-free-roam
+```
+
+The `--ticks 600` option bounds a diagnostic run to 600 ticks.
+Without `--experimental-free-roam`, the native binary deliberately
+**refuses multiplayer admission**, keeping production with `openomsi --server`.
+Users must not treat a successful relay connection as proof of vehicle,
+map, timetable, or passenger authority.
+
 ## Manual end-to-end acceptance gates — blocking
 
 1. **No GPU/no display:** on a clean Linux VPS without X11, Wayland, Vulkan,

@@ -22,3 +22,7 @@ ureq.workspace = true
 glam.workspace = true
 hashbrown.workspace = true
 omsi-vehicle = { path = "../omsi-vehicle" }
+
+[[bin]]
+name = "omsi-server"
+path = "src/bin/server.rs"
