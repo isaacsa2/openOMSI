@@ -44,7 +44,7 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
     // No [entrypoints] section: the old server discovers this .sco marker.
     write(
         &root.join("Sceneryobjects/Generic/entrypoint_bus.sco"),
-        "[entrypoint]\\n[onlyeditor]\\n",
+        "[entrypoint]\n[onlyeditor]\n",
     );
     let cfg = root.join("server-test.cfg");
     let port = free_port();
