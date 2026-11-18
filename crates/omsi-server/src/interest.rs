@@ -127,6 +127,7 @@ mod tests {
     fn foreign_or_nonfinite_positions_cannot_poison_ai_physics() {
         let mut pose = Pose {
             bus: "Vehicles/Bus.bus".into(),
+            flags: omsi_net::FLAG_VEHICLE,
             x: 12.0,
             y: -30.0,
             z: 3.0,
@@ -164,6 +165,7 @@ mod tests {
         let mut b = LanSession::join_addr(vec![addr], None, "b", WorldInfo::default()).unwrap();
         let pa = Pose {
             bus: "Vehicles/BusA.bus".into(),
+            flags: omsi_net::FLAG_VEHICLE,
             x: 100.0,
             y: 210.0,
             width: 2.5,
@@ -172,6 +174,7 @@ mod tests {
         };
         let pb = Pose {
             bus: "Vehicles/BusB.bus".into(),
+            flags: omsi_net::FLAG_VEHICLE,
             x: -50.0,
             y: 20.0,
             width: 2.5,
