@@ -119,8 +119,10 @@ mod tests {
             if a.connected
                 && b.connected
                 && host.session().peer_count() == 2
-                && a.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "beta")
-                && b.peers().any(|p| p.has_info && p.has_pose && p.pose.name == "alpha")
+                && a.peers()
+                    .any(|p| p.has_info && p.has_pose && p.pose.name == "beta")
+                && b.peers()
+                    .any(|p| p.has_info && p.has_pose && p.pose.name == "alpha")
             {
                 exchanged = true;
                 break;
