@@ -38,6 +38,18 @@ jobs:
             exit 1
           fi
 
+      - name: Generate current debug-flag documentation diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          OMSI_FLAGS_BLESS=1 cargo test --locked -p omsi-cfg flags_doc_up_to_date -- --test-threads=1
+          if ! git diff --quiet -- docs/DEBUG_FLAGS.md; then
+            echo "=== FLAGS_DOC_PATCH_BEGIN ==="
+            git --no-pager diff -- docs/DEBUG_FLAGS.md
+            echo "=== FLAGS_DOC_PATCH_END ==="
+            exit 1
+          fi
+
       - name: Headless transport, clock, CPU tiles, lanes and profiler regressions
         run: cargo test --locked -p omsi-server --all-targets -- --test-threads=2
 
