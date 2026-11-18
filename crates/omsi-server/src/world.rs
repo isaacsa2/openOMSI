@@ -114,7 +114,7 @@ impl HostWorld {
                     .collect(),
                 ailists,
                 date,
-                chrono_dirs,
+                chrono_dirs: chrono_dirs.clone(),
             }),
             tile_files: Some(Arc::new(
                 files
