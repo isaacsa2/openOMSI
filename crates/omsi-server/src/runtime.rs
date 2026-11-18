@@ -110,6 +110,14 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
         "experimental relay requires real_time=0 and metar_sync=0"
     );
     ensure!(
+        !cfg.voice.enabled && !cfg.voice.radio,
+        "experimental relay requires voice=0 and voice_radio=0"
+    );
+    ensure!(
+        !cfg.allow_player_teleport,
+        "experimental relay requires allow_player_teleport=0"
+    );
+    ensure!(
         cfg.date.is_some(),
         "experimental relay requires an explicit server.cfg date"
     );
@@ -412,6 +420,12 @@ mod tests {
         assert!(allow_free_roam(&cfg).is_err());
         cfg.public_address = "off".into();
         cfg.tunnel = true;
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.tunnel = false;
+        cfg.voice.enabled = true;
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.voice.enabled = false;
+        cfg.allow_player_teleport = true;
         assert!(allow_free_roam(&cfg).is_err());
     }
 }
