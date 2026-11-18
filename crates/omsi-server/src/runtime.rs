@@ -39,23 +39,50 @@ fn initial_tiles(
     index: &omsi_world::map_index::MapIndex,
     limit: usize,
 ) -> Vec<(i32, i32)> {
-    let center = global.entry_points.iter().find_map(|entry| {
-        (entry.group >= 0)
-            .then(|| global.raw_tiles.get(entry.group as usize))
-            .flatten()
-            .copied()
-            .or_else(|| index.objects.get(&entry.object_id).map(|(key, _, _)| *key))
-    });
-    let mut tiles: Vec<_> = global.tiles.iter().map(|t| (t.x, t.y)).collect();
-    if let Some((cx, cy)) = center {
-        tiles.sort_by_key(|&(x, y)| {
-            let dx = (i64::from(x) - i64::from(cx)).unsigned_abs() as u128;
-            let dy = (i64::from(y) - i64::from(cy)).unsigned_abs() as u128;
-            dx * dx + dy * dy
-        });
+    let tiles: Vec<_> = global.tiles.iter().map(|t| (t.x, t.y)).collect();
+    if limit == 0 {
+        return Vec::new();
     }
-    tiles.truncate(limit);
-    tiles
+    let mut selected = Vec::new();
+    // The graphical server indexes ALL entrypoints, not just the first one.
+    // Keep each distinct entrypoint's tile inside the bounded initial CPU
+    // simulation before filling the remaining slots with nearby road tiles.
+    for entry in &global.entry_points {
+        let key = usize::try_from(entry.group)
+            .ok()
+            .and_then(|i| global.raw_tiles.get(i))
+            .copied()
+            .or_else(|| {
+                crate::world::resolve_entry_point(global, index, entry)
+                    .map(|(pos, _)| omsi_map::world_to_tile_local(pos.x, pos.y).0)
+            });
+        if let Some(key) = key {
+            if tiles.contains(&key) && !selected.contains(&key) {
+                selected.push(key);
+                if selected.len() == limit {
+                    return selected;
+                }
+            }
+        }
+    }
+    if selected.is_empty() {
+        return tiles.into_iter().take(limit).collect();
+    }
+    let anchors = selected.clone();
+    let mut remaining: Vec<_> = tiles.into_iter().filter(|k| !selected.contains(k)).collect();
+    remaining.sort_by_key(|&(x, y)| {
+        anchors
+            .iter()
+            .map(|&(ax, ay)| {
+                let dx = (i64::from(x) - i64::from(ax)).unsigned_abs() as u128;
+                let dy = (i64::from(y) - i64::from(ay)).unsigned_abs() as u128;
+                dx * dx + dy * dy
+            })
+            .min()
+            .unwrap_or(u128::MAX)
+    });
+    selected.extend(remaining.into_iter().take(limit - selected.len()));
+    selected
 }
 
 /// Parse a configured date without inferring locale or system timezone.
@@ -147,6 +174,37 @@ pub fn free_roam(
     ensure!(map.index.tiles_read > 0, "no readable map tiles");
     let keys = initial_tiles(&map.global, &map.index, INITIAL_TILE_LIMIT);
     ensure!(!keys.is_empty(), "map has no active tiles");
+    let resolved_entries = map
+        .global
+        .entry_points
+        .iter()
+        .filter(|entry| crate::world::resolve_entry_point(&map.global, &map.index, entry).is_some())
+        .count();
+    let entry_tiles = map
+        .global
+        .entry_points
+        .iter()
+        .filter_map(|entry| {
+            usize::try_from(entry.group)
+                .ok()
+                .and_then(|i| map.global.raw_tiles.get(i))
+                .copied()
+        })
+        .filter(|key| keys.contains(key))
+        .count();
+    log::info!(
+        "native entrypoints: {} listed, {} resolved, {} covered by initial {} CPU tiles",
+        map.global.entry_points.len(),
+        resolved_entries,
+        entry_tiles,
+        keys.len()
+    );
+    if entry_tiles < map.global.entry_points.len() {
+        log::warn!(
+            "some entrypoints are outside the initial {}-tile CPU simulation; distant-tile streaming is not implemented",
+            INITIAL_TILE_LIMIT
+        );
+    }
     let ground_surfaces = map.install_spline_ground_surfaces(&keys);
     log::info!(
         "CPU road surfaces: {} active tiles, {} rasterized spline meshes, {} wheel meshes; {} pending scenery surfaces",
@@ -388,6 +446,31 @@ mod tests {
         assert_eq!(selected.len(), 5);
         assert_eq!(selected[0], (80, 0));
         assert!(selected.iter().all(|&(x, y)| (x - 80).abs() <= 3 && y == 0));
+    }
+
+    #[test]
+    fn initial_cpu_tiles_include_multiple_distant_entrypoints() {
+        use omsi_map::global::{EntryPoint, MapTileRef};
+        let mut global = omsi_map::global::GlobalCfg::default();
+        global.tiles = (0..100)
+            .map(|x| MapTileRef {
+                x,
+                index: x as usize,
+                ..Default::default()
+            })
+            .collect();
+        global.raw_tiles = (0..100).map(|x| (x, 0)).collect();
+        for group in [2, 89, 42] {
+            global.entry_points.push(EntryPoint {
+                group,
+                ..Default::default()
+            });
+        }
+        let keys = initial_tiles(&global, &omsi_world::map_index::MapIndex::default(), 8);
+        assert_eq!(keys.len(), 8);
+        assert_eq!(&keys[..3], &[(2, 0), (89, 0), (42, 0)]);
+        assert!(keys.contains(&(3, 0)));
+        assert!(keys.contains(&(88, 0)));
     }
 
     #[test]
