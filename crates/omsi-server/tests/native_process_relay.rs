@@ -202,7 +202,6 @@ fn native_binary_relays_three_drivers_and_updated_vehicle_state() {
     };
     let mut alpha = LanSession::join_addr(vec![addr], None, "alpha", world.clone()).unwrap();
     let mut beta = LanSession::join_addr(vec![addr], None, "beta", world.clone()).unwrap();
-    let mut charlie = LanSession::join_addr(vec![addr], None, "charlie", world).unwrap();
 
     let mut pa = driver("alpha", 101.0);
     pa.paint = "Test blue".into();
@@ -220,6 +219,26 @@ fn native_binary_relays_three_drivers_and_updated_vehicle_state() {
                 && (peer.pose.x - x).abs() < 0.5
         })
     };
+
+    // Connect the first two drivers before a late third client joins. This
+    // covers the snapshot path used when players join an ongoing session.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut pair_ready = false;
+    while Instant::now() < deadline {
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        if alpha.connected
+            && beta.connected
+            && sees(&alpha, "beta", 202.0)
+            && sees(&beta, "alpha", 101.0)
+        {
+            pair_ready = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(pair_ready, "native host did not connect the first two drivers");
+    let mut charlie = LanSession::join_addr(vec![addr], None, "charlie", world).unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut exchanged = false;
