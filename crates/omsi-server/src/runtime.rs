@@ -263,8 +263,7 @@ pub fn free_roam(
         net.tick(FIXED_DT);
         sim.sync_host_clients(net.session_mut());
         // Match LAN clock shifts; TrafficSim advances day_time inside step.
-        sim.traffic.day_time = authoritative
-            - f64::from(FIXED_DT) * sim.traffic.time_scale;
+        sim.traffic.day_time = authoritative - f64::from(FIXED_DT) * sim.traffic.time_scale;
         sim.step(FIXED_DT);
         world_sync.tick(net.session_mut(), &sim.traffic, FIXED_DT);
         // AI vehicle and passenger snapshots remain unsupported in free-roam.

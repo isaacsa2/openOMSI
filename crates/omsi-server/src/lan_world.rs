@@ -4,7 +4,7 @@
 //! host publishes once a second. Population and AI car sync are separate.
 
 use glam::DVec3;
-use omsi_net::world::{LightState, WorldFrame, LIGHTS_EVERY};
+use omsi_net::world::{LIGHTS_EVERY, LightState, WorldFrame};
 use omsi_net::{LanSession, Role};
 use omsi_sim::ai_traffic::TrafficSim;
 
@@ -30,7 +30,10 @@ fn light_frame(states: impl IntoIterator<Item = (i64, f64, bool)>) -> WorldFrame
     lights.sort_by_key(|light| light.object);
     lights.dedup_by_key(|light| light.object);
     lights.truncate(MAX_LIGHTS_PER_CLIENT);
-    WorldFrame { lights, ..Default::default() }
+    WorldFrame {
+        lights,
+        ..Default::default()
+    }
 }
 
 impl HeadlessWorldSync {
@@ -94,7 +97,7 @@ mod tests {
 
     #[test]
     fn live_udp_client_receives_cpu_crossing_clock() {
-        use omsi_net::{Pose, WorldInfo, FLAG_VEHICLE};
+        use omsi_net::{FLAG_VEHICLE, Pose, WorldInfo};
         use omsi_sim::ai_traffic::setup::RandomTypes;
         use omsi_sim::traffic::{LaneBuilder, LaneKind, Network, TrafficLightController};
         use std::net::SocketAddr;
@@ -104,9 +107,8 @@ mod tests {
         let mut host = LanSession::host(0, "headless", WorldInfo::default(), true)
             .expect("bind local LAN host");
         let addr = SocketAddr::from(([127, 0, 0, 1], host.local_addr().unwrap().port()));
-        let mut client = LanSession::join_addr(
-            vec![addr], None, "tester", WorldInfo::default(),
-        ).expect("connect LAN client");
+        let mut client = LanSession::join_addr(vec![addr], None, "tester", WorldInfo::default())
+            .expect("connect LAN client");
         let bus = Pose {
             bus: "Vehicles/Test/test.bus".into(),
             flags: FLAG_VEHICLE,
@@ -132,8 +134,12 @@ mod tests {
             uvg_defaults: Vec::new(),
         };
         let mut traffic = crate::traffic::assemble(
-            Path::new("."), Network::default(), random,
-            Vec::new(), Vec::new(), 0,
+            Path::new("."),
+            Network::default(),
+            random,
+            Vec::new(),
+            Vec::new(),
+            0,
         );
         let mut lane = LaneBuilder::polyline(
             vec![DVec3::new(0.0, 0.0, 0.0), DVec3::new(40.0, 0.0, 0.0)],
@@ -142,10 +148,7 @@ mod tests {
         );
         lane.traffic_light = Some((0, 0));
         traffic.net.lanes.push(lane);
-        let mut controller = TrafficLightController::new(
-            vec![vec![(1, 20.0), (2, 20.0)]],
-            40.0,
-        );
+        let mut controller = TrafficLightController::new(vec![vec![(1, 20.0), (2, 20.0)]], 40.0);
         controller.start(5.0);
         traffic.lights.push(controller);
         traffic.controller_of_object.insert(512, 0);
@@ -161,7 +164,11 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(4));
         }
-        assert!(received.iter().any(|l| l.object == 512 && (l.time - 5.0).abs() < 0.1));
+        assert!(
+            received
+                .iter()
+                .any(|l| l.object == 512 && (l.time - 5.0).abs() < 0.1)
+        );
     }
 
     #[test]
