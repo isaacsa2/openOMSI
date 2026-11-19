@@ -251,6 +251,14 @@ export const serverJoined = (answer) => ({
 
 /** Refresh once when opening the picker: saved server status can predate the
  * fleet catalogue, even when the game server is now running the latest build. */
+/** A verified server fleet is the only reason to block a player's launch
+ * while refreshing session details. For ordinary map-only sessions, the
+ * checked code and LAN WELCOME establish the session; a second gateway
+ * query can time out even when UDP works. */
+export function joinNeedsFleetRefresh(c = S.choice) {
+  return c?.lan_mode === 'join' && c?.lan_server?.fleet_version === 1;
+}
+
 export async function askJoined({ refresh = false } = {}) {
   const c = S.choice;
   if (c?.lan_mode !== 'join' || (!refresh && c.lan_server?.asked)) return c?.lan_server || null;
