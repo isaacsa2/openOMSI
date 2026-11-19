@@ -6,6 +6,7 @@ use crate::admin;
 use crate::ai_sync::HeadlessTrafficSync;
 use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
+use crate::timetable::CpuTimetable;
 use crate::simulation::CpuSimulation;
 use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
@@ -181,10 +182,6 @@ pub fn allow_simulated_roam(cfg: &ServerCfg) -> Result<()> {
         cfg.ai_limits.max_humans.unwrap_or(64) <= 128,
         "experimental CPU simulation supports no more than 128 humans"
     );
-    ensure!(
-        !cfg.timetable,
-        "scheduled AI requires the route and fleet dispatcher; timetable=1 is not yet admitted"
-    );
     Ok(())
 }
 
@@ -282,27 +279,7 @@ fn service_streaming(
     true
 }
 
-fn run(
-    root: &Path,
-    plan: &crate::startup::LaunchPlan,
-    max_ticks: Option<u64>,
-    simulated: bool,
-) -> Result<()> {
-    let cfg = &plan.config;
-    let weather = plan.weather.as_deref();
-    if simulated {
-        allow_simulated_roam(cfg)?;
-    } else {
-        allow_free_roam(cfg)?;
-    }
-    let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
-    let initial_time = checked_clock(&cfg.time)?;
-    let global = omsi_cfg::resolve_path(root, &cfg.map);
-    let mut map = crate::world::HostWorld::open(root, &global, date_num)
-        .with_context(|| format!("loading {}", global.display()))?;
-    ensure!(map.index.tiles_read > 0, "no readable map tiles");
-    let keys = initial_tiles(&map.global, &map.index, INITIAL_TILE_LIMIT);
-    ensure!(!keys.is_empty(), "map has no active tiles");
+fn report_entrypoints(map: &crate::world::HostWorld, keys: &[(i32, i32)], simulated: bool) {
     let resolved_entries = map
         .global
         .entry_points
@@ -339,21 +316,16 @@ fn run(
             }
         );
     }
-    let ground_surfaces = map.install_spline_ground_surfaces(&keys);
-    log::info!(
-        "CPU road surfaces: {} active tiles, {} rasterized spline meshes, {} wheel meshes; {} pending scenery surfaces",
-        ground_surfaces.target_tiles,
-        ground_surfaces.road_meshes,
-        ground_surfaces.wheel_meshes,
-        ground_surfaces.pending_scenery_surfaces
-    );
-    let _stops = map.install_stop_lists(&keys);
-    let signals = map.network_with_traffic_lights(&keys);
-    let collisions = map.install_static_box_collisions(&keys, &signals.network.lanes);
-    ensure!(
-        !signals.network.lanes.is_empty(),
-        "no drivable or foot paths in selected tiles"
-    );
+}
+fn make_cpu_sim(
+    root: &Path,
+    cfg: &ServerCfg,
+    map: &crate::world::HostWorld,
+    keys: &[(i32, i32)],
+    signals: crate::signals::SignalNetwork,
+    simulated: bool,
+    initial_time: f64,
+) -> CpuSimulation {
     // Only the explicit simulation mode loads installed AI definitions and
     // script programs. The original free-roam relay retains its zero-AI path.
     let random = if simulated && cfg.traffic > 0 {
@@ -397,6 +369,65 @@ fn run(
     sim.traffic.day_time = initial_time;
     sim.traffic.time_scale = cfg.time_speed;
 
+    sim
+}
+
+fn run(
+    root: &Path,
+    plan: &crate::startup::LaunchPlan,
+    max_ticks: Option<u64>,
+    simulated: bool,
+) -> Result<()> {
+    let cfg = &plan.config;
+    let weather = plan.weather.as_deref();
+    if simulated {
+        allow_simulated_roam(cfg)?;
+    } else {
+        allow_free_roam(cfg)?;
+    }
+    let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
+    let initial_time = checked_clock(&cfg.time)?;
+    let global = omsi_cfg::resolve_path(root, &cfg.map);
+    let mut map = crate::world::HostWorld::open(root, &global, date_num)
+        .with_context(|| format!("loading {}", global.display()))?;
+    ensure!(map.index.tiles_read > 0, "no readable map tiles");
+    let keys = initial_tiles(&map.global, &map.index, INITIAL_TILE_LIMIT);
+    ensure!(!keys.is_empty(), "map has no active tiles");
+    report_entrypoints(&map, &keys, simulated);
+    let ground_surfaces = map.install_spline_ground_surfaces(&keys);
+    log::info!(
+        "CPU road surfaces: {} active tiles, {} rasterized spline meshes, {} wheel meshes; {} pending scenery surfaces",
+        ground_surfaces.target_tiles,
+        ground_surfaces.road_meshes,
+        ground_surfaces.wheel_meshes,
+        ground_surfaces.pending_scenery_surfaces
+    );
+    let _stops = map.install_stop_lists(&keys);
+    let signals = map.network_with_traffic_lights(&keys);
+    let collisions = map.install_static_box_collisions(&keys, &signals.network.lanes);
+    ensure!(
+        !signals.network.lanes.is_empty(),
+        "no drivable or foot paths in selected tiles"
+    );
+    let mut sim = make_cpu_sim(root, cfg, &map, &keys, signals, simulated, initial_time);
+    let mut sim_clock = omsi_sim::SimClock::starting(cfg.date.as_deref(), None, &cfg.time);
+    let mut schedule = if simulated && cfg.timetable {
+        Some(CpuTimetable::new(
+            root,
+            &sim.world,
+            &sim_clock,
+            cfg.ai_limits.max_scheduled.filter(|&count| count > 0).unwrap_or(12) as usize,
+        ))
+    } else {
+        None
+    };
+    if let Some(ref timetable) = schedule {
+        if cfg.passengers {
+            sim.people.stop_targets = Some(timetable.sim.stop_targets());
+            sim.people.stop_target_objects = Some(timetable.sim.stop_target_objects());
+            sim.people.stop_names = Some(timetable.sim.stop_names());
+        }
+    }
     let world = WorldInfo {
         map: cfg.map.replace('\\', "/"),
         date: date.clone(),
@@ -436,17 +467,18 @@ fn run(
     omsi_lan::gateway::open_public_gateway(net.session(), info, cfg.web_port, false);
     // Do not advertise or hash an untransferable bus fleet in relay-only mode.
     log::warn!(
-        "EXPERIMENTAL headless ONLY: {} static boxes, {} exact collision meshes; {} unresolved mesh files, {} tilted objects, {} attachments; traffic {}, passengers {}, timetable off",
+        "EXPERIMENTAL headless ONLY: {} static boxes, {} exact collision meshes; {} unresolved mesh files, {} tilted objects, {} attachments; traffic {}, passengers {}, timetable {}",
         collisions.static_boxes,
         collisions.static_meshes,
         collisions.pending_meshes,
         collisions.pending_tilted,
         collisions.pending_attachments,
         if simulated { cfg.traffic } else { 0 },
-        simulated && cfg.passengers
+        simulated && cfg.passengers,
+        simulated && cfg.timetable
     );
     eprintln!(
-        "Experimental headless {}: no authoritative player bus or timetable parity",
+        "Experimental headless {}: AI timetable experimental, no authoritative player-bus parity",
         if simulated {
             "CPU SIMULATION"
         } else {
@@ -546,6 +578,18 @@ fn run(
         // Match LAN clock shifts; TrafficSim advances day_time inside step.
         sim.traffic.day_time = authoritative - f64::from(FIXED_DT) * sim.traffic.time_scale;
         profile(&mut profiler, "simulation", || sim.step(FIXED_DT));
+        if let Some(ref mut timetable) = schedule {
+            if n % 60 == 0 {
+                sim_clock.time = authoritative.rem_euclid(86_400.0);
+                profile(&mut profiler, "timetable", || {
+                    timetable.tick(root, &sim.world, &mut sim.traffic, &sim_clock, 1.0)
+                });
+            }
+            if cfg.passengers && n % 3600 == 0 {
+                sim.people.due_dests = Some(timetable.sim.due_destinations(authoritative));
+                sim.people.due_at = authoritative;
+            }
+        }
         profile(&mut profiler, "world_sync", || {
             world_sync.tick(net.session_mut(), &sim.traffic, FIXED_DT)
         });
