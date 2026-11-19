@@ -164,6 +164,31 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
     Ok(())
 }
 
+/// Only authenticated peers with finite world coordinates may inform
+/// moderation and player teleport commands. Reject invalid coordinate data.
+fn peer_positions(net: &HostTransport) -> HashMap<u32, (DVec3, f64)> {
+    net.session()
+        .peers()
+        .filter(|peer| {
+            peer.has_pose
+                && peer.has_info
+                && peer.pose.x.is_finite()
+                && peer.pose.y.is_finite()
+                && peer.pose.z.is_finite()
+                && peer.pose.heading.is_finite()
+        })
+        .map(|peer| {
+            (
+                peer.pose.id,
+                (
+                    DVec3::new(peer.pose.x, peer.pose.y, peer.pose.z),
+                    f64::from(peer.pose.heading),
+                ),
+            )
+        })
+        .collect()
+}
+
 /// Launch a bounded CPU map and a LAN host. Explicitly not full sim parity.
 pub fn free_roam(
     root: &Path,
@@ -340,27 +365,7 @@ pub fn free_roam(
             break;
         }
         let started = Instant::now();
-        let positions: HashMap<u32, (DVec3, f64)> = net
-            .session()
-            .peers()
-            .filter(|peer| {
-                peer.has_pose
-                    && peer.has_info
-                    && peer.pose.x.is_finite()
-                    && peer.pose.y.is_finite()
-                    && peer.pose.z.is_finite()
-                    && peer.pose.heading.is_finite()
-            })
-            .map(|peer| {
-                (
-                    peer.pose.id,
-                    (
-                        DVec3::new(peer.pose.x, peer.pose.y, peer.pose.z),
-                        f64::from(peer.pose.heading),
-                    ),
-                )
-            })
-            .collect();
+        let positions = peer_positions(&net);
         let hub = omsi_lan::admin::hub().map(|h| &**h);
         crate::commands::service_commands(
             net.session_mut(),
