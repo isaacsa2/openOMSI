@@ -377,6 +377,8 @@ fn run(
     simulated: bool,
 ) -> Result<()> {
     let cfg = &plan.config;
+    // A separate applied snapshot changes only after full /reload validation.
+    let mut live_cfg = cfg.clone();
     let weather = plan.weather.as_deref();
     if simulated {
         allow_simulated_roam(cfg)?;
@@ -504,7 +506,7 @@ fn run(
     let mut admin_state = ServerAdmin::default();
     admin_state.password = cfg.admin_password.clone();
     admin_state.moderator_password = cfg.moderator_password.clone();
-    let rules = ServerRules {
+    let mut rules = ServerRules {
         real_time: false,
         metar: false,
         traffic_max: if simulated { cfg.traffic } else { 0 },
@@ -547,6 +549,14 @@ fn run(
             FIXED_DT,
         );
         crate::commands::apply_world_jobs(net.session_mut(), &mut admin_state, None, clock, 0, hub);
+        if console::take_reload_requested() {
+            if let Err(error) = crate::reload::apply(
+                &plan.config_path, &mut live_cfg, simulated, &mut sim, &mut net,
+                &mut schedule, &mut rules, &mut admin_state,
+            ) {
+                log::warn!("server console: /reload refused; settings unchanged: {error}");
+            }
+        }
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         let authoritative = clock + admin_state.shift;
         net.session_mut().set_clock(&date, authoritative);
@@ -573,7 +583,7 @@ fn run(
         if simulated && n % 60 == 0 {
             let viewers = sim.traffic.lan_centers.clone();
             profile(&mut profiler, "ai_population", || {
-                population.tick(&mut sim.traffic, &sim.world, &viewers, cfg.traffic, 1.0)
+                population.tick(&mut sim.traffic, &sim.world, &viewers, live_cfg.traffic, 1.0)
             });
         }
         // Match LAN clock shifts; TrafficSim advances day_time inside step.
@@ -586,7 +596,7 @@ fn run(
                     timetable.tick(root, &sim.world, &mut sim.traffic, &sim_clock, 1.0)
                 });
             }
-            if cfg.passengers && n % 3600 == 0 {
+            if live_cfg.passengers && n % 3600 == 0 {
                 sim.people.due_dests = Some(timetable.sim.due_destinations(authoritative));
                 sim.people.due_at = authoritative;
             }
@@ -616,8 +626,8 @@ fn run(
         n += 1;
         if report.elapsed() >= Duration::from_secs(1) {
             let counts = WorldCounts {
-                traffic: if simulated { cfg.traffic } else { 0 },
-                passengers: simulated && cfg.passengers,
+                traffic: if simulated { live_cfg.traffic } else { 0 },
+                passengers: simulated && live_cfg.passengers,
                 ..Default::default()
             };
             admin::publish_status(
