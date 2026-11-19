@@ -117,7 +117,9 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         .expect("stdin pipe")
         .write_all(b"/reload\n")
         .expect("send local reload command");
-    let simulated = child.wait_with_output().expect("wait for native simulation");
+    let simulated = child
+        .wait_with_output()
+        .expect("wait for native simulation");
     assert!(
         simulated.status.success(),
         "CPU simulation failed with code {:?}\\nstdout:\\n{}\\nstderr:\\n{}",
