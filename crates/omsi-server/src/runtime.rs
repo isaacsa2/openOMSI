@@ -5,6 +5,7 @@
 use crate::admin;
 use crate::ai_sync::HeadlessTrafficSync;
 use crate::people_sync::HeadlessPeopleSync;
+use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
 use crate::simulation::CpuSimulation;
 use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
@@ -164,6 +165,29 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
     Ok(())
 }
 
+/// Opt-in, local-only CPU simulation. Keep the strict transfer, public
+/// exposure and moderation restrictions of the free-roam test mode.
+pub fn allow_simulated_roam(cfg: &ServerCfg) -> Result<()> {
+    let mut base = cfg.clone();
+    base.traffic = 0;
+    base.timetable = false;
+    base.passengers = false;
+    allow_free_roam(&base)?;
+    ensure!(
+        cfg.traffic <= MAX_EXPERIMENTAL_TRAFFIC,
+        "experimental CPU simulation supports no more than {MAX_EXPERIMENTAL_TRAFFIC} AI vehicles"
+    );
+    ensure!(
+        cfg.ai_limits.max_humans.unwrap_or(64) <= 128,
+        "experimental CPU simulation supports no more than 128 humans"
+    );
+    ensure!(
+        !cfg.timetable,
+        "scheduled AI requires the route and fleet dispatcher; timetable=1 is not yet admitted"
+    );
+    Ok(())
+}
+
 /// Only authenticated peers with finite world coordinates may inform
 /// moderation and player teleport commands. Reject invalid coordinate data.
 fn peer_positions(net: &HostTransport) -> HashMap<u32, (DVec3, f64)> {
@@ -189,15 +213,37 @@ fn peer_positions(net: &HostTransport) -> HashMap<u32, (DVec3, f64)> {
         .collect()
 }
 
-/// Launch a bounded CPU map and a LAN host. Explicitly not full sim parity.
+/// Preserve the existing free-roam behavior for regression tests.
 pub fn free_roam(
     root: &Path,
     plan: &crate::startup::LaunchPlan,
     max_ticks: Option<u64>,
 ) -> Result<()> {
+    run(root, plan, max_ticks, false)
+}
+
+/// Explicit test mode with CPU AI and pedestrians. Still not full server parity.
+pub fn simulated_roam(
+    root: &Path,
+    plan: &crate::startup::LaunchPlan,
+    max_ticks: Option<u64>,
+) -> Result<()> {
+    run(root, plan, max_ticks, true)
+}
+
+fn run(
+    root: &Path,
+    plan: &crate::startup::LaunchPlan,
+    max_ticks: Option<u64>,
+    simulated: bool,
+) -> Result<()> {
     let cfg = &plan.config;
     let weather = plan.weather.as_deref();
-    allow_free_roam(cfg)?;
+    if simulated {
+        allow_simulated_roam(cfg)?;
+    } else {
+        allow_free_roam(cfg)?;
+    }
     let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
     let initial_time = checked_clock(&cfg.time)?;
     let global = omsi_cfg::resolve_path(root, &cfg.map);
@@ -233,8 +279,9 @@ pub fn free_roam(
     );
     if entry_tiles < map.global.entry_points.len() {
         log::warn!(
-            "some entrypoints are outside the initial {}-tile CPU simulation; distant-tile streaming is not implemented",
-            INITIAL_TILE_LIMIT
+            "some entrypoints are outside the initial {}-tile CPU simulation; mode={}",
+            INITIAL_TILE_LIMIT,
+            if simulated { "fixed-map CPU simulation" } else { "streaming free-roam" }
         );
     }
     let ground_surfaces = map.install_spline_ground_surfaces(&keys);
@@ -252,15 +299,19 @@ pub fn free_roam(
         !signals.network.lanes.is_empty(),
         "no drivable or foot paths in selected tiles"
     );
-    // The standalone relay does not invent authoritative timetable or AI cars.
-    // Free-roam has traffic=0. Loading all AI bus scripts and paints here
-    // would waste disk I/O and RAM for vehicles that can never be spawned.
-    let random = omsi_sim::ai_traffic::setup::RandomTypes {
-        types: Vec::new(),
-        groups: Vec::new(),
-        group_curves: false,
-        group_uvg: Vec::new(),
-        uvg_defaults: Vec::new(),
+    // Only the explicit simulation mode loads installed AI definitions and
+    // script programs. The original free-roam relay retains its zero-AI path.
+    let random = if simulated && cfg.traffic > 0 {
+        let facts = map.data.snapshot();
+        traffic::random_types(root, &map.global, &map.map_dir, &facts.map.ailists)
+    } else {
+        omsi_sim::ai_traffic::setup::RandomTypes {
+            types: Vec::new(),
+            groups: Vec::new(),
+            group_curves: false,
+            group_uvg: Vec::new(),
+            uvg_defaults: Vec::new(),
+        }
     };
     let mut ai = traffic::assemble(
         root,
@@ -268,11 +319,26 @@ pub fn free_roam(
         random,
         map.global.traffic_density_road.clone(),
         keys.clone(),
-        0,
+        if simulated { cfg.traffic } else { 0 },
     );
     ai.lights = signals.controllers;
     ai.controller_of_object = signals.controller_of_object;
-    let mut sim = CpuSimulation::new(root, Arc::clone(&map.data), ai, 0);
+    let mut sim = CpuSimulation::new(
+        root,
+        Arc::clone(&map.data),
+        ai,
+        if simulated && cfg.passengers {
+            cfg.ai_limits.max_humans.unwrap_or(64) as usize
+        } else {
+            0
+        },
+    );
+    sim.people.players_only = true;
+    sim.people.density = if simulated && cfg.passengers {
+        cfg.passenger_density.unwrap_or(1.0).clamp(0.0, 3.0)
+    } else {
+        0.0
+    };
     sim.traffic.day_time = initial_time;
     sim.traffic.time_scale = cfg.time_speed;
 
@@ -315,15 +381,18 @@ pub fn free_roam(
     omsi_lan::gateway::open_public_gateway(net.session(), info, cfg.web_port, false);
     // Do not advertise or hash an untransferable bus fleet in relay-only mode.
     log::warn!(
-        "EXPERIMENTAL relay ONLY: {} static boxes, {} exact collision meshes; {} unresolved mesh files, {} tilted objects, {} attachments; AI/timetable/passengers disabled",
+        "EXPERIMENTAL headless ONLY: {} static boxes, {} exact collision meshes; {} unresolved mesh files, {} tilted objects, {} attachments; traffic {}, passengers {}, timetable off",
         collisions.static_boxes,
         collisions.static_meshes,
         collisions.pending_meshes,
         collisions.pending_tilted,
-        collisions.pending_attachments
+        collisions.pending_attachments,
+        if simulated { cfg.traffic } else { 0 },
+        simulated && cfg.passengers
     );
     eprintln!(
-        "Experimental headless FREE-ROAM relay: no authoritative bus/traffic/passenger simulation parity"
+        "Experimental headless {}: no authoritative player bus or timetable parity",
+        if simulated { "CPU SIMULATION" } else { "FREE-ROAM relay" }
     );
     net.ready();
     let port = net
@@ -346,15 +415,22 @@ pub fn free_roam(
     let rules = ServerRules {
         real_time: false,
         metar: false,
-        traffic_max: 0,
+        traffic_max: if simulated { cfg.traffic } else { 0 },
         notice_ok: &|notice| notice.len() <= 2048,
     };
     let mut pacer = TickPacer::new(Instant::now());
     let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
     let mut traffic_sync = HeadlessTrafficSync::default();
     let mut people_sync = HeadlessPeopleSync::default();
+    let mut population = CpuTrafficPopulation::default();
     let stream_global = map.global.clone();
-    let streamer = StreamWorker::start(map).context("starting CPU tile stream worker")?;
+    // A live traffic sim retains lane indices, vehicle paths and pedestrians:
+    // do not replace its network until entity-aware streaming is implemented.
+    let streamer = if simulated {
+        None
+    } else {
+        Some(StreamWorker::start(map).context("starting CPU tile stream worker")?)
+    };
     let mut stream_busy = false;
     let mut active_keys = keys.clone();
     let mut clock = initial_time;
@@ -385,6 +461,7 @@ pub fn free_roam(
         profile(&mut profiler, "network", || net.tick(FIXED_DT));
         // Parse remote tile neighborhoods on a dedicated worker. Never let
         // expensive map IO or collision rebuilding stall UDP keepalives.
+        if let Some(ref streamer) = streamer {
         match streamer.poll() {
             Ok(Some(update)) => {
                 stream_busy = false;
@@ -423,9 +500,16 @@ pub fn free_roam(
                 }
             }
         }
+        }
         profile(&mut profiler, "interest", || {
             sim.sync_host_clients(net.session_mut())
         });
+        if simulated && n % 60 == 0 {
+            let viewers = sim.traffic.lan_centers.clone();
+            profile(&mut profiler, "ai_population", || {
+                population.tick(&mut sim.traffic, &sim.world, &viewers, cfg.traffic, 1.0)
+            });
+        }
         // Match LAN clock shifts; TrafficSim advances day_time inside step.
         sim.traffic.day_time = authoritative - f64::from(FIXED_DT) * sim.traffic.time_scale;
         profile(&mut profiler, "simulation", || sim.step(FIXED_DT));
@@ -454,8 +538,8 @@ pub fn free_roam(
         n += 1;
         if report.elapsed() >= Duration::from_secs(1) {
             let counts = WorldCounts {
-                traffic: 0,
-                passengers: false,
+                traffic: if simulated { cfg.traffic } else { 0 },
+                passengers: simulated && cfg.passengers,
                 ..Default::default()
             };
             admin::publish_status(
@@ -473,7 +557,9 @@ pub fn free_roam(
         std::thread::sleep(pacer.after_tick(Instant::now()).wait);
     }
     net.session_mut().leave();
-    streamer.stop();
+    if let Some(streamer) = streamer {
+        streamer.stop();
+    }
     drop(mods_server);
     omsi_lan::gateway::close_public_gateway();
     eprintln!("Dedicated relay stopped cleanly after {n} ticks");
