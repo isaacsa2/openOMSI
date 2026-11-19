@@ -58,6 +58,48 @@ For a local web admin/TPS panel, set a unique `admin_password` of at least
 admin URL `http://127.0.0.1:27025/admin/` on the server itself. With a blank
 password, web admin is intentionally disabled.
 
+## Optional AI, passenger and timetable simulation (experimental)
+
+The original `--experimental-free-roam` mode remains unchanged, with
+`traffic=0`, `passengers=0`, and `timetable=0`. The **separate**
+`--experimental-simulation` flag uses the real CPU `TrafficSim`,
+`PeopleSim` and `ScheduleSim` from the shared engine:
+
+```sh
+cargo run --locked --release -p omsi-server --bin omsi-server -- /path/to/OMSI2 scripts/server-headless/server-simulation.cfg --experimental-simulation
+```
+
+Change the example `map` only to a map actually installed on the test
+machine. The native simulation reads its `ailists.cfg`, timetable, road
+paths, Chrono data, stop locations and installed AI vehicle scripts.
+It runs a bounded number of road vehicles, their existing AI physics and
+script callbacks, and pedestrians around connected players. It publishes
+cars through the acknowledged LAN traffic table and people through existing
+`WORLD` and `DESC` packets. Chrono-based road-bus departures and lines are
+experimental; not all consist, train and timetable edge cases are supported.
+
+This test mode currently allows up to **32 random AI vehicles**, **128
+humans** and **12 scheduled road buses**, without renderer or audio. The
+example uses much lower limits. The road network is held on the **initial
+64 entrypoint-oriented tiles** to preserve vehicle lane indexes. Dynamic
+tile replacement is intentionally disabled while the CPU sim owns vehicles
+or passengers; the free-roam relay's 192-tile streaming does not apply to
+this mode. Maps or routes outside the initial region may not complete.
+
+Only use an isolated LAN/VPS firewall allowing trusted testers: mod upload,
+map sharing, public listing and fleet transfer remain forbidden. All testers
+must own the same installed content. Neither mode provides authoritative
+**player-driven bus** physics/scripts; those remain client-controlled and
+validated by the existing network relay. Do not use this experimental mode
+for production or publish it as full multiplayer parity.
+
+For a useful manual test, use two matching graphical clients, wait for
+AI cars to spawn out of sight, follow them across crossings, approach a
+stop with waiting passengers, board a passenger using the existing CLAIM
+handshake, then compare traffic, passengers and timetable lines on both
+clients. Record CPU/TPS and disconnect/reconnect behavior. Distinguish a
+config with no installed AI/human/timetable content from a network failure.
+
 ## Streaming-test addendum: drive beyond the starting area
 
 The native experimental host initially loads 64 tiles around the map's
