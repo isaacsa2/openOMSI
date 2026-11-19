@@ -156,11 +156,10 @@ pub fn attach_cpu_ground(vehicle: &mut VehicleInstance, data: &Arc<WorldCell>) {
             .map(f64::from)
     }));
     let ground = Arc::clone(data);
-    vehicle.contact =
-        Some(
-            Arc::new(move |x, y, top| ground.peek().ground.drive_probe(x, y, top))
-                as Arc<dyn omsi_sim::rigid::Ground>,
-        );
+    vehicle.contact = Some(
+        Arc::new(move |x, y, top| ground.peek().ground.drive_probe(x, y, top))
+            as Arc<dyn omsi_sim::rigid::Ground>,
+    );
 }
 
 /// Construct an AI host with the actual server calendar and clock, not the
