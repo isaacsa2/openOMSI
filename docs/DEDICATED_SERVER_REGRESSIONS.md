@@ -20,6 +20,35 @@ ordinary openOMSI client sessions. It asserts the clients' vehicles propagate,
 they receive the same map/date/weather and the server itself owns no bus. It
 does **not** replace two separate game clients driving a licensed map.
 
+## Isolated experimental CPU AI, passengers and schedules
+
+The **separate** `--experimental-simulation` switch activates the shared
+engine's AI road-car physics and scripts, pedestrian population, existing
+`TrafficTable` and `WORLD` / `DESC` serializers, and the native
+`ScheduleSim` dispatcher for simple road-bus schedules. See
+`scripts/server-headless/server-simulation.cfg`. The normal
+`--experimental-free-roam` path remains traffic/passenger/timetable-free.
+
+Admission still fails closed on public server discovery, tunnel, file/map
+sharing, vehicle transfer, voice and unauthorized teleport. The AI population
+budget is limited to 32, the human pool to 128 and the scheduled road-bus
+budget to 12. Tests must verify both flags independently and confirm that
+neither can enable prohibited file transfer or public hosting.
+
+The first CPU-simulation path has **fixed initial tiles** instead of live
+192-tile swaps: populated AI and pedestrian lane indices cannot be rewritten
+without entity-aware migration. It does **not** establish authoritative
+player-driven bus input/physics or whole-map, train, articulated consist,
+real-time performance, timetable and complete collision parity.
+
+Required external tests: a licensed installed map with usable AI vehicle and
+human definitions, actual Chrono timetable content, multiple normal graphical
+clients, coordinated stop boarding/CLAIMs, AI near junctions and signals, TPS
+under load, late joining, reconnection, server shutdown, and client behavior
+outside the initial CPU area. Do **not** mark production-ready if the CI
+smoke test alone passes: a synthetic test without installed AI types cannot
+prove a populated real-world scene.
+
 ## Licensed-map CPU smoke and load measurements
 
 ```sh
