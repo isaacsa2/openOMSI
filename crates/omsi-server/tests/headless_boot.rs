@@ -68,7 +68,6 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         .env_remove("WAYLAND_DISPLAY")
         .output()
         .expect("start standalone headless executable");
-    let _ = fs::remove_dir_all(&root);
     assert!(
         result.status.success(),
         "native host failed with code {:?}\nstdout:\n{}\nstderr:\n{}",
@@ -87,4 +86,35 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         "headless host did not finish its bounded simulation: {}",
         String::from_utf8_lossy(&result.stderr)
     );
+    // Run the real native executable with AI, passenger and Chrono scheduler
+    // enabled against an isolated asset-free fixture. It must not require a
+    // renderer, GPU or a graphical client merely to advance its first ticks.
+    let experimental = fs::read_to_string(&cfg)
+        .unwrap()
+        .replace("traffic = 0", "traffic = 4")
+        .replace("timetable = 0", "timetable = 1")
+        .replace("passengers = 0", "passengers = 1");
+    fs::write(&cfg, experimental).unwrap();
+    let simulated = Command::new(env!("CARGO_BIN_EXE_omsi-server"))
+        .arg(&root)
+        .arg(&cfg)
+        .arg("--experimental-simulation")
+        .arg("--ticks")
+        .arg("65")
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY")
+        .output()
+        .expect("start isolated CPU-simulation server");
+    assert!(
+        simulated.status.success(),
+        "CPU simulation failed with code {:?}\\nstdout:\\n{}\\nstderr:\\n{}",
+        simulated.status.code(),
+        String::from_utf8_lossy(&simulated.stdout),
+        String::from_utf8_lossy(&simulated.stderr)
+    );
+    let diagnostic = String::from_utf8_lossy(&simulated.stderr);
+    assert!(diagnostic.contains("CPU SIMULATION"), "{diagnostic}");
+    assert!(diagnostic.contains("stopped cleanly after 65 ticks"), "{diagnostic}");
+    let _ = fs::remove_dir_all(&root);
+
 }
