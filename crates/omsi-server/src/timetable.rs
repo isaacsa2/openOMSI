@@ -42,6 +42,12 @@ impl CpuTimetable {
 
     /// Once per simulated second, queue departures and place at most one
     /// genuinely routable scheduled bus on the CPU map.
+    /// Applies only to future departures. Existing buses may finish their trip
+    /// rather than being despawned in front of clients on a config reload.
+    pub fn set_limit(&mut self, max: usize) {
+        self.max = max.min(MAX_EXPERIMENTAL_SCHEDULED);
+    }
+
     pub fn tick(
         &mut self,
         root: &Path,
