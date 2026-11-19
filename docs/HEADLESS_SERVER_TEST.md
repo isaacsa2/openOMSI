@@ -69,6 +69,12 @@ The original `--experimental-free-roam` mode remains unchanged, with
 cargo run --locked --release -p omsi-server --bin omsi-server -- /path/to/OMSI2 scripts/server-headless/server-simulation.cfg --experimental-simulation
 ```
 
+The headless-test ZIP now includes `server-simulation.cfg` and
+`run-simulation.cmd` (Windows) or `run-simulation.sh` (Linux), alongside
+the unchanged free-roam launchers. Run the simulation launcher with your
+OMSI 2 installation folder, just as with `run-test`. Alternatively invoke
+`omsi-server` directly with the flag and configuration above.
+
 Change the example `map` only to a map actually installed on the test
 machine. The native simulation reads its `ailists.cfg`, timetable, road
 paths, Chrono data, stop locations and installed AI vehicle scripts.
