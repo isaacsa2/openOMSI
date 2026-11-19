@@ -108,6 +108,47 @@ handshake, then compare traffic, passengers and timetable lines on both
 clients. Record CPU/TPS and disconnect/reconnect behavior. Distinguish a
 config with no installed AI/human/timetable content from a network failure.
 
+## Reload server.cfg without disconnecting players
+
+The running process can re-read the **exact configuration file used at launch**
+(`server-test.cfg`, `server-simulation.cfg`, or a custom file). Edit the
+file on disk, save it, then enter this command in the **local server terminal**:
+
+```text
+/reload
+```
+
+The slash is optional (`reload` also works). A successful reload is applied
+by the next server simulation tick, without replacing the sockets, game map or
+active LAN session. It prints the actual changed setting names to the server
+log; an unchanged file prints `no changes`.
+
+The only **hot-reloadable** keys in this experimental native host are:
+
+- `traffic`: random AI population target (up to 32 in CPU simulation).
+  Reducing it removes excess unscheduled AI cars; scheduled road buses keep
+  their existing trips.
+- `passenger_density`: demand factor 0–3, if passengers were enabled at boot.
+- `time_speed`: simulation clock speed, 1–30.
+- `ai_max_scheduled`: maximum new scheduled road buses (up to 12).
+- `speed_limit_kmh`: 0, 60, 75 or 80.
+
+Changes to **all other** keys (such as `map`, `date`, `time`,
+`passengers`, `timetable`, `port`, `web_port`, `max_players`,
+`admin_password`, `vehicles`, `accept_uploads`, `share_maps`,
+`public_server`, proxy settings and security policy) **require a restart**.
+The host rejects the entire reload if it detects any of these changes, even
+when the file also includes otherwise hot-reloadable values. It also rejects
+missing files, invalid hot values and any attempt to bypass the private-mode
+security policy. No changes are applied on a failed reload.
+
+This command is intentionally **terminal-only**, not a Discord/chat command
+or remotely invocable web-admin action. Avoid editing a live configuration
+while it is half-written; save atomically from your editor if possible. The
+initial free-roam mode still requires `traffic=0`,
+`passengers=0`, and `timetable=0`; it cannot turn itself into the
+simulation mode through `/reload`.
+
 ## Streaming-test addendum: drive beyond the starting area
 
 The native experimental host initially loads 64 tiles around the map's
