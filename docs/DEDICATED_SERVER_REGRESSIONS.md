@@ -49,6 +49,26 @@ outside the initial CPU area. Do **not** mark production-ready if the CI
 smoke test alone passes: a synthetic test without installed AI types cannot
 prove a populated real-world scene.
 
+## Live configuration reload regression gates
+
+The renderer-free dedicated host accepts `/reload` from the **local
+terminal only**; the stdin reader sets a one-shot flag, and the simulation
+thread reads the original config filename and validates every change before
+applying anything. Automated checks require:
+
+- Valid hot changes to `traffic`, `time_speed`, `passenger_density`,
+  `ai_max_scheduled` and `speed_limit_kmh` are accepted.
+- Invalid numbers, deleted config, changes to map/ports/auth/transfer/public
+  settings, and attempts to enable AI through free-roam are all rejected.
+- Rejected reloads do not mutate the live config, traffic/scheduled limits,
+  connection endpoints or policies. No user-controlled remote `reload`
+  action is available.
+- Lowering `traffic` retires excess unscheduled AI cars; currently active
+  timetable buses may finish their runs. The session and existing clients
+  remain connected.
+- A real interactive-console test must verify the command produces an
+  applied/unchanged/rejected status in the logs.
+
 ## Licensed-map CPU smoke and load measurements
 
 ```sh
