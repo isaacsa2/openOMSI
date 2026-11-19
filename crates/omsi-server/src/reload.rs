@@ -148,6 +148,76 @@ pub fn read_checked(path: &Path, active: &ServerCfg, simulated: bool) -> Result<
     Ok(Reloaded { config: next, changed })
 }
 
+/// Atomically apply the validated hot settings on the simulation thread.
+/// A lowered random-AI limit removes only excess unscheduled cars; scheduled
+/// buses keep running their current trips and obey the new cap on next spawn.
+#[allow(clippy::too_many_arguments)]
+pub fn apply(
+    path: &Path,
+    active: &mut ServerCfg,
+    simulated: bool,
+    simulation: &mut crate::simulation::CpuSimulation,
+    transport: &mut crate::transport::HostTransport,
+    schedule: &mut Option<crate::timetable::CpuTimetable>,
+    rules: &mut omsi_lan::admin::ServerRules<'_>,
+    admin: &mut omsi_lan::admin::ServerAdmin,
+) -> Result<()> {
+    let Reloaded { config, changed } = read_checked(path, active, simulated)?;
+    if changed.is_empty() {
+        log::info!("server console: /reload: no changes in {}", path.display());
+        return Ok(());
+    }
+    // All validation has completed, and the following operations cannot
+    // fail. No listener, auth hub, asset mount or world network is replaced.
+    simulation.traffic.target = if simulated { config.traffic } else { 0 };
+    simulation.traffic.time_scale = config.time_speed;
+    transport.session_mut().clock_speed = config.time_speed;
+    simulation.people.density = if simulated && config.passengers {
+        config.passenger_density.unwrap_or(1.0).clamp(0.0, 3.0)
+    } else {
+        0.0
+    };
+    admin.passenger_density = config.passenger_density;
+    rules.traffic_max = if simulated { config.traffic } else { 0 };
+    omsi_lan::server_cfg::set_server_speed_limit_kmh(config.speed_limit_kmh);
+    if let Some(timetable) = schedule {
+        let max = config
+            .ai_limits
+            .max_scheduled
+            .filter(|count| *count > 0)
+            .unwrap_or(crate::timetable::MAX_EXPERIMENTAL_SCHEDULED as u32);
+        timetable.set_limit(max as usize);
+    }
+    let mut excess = simulation
+        .traffic
+        .cars
+        .iter()
+        .filter(|car| !car.is_bus())
+        .count()
+        .saturating_sub(if simulated { config.traffic } else { 0 });
+    if excess > 0 {
+        for index in (0..simulation.traffic.cars.len()).rev() {
+            if excess == 0 {
+                break;
+            }
+            if !simulation.traffic.cars[index].is_bus() {
+                let car = simulation
+                    .traffic
+                    .take_off(index, omsi_sim::ai_traffic::control::Removal::Finished);
+                simulation.traffic.retired.push(car.id);
+                excess -= 1;
+            }
+        }
+    }
+    *active = config;
+    log::info!(
+        "server console: /reload: applied {} from {} (existing timetable buses finish their trips)",
+        changed.join(", "),
+        path.display()
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
