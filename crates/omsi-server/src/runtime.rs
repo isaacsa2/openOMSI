@@ -787,10 +787,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "omsi-native-ai-{}-{nanos}.cfg",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("omsi-native-ai-{}-{nanos}.cfg", std::process::id()));
         let sample = include_str!("../../../scripts/server-headless/server-simulation.cfg");
         std::fs::write(&path, sample).unwrap();
         let mut cfg = ServerCfg::load(&path, 256).unwrap();
@@ -815,5 +813,4 @@ mod tests {
         cfg.vehicles.push("Vehicles/Private/vehicle.bus".into());
         assert!(allow_simulated_roam(&cfg).is_err());
     }
-
 }
