@@ -781,4 +781,39 @@ mod tests {
         cfg.vehicles.push("Vehicles/Private/Bus.bus".into());
         assert!(allow_free_roam(&cfg).is_err());
     }
+    #[test]
+    fn experimental_simulation_admission_is_explicit_and_still_private() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "omsi-native-ai-{}-{nanos}.cfg",
+            std::process::id()
+        ));
+        let sample = include_str!("../../../scripts/server-headless/server-simulation.cfg");
+        std::fs::write(&path, sample).unwrap();
+        let mut cfg = ServerCfg::load(&path, 256).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(allow_simulated_roam(&cfg).is_ok());
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.traffic = MAX_EXPERIMENTAL_TRAFFIC + 1;
+        assert!(allow_simulated_roam(&cfg).is_err());
+        cfg.traffic = 8;
+        cfg.ai_limits.max_humans = Some(129);
+        assert!(allow_simulated_roam(&cfg).is_err());
+        cfg.ai_limits.max_humans = Some(64);
+        cfg.accept_uploads = true;
+        assert!(allow_simulated_roam(&cfg).is_err());
+        cfg.accept_uploads = false;
+        cfg.share_maps = true;
+        assert!(allow_simulated_roam(&cfg).is_err());
+        cfg.share_maps = false;
+        cfg.public_server = true;
+        assert!(allow_simulated_roam(&cfg).is_err());
+        cfg.public_server = false;
+        cfg.vehicles.push("Vehicles/Private/vehicle.bus".into());
+        assert!(allow_simulated_roam(&cfg).is_err());
+    }
+
 }
