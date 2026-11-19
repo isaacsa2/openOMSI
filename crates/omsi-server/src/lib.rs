@@ -6,6 +6,7 @@
 //! runtime while the application-specific world adapters are being extracted.
 
 pub mod admin;
+pub mod ai_sync;
 pub mod clock;
 pub mod collision;
 pub mod collision_mesh;
