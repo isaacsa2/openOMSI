@@ -22,7 +22,10 @@ pub struct CpuTrafficPopulation {
 
 impl Default for CpuTrafficPopulation {
     fn default() -> Self {
-        Self { elapsed: 0.0, state: 0xD1B5_4A32_0713_1EEB }
+        Self {
+            elapsed: 0.0,
+            state: 0xD1B5_4A32_0713_1EEB,
+        }
     }
 }
 
@@ -83,17 +86,17 @@ impl CpuTrafficPopulation {
             if viewers
                 .iter()
                 .any(|at| (position - *at).truncate().length() < MIN_PLAYER_DISTANCE)
-                || traffic.cars.iter().any(|car| {
-                    (position - car.vehicle.position).truncate().length() < MIN_CAR_GAP
-                })
+                || traffic
+                    .cars
+                    .iter()
+                    .any(|car| (position - car.vehicle.position).truncate().length() < MIN_CAR_GAP)
             {
                 continue;
             }
             let valid_ground = {
                 let d = data.peek();
                 let (key, _) = omsi_map::world_to_tile_local(position.x, position.y);
-                d.ground.terrains.contains_key(&key)
-                    || d.ground.surfaces.contains_key(&key)
+                d.ground.terrains.contains_key(&key) || d.ground.surfaces.contains_key(&key)
             };
             if !valid_ground {
                 continue;
@@ -107,8 +110,7 @@ impl CpuTrafficPopulation {
             if eligible.is_empty() {
                 break;
             }
-            let ty: Arc<VehicleType> =
-                eligible[(self.random() as usize) % eligible.len()].clone();
+            let ty: Arc<VehicleType> = eligible[(self.random() as usize) % eligible.len()].clone();
             let seed = self.random();
             let scheme = traffic.ai_scheme(&ty, seed >> 8);
             let mut host = VehicleHost::new(SimClock::default());
@@ -131,10 +133,11 @@ impl CpuTrafficPopulation {
                     .map(f64::from)
             }));
             let ground = Arc::clone(data);
-            vehicle.contact = Some(
-                Arc::new(move |x, y, top| ground.peek().ground.drive_probe(x, y, top))
-                    as Arc<dyn omsi_sim::rigid::Ground>,
-            );
+            vehicle.contact =
+                Some(
+                    Arc::new(move |x, y, top| ground.peek().ground.drive_probe(x, y, top))
+                        as Arc<dyn omsi_sim::rigid::Ground>,
+                );
             vehicle.apply_paint_vars(scheme);
             traffic.place_car(
                 vehicle,
@@ -181,7 +184,10 @@ mod tests {
         let data = Arc::new(WorldCell::new(WorldData::default()));
         let mut population = CpuTrafficPopulation::default();
         assert_eq!(population.tick(&mut traffic, &data, &[], 10, 1.0), 0);
-        assert_eq!(population.tick(&mut traffic, &data, &[DVec3::ZERO], 10, 1.0), 0);
+        assert_eq!(
+            population.tick(&mut traffic, &data, &[DVec3::ZERO], 10, 1.0),
+            0
+        );
         assert!(traffic.cars.is_empty());
     }
 }
