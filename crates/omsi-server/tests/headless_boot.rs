@@ -2,9 +2,10 @@
 //! The synthetic content is used solely inside CI and is not redistributed.
 
 use std::fs;
+use std::io::Write;
 use std::net::TcpListener;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn write(path: &Path, content: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -95,16 +96,28 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         .replace("timetable = 0", "timetable = 1")
         .replace("passengers = 0", "passengers = 1");
     fs::write(&cfg, experimental).unwrap();
-    let simulated = Command::new(env!("CARGO_BIN_EXE_omsi-server"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omsi-server"))
         .arg(&root)
         .arg(&cfg)
         .arg("--experimental-simulation")
         .arg("--ticks")
         .arg("65")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
-        .output()
+        .spawn()
         .expect("start isolated CPU-simulation server");
+    // Exercise the actual stdin -> queued command -> simulation-tick path,
+    // rather than only the parser unit test.
+    child
+        .stdin
+        .take()
+        .expect("stdin pipe")
+        .write_all(b"/reload\\n")
+        .expect("send local reload command");
+    let simulated = child.wait_with_output().expect("wait for native simulation");
     assert!(
         simulated.status.success(),
         "CPU simulation failed with code {:?}\\nstdout:\\n{}\\nstderr:\\n{}",
@@ -114,6 +127,10 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
     );
     let diagnostic = String::from_utf8_lossy(&simulated.stderr);
     assert!(diagnostic.contains("CPU SIMULATION"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("server console: /reload: no changes"),
+        "local /reload was not executed through the active simulation: {diagnostic}"
+    );
     assert!(
         diagnostic.contains("stopped cleanly after 65 ticks"),
         "{diagnostic}"
