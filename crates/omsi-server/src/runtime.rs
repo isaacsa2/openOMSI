@@ -3,6 +3,7 @@
 //! timetable authority are blocked until CPU world parity is verified.
 
 use crate::admin;
+use crate::ai_sync::HeadlessTrafficSync;
 use crate::simulation::CpuSimulation;
 use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
@@ -324,6 +325,7 @@ pub fn free_roam(
     };
     let mut pacer = TickPacer::new(Instant::now());
     let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
+    let mut traffic_sync = HeadlessTrafficSync::default();
     let stream_global = map.global.clone();
     let streamer = StreamWorker::start(map).context("starting CPU tile stream worker")?;
     let mut stream_busy = false;
@@ -422,6 +424,13 @@ pub fn free_roam(
         profile(&mut profiler, "simulation", || sim.step(FIXED_DT));
         profile(&mut profiler, "world_sync", || {
             world_sync.tick(net.session_mut(), &sim.traffic, FIXED_DT)
+        });
+        // The graphical host writes an acknowledged traffic table after
+        // physics. Keep the same wire contract even when experimental
+        // free-roam has no server-owned AI cars.
+        profile(&mut profiler, "traffic_sync", || {
+            traffic_sync.update(&sim.traffic, root);
+            traffic_sync.publish(net.session_mut(), FIXED_DT)
         });
         // AI vehicle and passenger snapshots remain unsupported in free-roam.
         sim.discard_presentation_events_after_publish();
