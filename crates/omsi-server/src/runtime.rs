@@ -551,8 +551,14 @@ fn run(
         crate::commands::apply_world_jobs(net.session_mut(), &mut admin_state, None, clock, 0, hub);
         if console::take_reload_requested() {
             if let Err(error) = crate::reload::apply(
-                &plan.config_path, &mut live_cfg, simulated, &mut sim, &mut net,
-                &mut schedule, &mut rules, &mut admin_state,
+                &plan.config_path,
+                &mut live_cfg,
+                simulated,
+                &mut sim,
+                &mut net,
+                &mut schedule,
+                &mut rules,
+                &mut admin_state,
             ) {
                 log::warn!("server console: /reload refused; settings unchanged: {error}");
             }
@@ -583,7 +589,13 @@ fn run(
         if simulated && n % 60 == 0 {
             let viewers = sim.traffic.lan_centers.clone();
             profile(&mut profiler, "ai_population", || {
-                population.tick(&mut sim.traffic, &sim.world, &viewers, live_cfg.traffic, 1.0)
+                population.tick(
+                    &mut sim.traffic,
+                    &sim.world,
+                    &viewers,
+                    live_cfg.traffic,
+                    1.0,
+                )
             });
         }
         // Match LAN clock shifts; TrafficSim advances day_time inside step.
