@@ -45,25 +45,31 @@ fn check_hot_values(text: &str) -> Result<()> {
                 );
             }
             "passenger_density" => {
-                let density: f32 =
-                    value.parse().context("passenger_density must be a number")?;
+                let density: f32 = value
+                    .parse()
+                    .context("passenger_density must be a number")?;
                 ensure!(
                     density.is_finite() && (0.0..=3.0).contains(&density),
                     "passenger_density must be between 0 and 3"
                 );
             }
             "speed_limit_kmh" => {
-                let speed: u32 =
-                    value.parse().context("speed_limit_kmh must be an integer")?;
+                let speed: u32 = value
+                    .parse()
+                    .context("speed_limit_kmh must be an integer")?;
                 ensure!(
                     matches!(speed, 0 | 60 | 75 | 80),
                     "speed_limit_kmh must be 0, 60, 75 or 80"
                 );
             }
             "ai_max_scheduled" => {
-                let count: u32 =
-                    value.parse().context("ai_max_scheduled must be an integer")?;
-                ensure!(count <= 4096, "ai_max_scheduled exceeds the supported range");
+                let count: u32 = value
+                    .parse()
+                    .context("ai_max_scheduled must be an integer")?;
+                ensure!(
+                    count <= 4096,
+                    "ai_max_scheduled exceeds the supported range"
+                );
             }
             _ => {}
         }
@@ -86,16 +92,46 @@ pub fn restart_required(old: &ServerCfg, next: &ServerCfg) -> Vec<&'static str> 
         };
     }
     compare!(
-        name, motd, map, date, time, weather, timetable, passengers,
-        port, web_port, max_players, tunnel, public_address, radius,
-        icon, admin_password, moderator_password, allow_player_teleport,
-        admin_web, admin_web_origins, admin_trusted_proxies,
-        admin_proxy_header, gateway_cf_connecting_ip,
-        real_time, metar_sync, metar_station, vehicles,
-        share_positions, accept_uploads, uploads_keep_days,
-        parked_buses, share_maps, voice, public_server, public_list_url,
-        owner_bans, require_hardware_id, ai_drive_through_parked,
-        log_addresses, dir
+        name,
+        motd,
+        map,
+        date,
+        time,
+        weather,
+        timetable,
+        passengers,
+        port,
+        web_port,
+        max_players,
+        tunnel,
+        public_address,
+        radius,
+        icon,
+        admin_password,
+        moderator_password,
+        allow_player_teleport,
+        admin_web,
+        admin_web_origins,
+        admin_trusted_proxies,
+        admin_proxy_header,
+        gateway_cf_connecting_ip,
+        real_time,
+        metar_sync,
+        metar_station,
+        vehicles,
+        share_positions,
+        accept_uploads,
+        uploads_keep_days,
+        parked_buses,
+        share_maps,
+        voice,
+        public_server,
+        public_list_url,
+        owner_bans,
+        require_hardware_id,
+        ai_drive_through_parked,
+        log_addresses,
+        dir
     );
     if old.ai_limits.unsched_factor != next.ai_limits.unsched_factor {
         changed.push("ai_unsched_factor");
@@ -113,9 +149,13 @@ pub fn restart_required(old: &ServerCfg, next: &ServerCfg) -> Vec<&'static str> 
 /// <config-dir>/server.cfg), validate test-mode safety, then compare with the
 /// actively applied config. If any step fails the live state stays untouched.
 pub fn read_checked(path: &Path, active: &ServerCfg, simulated: bool) -> Result<Reloaded> {
-    ensure!(path.is_file(), "config file no longer exists: {}", path.display());
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    ensure!(
+        path.is_file(),
+        "config file no longer exists: {}",
+        path.display()
+    );
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     check_hot_values(&text)?;
     let next = ServerCfg::load(path, PARSE_TRAFFIC_MAX)?;
     if simulated {
@@ -145,7 +185,10 @@ pub fn read_checked(path: &Path, active: &ServerCfg, simulated: bool) -> Result<
     if active.ai_limits.max_scheduled != next.ai_limits.max_scheduled {
         changed.push("ai_max_scheduled");
     }
-    Ok(Reloaded { config: next, changed })
+    Ok(Reloaded {
+        config: next,
+        changed,
+    })
 }
 
 /// Atomically apply the validated hot settings on the simulation thread.
@@ -228,10 +271,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "native-reload-{}-{nanos}.cfg",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("native-reload-{}-{nanos}.cfg", std::process::id()));
         let original = include_str!("../../../scripts/server-headless/server-simulation.cfg");
         std::fs::write(&path, original).unwrap();
         let old = ServerCfg::load(&path, PARSE_TRAFFIC_MAX).unwrap();
@@ -250,7 +291,12 @@ mod tests {
         std::fs::write(&path, updated.replace("share_maps = 0", "share_maps = 1")).unwrap();
         assert!(read_checked(&path, &old, true).is_err());
         std::fs::write(&path, updated.replace("port = 27015", "port = 27016")).unwrap();
-        assert!(read_checked(&path, &old, true).unwrap_err().to_string().contains("port"));
+        assert!(
+            read_checked(&path, &old, true)
+                .unwrap_err()
+                .to_string()
+                .contains("port")
+        );
         std::fs::write(&path, updated.replace("traffic = 16", "traffic = garbage")).unwrap();
         assert!(read_checked(&path, &old, true).is_err());
         std::fs::remove_file(&path).unwrap();
