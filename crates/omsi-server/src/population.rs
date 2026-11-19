@@ -116,28 +116,7 @@ impl CpuTrafficPopulation {
             let mut host = VehicleHost::new(SimClock::default());
             host.paint_scheme = Some(scheme);
             let mut vehicle = VehicleInstance::new(ty.clone(), host);
-            let ground = Arc::clone(data);
-            vehicle.ground = Some(Arc::new(move |x, y| {
-                let d = ground.peek();
-                let (key, (lx, ly)) = omsi_map::world_to_tile_local(x, y);
-                d.ground
-                    .surfaces
-                    .get(&key)
-                    .and_then(|surface| surface.sample_road_smooth(lx as f32, ly as f32))
-                    .or_else(|| {
-                        d.ground
-                            .terrains
-                            .get(&key)
-                            .map(|terrain| terrain.sample(lx as f32, ly as f32))
-                    })
-                    .map(f64::from)
-            }));
-            let ground = Arc::clone(data);
-            vehicle.contact =
-                Some(
-                    Arc::new(move |x, y, top| ground.peek().ground.drive_probe(x, y, top))
-                        as Arc<dyn omsi_sim::rigid::Ground>,
-                );
+            attach_cpu_ground(&mut vehicle, data);
             vehicle.apply_paint_vars(scheme);
             traffic.place_car(
                 vehicle,
@@ -155,6 +134,41 @@ impl CpuTrafficPopulation {
         }
         placed
     }
+}
+
+/// Attach the same road/terrain and exact wheel-contact samplers used by
+/// the game, but via shared immutable CPU map snapshots rather than a Scene.
+pub fn attach_cpu_ground(vehicle: &mut VehicleInstance, data: &Arc<WorldCell>) {
+    let ground = Arc::clone(data);
+    vehicle.ground = Some(Arc::new(move |x, y| {
+        let d = ground.peek();
+        let (key, (lx, ly)) = omsi_map::world_to_tile_local(x, y);
+        d.ground
+            .surfaces
+            .get(&key)
+            .and_then(|surface| surface.sample_road_smooth(lx as f32, ly as f32))
+            .or_else(|| {
+                d.ground
+                    .terrains
+                    .get(&key)
+                    .map(|terrain| terrain.sample(lx as f32, ly as f32))
+            })
+            .map(f64::from)
+    }));
+    let ground = Arc::clone(data);
+    vehicle.contact =
+        Some(
+            Arc::new(move |x, y, top| ground.peek().ground.drive_probe(x, y, top))
+                as Arc<dyn omsi_sim::rigid::Ground>,
+        );
+}
+
+/// Construct an AI host with the actual server calendar and clock, not the
+/// graphical application's default 09:00 time.
+pub fn ai_host_clock(date: Option<&str>, time: &str, day_time: f64) -> SimClock {
+    let mut clock = SimClock::starting(date, None, time);
+    clock.time = day_time.rem_euclid(86_400.0);
+    clock
 }
 
 #[cfg(test)]
