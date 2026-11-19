@@ -4,6 +4,7 @@
 
 use crate::admin;
 use crate::ai_sync::HeadlessTrafficSync;
+use crate::people_sync::HeadlessPeopleSync;
 use crate::simulation::CpuSimulation;
 use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
@@ -326,6 +327,7 @@ pub fn free_roam(
     let mut pacer = TickPacer::new(Instant::now());
     let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
     let mut traffic_sync = HeadlessTrafficSync::default();
+    let mut people_sync = HeadlessPeopleSync::default();
     let stream_global = map.global.clone();
     let streamer = StreamWorker::start(map).context("starting CPU tile stream worker")?;
     let mut stream_busy = false;
@@ -431,6 +433,14 @@ pub fn free_roam(
         profile(&mut profiler, "traffic_sync", || {
             traffic_sync.update(&sim.traffic, root);
             traffic_sync.publish(net.session_mut(), FIXED_DT)
+        });
+        profile(&mut profiler, "people_sync", || {
+            people_sync.tick(
+                net.session_mut(),
+                &sim.people,
+                &traffic_sync.table,
+                FIXED_DT,
+            )
         });
         // AI vehicle and passenger snapshots remain unsupported in free-roam.
         sim.discard_presentation_events_after_publish();
