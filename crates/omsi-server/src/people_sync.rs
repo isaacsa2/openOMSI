@@ -6,9 +6,7 @@
 
 use glam::DVec3;
 use omsi_net::traffic_table::TrafficTable;
-use omsi_net::world::{
-    self, Activity, Desc, PersonPlace, PersonState, WorldFrame,
-};
+use omsi_net::world::{self, Activity, Desc, PersonPlace, PersonState, WorldFrame};
 use omsi_net::{LanSession, Role};
 use omsi_sim::people::{LanPerson, PeopleSim};
 use std::collections::{HashMap, HashSet};
@@ -210,9 +208,15 @@ mod tests {
     #[test]
     fn late_join_gets_first_snapshot_and_only_changed_poses_follow() {
         let mut view = ClientPeople::default();
-        assert_eq!(view.frame(&[person(12, 2.0)], 0.1).people, vec![person(12, 2.0)]);
+        assert_eq!(
+            view.frame(&[person(12, 2.0)], 0.1).people,
+            vec![person(12, 2.0)]
+        );
         assert!(view.frame(&[person(12, 2.0)], 0.1).people.is_empty());
-        assert_eq!(view.frame(&[person(12, 4.0)], 0.1).people, vec![person(12, 4.0)]);
+        assert_eq!(
+            view.frame(&[person(12, 4.0)], 0.1).people,
+            vec![person(12, 4.0)]
+        );
     }
 
     #[test]
