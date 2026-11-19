@@ -28,15 +28,17 @@ fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let Some(root) = args.next() else {
         bail!(
-            "Usage: omsi-server <OMSI2-root> <server.cfg> [--experimental-free-roam] [--ticks N]"
+            "Usage: omsi-server <OMSI2-root> <server.cfg> (--experimental-free-roam | --experimental-simulation) [--ticks N]"
         );
     };
     let config = args.next().context("missing server.cfg path")?;
     let mut experimental = false;
+    let mut simulation = false;
     let mut max_ticks = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--experimental-free-roam" if !experimental => experimental = true,
+            "--experimental-simulation" if !simulation => simulation = true,
             "--ticks" if max_ticks.is_none() => {
                 let ticks: u64 = args
                     .next()
@@ -48,9 +50,9 @@ fn main() -> Result<()> {
             _ => bail!("unsupported or repeated option {flag}"),
         }
     }
-    if !experimental {
+    if experimental == simulation {
         bail!(
-            "Full headless multiplayer is not ready: run the legacy openomsi --server for production. Use --experimental-free-roam only with an isolated, restricted server.cfg"
+            "Choose exactly one experimental mode: --experimental-free-roam or --experimental-simulation. Use legacy openomsi --server for production"
         );
     }
     let root = PathBuf::from(root);
@@ -78,7 +80,11 @@ fn main() -> Result<()> {
     // Validate operator restrictions before initializing any administration,
     // global upload policy, gateway or console reader.
     let parsed = omsi_lan::server_cfg::ServerCfg::load(&config, 256)?;
-    runtime::allow_free_roam(&parsed)?;
+    if simulation {
+        runtime::allow_simulated_roam(&parsed)?;
+    } else {
+        runtime::allow_free_roam(&parsed)?;
+    }
     let plan = startup::prepare(
         &config,
         &root,
@@ -87,5 +93,9 @@ fn main() -> Result<()> {
         env!("CARGO_PKG_VERSION"),
         &|_, _| String::new(),
     )?;
-    runtime::free_roam(&root, &plan, max_ticks)
+    if simulation {
+        runtime::simulated_roam(&root, &plan, max_ticks)
+    } else {
+        runtime::free_roam(&root, &plan, max_ticks)
+    }
 }
