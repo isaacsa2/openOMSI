@@ -6,10 +6,10 @@ use crate::admin;
 use crate::ai_sync::HeadlessTrafficSync;
 use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
-use crate::timetable::CpuTimetable;
 use crate::simulation::CpuSimulation;
 use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
+use crate::timetable::CpuTimetable;
 use crate::transport::HostTransport;
 use crate::{console, traffic};
 use anyhow::{Context, Result, ensure};
@@ -270,9 +270,7 @@ fn service_streaming(
         if next != current {
             *busy = worker.request(desired);
             if !*busy {
-                log::warn!(
-                    "native tile stream worker disconnected; retaining the previous world"
-                );
+                log::warn!("native tile stream worker disconnected; retaining the previous world");
             }
         }
     }
@@ -345,7 +343,7 @@ fn make_cpu_sim(
         signals.network,
         random,
         map.global.traffic_density_road.clone(),
-        keys.clone(),
+        keys.to_vec(),
         if simulated { cfg.traffic } else { 0 },
     );
     ai.lights = signals.controllers;
@@ -416,7 +414,10 @@ fn run(
             root,
             &sim.world,
             &sim_clock,
-            cfg.ai_limits.max_scheduled.filter(|&count| count > 0).unwrap_or(12) as usize,
+            cfg.ai_limits
+                .max_scheduled
+                .filter(|&count| count > 0)
+                .unwrap_or(12) as usize,
         ))
     } else {
         None
