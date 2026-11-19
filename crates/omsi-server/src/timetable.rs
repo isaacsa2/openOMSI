@@ -107,13 +107,7 @@ impl CpuTimetable {
             let mut taken = false;
             if let Some(i) = next {
                 if self.sim.may_take_on(i, now) {
-                    let placed = match self.sim.place_departure(
-                        i,
-                        world,
-                        traffic,
-                        now,
-                        Some(ci),
-                    ) {
+                    let placed = match self.sim.place_departure(i, world, traffic, now, Some(ci)) {
                         Ok(route) => self.sim.take_trip_on(i, ci, route, traffic, now),
                         Err(placed) => placed,
                     };
@@ -170,9 +164,11 @@ impl CpuTimetable {
         {
             return Placed::Wait;
         }
-        if traffic.cars.iter().any(|car| {
-            (car.vehicle.position - at).truncate().length() < 16.0
-        }) {
+        if traffic
+            .cars
+            .iter()
+            .any(|car| (car.vehicle.position - at).truncate().length() < 16.0)
+        {
             return Placed::Busy;
         }
         let scheme = choice.scheme;
@@ -221,7 +217,10 @@ impl CpuTimetable {
         );
         self.sim.bus_runs(id, i);
         self.sim.started(i);
-        log::info!("native timetable: scheduled road bus {id} for {}", p.trip_name);
+        log::info!(
+            "native timetable: scheduled road bus {id} for {}",
+            p.trip_name
+        );
         Placed::Spawned
     }
 }
