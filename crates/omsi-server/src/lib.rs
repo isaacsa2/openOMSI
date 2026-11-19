@@ -28,6 +28,7 @@ pub mod stops;
 pub mod streaming;
 pub mod surfaces;
 pub mod tick;
+pub mod timetable;
 pub mod traffic;
 pub mod transport;
 pub mod weather;
