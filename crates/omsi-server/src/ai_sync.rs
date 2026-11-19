@@ -96,7 +96,13 @@ impl HeadlessTrafficSync {
                     .map(|paint| paint.name.clone())
                     .unwrap_or_default(),
             };
-            let meta = || if car.is_bus() { car_meta(vehicle) } else { Meta::default() };
+            let meta = || {
+                if car.is_bus() {
+                    car_meta(vehicle)
+                } else {
+                    Meta::default()
+                }
+            };
             let Some(id) = self.table.upsert(car.id, kind, look, meta, row) else {
                 continue;
             };
@@ -121,12 +127,7 @@ impl HeadlessTrafficSync {
                     .iter()
                     .all(|coordinate| coordinate.is_finite() && coordinate.abs() < 1.0e8)
             })
-            .map(|peer| {
-                (
-                    peer.pose.id,
-                    [peer.pose.x, peer.pose.y, peer.pose.z],
-                )
-            })
+            .map(|peer| (peer.pose.id, [peer.pose.x, peer.pose.y, peer.pose.z]))
             .collect();
         let bytes = lan.traffic_publish(&self.table, &viewers, dt, TRAFFIC_BYTES_PER_SECOND);
         self.sent_bytes += bytes as u64;
