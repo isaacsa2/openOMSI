@@ -12,6 +12,8 @@ pub static SERVER_METAR: OnceLock<Option<String>> = OnceLock::new();
 pub static SERVER_ADMIN: OnceLock<(String, String, f64)> = OnceLock::new();
 
 pub struct LaunchPlan {
+    /// The exact configured filename, including alternate test config names.
+    pub config_path: std::path::PathBuf,
     pub config: ServerCfg,
     pub weather: Option<String>,
     pub ai_limits: String,
@@ -100,6 +102,7 @@ pub fn prepare(
         "server operator: you are responsible for your players' private data, logs and moderation records"
     );
     Ok(LaunchPlan {
+        config_path: path.to_path_buf(),
         config: cfg,
         weather,
         ai_limits,
