@@ -114,7 +114,9 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
     );
     let diagnostic = String::from_utf8_lossy(&simulated.stderr);
     assert!(diagnostic.contains("CPU SIMULATION"), "{diagnostic}");
-    assert!(diagnostic.contains("stopped cleanly after 65 ticks"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("stopped cleanly after 65 ticks"),
+        "{diagnostic}"
+    );
     let _ = fs::remove_dir_all(&root);
-
 }
