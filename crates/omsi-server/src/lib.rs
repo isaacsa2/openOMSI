@@ -18,6 +18,7 @@ pub mod lan_world;
 pub mod lanes;
 pub mod metar;
 pub mod people_sync;
+pub mod population;
 pub mod runtime;
 mod scenery_ground;
 pub mod signals;
