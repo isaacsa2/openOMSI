@@ -231,6 +231,57 @@ pub fn simulated_roam(
     run(root, plan, max_ticks, true)
 }
 
+/// Streaming is deliberately free-roam only. Replacing a populated lane
+/// network would invalidate AI routes and pedestrian lane indices.
+#[allow(clippy::too_many_arguments)]
+fn service_streaming(
+    worker: &StreamWorker,
+    sim: &mut CpuSimulation,
+    net: &HostTransport,
+    profiler: &mut Profiler,
+    root: &Path,
+    global: &omsi_map::GlobalCfg,
+    initial: &[(i32, i32)],
+    active_keys: &mut Vec<(i32, i32)>,
+    busy: &mut bool,
+    tick: u64,
+) -> bool {
+    match worker.poll() {
+        Ok(Some(update)) => {
+            *busy = false;
+            *active_keys = profile(profiler, "tile_stream_apply", || {
+                apply_free_roam_update(sim, root, &global.traffic_density_road, update)
+            });
+        }
+        Ok(None) => *busy = false,
+        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            log::error!("native CPU tile stream worker stopped unexpectedly");
+            return false;
+        }
+    }
+    if !*busy && tick % STREAM_REFRESH_TICKS == 0 {
+        let centers: Vec<(f64, f64)> = net
+            .session()
+            .peers()
+            .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
+            .map(|peer| (peer.pose.x, peer.pose.y))
+            .collect();
+        let desired = interest_tiles(global, initial, &centers, STREAM_TILE_LIMIT);
+        let current: BTreeSet<_> = active_keys.iter().copied().collect();
+        let next: BTreeSet<_> = desired.iter().copied().collect();
+        if next != current {
+            *busy = worker.request(desired);
+            if !*busy {
+                log::warn!(
+                    "native tile stream worker disconnected; retaining the previous world"
+                );
+            }
+        }
+    }
+    true
+}
+
 fn run(
     root: &Path,
     plan: &crate::startup::LaunchPlan,
@@ -281,7 +332,11 @@ fn run(
         log::warn!(
             "some entrypoints are outside the initial {}-tile CPU simulation; mode={}",
             INITIAL_TILE_LIMIT,
-            if simulated { "fixed-map CPU simulation" } else { "streaming free-roam" }
+            if simulated {
+                "fixed-map CPU simulation"
+            } else {
+                "streaming free-roam"
+            }
         );
     }
     let ground_surfaces = map.install_spline_ground_surfaces(&keys);
@@ -392,7 +447,11 @@ fn run(
     );
     eprintln!(
         "Experimental headless {}: no authoritative player bus or timetable parity",
-        if simulated { "CPU SIMULATION" } else { "FREE-ROAM relay" }
+        if simulated {
+            "CPU SIMULATION"
+        } else {
+            "FREE-ROAM relay"
+        }
     );
     net.ready();
     let port = net
@@ -459,47 +518,21 @@ fn run(
         let authoritative = clock + admin_state.shift;
         net.session_mut().set_clock(&date, authoritative);
         profile(&mut profiler, "network", || net.tick(FIXED_DT));
-        // Parse remote tile neighborhoods on a dedicated worker. Never let
-        // expensive map IO or collision rebuilding stall UDP keepalives.
-        if let Some(ref streamer) = streamer {
-        match streamer.poll() {
-            Ok(Some(update)) => {
-                stream_busy = false;
-                active_keys = profile(&mut profiler, "tile_stream_apply", || {
-                    apply_free_roam_update(
-                        &mut sim,
-                        root,
-                        &stream_global.traffic_density_road,
-                        update,
-                    )
-                });
-            }
-            Ok(None) => stream_busy = false,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                log::error!("native CPU tile stream worker stopped unexpectedly");
+        if let Some(ref worker) = streamer {
+            if !service_streaming(
+                worker,
+                &mut sim,
+                &net,
+                &mut profiler,
+                root,
+                &stream_global,
+                &keys,
+                &mut active_keys,
+                &mut stream_busy,
+                n,
+            ) {
                 break;
             }
-        }
-        if !stream_busy && n % STREAM_REFRESH_TICKS == 0 {
-            let centers: Vec<(f64, f64)> = net
-                .session()
-                .peers()
-                .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
-                .map(|peer| (peer.pose.x, peer.pose.y))
-                .collect();
-            let desired = interest_tiles(&stream_global, &keys, &centers, STREAM_TILE_LIMIT);
-            let current: BTreeSet<_> = active_keys.iter().copied().collect();
-            let next: BTreeSet<_> = desired.iter().copied().collect();
-            if next != current {
-                stream_busy = streamer.request(desired);
-                if !stream_busy {
-                    log::warn!(
-                        "native tile stream worker disconnected; retaining the previous world"
-                    );
-                }
-            }
-        }
         }
         profile(&mut profiler, "interest", || {
             sim.sync_host_clients(net.session_mut())
