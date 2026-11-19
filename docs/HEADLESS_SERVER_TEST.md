@@ -1,7 +1,9 @@
 # openOMSI — native dedicated server test package
 
-**EXPERIMENTAL FREE-ROAM ONLY. Not a replacement for `openomsi --server`.**
-This binary is built from PR #405 and does not initialize the graphical
+**EXPERIMENTAL CPU-ONLY host. Not a replacement for `openomsi --server`.**
+The default test launcher uses the restricted free-roam mode. A separate
+simulation launcher enables bounded AI, passengers and schedules for private
+tests, as documented below. This binary is built from PR #405 and does not initialize the graphical
 renderer, DirectX, Vulkan, or audio. It uses the normal openOMSI UDP session
 transport with a fixed CPU-side tick and a local server console.
 
