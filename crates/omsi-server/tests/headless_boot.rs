@@ -115,7 +115,7 @@ fn native_server_boots_a_cpu_map_and_stops_after_bounded_ticks() {
         .stdin
         .take()
         .expect("stdin pipe")
-        .write_all(b"/reload\\n")
+        .write_all(b"/reload\n")
         .expect("send local reload command");
     let simulated = child.wait_with_output().expect("wait for native simulation");
     assert!(
