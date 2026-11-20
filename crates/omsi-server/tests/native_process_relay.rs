@@ -168,8 +168,14 @@ fn chrono_midnight_rebuild_keeps_two_connected_clients_and_manifest() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(joined_before, "the two clients must connect before midnight");
-    assert!(migrated, "Chrono.cfg transition must rebuild CPU map on May 31");
+    assert!(
+        joined_before,
+        "the two clients must connect before midnight"
+    );
+    assert!(
+        migrated,
+        "Chrono.cfg transition must rebuild CPU map on May 31"
+    );
     assert!(
         relayed_after,
         "connected clients must still exchange poses after the Chrono swap"
