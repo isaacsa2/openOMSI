@@ -87,7 +87,7 @@ cars through the acknowledged LAN traffic table and people through existing
 `WORLD` and `DESC` packets. Chrono-based road-bus departures and lines are
 experimental; not all consist, train and timetable edge cases are supported.
 
-This test mode currently allows up to **128 ordinary AI cars**, **128
+This test mode currently allows up to **320 ordinary AI cars**, **128
 humans** and **12 scheduled road buses**, without renderer or audio. The
 example uses much lower limits. The road network is held on the **initial
 64 entrypoint-oriented tiles** to preserve vehicle lane indexes. Dynamic
@@ -111,6 +111,27 @@ handshake, then compare traffic, passengers and timetable lines on both
 clients. Record CPU/TPS and disconnect/reconnect behavior. Distinguish a
 config with no installed AI/human/timetable content from a network failure.
 
+
+## Public multiplayer testing
+
+To test public discovery through the regular moderated server list, explicitly
+enable it in server.cfg and restart the process once:
+
+```ini
+public_server = 1
+tunnel = 1
+public_address = off
+share_positions = 0
+accept_uploads = 0
+share_maps = 0
+require_hardware_id = 1
+```
+
+The tunnel is optional; with `tunnel=0` you must arrange external reachability
+for game UDP and TCP gateway/mod service. Public listing can reject the
+server's name, icon or MOTD and requires a reachable gateway. Use moderation,
+firewall restrictions and redistribution-authorized assets. Public discovery
+is experimental, not proof of complete multiplayer parity.
 
 ## Optional private mod-sharing test (server restart required)
 

@@ -147,10 +147,8 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
             .all(|bus| omsi_net::vehicle_path(bus).is_some()),
         "experimental relay vehicles must contain valid relative vehicle paths"
     );
-    ensure!(
-        !cfg.public_server && !cfg.tunnel && cfg.public_address.eq_ignore_ascii_case("off"),
-        "experimental relay requires public_server=0, tunnel=0, public_address=off"
-    );
+    // Public discovery uses the normal authenticated gateway and moderated
+    // listing. Both remain explicit operator opt-ins via server.cfg.
     ensure!(
         !cfg.real_time && !cfg.metar_sync,
         "experimental relay requires real_time=0 and metar_sync=0"
@@ -183,8 +181,8 @@ pub fn allow_simulated_roam(cfg: &ServerCfg) -> Result<()> {
         "experimental CPU simulation supports no more than {MAX_EXPERIMENTAL_TRAFFIC} ordinary AI cars"
     );
     ensure!(
-        cfg.ai_limits.max_humans.unwrap_or(64) <= 128,
-        "experimental CPU simulation supports no more than 128 humans"
+        cfg.ai_limits.max_humans.unwrap_or(64) <= 2_000,
+        "experimental CPU simulation supports no more than 2000 humans"
     );
     Ok(())
 }
@@ -652,7 +650,7 @@ fn run(
         .context("starting authenticated local-only LAN manifest service")?;
     // Do not open the gateway or allow players during CPU map initialization.
     let info = admin::info_of(cfg, env!("CARGO_PKG_VERSION"));
-    omsi_lan::gateway::open_public_gateway(net.session(), info, cfg.web_port, false);
+    omsi_lan::gateway::open_public_gateway(net.session(), info, cfg.web_port, cfg.tunnel);
     // Do not advertise or hash an untransferable bus fleet in relay-only mode.
     log::warn!(
         "EXPERIMENTAL headless ONLY: {} static boxes, {} exact collision meshes; {} unresolved mesh files, {} tilted objects, {} attachments; traffic {}, passengers {}, timetable {}",
@@ -674,6 +672,12 @@ fn run(
         }
     );
     net.ready();
+    admin::start_public_list(cfg, env!("CARGO_PKG_VERSION"));
+    if cfg.public_server {
+        log::warn!(
+            "EXPERIMENTAL public server listed: enable a firewall, configure moderation, and only share redistributable mods"
+        );
+    }
     let port = net
         .session()
         .local_addr()
@@ -683,7 +687,7 @@ fn run(
         log::info!("join code for approved testers: {}", code.encode());
     }
     log::info!(
-        "web gateway on TCP port {} (public_address=off does not restrict firewall access)",
+        "web gateway on TCP port {} (visibility follows public_server, tunnel, and firewall settings)",
         cfg.web_port
     );
     let mut meter = TickMeter::new(60.0);
@@ -862,6 +866,17 @@ mod tests {
         profiler.stop();
         profile(&mut profiler, "network", || ());
         assert_eq!(profiler.report().stages.len(), 1);
+    }
+
+    #[test]
+    fn public_gateway_and_server_list_are_explicit_operator_choices() {
+        let mut cfg = test_cfg();
+        cfg.public_server = true;
+        cfg.tunnel = true;
+        cfg.public_address = "off".into();
+        assert!(allow_free_roam(&cfg).is_ok());
+        cfg.tunnel = false;
+        assert!(allow_free_roam(&cfg).is_ok());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use omsi_sim::world_data::WorldCell;
 use omsi_sim::{SimClock, VehicleHost, VehicleInstance, VehicleType};
 use std::sync::Arc;
 
-pub const MAX_EXPERIMENTAL_TRAFFIC: usize = 128;
+pub const MAX_EXPERIMENTAL_TRAFFIC: usize = 320;
 const MAX_SPAWNS_PER_SECOND: usize = 4;
 const RECYCLE_DISTANCE: f64 = 900.0;
 const SPAWN_INTERVAL: f32 = 1.0;

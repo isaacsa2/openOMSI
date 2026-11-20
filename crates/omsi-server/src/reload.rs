@@ -8,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use omsi_lan::server_cfg::ServerCfg;
 use std::path::Path;
 
-pub const PARSE_TRAFFIC_MAX: usize = 256;
+pub const PARSE_TRAFFIC_MAX: usize = 320;
 
 #[derive(Debug)]
 pub struct Reloaded {

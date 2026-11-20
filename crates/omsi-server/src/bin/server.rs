@@ -79,7 +79,7 @@ fn main() -> Result<()> {
     omsi_cfg::add_content_root(root.clone());
     // Validate operator restrictions before initializing any administration,
     // global upload policy, gateway or console reader.
-    let parsed = omsi_lan::server_cfg::ServerCfg::load(&config, 256)?;
+    let parsed = omsi_lan::server_cfg::ServerCfg::load(&config, omsi_server::population::MAX_EXPERIMENTAL_TRAFFIC)?;
     if simulation {
         runtime::allow_simulated_roam(&parsed)?;
     } else {
@@ -89,7 +89,7 @@ fn main() -> Result<()> {
         &config,
         &root,
         None,
-        256,
+        omsi_server::population::MAX_EXPERIMENTAL_TRAFFIC,
         env!("CARGO_PKG_VERSION"),
         &|_, _| String::new(),
     )?;
