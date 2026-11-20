@@ -110,8 +110,23 @@ Two **graphical** clients must still validate that old AI and passenger IDs
 retire correctly, no ghost entities remain, scheduled buses/timetable data
 are usable, and boarding/CLAIM survives or recovers. Configured map and
 authentication/transfer-policy changes require a complete process restart.
-A restart reopens date-sensitive Chrono data with the current simulated date;
-automatic midnight map migration remains a blocking release gate.
+A restart reopens date-sensitive Chrono data with the current simulated date.
+The native host now has an **experimental staged midnight Chrono migration**:
+the simulation detects an active Chrono-folder selection change, prepares
+a fresh map index, AI definitions, road/wheel geometry, collision set,
+stop/timetable data and tile worker off the LAN tick, then swaps the
+complete candidate while retaining LAN sockets, join code, connected peers,
+publisher history, and the currently streamed player neighborhoods. A failed
+build retains the old world and is retried after a bounded delay; a stale
+build is never installed after a newer date transition or manual restart.
+No rebuild is required when the active Chrono selection is unchanged.
+
+**Still blocking acceptance:** on a licensed Chrono map, verify with two
+graphical clients that midnight switches correct active AI lists, tile
+patches and timetables without ghost cars, duplicate passengers, broken
+boarding/CLAIM, stale client scripts, disconnects or large TPS stalls.
+Also check an accelerated clock and an in-session manual restart. A synthetic
+Chrono.cfg date-selection unit test does not prove multiplayer continuity.
 
 ## Licensed-map CPU smoke and load measurements
 
