@@ -530,6 +530,53 @@ fn live_world_counts(sim: &CpuSimulation, simulated: bool, passengers: bool) -> 
     }
 }
 
+/// Low-overhead native diagnostics. These are *CPU ground data estimates*,
+/// not whole-process RSS: script heaps, content caches and sockets are separate.
+/// Sample only once per 60 seconds to avoid harming a steady 59–60 TPS host.
+fn report_native_ground_load(
+    sim: &CpuSimulation,
+    active_tiles: usize,
+    meter: &TickMeter,
+    profiler: &Profiler,
+) {
+    let world = sim.world.peek();
+    let terrain_bytes: usize = world
+        .ground
+        .terrains
+        .values()
+        .map(|terrain| terrain.heights.capacity() * std::mem::size_of::<f32>())
+        .sum();
+    let (raster_bytes, drive_bytes) = world
+        .ground
+        .surfaces
+        .values()
+        .map(|surface| surface.heap_bytes())
+        .fold((0_usize, 0_usize), |(r, d), (next_r, next_d)| {
+            (r.saturating_add(next_r), d.saturating_add(next_d))
+        });
+    let (cars, buses, _, _) = sim.traffic.counts();
+    let (walking, waiting, aboard) = sim.people.counts();
+    let profile = profiler.report();
+    log::info!(
+        "native load: TPS {:.1}/{:.0}, {} active CPU tiles, {} AI cars, {} AI buses, {} pedestrians ({} walking, {} waiting, {} aboard); ground heap est.: {:.1} MiB terrain, {:.1} MiB raster, {:.1} MiB wheel; tick p95 {:.1} ms p99 {:.1} ms (profiling {})",
+        meter.tps().unwrap_or_default(),
+        meter.target(),
+        active_tiles,
+        cars,
+        buses,
+        walking + waiting + aboard,
+        walking,
+        waiting,
+        aboard,
+        terrain_bytes as f64 / 1_048_576.0,
+        raster_bytes as f64 / 1_048_576.0,
+        drive_bytes as f64 / 1_048_576.0,
+        profile.p95_tick_ms,
+        profile.p99_tick_ms,
+        if profiler.enabled() { "on" } else { "off" }
+    );
+}
+
 /// Reuse the existing server's verified, persisted parked-bus service. This
 /// adds no artificial host driver and keeps uploaded vehicles separate from AI.
 fn start_verified_parked_buses(
@@ -1054,6 +1101,9 @@ fn run(
         profiler.tick(started.elapsed());
         meter.completed(Instant::now());
         n += 1;
+        if n % 3600 == 0 {
+            report_native_ground_load(&sim, active_keys.len(), &meter, &profiler);
+        }
         if report.elapsed() >= Duration::from_secs(1) {
             let counts = live_world_counts(&sim, simulated, live_cfg.passengers);
             admin::publish_status(
