@@ -279,6 +279,39 @@ pub fn object_lanes(
     out
 }
 
+/// Apply the full map-object pose and crossing height field to its AI paths.
+/// Unlike a graphical mesh, a lane is already in world XY after object_lanes.
+/// Rotate only the pitch/bank residual and then deform at local field XY.
+pub(crate) fn place_object_paths(
+    lanes: &mut [Lane],
+    origin: DVec3,
+    raw_rotation: [f64; 3],
+    deformation: Option<&omsi_geometry::MeshData>,
+) {
+    let rotation = omsi_geometry::map_rotation(raw_rotation);
+    let xf = omsi_geometry::object_rotation(rotation);
+    let yaw = omsi_geometry::object_rotation([rotation[0], 0.0, 0.0]);
+    let tilt = xf * yaw.inverse();
+    let tilted = !tilt.abs_diff_eq(glam::Mat4::IDENTITY, 1e-5);
+    let inverse = deformation.map(|_| xf.inverse());
+    for lane in lanes {
+        for point in &mut lane.points {
+            if tilted {
+                *point = origin + tilt.transform_point3((*point - origin).as_vec3()).as_dvec3();
+            }
+            if let (Some(field), Some(inv)) = (deformation, inverse) {
+                let local = inv.transform_point3((*point - origin).as_vec3());
+                if let Some(height) = crate::scenery_ground::field_height(field, local.x, local.y) {
+                    point.z += f64::from(height);
+                }
+            }
+        }
+        if tilted || deformation.is_some() {
+            lane.refresh();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +345,42 @@ mod tests {
         assert!(lanes[1].reversed);
         assert!((lanes[0].offset - -2.0).abs() < 0.01);
         assert!(lanes.iter().all(|l| l.points.len() >= 2));
+    }
+
+    #[test]
+    fn pitched_crossing_paths_follow_map_object_pose() {
+        let mut lanes = vec![LaneBuilder::polyline(
+            vec![DVec3::ZERO, DVec3::new(0.0, 10.0, 0.0)],
+            LaneKind::Street,
+            3.0,
+        )];
+        place_object_paths(&mut lanes, DVec3::ZERO, [0.0, 30.0, 0.0], None);
+        assert!(
+            lanes[0].points[1].z.abs() > 1.0,
+            "a pitched crossing must not keep a flat AI path"
+        );
+    }
+
+    #[test]
+    fn crossing_field_moves_ai_path_points_only_inside_its_triangles() {
+        let field = omsi_geometry::MeshData {
+            positions: vec![
+                glam::Vec3::new(-10.0, -10.0, 1.5),
+                glam::Vec3::new(10.0, -10.0, 1.5),
+                glam::Vec3::new(10.0, 10.0, 1.5),
+                glam::Vec3::new(-10.0, 10.0, 1.5),
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            ..Default::default()
+        };
+        let mut lanes = vec![LaneBuilder::polyline(
+            vec![DVec3::ZERO, DVec3::new(0.0, 20.0, 0.0)],
+            LaneKind::Street,
+            3.0,
+        )];
+        place_object_paths(&mut lanes, DVec3::ZERO, [0.0; 3], Some(&field));
+        assert!((lanes[0].points[0].z - 1.5).abs() < 1e-5);
+        assert!(lanes[0].points[1].z.abs() < 1e-5);
     }
 
     #[test]
