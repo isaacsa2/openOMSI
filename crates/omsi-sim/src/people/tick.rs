@@ -69,6 +69,141 @@ impl PeopleSim {
         self.tick_stats.2 = self.tick_stats.2.max(ms);
     }
 
+    /// Build road-vehicle and parked-vehicle collision candidates for people
+    /// without coupling the crowd step to the renderer or to a host camera.
+    fn prepare_pedestrian_obstacles(
+        &mut self,
+        world: &dyn World,
+        traffic: Option<&TrafficSim>,
+        buses: &[BusNow],
+        bus_ix: &HashMap<BusId, usize>,
+    ) {
+        let mut cars = std::mem::take(&mut self.scratch.cars);
+        cars.clear();
+        let mut blocks = std::mem::take(&mut self.scratch.blocks);
+        blocks.clear();
+        if let Some(t) = traffic {
+            for c in &t.cars {
+                if self.far_from_players(c.vehicle.position, 320.0) {
+                    continue;
+                }
+                let h = c.vehicle.heading.to_radians();
+                let fwd = DVec2::new(h.sin(), h.cos());
+                let bb = c
+                    .vehicle
+                    .ty
+                    .def
+                    .bounding_box
+                    .unwrap_or([2.0, 4.5, 1.6, 0.0, 0.0, 0.8]);
+                cars.push((
+                    c.vehicle.position.truncate(),
+                    fwd * c.state.speed as f64,
+                    bb[1] as f64 * 0.5,
+                ));
+                if !matches!(c.vehicle.ty.def.kind, omsi_vehicle::VehicleKind::Other(3)) {
+                    let o =
+                        crate::collision::Obb::from_box(bb, c.vehicle.position, c.vehicle.heading);
+                    blocks.push(Block {
+                        center: o.center,
+                        half: o.half,
+                        heading: o.heading,
+                        vel: fwd * c.state.speed as f64,
+                    });
+                    for t in &c.vehicle.trailers {
+                        let tb =
+                            t.ty.def
+                                .bounding_box
+                                .unwrap_or([2.5, 7.0, 3.0, 0.0, 0.0, 1.5]);
+                        let o = crate::collision::Obb::from_box(tb, t.position, t.heading);
+                        let th = t.heading.to_radians();
+                        blocks.push(Block {
+                            center: o.center,
+                            half: o.half,
+                            heading: o.heading,
+                            vel: DVec2::new(th.sin(), th.cos()) * c.state.speed as f64,
+                        });
+                    }
+                }
+            }
+        }
+        for o in world.parked_boxes().iter() {
+            if self
+                .anchors()
+                .any(|c| (o.center - c.truncate()).length() < 320.0)
+            {
+                blocks.push(Block {
+                    center: o.center,
+                    half: o.half,
+                    heading: o.heading,
+                    vel: DVec2::ZERO,
+                });
+            }
+        }
+        if let Some(pb) = bus_ix.get(&BusId::Player).map(|&i| &buses[i]) {
+            cars.push((pb.pos.truncate(), pb.fwd() * pb.speed, pb.half.y));
+            for t in &pb.trailers {
+                let h = t.heading.to_radians();
+                cars.push((
+                    t.pos.truncate(),
+                    DVec2::new(h.sin(), h.cos()) * pb.speed,
+                    t.half.y,
+                ));
+            }
+            blocks.extend(pb.blocks());
+        }
+        // (the vehicles by where they are: a look for a vehicle at a point goes through the
+        // ones of its cell, not all of them)
+        self.scratch.blocks = blocks;
+        self.scratch.file_blocks();
+        self.scratch.cars = cars;
+    }
+
+    fn avoid_stationary_vehicle_blocks(&mut self, dt: f32, wants: &mut [Want], gone: &[bool]) {
+        // a standing vehicle in the way: wait, then go round it
+        for i in 0..self.people.len() {
+            let p = &self.people[i];
+            if gone[i] || p.puppet.is_some() || p.remote || !matches!(p.state, State::Strolling(_))
+            {
+                continue;
+            }
+            let want = wants[i].vel;
+            let speed = want.length();
+            if speed < 0.2 {
+                self.people[i].car_wait = 0.0;
+                continue;
+            }
+            let ahead = p.position.truncate() + want / speed * 0.9;
+            let blocks = &self.scratch.blocks;
+            let stands_in_way = |b: &Block| {
+                b.vel.length() < 0.5 && b.near(ahead, BODY_OUTSIDE + 0.15) && {
+                    let (q, inside) = b.closest(ahead);
+                    inside || (ahead - q).length() < BODY_OUTSIDE + 0.15
+                }
+            };
+            let in_way = self
+                .scratch
+                .blocks_at(ahead)
+                .iter()
+                .any(|&k| stands_in_way(&blocks[k as usize]));
+            debug_assert_eq!(
+                in_way,
+                blocks.iter().any(stands_in_way),
+                "the vehicle grid missed one in the way"
+            );
+            if !in_way {
+                self.people[i].car_wait = 0.0;
+                continue;
+            }
+            self.people[i].car_wait += dt;
+            if self.people[i].car_wait > 8.0 {
+                self.people[i].detour = self.people[i].detour.max(4.0);
+                self.people[i].car_wait = 0.0;
+            } else if self.people[i].detour <= 0.0 {
+                wants[i].vel = DVec2::ZERO;
+            }
+        }
+    }
+
     /// The simulation step: what everybody decides and does this frame. It does not draw;
     /// the people it makes or takes away are shown by omsi-app's view after it.
     #[allow(unused_assignments)]
@@ -220,83 +355,8 @@ impl PeopleSim {
         // the pedestrians: a crowd on the pavements (the cars around every player: the people
         // around the other LAN players wait for them at the kerb too)
         // (the lists of this part are kept from frame to frame, see `scratch`)
+        self.prepare_pedestrian_obstacles(world, traffic, buses, &bus_ix);
         let mut cars = std::mem::take(&mut self.scratch.cars);
-        cars.clear();
-        let mut blocks = std::mem::take(&mut self.scratch.blocks);
-        blocks.clear();
-        if let Some(t) = traffic {
-            for c in &t.cars {
-                if self.far_from_players(c.vehicle.position, 320.0) {
-                    continue;
-                }
-                let h = c.vehicle.heading.to_radians();
-                let fwd = DVec2::new(h.sin(), h.cos());
-                let bb = c
-                    .vehicle
-                    .ty
-                    .def
-                    .bounding_box
-                    .unwrap_or([2.0, 4.5, 1.6, 0.0, 0.0, 0.8]);
-                cars.push((
-                    c.vehicle.position.truncate(),
-                    fwd * c.state.speed as f64,
-                    bb[1] as f64 * 0.5,
-                ));
-                if !matches!(c.vehicle.ty.def.kind, omsi_vehicle::VehicleKind::Other(3)) {
-                    let o =
-                        crate::collision::Obb::from_box(bb, c.vehicle.position, c.vehicle.heading);
-                    blocks.push(Block {
-                        center: o.center,
-                        half: o.half,
-                        heading: o.heading,
-                        vel: fwd * c.state.speed as f64,
-                    });
-                    for t in &c.vehicle.trailers {
-                        let tb =
-                            t.ty.def
-                                .bounding_box
-                                .unwrap_or([2.5, 7.0, 3.0, 0.0, 0.0, 1.5]);
-                        let o = crate::collision::Obb::from_box(tb, t.position, t.heading);
-                        let th = t.heading.to_radians();
-                        blocks.push(Block {
-                            center: o.center,
-                            half: o.half,
-                            heading: o.heading,
-                            vel: DVec2::new(th.sin(), th.cos()) * c.state.speed as f64,
-                        });
-                    }
-                }
-            }
-        }
-        for o in world.parked_boxes().iter() {
-            if self
-                .anchors()
-                .any(|c| (o.center - c.truncate()).length() < 320.0)
-            {
-                blocks.push(Block {
-                    center: o.center,
-                    half: o.half,
-                    heading: o.heading,
-                    vel: DVec2::ZERO,
-                });
-            }
-        }
-        if let Some(pb) = bus_ix.get(&BusId::Player).map(|&i| &buses[i]) {
-            cars.push((pb.pos.truncate(), pb.fwd() * pb.speed, pb.half.y));
-            for t in &pb.trailers {
-                let h = t.heading.to_radians();
-                cars.push((
-                    t.pos.truncate(),
-                    DVec2::new(h.sin(), h.cos()) * pb.speed,
-                    t.half.y,
-                ));
-            }
-            blocks.extend(pb.blocks());
-        }
-        // (the vehicles by where they are: a look for a vehicle at a point goes through the
-        // ones of its cell, not all of them)
-        self.scratch.blocks = blocks;
-        self.scratch.file_blocks();
         let mut wants = std::mem::take(&mut self.scratch.wants);
         wants.clear();
         for i in 0..self.people.len() {
@@ -322,49 +382,7 @@ impl PeopleSim {
                 *g = true;
             }
         }
-        // a standing vehicle in the way: wait, then go round it
-        for i in 0..self.people.len() {
-            let p = &self.people[i];
-            if gone[i] || p.puppet.is_some() || p.remote || !matches!(p.state, State::Strolling(_))
-            {
-                continue;
-            }
-            let want = wants[i].vel;
-            let speed = want.length();
-            if speed < 0.2 {
-                self.people[i].car_wait = 0.0;
-                continue;
-            }
-            let ahead = p.position.truncate() + want / speed * 0.9;
-            let blocks = &self.scratch.blocks;
-            let stands_in_way = |b: &Block| {
-                b.vel.length() < 0.5 && b.near(ahead, BODY_OUTSIDE + 0.15) && {
-                    let (q, inside) = b.closest(ahead);
-                    inside || (ahead - q).length() < BODY_OUTSIDE + 0.15
-                }
-            };
-            let in_way = self
-                .scratch
-                .blocks_at(ahead)
-                .iter()
-                .any(|&k| stands_in_way(&blocks[k as usize]));
-            debug_assert_eq!(
-                in_way,
-                blocks.iter().any(stands_in_way),
-                "the vehicle grid missed one in the way"
-            );
-            if !in_way {
-                self.people[i].car_wait = 0.0;
-                continue;
-            }
-            self.people[i].car_wait += dt;
-            if self.people[i].car_wait > 8.0 {
-                self.people[i].detour = self.people[i].detour.max(4.0);
-                self.people[i].car_wait = 0.0;
-            } else if self.people[i].detour <= 0.0 {
-                wants[i].vel = DVec2::ZERO;
-            }
-        }
+        self.avoid_stationary_vehicle_blocks(dt, &mut wants, &gone);
         // the crowd of the pavements (passengers outside stand in it as they are)
         let mut walkers = std::mem::take(&mut self.scratch.walkers);
         walkers.clear();
