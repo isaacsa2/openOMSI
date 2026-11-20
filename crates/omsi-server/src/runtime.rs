@@ -3,6 +3,8 @@
 //! timetable authority are blocked until CPU world parity is verified.
 
 use crate::admin;
+use crate::chrono::ChronoRefresh;
+use crate::reboot::Prepared;
 use crate::ai_sync::HeadlessTrafficSync;
 use crate::context_sync::HeadlessContextSync;
 use crate::people_sync::HeadlessPeopleSync;
@@ -595,6 +597,32 @@ fn service_native_admin_tick(
     );
 }
 
+/// Atomically swap a completely staged CPU world while retaining LAN sockets,
+/// credentials, publisher history and all connected players. The caller
+/// chooses whether old-worker cleanup can block (manual vs. automatic).
+#[allow(clippy::too_many_arguments)]
+fn install_cpu_world(
+    prepared: Prepared,
+    sim: &mut CpuSimulation,
+    schedule: &mut Option<CpuTimetable>,
+    streamer: &mut Option<StreamWorker>,
+    keys: &mut Vec<(i32, i32)>,
+    active_keys: &mut Vec<(i32, i32)>,
+    stream_global: &mut omsi_map::global::GlobalCfg,
+    stream_busy: &mut bool,
+    population: &mut CpuTrafficPopulation,
+) -> Option<StreamWorker> {
+    let previous = streamer.replace(prepared.streamer);
+    *sim = prepared.simulation;
+    *schedule = prepared.timetable;
+    *keys = prepared.keys;
+    *active_keys = keys.clone();
+    *stream_global = prepared.global;
+    *stream_busy = false;
+    *population = CpuTrafficPopulation::default();
+    previous
+}
+
 /// Apply local console changes on the host tick. A rejected reload/restart
 /// leaves the existing world, joined peers and network services unchanged.
 #[allow(clippy::too_many_arguments)]
@@ -616,7 +644,7 @@ fn process_console_changes(
     stream_global: &mut omsi_map::global::GlobalCfg,
     stream_busy: &mut bool,
     population: &mut CpuTrafficPopulation,
-) {
+) -> bool {
     if console::take_reload_requested() {
         if let Err(error) = crate::reload::apply(
             config_path,
@@ -632,7 +660,7 @@ fn process_console_changes(
         }
     }
     if !console::take_restart_requested() {
-        return;
+        return false;
     }
     // Build the candidate before modifying active simulation or LAN state.
     let result = crate::reboot::read_config(config_path, live_cfg, simulated).and_then(|next| {
@@ -642,16 +670,19 @@ fn process_console_changes(
     });
     match result {
         Ok((next, prepared)) => {
-            if let Some(old) = streamer.replace(prepared.streamer) {
+            if let Some(old) = install_cpu_world(
+                prepared,
+                sim,
+                schedule,
+                streamer,
+                keys,
+                active_keys,
+                stream_global,
+                stream_busy,
+                population,
+            ) {
                 old.stop();
             }
-            *sim = prepared.simulation;
-            *schedule = prepared.timetable;
-            *keys = prepared.keys;
-            *active_keys = keys.clone();
-            *stream_global = prepared.global;
-            *stream_busy = false;
-            *population = CpuTrafficPopulation::default();
             // Keep LAN publisher history: clients must receive GONE/retire
             // deltas for old CPU entities after the swap, not orphaned rows.
             admin_state.passenger_density = next.passenger_density;
@@ -661,9 +692,11 @@ fn process_console_changes(
             log::info!(
                 "server console: /restart completed; CPU world and timetable rebuilt, LAN session, code, mods listener and gateway retained"
             );
+            true
         }
         Err(error) => {
             log::warn!("server console: /restart refused; live world unchanged: {error}");
+            false
         }
     }
 }
@@ -824,6 +857,7 @@ fn run(
     let mut pacer = TickPacer::new(Instant::now());
     let mut publishers = NativePublishers::default();
     let mut population = CpuTrafficPopulation::default();
+    let mut chrono_refresh = ChronoRefresh::new(map.map_dir.clone(), date_num);
     let mut stream_global = map.global.clone();
     // Simulation streams new tiles additively: lane IDs and route references
     // already held by AI cars, scheduled vehicles and pedestrians stay valid.
@@ -854,7 +888,7 @@ fn run(
             &rules,
             simulated,
         );
-        process_console_changes(
+        let manually_restarted = process_console_changes(
             root,
             &plan.config_path,
             simulated,
@@ -873,12 +907,36 @@ fn run(
             &mut stream_busy,
             &mut population,
         );
+        if manually_restarted {
+            let current_date = calendar.at(clock + admin_state.shift).date_code();
+            chrono_refresh.manual_restart(current_date);
+        }
         sync_native_simulation_settings(&mut sim, &net, &admin_state, &live_cfg, simulated);
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         let authoritative = clock + admin_state.shift;
         // Date and time-of-day on the wire must roll over with the world clock;
         // ScheduleSim still sees the continuous elapsed-day timeline.
         sim_clock = calendar.at(authoritative).clone();
+        if let Some(prepared) = chrono_refresh.tick(root, &live_cfg, &sim_clock, simulated) {
+            if let Some(old) = install_cpu_world(
+                prepared,
+                &mut sim,
+                &mut schedule,
+                &mut streamer,
+                &mut keys,
+                &mut active_keys,
+                &mut stream_global,
+                &mut stream_busy,
+                &mut population,
+            ) {
+                crate::chrono::retire_worker(old);
+            }
+            chrono_refresh.installed();
+            log::info!(
+                "native Chrono: installed date {} CPU map, AI lists and timetable; LAN session and connected players retained",
+                sim_clock.date_code()
+            );
+        }
         let (day, month) = sim_clock.day_month();
         net.session_mut().set_clock(
             &format!("{:04}-{month:02}-{day:02}", sim_clock.year),
