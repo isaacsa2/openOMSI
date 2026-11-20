@@ -704,16 +704,17 @@ fn run(
     let mut pacer = TickPacer::new(Instant::now());
     let mut publishers = NativePublishers::default();
     let mut population = CpuTrafficPopulation::default();
-    let stream_global = map.global.clone();
+    let mut stream_global = map.global.clone();
     // Simulation streams new tiles additively: lane IDs and route references
     // already held by AI cars, scheduled vehicles and pedestrians stay valid.
-    let streamer = Some(if simulated {
+    let mut streamer = Some(if simulated {
         StreamWorker::start_populated(map, keys.clone())
             .context("starting populated CPU tile stream worker")?
     } else {
         StreamWorker::start(map).context("starting CPU tile stream worker")?
     });
     let mut stream_busy = false;
+    let mut keys = keys;
     let mut active_keys = keys.clone();
     let mut clock = initial_time;
     let mut n = 0_u64;
@@ -757,6 +758,43 @@ fn run(
                 &mut admin_state,
             ) {
                 log::warn!("server console: /reload refused; settings unchanged: {error}");
+            }
+        }
+        if console::take_restart_requested() {
+            // Prepare and validate independently of the live host. No socket,
+            // authenticated mod listener, gateway, tunnel or LAN code is rebound.
+            let result = crate::reboot::read_config(&plan.config_path, &live_cfg, simulated)
+                .and_then(|next| {
+                    let current_clock = calendar.at(clock + admin_state.shift).clone();
+                    crate::reboot::prepare(root, &next, &current_clock, simulated)
+                        .map(|prepared| (next, prepared))
+                });
+            match result {
+                Ok((next, prepared)) => {
+                    // Stop the previous map worker instead of accumulating background
+                    // threads across repeated operator-initiated restarts.
+                    if let Some(old) = streamer.replace(prepared.streamer) {
+                        old.stop();
+                    }
+                    sim = prepared.simulation;
+                    schedule = prepared.timetable;
+                    keys = prepared.keys;
+                    active_keys = keys.clone();
+                    stream_global = prepared.global;
+                    stream_busy = false;
+                    population = CpuTrafficPopulation::default();
+                    publishers = NativePublishers::default();
+                    admin_state.passenger_density = next.passenger_density;
+                    net.session_mut().clock_speed = next.time_speed;
+                    omsi_lan::server_cfg::set_server_speed_limit_kmh(next.speed_limit_kmh);
+                    live_cfg = next;
+                    log::info!(
+                        "server console: /restart completed; CPU world and timetable rebuilt, LAN session, code, mods listener and gateway retained"
+                    );
+                }
+                Err(error) => {
+                    log::warn!("server console: /restart refused; live world unchanged: {error}");
+                }
             }
         }
         sync_native_simulation_settings(&mut sim, &net, &admin_state, &live_cfg, simulated);
