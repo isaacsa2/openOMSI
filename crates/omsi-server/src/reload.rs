@@ -224,12 +224,8 @@ pub fn apply(
     rules.traffic_max = if simulated { config.traffic } else { 0 };
     omsi_lan::server_cfg::set_server_speed_limit_kmh(config.speed_limit_kmh);
     if let Some(timetable) = schedule {
-        let max = config
-            .ai_limits
-            .max_scheduled
-            .filter(|&count| count > 0)
-            .unwrap_or(crate::timetable::MAX_EXPERIMENTAL_SCHEDULED as u32);
-        timetable.set_limit(max as usize);
+        let max = crate::timetable::scheduled_budget(config.ai_limits.max_scheduled);
+        timetable.set_limit(max);
     }
     let mut excess = simulation
         .traffic
