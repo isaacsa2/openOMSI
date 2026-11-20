@@ -12,7 +12,21 @@ use omsi_sim::ai_traffic::light_paths::box_outline;
 use omsi_sim::ai_traffic::model::PlayerBox;
 use omsi_sim::ai_traffic::viewer::Viewer;
 use omsi_sim::people::PeopleSim;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+const BOARDING_CLAIM_RADIUS: f64 = 80.0;
+const BOARDING_CLAIM_VERTICAL: f64 = 10.0;
+const MAX_BOARDING_CLAIMS: usize = 64;
+
+/// A bus owner may claim only waiting people in the same local stop area.
+/// Validate on the host; possession of a remote passenger ID alone grants no
+/// right to steal a person from another player's stop.
+fn can_claim_at(bus: DVec3, person: DVec3) -> bool {
+    bus.is_finite()
+        && person.is_finite()
+        && (bus - person).truncate().length() <= BOARDING_CLAIM_RADIUS
+        && (bus.z - person.z).abs() <= BOARDING_CLAIM_VERTICAL
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InterestUpdate {
@@ -121,9 +135,32 @@ pub fn update_host_interest(
         people.lan_centers.push(position);
     }
 
+    // Keep the authoritative claim decision on the same physics tick as
+    // PeopleSim::hand_over. Never trust a caller-supplied passenger ID alone.
+    let buses: HashMap<u32, DVec3> = lan
+        .peers()
+        .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
+        .filter_map(|peer| client_position(&peer.pose).map(|pos| (peer.pose.id, pos)))
+        .collect();
     for (player, requested) in lan.take_claims() {
         summary.boarding_claims += requested.len();
-        let granted = people.hand_over(player, &requested);
+        let eligible: Vec<u32> = buses
+            .get(&player)
+            .into_iter()
+            .flat_map(|&bus| {
+                requested
+                    .iter()
+                    .copied()
+                    .take(MAX_BOARDING_CLAIMS)
+                    .filter(move |id| {
+                        people
+                            .people
+                            .iter()
+                            .any(|person| person.id == *id && can_claim_at(bus, person.position))
+                    })
+            })
+            .collect();
+        let granted = people.hand_over(player, &eligible);
         let granted_set: HashSet<u32> = granted.iter().copied().collect();
         let denied: Vec<u32> = requested
             .iter()
@@ -140,6 +177,15 @@ pub fn update_host_interest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_passenger_claims_cannot_steal_from_distant_stops_or_other_floors() {
+        let bus = DVec3::new(100.0, 200.0, 5.0);
+        assert!(can_claim_at(bus, DVec3::new(105.0, 205.0, 5.0)));
+        assert!(!can_claim_at(bus, DVec3::new(220.0, 200.0, 5.0)));
+        assert!(!can_claim_at(bus, DVec3::new(100.0, 200.0, 40.0)));
+        assert!(!can_claim_at(bus, DVec3::new(f64::NAN, 200.0, 5.0)));
+    }
 
     #[test]
     fn foreign_or_nonfinite_positions_cannot_poison_ai_physics() {
