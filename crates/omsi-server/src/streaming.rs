@@ -124,10 +124,9 @@ pub fn apply_free_roam_update(
     update.keys
 }
 
-
-    /// Append CPU map tiles without renumbering lanes already referenced by AI
-    /// routes, scheduled buses, pedestrian paths or light programs. Unlike the
-    /// free-roam relay, a populated region never replaces the entire network.
+/// Append CPU map tiles without renumbering lanes already referenced by AI
+/// routes, scheduled buses, pedestrian paths or light programs. Unlike the
+/// free-roam relay, a populated region never replaces the entire network.
 pub fn apply_populated_update(
     sim: &mut crate::simulation::CpuSimulation,
     update: StreamUpdate,
@@ -149,7 +148,9 @@ pub fn apply_populated_update(
                 continue;
             };
             let index = sim.traffic.lights.len();
-            sim.traffic.light_prev.push(vec![-100; controller.lights.len()]);
+            sim.traffic
+                .light_prev
+                .push(vec![-100; controller.lights.len()]);
             sim.traffic.lights.push(controller);
             sim.traffic.controller_of_object.insert(object, index);
             index
@@ -164,10 +165,10 @@ pub fn apply_populated_update(
                 .map(|global| (global, light));
         }
     }
-    let range = sim.traffic.net.extend(
-        signals.network.lanes,
-        omsi_sim::traffic::LINK_TOLERANCE,
-    );
+    let range = sim
+        .traffic
+        .net
+        .extend(signals.network.lanes, omsi_sim::traffic::LINK_TOLERANCE);
     sim.traffic.set_spawn_densities(range.clone());
     sim.traffic.street_weight += sim.traffic.net.lanes[range.clone()]
         .iter()
@@ -227,7 +228,10 @@ impl StreamWorker {
                     // In simulated mode the thread only parses new tiles.
                     // Older map regions stay attached to live AI route indices.
                     let keys: Vec<_> = if populated {
-                        requested.into_iter().filter(|key| retained.insert(*key)).collect()
+                        requested
+                            .into_iter()
+                            .filter(|key| retained.insert(*key))
+                            .collect()
                     } else {
                         requested
                     };
@@ -257,10 +261,8 @@ impl StreamWorker {
                         world.install_static_box_collisions(&all, &all_lanes.lanes)
                     } else {
                         world.install_stop_lists(&keys);
-                        let collision = world.install_static_box_collisions(
-                            &keys,
-                            &signals.network.lanes,
-                        );
+                        let collision =
+                            world.install_static_box_collisions(&keys, &signals.network.lanes);
                         world.prune_streamed_ground(&keys);
                         collision
                     };
