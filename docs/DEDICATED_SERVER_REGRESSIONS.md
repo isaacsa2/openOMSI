@@ -49,6 +49,25 @@ outside the initial CPU area. Do **not** mark production-ready if the CI
 smoke test alone passes: a synthetic test without installed AI types cannot
 prove a populated real-world scene.
 
+## Integration status before Phase 2 review
+
+Phase 1 connects CPU AI spawning, the timetable dispatcher, pedestrian
+population, authenticated traffic table, rotating scheduled-bus script
+context, world-frame pedestrian/signal snapshots and the local `/reload`
+console. The native simulation remains explicitly opt-in and keeps the
+legacy graphical dedicated host intact.
+
+The Phase 2 review must include two real graphical clients and a licensed
+map with installed AI scripts, road-bus HOF and Chrono data. In particular,
+verify actual script context on both clients, ticketing and passenger claims,
+time acceleration, a midnight/day rollover, live-reloaded traffic targets
+(0 to positive and back), late-join AI ID reuse, reconnects, and duplicate
+passenger prevention. The new native host currently discards client-owned
+pedestrian `WORLDUP`/`DESCUP` updates rather than forwarding unverified
+IDs; this is a deliberate uncompleted feature, not an acceptance pass.
+Never mark physics, scripts, or passenger parity complete from synthetic
+process tests alone.
+
 ## Live configuration reload regression gates
 
 The renderer-free dedicated host accepts `/reload` from the **local
@@ -132,10 +151,13 @@ worker. The UDP networking loop continues ticking while this work runs.
 Replaced regions release inactive road rasters and terrain outside the active
 neighborhood; current signal clocks are carried across the lane-network swap.
 
-This streaming path is **experimental**, not complete world authority: active
-AI and passenger entities are intentionally disabled, and there is no full
-entity-aware unloading, crossing height deformation or terrain-hole parity,
-complete AI/passenger snapshots, or authoritative bus scripts. Rejected
+This **free-roam** streaming path is experimental: it keeps AI and
+pedestrian population disabled because active lane/ground indices cannot
+yet migrate on unload. The separate `--experimental-simulation` mode has
+bounded native AI and passenger snapshots plus timed road buses on a fixed
+initial map. Neither mode has entity-aware unloading, crossing-height
+deformation, terrain-hole parity, client-owned passenger relaying, or
+authoritative **player-driven** bus scripts. Rejected
 scenery surfaces, invalid splines and missing definitions remain visible
 as unresolved counts; the road mesh is not proof of full collision parity.
 
@@ -159,8 +181,9 @@ server-side vehicle authority.
 ## Experimental independent host process
 
 The Release CI creates **separate** headless-test ZIPs for Windows x64 and
-Linux. These contain `omsi-server`, `server-test.cfg`, a launch script and
-`README.md`. The existing `server-windows` and `server-linux` ZIPs
+Linux. These contain `omsi-server`, both `server-test.cfg` and
+`server-simulation.cfg`, separate `run-test` and `run-simulation`
+launchers, and `README.md`. The existing `server-windows` and `server-linux` ZIPs
 remain the original `openomsi --server` build. The native test package is
 not promoted as a supported production host.
 
@@ -169,10 +192,13 @@ The first **native renderer-free** `omsi-server` executable now exists. It
 has a 60 Hz loop, actual network relay, restricted admin/console, CPU-only map
 and road data, collision-box checks, traffic-light initialization, and CPU
 simulation ticks. **This does not constitute full OMSI server parity**:
-vehicle script ownership, full collisions, scheduled AI traffic and passenger
-snapshot transfer are still incomplete.
+player-driven vehicle script ownership, full collisions, client-owned rider
+replication and timetable/AI parity are still incomplete. The native
+`TrafficTable` plus rotating AI-context pages send scripted line,
+destination, HOF stop and delay data using the same LAN encoder as the
+graphical host; this requires real-client acceptance testing.
 
-For an **isolated test only**, configure `server.cfg` with:
+For the **isolated free-roam relay only**, configure `server.cfg` with:
 `date = 1989-05-30`, `traffic = 0`, `timetable = 0`,
 `passengers = 0`, `share_maps = 0`, `accept_uploads = 0`,
 `parked_buses = 0`, `public_server = 0`, `tunnel = 0`, `public_address = off`,
