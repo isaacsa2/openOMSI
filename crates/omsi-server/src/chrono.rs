@@ -189,6 +189,35 @@ mod tests {
     }
 
     #[test]
+    fn midnight_activates_chrono_without_rebuilding_on_an_unchanged_day() {
+        use std::fs;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let map_dir = std::env::temp_dir().join(format!(
+            "omsi-native-chrono-{}-{stamp}",
+            std::process::id()
+        ));
+        let chrono = map_dir.join("Chrono").join("SummerTimetable");
+        fs::create_dir_all(&chrono).unwrap();
+        fs::write(chrono.join("Chrono.cfg"), "[startdate]\n19890531\n").unwrap();
+
+        let mut clock = crate::clock::NativeCalendar::new("1989-05-30", "23:59");
+        let before = clock.at(86_399.0).date_code();
+        let after = clock.at(86_400.0).date_code();
+        assert_eq!((before, after), (19890530, 19890531));
+        let before_dirs = omsi_map::active_chrono_dirs(&map_dir, before);
+        let after_dirs = omsi_map::active_chrono_dirs(&map_dir, after);
+        assert!(before_dirs.is_empty());
+        assert_eq!(after_dirs, vec![chrono.clone()]);
+        assert!(needs_rebuild(&before_dirs, &after_dirs));
+        assert!(!needs_rebuild(&after_dirs, &after_dirs));
+
+        fs::remove_dir_all(&map_dir).unwrap();
+    }
+
+    #[test]
     fn manual_restart_discards_a_stale_chrono_request() {
         let path = std::env::temp_dir().join(format!(
             "omsi-chrono-empty-{}",
