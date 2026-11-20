@@ -137,19 +137,18 @@ pub fn update_host_interest(
 
     // Keep the authoritative claim decision on the same physics tick as
     // PeopleSim::hand_over. Never trust a caller-supplied passenger ID alone.
+    let claims = lan.take_claims();
+    if claims.is_empty() {
+        return summary;
+    }
+    // No allocation or ID/peer scan on ordinary 60 Hz ticks without claims.
     let buses: HashMap<u32, DVec3> = lan
         .peers()
         .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
         .filter_map(|peer| client_position(&peer.pose).map(|pos| (peer.pose.id, pos)))
         .collect();
-    let claims = lan.take_claims();
-    // Index passenger positions only when someone actually requests boarding.
-    // Repeated client IDs then cost O(claims) rather than O(claims × humans).
-    let passenger_positions: HashMap<u32, DVec3> = if claims.is_empty() {
-        HashMap::new()
-    } else {
-        people.people.iter().map(|p| (p.id, p.position)).collect()
-    };
+    let passenger_positions: HashMap<u32, DVec3> =
+        people.people.iter().map(|p| (p.id, p.position)).collect();
     for (player, requested) in claims {
         summary.boarding_claims += requested.len();
         let eligible: Vec<u32> = if let Some(&bus) = buses.get(&player) {
