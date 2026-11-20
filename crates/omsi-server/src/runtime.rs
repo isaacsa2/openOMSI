@@ -538,12 +538,14 @@ fn start_verified_parked_buses(
         .filter(|(at, heading)| at.is_finite() && heading[0].is_finite())
         .map(|(at, heading)| (at.to_array(), heading[0] as f32))
         .collect();
-    let ground = sim.world.snapshot().ground.clone();
+    // stand_height is on the full WorldData snapshot, which resolves roads,
+    // bridges and ground with the same rules as the graphical host.
+    let world = sim.world.snapshot();
     omsi_lan::parked::start(root, &cfg.map, &spots, &|x, y, near| {
-        ground
+        world
             .stand_height(x, y, near)
-            .or_else(|| ground.stand_height(x, y, near + 4.0))
-            .or_else(|| ground.ground_height(x, y))
+            .or_else(|| world.stand_height(x, y, near + 4.0))
+            .or_else(|| world.ground_height(x, y))
     });
     log::info!(
         "native parked buses: limit {}, {} spawn points",
