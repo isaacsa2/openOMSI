@@ -210,7 +210,10 @@ mod tests {
         let data = Arc::new(WorldCell::new(WorldData::default()));
         let mut population = CpuTrafficPopulation::default();
         let clock = SimClock::default();
-        assert_eq!(population.tick(&mut traffic, &data, &[], 10, &clock, 1.0), 0);
+        assert_eq!(
+            population.tick(&mut traffic, &data, &[], 10, &clock, 1.0),
+            0
+        );
         assert_eq!(
             population.tick(&mut traffic, &data, &[DVec3::ZERO], 10, &clock, 1.0),
             0
