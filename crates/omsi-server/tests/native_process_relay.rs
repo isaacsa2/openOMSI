@@ -5,6 +5,7 @@
 
 use omsi_net::{LanSession, Pose, WorldInfo};
 use std::fs;
+use std::io::Write;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -87,9 +88,11 @@ fn start_fixture_mode(max_players: usize, simulation: bool) -> (FixtureProcess, 
         .arg("1800")
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(
+            fs::File::create(root.join("headless.log")).expect("fixture log"),
+        ))
         .spawn()
         .expect("start actual native headless server");
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -105,6 +108,99 @@ fn driver(name: &str, x: f64) -> Pose {
         y: 10.0,
         ..Default::default()
     }
+}
+
+#[test]
+fn native_restart_rebuilds_the_cpu_world_without_disconnecting_lan_clients() {
+    let (mut server, addr) = start_fixture_mode(2, true);
+    let world = WorldInfo {
+        map: "Maps/Fixture/global.cfg".into(),
+        date: "1989-05-30".into(),
+        time: 9.0 * 3600.0,
+        ..Default::default()
+    };
+    let mut alpha = LanSession::join_addr(vec![addr], None, "alpha", world.clone()).unwrap();
+    let mut beta = LanSession::join_addr(vec![addr], None, "beta", world.clone()).unwrap();
+    let pa = driver("alpha", 101.0);
+    let pb = driver("beta", 202.0);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut joined = false;
+    while Instant::now() < deadline {
+        if let Some(status) = server.process.try_wait().unwrap() {
+            panic!("native host stopped before initial join: {status}");
+        }
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        if alpha.connected && beta.connected {
+            joined = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(joined, "both clients must join before restarting");
+    let path = server.root.join("server-test.cfg");
+    let current = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        current.replace("passengers = 1", "passengers = 0\nai_max_humans = 2000"),
+    )
+    .unwrap();
+    server
+        .process
+        .stdin
+        .as_mut()
+        .expect("local console pipe")
+        .write_all(b"/restart\n")
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut restarted = false;
+    while Instant::now() < deadline {
+        if let Some(status) = server.process.try_wait().unwrap() {
+            panic!("native host exited during in-session restart: {status}");
+        }
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        if fs::read_to_string(server.root.join("headless.log"))
+            .unwrap_or_default()
+            .contains("/restart completed")
+        {
+            restarted = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(restarted, "console restart was not consumed by the CPU tick");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut relayed = false;
+    while Instant::now() < deadline {
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        if alpha.connected
+            && beta.connected
+            && alpha.peers().any(|p| p.has_info && p.pose.name == "beta")
+            && beta.peers().any(|p| p.has_info && p.pose.name == "alpha")
+        {
+            relayed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(relayed, "restart must preserve joined clients and pose relay");
+    let mut installed_map = world.map;
+    let report = omsi_lan::mods::fetch_selected(
+        &server.root,
+        &mut installed_map,
+        addr,
+        alpha.session,
+        None,
+        None,
+        &mut |_, _, _| {},
+    )
+    .expect("authenticated TCP manifest must survive CPU restart");
+    assert_eq!(report.fetched, 0);
+    assert_eq!(report.bytes, 0);
+    alpha.leave();
+    beta.leave();
 }
 
 #[test]
