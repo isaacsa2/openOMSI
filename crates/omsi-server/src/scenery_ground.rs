@@ -232,8 +232,8 @@ fn hole_is_buried(
 }
 
 impl HostWorld {
-    /// Publish only static, undistorted scenery surfaces into the active
-    /// tile rasters. Existing map-index coordinates preserve Chrono and
+    /// Publish authored static and height-field-deformed surfaces into the
+    /// active tile rasters. Existing map-index coordinates preserve Chrono and
     /// geographic map placement; no GPU meshes or texture files are loaded.
     pub(crate) fn install_scenery_ground(
         &mut self,
@@ -317,9 +317,7 @@ impl HostWorld {
             for (&target, surface) in rasters.iter_mut() {
                 if let Some(mesh) = &mesh {
                     if raster_overlaps_tile(mesh, &rotation, pos, target) {
-                        surface.rasterize_kind(
-                            mesh, &rotation, pos, target.0, target.1, drivable,
-                        );
+                        surface.rasterize_kind(mesh, &rotation, pos, target.0, target.1, drivable);
                         if drivable {
                             surface.add_drive_mesh(mesh, &rotation, pos, target.0, target.1);
                         }
