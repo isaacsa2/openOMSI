@@ -62,8 +62,8 @@ map with installed AI scripts, road-bus HOF and Chrono data. In particular,
 verify actual script context on both clients, ticketing and passenger claims,
 time acceleration, a midnight/day rollover, live-reloaded traffic targets
 (0 to positive and back), late-join AI ID reuse, reconnects, and duplicate
-passenger prevention. The new native host currently discards client-owned
-pedestrian `WORLDUP`/`DESCUP` updates rather than forwarding unverified
+passenger prevention. The native host now isolates and forwards bounded client-owned
+pedestrian `WORLDUP`/`DESCUP` updates after validating source ownership, rather than blindly forwarding unverified
 IDs; this is a deliberate uncompleted feature, not an acceptance pass.
 Never mark physics, scripts, or passenger parity complete from synthetic
 process tests alone.

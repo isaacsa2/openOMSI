@@ -242,7 +242,7 @@ Passing this table does **not** make either native mode production-ready.
 **Still missing:** authoritative player-bus physics/scripts, full deformed-road
 and train-signal parity, moving active AI/people between streamed tiles, and
 authenticated remapping/forwarding of other clients' `WORLDUP`/`DESCUP`
-passengers. The native host drains those upstream queues without forwarding
-them until an ID-safe relay is available; server-owned people and AI do
+passengers. The native host accepts validated, bounded client-owned upstream queues and forwards
+them with isolated IDs to nearby peers; server-owned people and AI also do
 publish their own snapshots. Multi-client graphical verification remains a
 blocking acceptance gate before merging the replacement server into main.

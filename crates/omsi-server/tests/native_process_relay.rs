@@ -37,6 +37,10 @@ impl Drop for FixtureProcess {
 }
 
 fn start_fixture(max_players: usize) -> (FixtureProcess, SocketAddr) {
+    start_fixture_mode(max_players, false)
+}
+
+fn start_fixture_mode(max_players: usize, simulation: bool) -> (FixtureProcess, SocketAddr) {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -64,16 +68,21 @@ fn start_fixture(max_players: usize) -> (FixtureProcess, SocketAddr) {
         web_port = unused_port();
     }
     let cfg = root.join("server-test.cfg");
+    let passengers = u8::from(simulation);
     write(
         &cfg,
         &format!(
-            "name = Native UDP Test\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = 09:00\ntraffic = 0\ntimetable = 0\npassengers = 0\nport = {port}\nweb_port = {web_port}\nmax_players = {max_players}\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n"
+            "name = Native UDP Test\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = 09:00\ntraffic = 0\ntimetable = 0\npassengers = {passengers}\nport = {port}\nweb_port = {web_port}\nmax_players = {max_players}\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n"
         ),
     );
     let process = Command::new(env!("CARGO_BIN_EXE_omsi-server"))
         .arg(&root)
         .arg(&cfg)
-        .arg("--experimental-free-roam")
+        .arg(if simulation {
+            "--experimental-simulation"
+        } else {
+            "--experimental-free-roam"
+        })
         .arg("--ticks")
         .arg("1800")
         .env_remove("DISPLAY")
@@ -336,4 +345,109 @@ fn native_binary_relays_three_drivers_and_updated_vehicle_state() {
     alpha.leave();
     beta.leave();
     charlie.leave();
+}
+
+#[test]
+fn simulated_native_host_relays_client_owned_passengers_end_to_end() {
+    use omsi_net::world::{self, Activity, Desc, PersonPlace, PersonState, WorldFrame};
+
+    let (mut server, addr) = start_fixture_mode(2, true);
+    let info = WorldInfo {
+        map: "Maps/Fixture/global.cfg".into(),
+        date: "1989-05-30".into(),
+        time: 9.0 * 3600.0,
+        ..Default::default()
+    };
+    let mut alpha = LanSession::join_addr(vec![addr], None, "alpha", info.clone()).unwrap();
+    let mut beta = LanSession::join_addr(vec![addr], None, "beta", info).unwrap();
+    let pa = driver("alpha", 10.0);
+    let pb = driver("beta", 12.0);
+    let deadline = Instant::now() + Duration::from_secs(12);
+    while Instant::now() < deadline {
+        if let Some(status) = server.process.try_wait().unwrap() {
+            panic!("experimental server exited before clients joined: {status}");
+        }
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        if alpha.connected && beta.connected {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(alpha.connected && beta.connected, "two clients must join simulation mode");
+
+    let person = PersonState {
+        id: 7,
+        activity: Activity::Walk,
+        place: PersonPlace::Foot {
+            x: 11.0,
+            y: 10.0,
+            z: 0.0,
+            heading: 0.0,
+            speed: 1.0,
+            waiting: None,
+        },
+    };
+    let mut relayed_id = None;
+    let mut described = false;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut n = 0;
+    while Instant::now() < deadline {
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        if n % 10 == 0 {
+            alpha.send_desc_up(&Desc::Person {
+                id: person.id,
+                file: "Humans/Example.hum".into(),
+            });
+        }
+        alpha.send_world_up(&WorldFrame {
+            people: vec![person],
+            ..Default::default()
+        });
+        for desc in beta.take_descs() {
+            let Desc::Person { id, file } = desc;
+            if id >= 0xC0_0000 && file == "Humans/Example.hum" {
+                described = true;
+            }
+        }
+        for (_, frame) in beta.take_world() {
+            if let Some(state) = frame.people.into_iter().find(|p| p.id >= 0xC0_0000) {
+                assert_eq!(state.activity, Activity::Walk);
+                assert!(state.id <= world::MAX_ID);
+                relayed_id = Some(state.id);
+            }
+        }
+        if relayed_id.is_some() && described {
+            break;
+        }
+        n += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let id = relayed_id.expect("another client must receive relayed rider through the executable");
+    assert!(described, "receiver must also get the model description");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut removed = false;
+    while Instant::now() < deadline {
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        alpha.send_world_up(&WorldFrame {
+            gone: vec![(true, person.id)],
+            ..Default::default()
+        });
+        for (_, frame) in beta.take_world() {
+            if frame.gone.contains(&(true, id)) {
+                removed = true;
+                break;
+            }
+        }
+        if removed {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(removed, "removing a client-owned rider must reach the other client");
+    alpha.leave();
+    beta.leave();
 }
