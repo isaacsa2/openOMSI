@@ -15,6 +15,15 @@ const SPAWN_RADIUS: f64 = 390.0;
 const MIN_PLAYER_DISTANCE: f64 = 100.0;
 const MIN_CAR_GAP: f64 = 24.0;
 
+/// Scheduled line buses have a separate budget; they must not consume random
+/// AI slots or make cars disappear when a timetable starts a new departure.
+pub fn random_slots(target: usize, active_unscheduled: usize) -> usize {
+    target
+        .min(MAX_EXPERIMENTAL_TRAFFIC)
+        .saturating_sub(active_unscheduled)
+        .min(2)
+}
+
 pub struct CpuTrafficPopulation {
     elapsed: f32,
     state: u64,
@@ -46,6 +55,7 @@ impl CpuTrafficPopulation {
         data: &Arc<WorldCell>,
         viewers: &[DVec3],
         target: usize,
+        clock: &SimClock,
         dt: f32,
     ) -> usize {
         if target == 0 || viewers.is_empty() || traffic.types.is_empty() {
@@ -56,10 +66,10 @@ impl CpuTrafficPopulation {
             return 0;
         }
         self.elapsed %= SPAWN_INTERVAL;
-        let budget = target
-            .min(MAX_EXPERIMENTAL_TRAFFIC)
-            .saturating_sub(traffic.cars.len())
-            .min(2);
+        let budget = random_slots(
+            target,
+            traffic.cars.iter().filter(|car| !car.is_bus()).count(),
+        );
         let mut placed = 0;
         for _ in 0..budget {
             let near = viewers[(self.random() as usize) % viewers.len()];
@@ -113,7 +123,10 @@ impl CpuTrafficPopulation {
             let ty: Arc<VehicleType> = eligible[(self.random() as usize) % eligible.len()].clone();
             let seed = self.random();
             let scheme = traffic.ai_scheme(&ty, seed >> 8);
-            let mut host = VehicleHost::new(SimClock::default());
+            // Random traffic scripts use the host's actual date/time.
+            // SimClock::default() would silently start every AI car in 1989
+            // at 09:00, even on an evening Chrono timetable.
+            let mut host = VehicleHost::new(clock.clone());
             host.paint_scheme = Some(scheme);
             let mut vehicle = VehicleInstance::new(ty.clone(), host);
             attach_cpu_ground(&mut vehicle, data);
@@ -196,11 +209,32 @@ mod tests {
         );
         let data = Arc::new(WorldCell::new(WorldData::default()));
         let mut population = CpuTrafficPopulation::default();
-        assert_eq!(population.tick(&mut traffic, &data, &[], 10, 1.0), 0);
+        let clock = SimClock::default();
+        assert_eq!(population.tick(&mut traffic, &data, &[], 10, &clock, 1.0), 0);
         assert_eq!(
-            population.tick(&mut traffic, &data, &[DVec3::ZERO], 10, 1.0),
+            population.tick(&mut traffic, &data, &[DVec3::ZERO], 10, &clock, 1.0),
             0
         );
         assert!(traffic.cars.is_empty());
+    }
+
+    #[test]
+    fn scheduled_buses_do_not_consume_random_ai_capacity() {
+        // With 8 scheduled buses on the road, random AI must still populate
+        // 8 unscheduled cars, subject to the two-spawns-per-second bound.
+        assert_eq!(random_slots(8, 0), 2);
+        assert_eq!(random_slots(8, 6), 2);
+        assert_eq!(random_slots(8, 7), 1);
+        assert_eq!(random_slots(8, 8), 0);
+        assert_eq!(random_slots(0, 0), 0);
+        assert_eq!(random_slots(usize::MAX, 31), 1);
+        assert_eq!(random_slots(usize::MAX, 32), 0);
+    }
+
+    #[test]
+    fn ai_clock_follows_the_real_server_date_and_time() {
+        let clock = ai_host_clock(Some("2000-05-30"), "21:40", 78_000.0);
+        assert_eq!(clock.date_code(), 20000530);
+        assert_eq!(clock.time, 78_000.0);
     }
 }
