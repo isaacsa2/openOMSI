@@ -26,6 +26,7 @@ enum SurfaceDef {
     Geometry {
         mesh: Option<Arc<MeshData>>,
         drivable: bool,
+        absolute_height: bool,
         holes: Vec<Arc<MeshData>>,
     },
 }
@@ -103,6 +104,7 @@ impl ScenerySurfaces {
         SurfaceDef::Geometry {
             mesh,
             drivable: sco.surface,
+            absolute_height: sco.absolute_height(),
             holes,
         }
     }
@@ -254,6 +256,7 @@ impl HostWorld {
             let SurfaceDef::Geometry {
                 mesh,
                 drivable,
+                absolute_height,
                 holes,
             } = loaded
             else {
@@ -277,21 +280,32 @@ impl HostWorld {
                         .get(&obj.id)
                         .and_then(|(owner, pos, rot)| (*owner == key).then_some((*pos, *rot)))
                 });
-            let (pos, raw_rot) = match indexed {
-                Some(p) => p,
-                None => {
-                    let base = DVec2::new(
+            // MapIndex records ordinary ground-relative objects with terrain
+            // added, even when the .sco declares [absheight]. For an absolute
+            // bridge or tunnel plate the recorded Z must win over the index.
+            let (pos, raw_rot) = if absolute_height {
+                (
+                    DVec3::new(
                         key.0 as f64 * tile_size() + obj.pos[0],
                         key.1 as f64 * tile_size() + obj.pos[1],
-                    );
-                    let height = if def.absolute_height() {
-                        0.0
-                    } else {
-                        self.terrain_height(base.x, base.y)
+                        obj.pos[2],
+                    ),
+                    obj.rot,
+                )
+            } else {
+                match indexed {
+                    Some(p) => p,
+                    None => {
+                        let base = DVec2::new(
+                            key.0 as f64 * tile_size() + obj.pos[0],
+                            key.1 as f64 * tile_size() + obj.pos[1],
+                        );
+                        let height = self
+                            .terrain_height(base.x, base.y)
                             .map(f64::from)
-                            .unwrap_or(0.0)
-                    };
-                    (DVec3::new(base.x, base.y, obj.pos[2] + height), obj.rot)
+                            .unwrap_or(0.0);
+                        (DVec3::new(base.x, base.y, obj.pos[2] + height), obj.rot)
+                    }
                 }
             };
             if !pos.is_finite() || !raw_rot.iter().all(|v| v.is_finite()) {
