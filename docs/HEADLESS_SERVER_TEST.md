@@ -247,9 +247,24 @@ The CPU state is rebuilt, so AI and pedestrian entities can be recreated.
 Before relying on this command with players connected, test two real game
 clients for synchronized removals, AI/timetable state, passenger boarding,
 scripts and reconnects. An automated synthetic LAN process regression does
-not prove complete in-game continuity. Date-specific Chrono content is
-loaded afresh on `/restart` using the current simulation date, but automatic
-Chrono map migration exactly at midnight is still a blocking limitation.
+not prove complete in-game continuity. Date-specific Chrono content is loaded afresh on `/restart` using the
+current simulation date. The experimental native host now also **prepares
+an automatic Chrono map/AI-list/timetable rebuild** when the active Chrono
+folders change at midnight. Preparation happens on a CPU worker, keeps already
+streamed player neighborhoods, and applies only a fully prepared snapshot
+without replacing LAN sockets, join codes or authenticated mod services.
+A failed build keeps the old world and retries after 30 seconds. This does
+**not** guarantee continuity of live AI IDs, passenger claims or bus scripts:
+test with two graphical clients before treating midnight migration as complete.
+
+To exercise the automatic path, use a licensed map with an authored
+`Chrono/<scenario>/Chrono.cfg` date boundary. Configure time shortly before
+that boundary, join with two graphical clients, enable experimental
+simulation and observe the log's `native Chrono: preparing` and
+`native Chrono: installed` messages. Verify the active `ailists`, schedules,
+vehicle positions, re-joins, passenger claims and UDP/TCP session continuity
+before and after midnight. A map with no Chrono changes does not need
+an expensive CPU world rebuild every day.
 
 ## Streaming-test addendum: drive beyond the starting area
 
