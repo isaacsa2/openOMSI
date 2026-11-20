@@ -169,7 +169,10 @@ fn native_restart_rebuilds_the_cpu_world_without_disconnecting_lan_clients() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(restarted, "console restart was not consumed by the CPU tick");
+    assert!(
+        restarted,
+        "console restart was not consumed by the CPU tick"
+    );
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut relayed = false;
     while Instant::now() < deadline {
@@ -185,7 +188,10 @@ fn native_restart_rebuilds_the_cpu_world_without_disconnecting_lan_clients() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(relayed, "restart must preserve joined clients and pose relay");
+    assert!(
+        relayed,
+        "restart must preserve joined clients and pose relay"
+    );
     let mut installed_map = world.map;
     let report = omsi_lan::mods::fetch_selected(
         &server.root,
