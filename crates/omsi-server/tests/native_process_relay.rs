@@ -42,6 +42,14 @@ fn start_fixture(max_players: usize) -> (FixtureProcess, SocketAddr) {
 }
 
 fn start_fixture_mode(max_players: usize, simulation: bool) -> (FixtureProcess, SocketAddr) {
+    start_fixture_with_chrono(max_players, simulation, false)
+}
+
+fn start_fixture_with_chrono(
+    max_players: usize,
+    simulation: bool,
+    chrono: bool,
+) -> (FixtureProcess, SocketAddr) {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -63,6 +71,12 @@ fn start_fixture_mode(max_players: usize, simulation: bool) -> (FixtureProcess, 
         &root.join("Splines/smoke.sli"),
         "[length]\n40\n[texture]\nroad.bmp\n[profile]\n0\n[profilepnt]\n-1.5\n0\n0\n1\n[profilepnt]\n1.5\n0\n1\n1\n[path]\n0\n0\n0\n3\n0\n",
     );
+    if chrono {
+        write(
+            &map.join("Chrono/NextDay/Chrono.cfg"),
+            "[startdate]\n19890531\n",
+        );
+    }
     let port = unused_port();
     let mut web_port = unused_port();
     while web_port == port {
@@ -70,10 +84,12 @@ fn start_fixture_mode(max_players: usize, simulation: bool) -> (FixtureProcess, 
     }
     let cfg = root.join("server-test.cfg");
     let passengers = u8::from(simulation);
+    let time = if chrono { "23:59" } else { "09:00" };
+    let time_speed = if chrono { 12 } else { 1 };
     write(
         &cfg,
         &format!(
-            "name = Native UDP Test\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = 09:00\ntraffic = 0\ntimetable = 0\npassengers = {passengers}\nport = {port}\nweb_port = {web_port}\nmax_players = {max_players}\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n"
+            "name = Native UDP Test\nmap = Maps/Fixture/global.cfg\ndate = 1989-05-30\ntime = {time}\ntime_speed = {time_speed}\ntraffic = 0\ntimetable = 0\npassengers = {passengers}\nport = {port}\nweb_port = {web_port}\nmax_players = {max_players}\ntunnel = 0\npublic_server = 0\npublic_address = off\nreal_time = 0\nmetar_sync = 0\naccept_uploads = 0\nshare_maps = 0\nparked_buses = 0\nvoice = 0\nadmin_web = off\n"
         ),
     );
     let process = Command::new(env!("CARGO_BIN_EXE_omsi-server"))
@@ -108,6 +124,72 @@ fn driver(name: &str, x: f64) -> Pose {
         y: 10.0,
         ..Default::default()
     }
+}
+
+#[test]
+fn chrono_midnight_rebuild_keeps_two_connected_clients_and_manifest() {
+    let (mut server, addr) = start_fixture_with_chrono(2, true, true);
+    let world = WorldInfo {
+        map: "Maps/Fixture/global.cfg".into(),
+        date: "1989-05-30".into(),
+        time: 23.0 * 3600.0 + 59.0 * 60.0,
+        ..Default::default()
+    };
+    let mut alpha = LanSession::join_addr(vec![addr], None, "alpha", world.clone()).unwrap();
+    let mut beta = LanSession::join_addr(vec![addr], None, "beta", world.clone()).unwrap();
+    let pa = driver("alpha", 101.0);
+    let pb = driver("beta", 202.0);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut joined_before = false;
+    let mut migrated = false;
+    let mut relayed_after = false;
+
+    while Instant::now() < deadline {
+        if let Some(status) = server.process.try_wait().unwrap() {
+            panic!("native host exited during Chrono midnight: {status}");
+        }
+        alpha.tick(0.05, &pa);
+        beta.tick(0.05, &pb);
+        if alpha.connected && beta.connected && !migrated {
+            joined_before = true;
+        }
+        let log = fs::read_to_string(server.root.join("headless.log")).unwrap_or_default();
+        if log.contains("native Chrono: installed date 19890531") {
+            migrated = true;
+        }
+        if migrated
+            && alpha.connected
+            && beta.connected
+            && alpha.peers().any(|p| p.has_info && p.pose.name == "beta")
+            && beta.peers().any(|p| p.has_info && p.pose.name == "alpha")
+        {
+            relayed_after = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(joined_before, "the two clients must connect before midnight");
+    assert!(migrated, "Chrono.cfg transition must rebuild CPU map on May 31");
+    assert!(
+        relayed_after,
+        "connected clients must still exchange poses after the Chrono swap"
+    );
+
+    let mut installed_map = world.map;
+    let report = omsi_lan::mods::fetch_selected(
+        &server.root,
+        &mut installed_map,
+        addr,
+        alpha.session,
+        None,
+        None,
+        &mut |_, _, _| {},
+    )
+    .expect("authenticated mod manifest must survive automatic Chrono");
+    assert_eq!(report.fetched, 0);
+    assert_eq!(report.bytes, 0);
+    alpha.leave();
+    beta.leave();
 }
 
 #[test]
