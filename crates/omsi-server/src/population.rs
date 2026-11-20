@@ -246,15 +246,15 @@ mod tests {
 
     #[test]
     fn scheduled_buses_do_not_consume_random_ai_capacity() {
-        // With 8 scheduled buses on the road, random AI must still populate
-        // 8 unscheduled cars, subject to the two-spawns-per-second bound.
-        assert_eq!(random_slots(8, 0), 2);
+        // Scheduled buses are counted separately from ordinary cars.
+        // Population growth is capped at four ordinary spawns per second.
+        assert_eq!(random_slots(8, 0), MAX_SPAWNS_PER_SECOND);
         assert_eq!(random_slots(8, 6), 2);
         assert_eq!(random_slots(8, 7), 1);
         assert_eq!(random_slots(8, 8), 0);
         assert_eq!(random_slots(0, 0), 0);
-        assert_eq!(random_slots(usize::MAX, 31), 1);
-        assert_eq!(random_slots(usize::MAX, 32), 0);
+        assert_eq!(random_slots(usize::MAX, 319), 1);
+        assert_eq!(random_slots(usize::MAX, 320), 0);
     }
 
     #[test]
