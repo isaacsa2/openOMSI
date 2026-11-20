@@ -300,7 +300,9 @@ export function transportRefusal(map, vehicle) {
  * thousands of stock buses. */
 export const shownModes = (x) => (x?.transport || []).filter((m) => m !== 'bus' || (x.transport.length > 1));
 
-export const curMap = () => S.maps?.find((m) => m.file === S.choice?.map);
+// Server WELCOME paths and installed content may use different case or
+// Windows separators. This is the *same installed map*, not a missing map.
+export const curMap = () => S.maps?.find((m) => norm(m.file) === norm(S.choice?.map));
 export const curBus = () => selectableVehicles().find((v) => busFile(v.file) === busFile(S.choice?.bus));
 export const curLine = () => S.lines.list?.find((l) => l.name === S.choice?.line);
 // Old saved choices use the displayed number; new choices identify the variant.
