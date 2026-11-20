@@ -173,24 +173,37 @@ impl CpuTrafficPopulation {
     }
 }
 
+/// Resolve a smooth drivable surface, or the visible ground only where the
+/// terrain is NOT cut out. A tunnel's [terrainhole] is open air below its road
+/// mesh, not an invisible mound for AI vehicle suspension and placement.
+fn cpu_ground_height(
+    ground: &omsi_sim::world_data::GroundTiles,
+    x: f64,
+    y: f64,
+) -> Option<f64> {
+    let (key, (lx, ly)) = omsi_map::world_to_tile_local(x, y);
+    let (lx, ly) = (lx as f32, ly as f32);
+    let surface = ground.surfaces.get(&key);
+    if let Some(road) = surface.and_then(|s| s.sample_road_smooth(lx, ly)) {
+        return Some(f64::from(road));
+    }
+    let terrain = ground.terrains.get(&key)?;
+    let height = terrain.sample(lx, ly);
+    if surface.is_some_and(|s| {
+        s.cut_at(lx, ly, height, omsi_sim::world_data::surface_flush())
+    }) {
+        return None;
+    }
+    Some(f64::from(height))
+}
+
 /// Attach the same road/terrain and exact wheel-contact samplers used by
 /// the game, but via shared immutable CPU map snapshots rather than a Scene.
 pub fn attach_cpu_ground(vehicle: &mut VehicleInstance, data: &Arc<WorldCell>) {
     let ground = Arc::clone(data);
     vehicle.ground = Some(Arc::new(move |x, y| {
         let d = ground.peek();
-        let (key, (lx, ly)) = omsi_map::world_to_tile_local(x, y);
-        d.ground
-            .surfaces
-            .get(&key)
-            .and_then(|surface| surface.sample_road_smooth(lx as f32, ly as f32))
-            .or_else(|| {
-                d.ground
-                    .terrains
-                    .get(&key)
-                    .map(|terrain| terrain.sample(lx as f32, ly as f32))
-            })
-            .map(f64::from)
+        cpu_ground_height(&d.ground, x, y)
     }));
     let ground = Arc::clone(data);
     vehicle.contact = Some(
@@ -205,6 +218,34 @@ mod tests {
     use omsi_sim::ai_traffic::setup::RandomTypes;
     use omsi_sim::traffic::Network;
     use omsi_sim::world_data::WorldData;
+
+    #[test]
+    fn cpu_ai_ground_never_uses_terrain_inside_an_explicit_tunnel_cutout() {
+        use glam::{Mat4, Vec3};
+        use omsi_geometry::{MeshData, TileSurface};
+        use omsi_map::Terrain;
+        use omsi_sim::world_data::GroundTiles;
+
+        let hole = MeshData {
+            positions: vec![
+                Vec3::new(4.0, 4.0, 0.0),
+                Vec3::new(16.0, 4.0, 0.0),
+                Vec3::new(16.0, 16.0, 0.0),
+                Vec3::new(4.0, 16.0, 0.0),
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            ..Default::default()
+        };
+        let mut raster = TileSurface::new(128);
+        raster.rasterize_hole(&hole, &Mat4::IDENTITY, DVec3::ZERO, 0, 0);
+        raster.finish();
+        let mut ground = GroundTiles::default();
+        ground.terrains.insert((0, 0), Arc::new(Terrain::flat()));
+        ground.surfaces.insert((0, 0), Arc::new(raster));
+
+        assert_eq!(cpu_ground_height(&ground, 10.0, 10.0), None);
+        assert_eq!(cpu_ground_height(&ground, 30.0, 30.0), Some(0.0));
+    }
 
     #[test]
     fn cannot_create_vehicles_without_connected_players_or_ai_types() {
