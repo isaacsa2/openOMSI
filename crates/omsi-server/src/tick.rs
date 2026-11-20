@@ -54,6 +54,40 @@ impl TickPacer {
     }
 }
 
+/// The offscreen loop's fixed steps kept to the clock when other games take part (a LAN
+/// session, the dedicated server): a step of `dt` every `dt` on the wall, the step's own work
+/// included. A whole step slept after each frame's work made a dedicated server's frames
+/// 41 ms long on Gladbeck: its world ran at 80 % of the clock while its world frames were
+/// stamped with the clock, so the players saw its cars and people a fifth too slow, mostly
+/// guessed on past the last frame they had, and standing still for a moment again and again
+/// (#660); its clock and timetable fell behind the day as well.
+#[derive(Default)]
+pub struct RealTime {
+    /// When the last step was to end (its wait ran until then).
+    end: Option<Instant>,
+}
+
+impl RealTime {
+    /// Further behind than this (a stall: a long load, the machine busy), the steps go on
+    /// from now rather than run back to back until they have caught up - the same quarter of
+    /// a second after which the session's stamps take the wall clock again
+    /// (`LanSession::tick`).
+    const BEHIND_MAX: std::time::Duration = std::time::Duration::from_millis(250);
+
+    /// How long to wait at `now`, at the end of a step of `dt` seconds.
+    pub fn wait(&mut self, now: Instant, dt: f32) -> std::time::Duration {
+        let dt = std::time::Duration::from_secs_f32(dt);
+        let due = self.end.map(|e| e + dt).unwrap_or(now + dt);
+        let due = if now > due + Self::BEHIND_MAX {
+            now
+        } else {
+            due
+        };
+        self.end = Some(due);
+        due.saturating_duration_since(now)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
