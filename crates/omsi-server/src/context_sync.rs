@@ -73,17 +73,14 @@ impl HeadlessContextSync {
         if self.elapsed < omsi_net::world::MOVING_EVERY {
             return 0;
         }
-        self.elapsed = (self.elapsed - omsi_net::world::MOVING_EVERY)
-            .min(omsi_net::world::MOVING_EVERY);
+        self.elapsed =
+            (self.elapsed - omsi_net::world::MOVING_EVERY).min(omsi_net::world::MOVING_EVERY);
         let viewers: Vec<_> = lan
             .peers()
             .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
             .filter_map(|peer| {
                 let at = DVec3::new(peer.pose.x, peer.pose.y, peer.pose.z);
-                (at.is_finite()
-                    && at.x.abs() < 1.0e8
-                    && at.y.abs() < 1.0e8
-                    && at.z.abs() < 1.0e8)
+                (at.is_finite() && at.x.abs() < 1.0e8 && at.y.abs() < 1.0e8 && at.z.abs() < 1.0e8)
                     .then_some((peer.pose.id, at))
             })
             .collect();
@@ -98,9 +95,7 @@ impl HeadlessContextSync {
             for car in traffic
                 .cars
                 .iter()
-                .filter(|car| {
-                    (car.vehicle.position - at).truncate().length() <= CAR_RADIUS
-                })
+                .filter(|car| (car.vehicle.position - at).truncate().length() <= CAR_RADIUS)
                 .take(MAX_CARS_PER_PEER)
             {
                 let Some(table_id) = table.id_of(car.id) else {
