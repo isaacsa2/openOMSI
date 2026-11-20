@@ -416,10 +416,7 @@ fn run(
             root,
             &sim.world,
             &sim_clock,
-            cfg.ai_limits
-                .max_scheduled
-                .filter(|&count| count > 0)
-                .unwrap_or(12) as usize,
+            cfg.ai_limits.max_scheduled.unwrap_or(12) as usize,
         ))
     } else {
         None
@@ -588,12 +585,20 @@ fn run(
         });
         if simulated && n % 60 == 0 {
             let viewers = sim.traffic.lan_centers.clone();
+            // A native AI script must start at this session's actual calendar
+            // and clock, not the engine's 1989/09:00 default.
+            let spawn_clock = crate::population::ai_host_clock(
+                live_cfg.date.as_deref(),
+                &live_cfg.time,
+                authoritative,
+            );
             profile(&mut profiler, "ai_population", || {
                 population.tick(
                     &mut sim.traffic,
                     &sim.world,
                     &viewers,
                     live_cfg.traffic,
+                    &spawn_clock,
                     1.0,
                 )
             });
