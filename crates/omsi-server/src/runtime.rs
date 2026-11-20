@@ -6,6 +6,7 @@ use crate::admin;
 use crate::ai_sync::HeadlessTrafficSync;
 use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
+use crate::context_sync::HeadlessContextSync;
 use crate::simulation::CpuSimulation;
 use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
@@ -512,6 +513,7 @@ fn run(
     let mut pacer = TickPacer::new(Instant::now());
     let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
     let mut traffic_sync = HeadlessTrafficSync::default();
+    let mut context_sync = HeadlessContextSync::default();
     let mut people_sync = HeadlessPeopleSync::default();
     let mut population = CpuTrafficPopulation::default();
     let stream_global = map.global.clone();
@@ -627,6 +629,16 @@ fn run(
         profile(&mut profiler, "traffic_sync", || {
             traffic_sync.update(&sim.traffic, root);
             traffic_sync.publish(net.session_mut(), FIXED_DT)
+        });
+        // Clients need their AI script context before they can display
+        // the car/timetable: the traffic table alone is not enough.
+        profile(&mut profiler, "ai_context", || {
+            context_sync.tick(
+                net.session_mut(),
+                &sim.traffic,
+                &traffic_sync.table,
+                FIXED_DT,
+            )
         });
         profile(&mut profiler, "people_sync", || {
             people_sync.tick(
