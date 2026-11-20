@@ -138,8 +138,8 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
     // Maps, approved fleet packages and client uploads are independent,
     // explicit opt-ins validated against the actual configuration file.
     ensure!(
-        cfg.parked_buses == 0,
-        "experimental relay requires parked_buses=0 (no parked-world authority)"
+        cfg.parked_buses <= 32 && (cfg.parked_buses == 0 || cfg.accept_uploads),
+        "experimental parked_buses requires accept_uploads=1 and no more than 32 buses"
     );
     ensure!(
         cfg.vehicles
@@ -180,7 +180,7 @@ pub fn allow_simulated_roam(cfg: &ServerCfg) -> Result<()> {
     allow_free_roam(&base)?;
     ensure!(
         cfg.traffic <= MAX_EXPERIMENTAL_TRAFFIC,
-        "experimental CPU simulation supports no more than {MAX_EXPERIMENTAL_TRAFFIC} AI vehicles"
+        "experimental CPU simulation supports no more than {MAX_EXPERIMENTAL_TRAFFIC} ordinary AI cars"
     );
     ensure!(
         cfg.ai_limits.max_humans.unwrap_or(64) <= 128,
@@ -560,6 +560,25 @@ fn run(
         "no drivable or foot paths in selected tiles"
     );
     let mut sim = make_cpu_sim(root, cfg, &map, &keys, signals, simulated, initial_time);
+    // Legacy verified-upload parked bus store and authenticated claim protocol.
+    if cfg.parked_buses > 0 {
+        let spots: Vec<omsi_lan::parked::Spot> = map
+            .global
+            .entry_points
+            .iter()
+            .filter_map(|ep| crate::world::resolve_entry_point(&map.global, &map.index, ep))
+            .filter(|(at, heading)| at.is_finite() && heading[0].is_finite())
+            .map(|(at, heading)| (at.to_array(), heading[0] as f32))
+            .collect();
+        let ground = sim.world.snapshot().ground.clone();
+        omsi_lan::parked::start(root, &cfg.map, &spots, &|x, y, near| {
+            ground
+                .stand_height(x, y, near)
+                .or_else(|| ground.stand_height(x, y, near + 4.0))
+                .or_else(|| ground.ground_height(x, y))
+        });
+        log::info!("native parked buses: limit {}, {} spawn points", cfg.parked_buses, spots.len());
+    }
     let mut calendar = crate::clock::NativeCalendar::new(&date, &cfg.time);
     let mut sim_clock = calendar.snapshot();
     let mut schedule = if simulated && cfg.timetable {
@@ -658,7 +677,7 @@ fn run(
     let mut rules = ServerRules {
         real_time: false,
         metar: false,
-        traffic_max: if simulated { cfg.traffic } else { 0 },
+        traffic_max: if simulated { MAX_EXPERIMENTAL_TRAFFIC } else { 0 },
         notice_ok: &|notice| notice.len() <= 2048,
     };
     let mut pacer = TickPacer::new(Instant::now());
@@ -701,7 +720,7 @@ fn run(
             &mut admin_state,
             &mut sim,
             clock,
-            live_cfg.traffic,
+            if simulated { MAX_EXPERIMENTAL_TRAFFIC } else { 0 },
             simulated,
             hub,
         );
@@ -753,6 +772,8 @@ fn run(
         });
         if simulated && n % 60 == 0 {
             profile(&mut profiler, "ai_population", || {
+                let viewers = sim.traffic.lan_centers.clone();
+                CpuTrafficPopulation::recycle_distant(&mut sim.traffic, &viewers);
                 advance_native_ai_population(&mut sim, &mut population, &sim_clock)
             });
         }

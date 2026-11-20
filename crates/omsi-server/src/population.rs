@@ -9,7 +9,9 @@ use omsi_sim::world_data::WorldCell;
 use omsi_sim::{SimClock, VehicleHost, VehicleInstance, VehicleType};
 use std::sync::Arc;
 
-pub const MAX_EXPERIMENTAL_TRAFFIC: usize = 32;
+pub const MAX_EXPERIMENTAL_TRAFFIC: usize = 128;
+const MAX_SPAWNS_PER_SECOND: usize = 4;
+const RECYCLE_DISTANCE: f64 = 900.0;
 const SPAWN_INTERVAL: f32 = 1.0;
 const SPAWN_RADIUS: f64 = 390.0;
 const MIN_PLAYER_DISTANCE: f64 = 100.0;
@@ -21,7 +23,7 @@ pub fn random_slots(target: usize, active_unscheduled: usize) -> usize {
     target
         .min(MAX_EXPERIMENTAL_TRAFFIC)
         .saturating_sub(active_unscheduled)
-        .min(2)
+        .min(MAX_SPAWNS_PER_SECOND)
 }
 
 pub struct CpuTrafficPopulation {
@@ -39,6 +41,28 @@ impl Default for CpuTrafficPopulation {
 }
 
 impl CpuTrafficPopulation {
+    /// Only ordinary cars follow remote player concentration. Timetable
+    /// buses retain their routes regardless of where players are.
+    pub fn recycle_distant(traffic: &mut TrafficSim, viewers: &[DVec3]) -> usize {
+        use omsi_sim::ai_traffic::control::Removal;
+        let mut removed = 0;
+        for index in (0..traffic.cars.len()).rev() {
+            let car = &traffic.cars[index];
+            if car.is_bus() {
+                continue;
+            }
+            let far = viewers.iter().all(|at| {
+                (car.vehicle.position - *at).truncate().length() > RECYCLE_DISTANCE
+            });
+            if far {
+                let car = traffic.take_off(index, Removal::Finished);
+                traffic.retired.push(car.id);
+                removed += 1;
+            }
+        }
+        removed
+    }
+
     fn random(&mut self) -> u64 {
         self.state ^= self.state << 13;
         self.state ^= self.state >> 7;
@@ -212,6 +236,13 @@ mod tests {
             0
         );
         assert!(traffic.cars.is_empty());
+    }
+
+    #[test]
+    fn ordinary_traffic_max_and_spawn_rate_are_bounded() {
+        assert_eq!(random_slots(64, 64), 0);
+        assert_eq!(random_slots(128, 0), MAX_SPAWNS_PER_SECOND);
+        assert_eq!(random_slots(128, 120), MAX_SPAWNS_PER_SECOND);
     }
 
     #[test]

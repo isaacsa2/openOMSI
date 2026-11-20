@@ -222,7 +222,11 @@ pub fn apply(
         0.0
     };
     admin.passenger_density = config.passenger_density;
-    rules.traffic_max = if simulated { config.traffic } else { 0 };
+    rules.traffic_max = if simulated {
+        crate::population::MAX_EXPERIMENTAL_TRAFFIC
+    } else {
+        0
+    };
     omsi_lan::server_cfg::set_server_speed_limit_kmh(config.speed_limit_kmh);
     if let Some(timetable) = schedule {
         let max = crate::timetable::scheduled_budget(config.ai_limits.max_scheduled);

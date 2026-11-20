@@ -87,7 +87,7 @@ cars through the acknowledged LAN traffic table and people through existing
 `WORLD` and `DESC` packets. Chrono-based road-bus departures and lines are
 experimental; not all consist, train and timetable edge cases are supported.
 
-This test mode currently allows up to **32 random AI vehicles**, **128
+This test mode currently allows up to **128 ordinary AI cars**, **128
 humans** and **12 scheduled road buses**, without renderer or audio. The
 example uses much lower limits. The road network is held on the **initial
 64 entrypoint-oriented tiles** to preserve vehicle lane indexes. Dynamic
@@ -145,6 +145,12 @@ delivered content. Share only files you own and are allowed to redistribute.
 Player-uploaded buses may be retained in the server's LAN store even after
 the player leaves, according to `uploads_keep_days`. Test with
 public-domain or otherwise redistribution-authorized files first.
+
+**Optional parked buses:** set `accept_uploads=1` and `parked_buses=1..32`
+before restarting the server. This reuses the existing verified uploaded-bus
+store, claim/hand-over and proximity publication. Parked player buses are
+not AI timetable buses and do not gain authoritative player-bus physics.
+Keep disabled for content you lack permission to redistribute.
 
 Changes to `share_maps`, `accept_uploads`, `vehicles`,
 `uploads_keep_days` or `parked_buses` are restart-only. Running
