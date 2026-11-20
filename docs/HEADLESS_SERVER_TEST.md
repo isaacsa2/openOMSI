@@ -130,7 +130,9 @@ The only **hot-reloadable** keys in this experimental native host are:
   their existing trips.
 - `passenger_density`: demand factor 0–3, if passengers were enabled at boot.
 - `time_speed`: simulation clock speed, 1–30.
-- `ai_max_scheduled`: maximum new scheduled road buses (up to 12).
+- `ai_max_scheduled`: maximum new scheduled road buses (up to 12; 0
+  retains the legacy meaning of no configured limit, bounded by the native
+  experimental cap of 12).
 - `speed_limit_kmh`: 0, 60, 75 or 80.
 
 Changes to **all other** keys (such as `map`, `date`, `time`,
@@ -167,9 +169,11 @@ client. Note stalls, new invisible walls, missing signals and unexpected
 terrain or surface heights. These remain open parity risks until tested on
 licensed maps, especially with complex crossings and Chrono content.
 
-This experimental worker is **not** a replacement for scheduled AI or
-passenger streaming. AI, pedestrians and timetables remain disabled, and
-the server does not authoritatively simulate or execute players' bus scripts.
+This dynamic tile worker belongs to **free-roam only**. It still disables
+AI cars, pedestrians and timetables. The separate **CPU simulation** mode
+provides limited scheduled/random AI and pedestrians, but deliberately
+keeps its initial tiles fixed while entities are active. Neither mode
+authoritatively executes the **player's** bus scripts or vehicle physics.
 
 ## Real-client multiplayer test procedure (2–3 drivers)
 
@@ -218,11 +222,13 @@ whether connection used an IP or code, the **first error message** and the
 matching excerpt of the server and client logs. Redact join codes, passwords,
 private addresses and identifying player information before posting publicly.
 
-**Current limits:** AI vehicles, pedestrians, scheduled traffic, server-side
-bus/physics authority, distant-tile streaming and complete map/crossing
-collisions are incomplete or disabled. They are not acceptance expectations
-for this restricted relay test, and passing the table does not make the
-native executable safe for production.
+**Current limits:** the free-roam relay still disables AI traffic,
+pedestrians and schedules, but can stream distant tiles. The separate
+`--experimental-simulation` mode activates bounded AI traffic, passengers,
+Chrono road buses and their shared LAN script-context pages on fixed tiles.
+Neither has complete server-owned player-bus physics, map/crossing collision,
+entity-aware region streaming or verified real-client passenger parity.
+Passing this table does **not** make either native mode production-ready.
 
 ## Acceptance checklist
 
@@ -233,8 +239,10 @@ native executable safe for production.
   do not crash the host.
 - Private maps, bus files and liveries are **not** uploaded or redistributed.
 
-**What is not implemented yet:** authoritative bus-script and vehicle-physics
-parity, complete map/deformed-road collision, train signals, scheduled/random
-AI and passenger snapshots. The unit suite tests two headless LAN clients,
-but these in-game acceptance tests must still be done. They block merging the
-full replacement server into main.
+**Still missing:** authoritative player-bus physics/scripts, full deformed-road
+and train-signal parity, moving active AI/people between streamed tiles, and
+authenticated remapping/forwarding of other clients' `WORLDUP`/`DESCUP`
+passengers. The native host drains those upstream queues without forwarding
+them until an ID-safe relay is available; server-owned people and AI do
+publish their own snapshots. Multi-client graphical verification remains a
+blocking acceptance gate before merging the replacement server into main.
