@@ -142,7 +142,15 @@ pub fn update_host_interest(
         .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
         .filter_map(|peer| client_position(&peer.pose).map(|pos| (peer.pose.id, pos)))
         .collect();
-    for (player, requested) in lan.take_claims() {
+    let claims = lan.take_claims();
+    // Index passenger positions only when someone actually requests boarding.
+    // Repeated client IDs then cost O(claims) rather than O(claims × humans).
+    let passenger_positions: HashMap<u32, DVec3> = if claims.is_empty() {
+        HashMap::new()
+    } else {
+        people.people.iter().map(|p| (p.id, p.position)).collect()
+    };
+    for (player, requested) in claims {
         summary.boarding_claims += requested.len();
         let eligible: Vec<u32> = if let Some(&bus) = buses.get(&player) {
             requested
@@ -150,10 +158,9 @@ pub fn update_host_interest(
                 .copied()
                 .take(MAX_BOARDING_CLAIMS)
                 .filter(|id| {
-                    people
-                        .people
-                        .iter()
-                        .any(|person| person.id == *id && can_claim_at(bus, person.position))
+                    passenger_positions
+                        .get(id)
+                        .is_some_and(|&person| can_claim_at(bus, person))
                 })
                 .collect()
         } else {
