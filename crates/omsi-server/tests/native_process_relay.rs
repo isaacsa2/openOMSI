@@ -374,7 +374,10 @@ fn simulated_native_host_relays_client_owned_passengers_end_to_end() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(alpha.connected && beta.connected, "two clients must join simulation mode");
+    assert!(
+        alpha.connected && beta.connected,
+        "two clients must join simulation mode"
+    );
 
     let person = PersonState {
         id: 7,
@@ -447,7 +450,10 @@ fn simulated_native_host_relays_client_owned_passengers_end_to_end() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(removed, "removing a client-owned rider must reach the other client");
+    assert!(
+        removed,
+        "removing a client-owned rider must reach the other client"
+    );
     alpha.leave();
     beta.leave();
 }
