@@ -161,15 +161,14 @@ mod tests {
             })
             .collect();
         let index = omsi_world::map_index::MapIndex::default();
-        let retained = selected_tiles(
-            &global,
-            &index,
-            &[(210, 0), (211, 0), (210, 0), (999, 0)],
-        );
+        let retained = selected_tiles(&global, &index, &[(210, 0), (211, 0), (210, 0), (999, 0)]);
         assert_eq!(&retained[..2], &[(210, 0), (211, 0)]);
         assert!(!retained.contains(&(999, 0)));
         assert!(retained.contains(&(0, 0)));
-        assert_eq!(retained.len(), retained.iter().copied().collect::<HashSet<_>>().len());
+        assert_eq!(
+            retained.len(),
+            retained.iter().copied().collect::<HashSet<_>>().len()
+        );
         assert!(retained.len() <= MAX_POPULATED_TILES);
     }
 
