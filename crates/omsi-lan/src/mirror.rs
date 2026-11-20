@@ -191,6 +191,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn graphical_and_native_hosts_share_the_same_ai_context_wire_contract() {
+        let mut host = omsi_sim::VehicleHost::new(omsi_sim::SimClock::default());
+        host.schedule_active = 1.0;
+        host.tt_line = "76".into();
+        host.tt_terminus_index = 3;
+        host.tt_stops.push(("Terminal".into(), 600.0, 610.0));
+        host.tt_stop_ids.push(102);
+        host.tt_busstop_index = 0;
+        host.tt_delay = 12.0;
+        let context = ai_context(&host);
+        assert_eq!(context.line, "76");
+        assert_eq!(context.stops, vec![(102, "Terminal".into(), 600.0, 610.0)]);
+        let packet = context
+            .packet(omsi_net::PROTOCOL as u8, 123, 900, 0)
+            .expect("encode real host context");
+        let mut receiver = omsi_net::ai_context::Receiver::default();
+        let (id, decoded) = receiver
+            .receive(&packet, omsi_net::PROTOCOL as u8)
+            .expect("client decodes native host context");
+        assert_eq!(id, 123);
+        assert_eq!(decoded, context);
+    }
+
+    #[test]
     fn a_file_is_named_relative_to_the_deepest_root_holding_it() {
         // the content folder first, the OMSI 2 folder inside it after (a server's layout)
         let roots = [PathBuf::from("/srv/openOMSI"), PathBuf::from("/srv/openOMSI/OMSI 2")];
