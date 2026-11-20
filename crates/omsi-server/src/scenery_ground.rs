@@ -108,7 +108,6 @@ impl ScenerySurfaces {
     }
 }
 
-
 /// Read model tags from the same file and directory as the visual host.
 fn resolved_model(def: &SceneryObject) -> Option<(SceneryObject, Model, PathBuf)> {
     let parent = def.path.parent().unwrap_or(Path::new(""));
@@ -126,11 +125,7 @@ fn resolved_model(def: &SceneryObject) -> Option<(SceneryObject, Model, PathBuf)
 }
 
 /// Reject oversized, missing or malformed map meshes before triangle indexing.
-fn load_checked_mesh(
-    directory: &Path,
-    name: &str,
-    model_first: bool,
-) -> Option<Arc<MeshData>> {
+fn load_checked_mesh(directory: &Path, name: &str, model_first: bool) -> Option<Arc<MeshData>> {
     let model = omsi_cfg::resolve_path(&omsi_cfg::resolve_path(directory, "model"), name);
     let direct = omsi_cfg::resolve_path(directory, name);
     let paths = if model_first {
@@ -139,9 +134,7 @@ fn load_checked_mesh(
         [direct, model]
     };
     let path = paths.into_iter().find(|p| omsi_cfg::vfs::is_file(p))?;
-    if std::fs::metadata(&path)
-        .is_ok_and(|metadata| metadata.len() > MAX_OBJECT_MESH_BYTES)
-    {
+    if std::fs::metadata(&path).is_ok_and(|metadata| metadata.len() > MAX_OBJECT_MESH_BYTES) {
         return None;
     }
     let loaded = omsi_o3d::load_mesh(&path).ok()?;
@@ -156,9 +149,7 @@ fn load_checked_mesh(
         return None;
     }
     let mesh = omsi_geometry::mesh_from_o3d(&loaded);
-    if mesh.indices.is_empty()
-        || mesh.positions.iter().any(|point| !point.is_finite())
-    {
+    if mesh.indices.is_empty() || mesh.positions.iter().any(|point| !point.is_finite()) {
         return None;
     }
     Some(Arc::new(mesh))
@@ -174,9 +165,7 @@ fn load_deformation(directory: &Path, name: &str) -> Option<Arc<MeshData>> {
 }
 
 /// None means the object has no field, Err means an authored field is missing.
-pub(crate) fn crossing_field(
-    def: &SceneryObject,
-) -> Result<Option<Arc<MeshData>>, ()> {
+pub(crate) fn crossing_field(def: &SceneryObject) -> Result<Option<Arc<MeshData>>, ()> {
     let (sco, _, directory) = resolved_model(def).ok_or(())?;
     match sco.crossing_height_deformation {
         Some(name) => load_deformation(&directory, &name).map(Some).ok_or(()),
@@ -266,7 +255,8 @@ impl HostWorld {
                 mesh,
                 drivable,
                 holes,
-            } = loaded else {
+            } = loaded
+            else {
                 if matches!(loaded, SurfaceDef::Unsupported) {
                     counts.pending_scenery_surfaces += 1;
                 }
@@ -326,8 +316,7 @@ impl HostWorld {
                     if !raster_overlaps_tile(hole, &rotation, pos, target)
                         || hole_is_buried(hole, &rotation, pos, &|x, y| {
                             let data = ground.peek();
-                            let (tile, (local_x, local_y)) =
-                                omsi_map::world_to_tile_local(x, y);
+                            let (tile, (local_x, local_y)) = omsi_map::world_to_tile_local(x, y);
                             data.ground.terrains.get(&tile).map(|terrain| {
                                 f64::from(terrain.sample(local_x as f32, local_y as f32))
                             })
