@@ -128,12 +128,13 @@ impl HeadlessPeopleSync {
         if lan.role != Role::Host || !dt.is_finite() || dt <= 0.0 {
             return 0;
         }
+        // Upstream person state belongs to the driver's local vehicle.
+        // Walking peers are observers, not authoritative rider uploaders.
         let positions: HashMap<u32, DVec3> = lan
             .peers()
             .filter(|p| p.has_info && p.has_pose && p.pose.has_vehicle())
             .filter_map(|p| {
-                let at = DVec3::new(p.pose.x, p.pose.y, p.pose.z);
-                at.is_finite().then_some((p.pose.id, at))
+                crate::interest::client_position(&p.pose).map(|at| (p.pose.id, at))
             })
             .collect();
         self.upstream.retain_peers(&positions);
@@ -182,10 +183,10 @@ impl HeadlessPeopleSync {
         let clients: Vec<_> = lan
             .peers()
             .filter(|peer| peer.has_info && peer.has_pose)
+            // A walking client publishes its position in Walker, not Pose.
+            // Use the same validated interest coordinates as AI and tiles.
             .filter_map(|peer| {
-                let at = DVec3::new(peer.pose.x, peer.pose.y, peer.pose.z);
-                (at.is_finite() && at.x.abs() < 1.0e8 && at.y.abs() < 1.0e8)
-                    .then_some((peer.pose.id, at))
+                crate::interest::client_position(&peer.pose).map(|at| (peer.pose.id, at))
             })
             .collect();
         let live: HashSet<u32> = clients.iter().map(|(id, _)| *id).collect();
@@ -252,6 +253,30 @@ mod tests {
                 waiting: None,
             },
         }
+    }
+
+    #[test]
+    fn walkers_observe_pedestrians_at_their_actual_walker_coordinates() {
+        let walking = omsi_net::Pose {
+            x: 0.0,
+            walker: Some(omsi_net::Walker {
+                x: 4_000.0,
+                y: 12.0,
+                z: 2.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let at = crate::interest::client_position(&walking).unwrap();
+        assert_eq!(at, DVec3::new(4_000.0, 12.0, 2.0));
+        let invalid = omsi_net::Pose {
+            walker: Some(omsi_net::Walker {
+                x: f64::NAN,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(crate::interest::client_position(&invalid).is_none());
     }
 
     #[test]
