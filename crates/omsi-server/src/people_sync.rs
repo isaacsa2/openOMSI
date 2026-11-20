@@ -133,9 +133,7 @@ impl HeadlessPeopleSync {
         let positions: HashMap<u32, DVec3> = lan
             .peers()
             .filter(|p| p.has_info && p.has_pose && p.pose.has_vehicle())
-            .filter_map(|p| {
-                crate::interest::client_position(&p.pose).map(|at| (p.pose.id, at))
-            })
+            .filter_map(|p| crate::interest::client_position(&p.pose).map(|at| (p.pose.id, at)))
             .collect();
         self.upstream.retain_peers(&positions);
         let descs = lan.take_descs_up();
