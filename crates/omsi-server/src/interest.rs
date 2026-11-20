@@ -38,7 +38,7 @@ pub(crate) fn client_position(pose: &Pose) -> Option<DVec3> {
     (position.is_finite()
         && heading.is_finite()
         && position.to_array().iter().all(|v| v.abs() <= 1.0e8))
-        .then_some(position)
+    .then_some(position)
 }
 
 fn vehicle_box(pose: &Pose) -> Option<(DVec3, PlayerBox)> {
@@ -252,7 +252,6 @@ mod tests {
         assert_eq!(traffic.others.len(), 1);
         assert_eq!(people.lan_centers.len(), 1);
     }
-
 
     #[test]
     fn walking_peer_is_a_population_center_but_never_a_phantom_bus() {
