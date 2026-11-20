@@ -3,12 +3,12 @@
 //! timetable authority are blocked until CPU world parity is verified.
 
 use crate::admin;
-use crate::chrono::ChronoRefresh;
-use crate::reboot::Prepared;
 use crate::ai_sync::HeadlessTrafficSync;
+use crate::chrono::ChronoRefresh;
 use crate::context_sync::HeadlessContextSync;
 use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
+use crate::reboot::Prepared;
 use crate::simulation::CpuSimulation;
 use crate::streaming::{
     MAX_POPULATED_TILES, STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update,
@@ -772,11 +772,7 @@ struct CpuBootstrap {
     collisions: crate::collision::CollisionCounts,
 }
 
-fn load_initial_cpu_world(
-    root: &Path,
-    cfg: &ServerCfg,
-    simulated: bool,
-) -> Result<CpuBootstrap> {
+fn load_initial_cpu_world(root: &Path, cfg: &ServerCfg, simulated: bool) -> Result<CpuBootstrap> {
     let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
     let initial_time = checked_clock(&cfg.time)?;
     let global = omsi_cfg::resolve_path(root, &cfg.map);
