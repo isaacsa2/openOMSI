@@ -220,7 +220,9 @@ pub fn run_builtin(
         }
         Some(Builtin::Restart) => {
             RESTART.store(true, Ordering::SeqCst);
-            log::info!("server console: in-session simulation restart requested (LAN identity retained)");
+            log::info!(
+                "server console: in-session simulation restart requested (LAN identity retained)"
+            );
         }
         Some(Builtin::Stop) => {
             STOP.store(true, Ordering::SeqCst);
