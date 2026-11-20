@@ -227,6 +227,7 @@ pub fn apply(
         let max = config
             .ai_limits
             .max_scheduled
+            .filter(|&count| count > 0)
             .unwrap_or(crate::timetable::MAX_EXPERIMENTAL_SCHEDULED as u32);
         timetable.set_limit(max as usize);
     }
