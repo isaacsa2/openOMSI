@@ -10,7 +10,7 @@ use std::path::Path;
 
 use crate::runtime::{INITIAL_TILE_LIMIT, initial_tiles, make_cpu_sim};
 use crate::simulation::CpuSimulation;
-use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker};
+use crate::streaming::{MAX_POPULATED_TILES, StreamWorker};
 use crate::timetable::{CpuTimetable, scheduled_budget};
 
 /// Sim changes that can safely be applied after recreating the CPU world.
@@ -79,7 +79,7 @@ fn selected_tiles(
     {
         if valid.contains(&key) && seen.insert(key) {
             selected.push(key);
-            if selected.len() == STREAM_TILE_LIMIT {
+            if selected.len() == MAX_POPULATED_TILES {
                 break;
             }
         }
@@ -170,7 +170,7 @@ mod tests {
         assert!(!retained.contains(&(999, 0)));
         assert!(retained.contains(&(0, 0)));
         assert_eq!(retained.len(), retained.iter().copied().collect::<HashSet<_>>().len());
-        assert!(retained.len() <= STREAM_TILE_LIMIT);
+        assert!(retained.len() <= MAX_POPULATED_TILES);
     }
 
     #[test]
