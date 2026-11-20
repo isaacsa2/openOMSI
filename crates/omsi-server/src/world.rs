@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use glam::{DVec2, DVec3};
-use omsi_geometry::SplineCurve;
+use omsi_geometry::{MeshData, SplineCurve};
 use omsi_map::global::GlobalCfg;
 use omsi_map::{Terrain, tile::Tile, tile_size};
 use omsi_scenery::{SceneryObject, Spline};
@@ -29,6 +29,7 @@ pub struct HostWorld {
     chrono_dirs: Vec<PathBuf>,
     spline_defs: HashMap<String, Option<Arc<Spline>>>,
     object_defs: HashMap<String, Option<Arc<SceneryObject>>>,
+    crossing_fields: HashMap<PathBuf, Option<Arc<MeshData>>>,
 }
 
 /// LRU cache for immutable OMSI tile records. A map can have tens of thousands
@@ -211,6 +212,7 @@ impl HostWorld {
             chrono_dirs,
             spline_defs: HashMap::new(),
             object_defs: HashMap::new(),
+            crossing_fields: HashMap::new(),
         })
     }
 
@@ -308,6 +310,21 @@ impl HostWorld {
         val
     }
 
+    /// Cache the authored height field; every crossing of this type reuses it.
+    /// A field is optional, but a declared field that cannot be loaded must
+    /// never produce a pretend flat crossing in the AI path network.
+    fn crossing_field(&mut self, def: &SceneryObject) -> Option<Arc<MeshData>> {
+        if let Some(field) = self.crossing_fields.get(&def.path) {
+            return field.clone();
+        }
+        let field = crate::scenery_ground::crossing_field(def);
+        if self.crossing_fields.len() >= 256 {
+            self.crossing_fields.clear();
+        }
+        self.crossing_fields.insert(def.path.clone(), field.clone());
+        field
+    }
+
     /// Build AI/pedestrian road lanes from the same .sli/.sco definitions and map
     /// rules as the game, but without allocating any render/model resources.
     /// Junction signal controllers and collision meshes are attached later.
@@ -360,7 +377,8 @@ impl HostWorld {
                 origin.y + object.pos[1],
                 object.pos[2] + height,
             );
-            lanes.extend(crate::lanes::object_lanes(
+            let field = self.crossing_field(&def);
+            let mut made = crate::lanes::object_lanes(
                 &def,
                 place,
                 [object.rot[0], 0.0, 0.0],
@@ -368,7 +386,9 @@ impl HostWorld {
                 key,
                 object.id,
                 &object.rules,
-            ));
+            );
+            crate::lanes::place_object_paths(&mut made, place, object.rot, field.as_deref());
+            lanes.extend(made);
         }
         Some(lanes)
     }
