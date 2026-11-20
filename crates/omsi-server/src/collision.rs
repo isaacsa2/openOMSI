@@ -219,17 +219,12 @@ impl HostWorld {
                             .get(&obj.id)
                             .and_then(|(owner, p, _)| (*owner == key).then_some(*p))
                     });
-                let pos = collision_position(
-                    base,
-                    obj.pos[2],
-                    indexed,
-                    def.absolute_height(),
-                    || {
+                let pos =
+                    collision_position(base, obj.pos[2], indexed, def.absolute_height(), || {
                         self.terrain_height(base.x, base.y)
                             .map(f64::from)
                             .unwrap_or(0.0)
-                    },
-                );
+                    });
                 // Decorative and terrain-render objects are not rigid
                 // obstacles even when their map placement is tilted.
                 if !(def.fixed || def.crash_mode_pole.is_some())
