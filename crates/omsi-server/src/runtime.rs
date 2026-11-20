@@ -911,7 +911,7 @@ mod tests {
         assert!(checked_date("2024-04-31").is_err());
     }
     #[test]
-    fn experimental_admission_fails_closed_on_public_or_transfer_settings() {
+    fn experimental_admission_keeps_public_and_parked_policy_private() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -926,11 +926,14 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert!(allow_free_roam(&cfg).is_ok());
         cfg.accept_uploads = true;
-        assert!(allow_free_roam(&cfg).is_err());
+        assert!(allow_free_roam(&cfg).is_ok());
         cfg.accept_uploads = false;
         cfg.share_maps = true;
-        assert!(allow_free_roam(&cfg).is_err());
+        assert!(allow_free_roam(&cfg).is_ok());
         cfg.share_maps = false;
+        cfg.parked_buses = 1;
+        assert!(allow_free_roam(&cfg).is_err());
+        cfg.parked_buses = 0;
         cfg.public_address.clear();
         assert!(allow_free_roam(&cfg).is_err());
         cfg.public_address = "off".into();
@@ -943,8 +946,8 @@ mod tests {
         cfg.allow_player_teleport = true;
         assert!(allow_free_roam(&cfg).is_err());
         cfg.allow_player_teleport = false;
-        cfg.vehicles.push("Vehicles/Private/Bus.bus".into());
-        assert!(allow_free_roam(&cfg).is_err());
+        cfg.vehicles.push("Vehicles/Test/Bus.bus".into());
+        assert!(allow_free_roam(&cfg).is_ok());
     }
     #[test]
     fn experimental_simulation_admission_is_explicit_and_still_private() {
@@ -967,15 +970,18 @@ mod tests {
         assert!(allow_simulated_roam(&cfg).is_err());
         cfg.ai_limits.max_humans = Some(64);
         cfg.accept_uploads = true;
-        assert!(allow_simulated_roam(&cfg).is_err());
+        assert!(allow_simulated_roam(&cfg).is_ok());
         cfg.accept_uploads = false;
         cfg.share_maps = true;
-        assert!(allow_simulated_roam(&cfg).is_err());
+        assert!(allow_simulated_roam(&cfg).is_ok());
         cfg.share_maps = false;
+        cfg.parked_buses = 1;
+        assert!(allow_simulated_roam(&cfg).is_err());
+        cfg.parked_buses = 0;
         cfg.public_server = true;
         assert!(allow_simulated_roam(&cfg).is_err());
         cfg.public_server = false;
-        cfg.vehicles.push("Vehicles/Private/vehicle.bus".into());
-        assert!(allow_simulated_roam(&cfg).is_err());
+        cfg.vehicles.push("Vehicles/Test/vehicle.bus".into());
+        assert!(allow_simulated_roam(&cfg).is_ok());
     }
 }

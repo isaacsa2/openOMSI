@@ -12,8 +12,9 @@ transport with a fixed CPU-side tick and a local server console.
 1. Extract this ZIP to a separate directory. Keep your existing server
    installation untouched.
 2. Install or locate your own licensed OMSI 2 content and verify
-   `Maps/Grundorf/global.cfg` exists. Every client must already have the map
-   and the same buses; the test host **never uploads or redistributes files**.
+   `Maps/Grundorf/global.cfg` exists. With default settings every client already needs the map
+   and matching buses. For private tests you may explicitly enable the
+   existing authenticated map and bus-mod transfer service (below).
 3. Double-click `run-test.cmd` (or supply the OMSI 2 directory as its first
    argument). Enter the complete OMSI 2 folder, for example
    `C:\Program Files (x86)\Steam\steamapps\common\OMSI 2`.
@@ -43,11 +44,11 @@ required content remains local. To run from a source checkout instead:
 cargo run --locked --release -p omsi-server --bin omsi-server -- /path/to/OMSI2 scripts/server-headless/server-test.cfg --experimental-free-roam
 ```
 
-The sample configuration requires `traffic=0`, `passengers=0`,
-`timetable=0`, `accept_uploads=0`, `share_maps=0`,
-`public_server=0`, `public_address=off`, `tunnel=0`, a fixed date,
-and related restrictions. The native test host refuses to start with
-unsafe values. To use another installed map, change only the `map`
+The sample configuration starts with `traffic=0`, `passengers=0`,
+`timetable=0`, `accept_uploads=0` and `share_maps=0`.
+Public listing, tunnels, unapproved parked buses and remote address
+advertising remain prohibited. Map and vehicle transfer can be opted
+into separately at startup as documented below. To use another installed map, change only the `map`
 entry initially and ensure it contains usable paths.
 
 **Important:** `public_address=off` prevents automatic address advertisement;
@@ -94,9 +95,11 @@ tile replacement is intentionally disabled while the CPU sim owns vehicles
 or passengers; the free-roam relay's 192-tile streaming does not apply to
 this mode. Maps or routes outside the initial region may not complete.
 
-Only use an isolated LAN/VPS firewall allowing trusted testers: mod upload,
-map sharing, public listing and fleet transfer remain forbidden. All testers
-must own the same installed content. Neither mode provides authoritative
+Only use an isolated LAN/VPS firewall allowing trusted testers. Public
+listing and tunnels remain forbidden. Content sharing stays disabled by
+default; enabling it for your private test intentionally sends selected
+files to connected players, so do not use private or paid content without
+permission. Neither mode provides authoritative
 **player-driven bus** physics/scripts; those remain client-controlled and
 validated by the existing network relay. Do not use this experimental mode
 for production or publish it as full multiplayer parity.
@@ -107,6 +110,49 @@ stop with waiting passengers, board a passenger using the existing CLAIM
 handshake, then compare traffic, passengers and timetable lines on both
 clients. Record CPU/TPS and disconnect/reconnect behavior. Distinguish a
 config with no installed AI/human/timetable content from a network failure.
+
+
+## Optional private mod-sharing test (server restart required)
+
+The native server reuses the ordinary openOMSI encrypted/authenticated LAN
+file service; it does **not** create a new unauthenticated HTTP download
+endpoint. For a test where every participant has permission to receive the
+content, set these keys explicitly in the active server configuration:
+
+```ini
+# Send the map and its non-stock dependencies to joining game clients.
+share_maps = 1
+# Accept a player's bus, livery and required dependencies for other clients.
+accept_uploads = 1
+# Still unsupported in the native CPU world.
+parked_buses = 0
+# Optional: permit downloadable server-owned buses via LISTBUS.
+# Only list assets you are explicitly authorized to distribute.
+# vehicles = Vehicles/YourBus/YourBus.bus
+```
+
+These switches are **independent**: use only `share_maps=1` for map
+sharing, only `accept_uploads=1` for client-bus uploads, or both.
+With both off (the sample defaults), clients must install their own maps
+and vehicles. Missing keys in older configurations do NOT count as
+consent: this experimental server refuses to start if the underlying
+legacy defaults would enable sharing without an explicit setting.
+
+The file service authenticates to the LAN room, applies trusted-content-root
+checks, file type/quarantine limits, hashes and sandboxed downloads. This
+does not provide DRM: someone using a modified client can still extract
+delivered content. Share only files you own and are allowed to redistribute.
+Player-uploaded buses may be retained in the server's LAN store even after
+the player leaves, according to `uploads_keep_days`. Test with
+public-domain or otherwise redistribution-authorized files first.
+
+Changes to `share_maps`, `accept_uploads`, `vehicles`,
+`uploads_keep_days` or `parked_buses` are restart-only. Running
+`/reload` after changing them intentionally rejects the entire reload
+without changing the active policy. Stop the server and start it again
+using the same `server.cfg`. Never open the mod TCP port to strangers.
+The TCP mod service uses the **same numeric port** as LAN UDP (27015
+by default); allow TCP 27015 for trusted clients as well as UDP 27015.
 
 ## Reload server.cfg without disconnecting players
 
@@ -215,7 +261,7 @@ substitute for a local, licensed installation.
 | Paint, doors, line, destination | Remote display matches what the sender shows | Pass / Fail, capture mismatch |
 | B leaves and C joins | Departed vehicle is removed; slot can be reused | Pass / Fail |
 | Three simultaneous clients | Each client sees two remote vehicles | Pass / Fail |
-| Security | No map, vehicle, skin or texture transferred by the host | Pass / Fail |
+| Security | Default mode transfers nothing; explicit opt-ins transfer only authorized content | Pass / Fail |
 
 When reporting a failure, include OS, PR commit, map and bus identifiers,
 whether connection used an IP or code, the **first error message** and the
@@ -237,7 +283,7 @@ Passing this table does **not** make either native mode production-ready.
 - Server `tps` and `timings report` reflect completed CPU simulation ticks.
 - `stop` closes the session; reconnects, bans and malformed join attempts
   do not crash the host.
-- Private maps, bus files and liveries are **not** uploaded or redistributed.
+- Default configuration transfers no private map, vehicle or livery. With explicit mod-sharing opt-in, only redistribution-authorized content is served over the authenticated connection.
 
 **Still missing:** authoritative player-bus physics/scripts, full deformed-road
 and train-signal parity, moving active AI/people between streamed tiles, and

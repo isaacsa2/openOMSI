@@ -33,7 +33,8 @@ Admission still fails closed on public server discovery, tunnel, file/map
 sharing, vehicle transfer, voice and unauthorized teleport. The AI population
 budget is limited to 32, the human pool to 128 and the scheduled road-bus
 budget to 12. Tests must verify both flags independently and confirm that
-neither can enable prohibited file transfer or public hosting.
+neither may enable public hosting; file sharing requires the explicit,
+restart-only, per-option consent gates and the authenticated LAN mod service.
 
 The first CPU-simulation path has **fixed initial tiles** instead of live
 192-tile swaps: populated AI and pedestrian lane indices cannot be rewritten
