@@ -143,8 +143,7 @@ impl ChronoRefresh {
                             retire_worker(prepared.streamer);
                         }
                     }
-                })
-            {
+                }) {
                 Ok(thread) => {
                     drop(thread);
                     self.pending = Some(receiver);
@@ -195,10 +194,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let map_dir = std::env::temp_dir().join(format!(
-            "omsi-native-chrono-{}-{stamp}",
-            std::process::id()
-        ));
+        let map_dir =
+            std::env::temp_dir().join(format!("omsi-native-chrono-{}-{stamp}", std::process::id()));
         let chrono = map_dir.join("Chrono").join("SummerTimetable");
         fs::create_dir_all(&chrono).unwrap();
         fs::write(chrono.join("Chrono.cfg"), "[startdate]\n19890531\n").unwrap();
@@ -219,10 +216,7 @@ mod tests {
 
     #[test]
     fn manual_restart_discards_a_stale_chrono_request() {
-        let path = std::env::temp_dir().join(format!(
-            "omsi-chrono-empty-{}",
-            std::process::id()
-        ));
+        let path = std::env::temp_dir().join(format!("omsi-chrono-empty-{}", std::process::id()));
         let mut refresh = ChronoRefresh::new(path, 19890530);
         let (_send, receive) = mpsc::channel();
         refresh.pending = Some(receive);
