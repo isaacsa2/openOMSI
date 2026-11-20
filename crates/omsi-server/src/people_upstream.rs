@@ -53,7 +53,14 @@ fn valid_state(owner: u32, near: DVec3, state: &PersonState) -> bool {
         return false;
     }
     match state.place {
-        PersonPlace::Foot { x, y, z, heading, speed, .. } => {
+        PersonPlace::Foot {
+            x,
+            y,
+            z,
+            heading,
+            speed,
+            ..
+        } => {
             [x, y, z, f64::from(heading), f64::from(speed)]
                 .iter()
                 .all(|v| v.is_finite() && v.abs() < 1.0e8)
@@ -61,7 +68,14 @@ fn valid_state(owner: u32, near: DVec3, state: &PersonState) -> bool {
                 && speed <= 20.0
                 && (DVec3::new(x, y, z) - near).truncate().length() <= OWNER_RADIUS
         }
-        PersonPlace::Aboard { bus, x, y, z, heading, .. } => {
+        PersonPlace::Aboard {
+            bus,
+            x,
+            y,
+            z,
+            heading,
+            ..
+        } => {
             bus == (world::PLAYER_BUS | owner)
                 && [x, y, z, heading]
                     .iter()
@@ -116,7 +130,12 @@ impl ClientUpstream {
         self.next_id += 1; // Never reuse an ID belonging to an earlier client.
         source.riders.insert(
             id,
-            Rider { id: relayed, file, state: None, updated: Instant::now() },
+            Rider {
+                id: relayed,
+                file,
+                state: None,
+                updated: Instant::now(),
+            },
         );
     }
 
@@ -137,7 +156,10 @@ impl ClientUpstream {
             };
             let mut state = p;
             state.id = rider.id;
-            if let PersonPlace::Foot { ref mut waiting, .. } = state.place {
+            if let PersonPlace::Foot {
+                ref mut waiting, ..
+            } = state.place
+            {
                 *waiting = None; // Clients may never claim relayed people.
             }
             rider.state = Some(state);
@@ -201,7 +223,14 @@ mod tests {
         PersonState {
             id: 7,
             activity: Activity::Walk,
-            place: PersonPlace::Foot { x, y: 0.0, z: 0.0, heading: 0.0, speed: 1.0, waiting: None },
+            place: PersonPlace::Foot {
+                x,
+                y: 0.0,
+                z: 0.0,
+                heading: 0.0,
+                speed: 1.0,
+                waiting: None,
+            },
         }
     }
 
@@ -214,8 +243,20 @@ mod tests {
             (3, DVec3::ZERO),
         ]));
         for peer in [1, 2] {
-            up.describe(peer, Desc::Person { id: 7, file: "Humans/Example.hum".into() });
-            up.frame(peer, WorldFrame { people: vec![pos(2.0)], ..Default::default() });
+            up.describe(
+                peer,
+                Desc::Person {
+                    id: 7,
+                    file: "Humans/Example.hum".into(),
+                },
+            );
+            up.frame(
+                peer,
+                WorldFrame {
+                    people: vec![pos(2.0)],
+                    ..Default::default()
+                },
+            );
         }
         let v = up.visible(3, DVec3::ZERO, 48);
         assert_eq!(v.len(), 2);
@@ -228,17 +269,40 @@ mod tests {
     fn foreign_bus_and_invalid_file_cannot_be_relayed() {
         let mut up = ClientUpstream::default();
         up.retain_peers(&HashMap::from([(1, DVec3::ZERO), (2, DVec3::ZERO)]));
-        up.describe(1, Desc::Person { id: 7, file: "../secret.hum".into() });
+        up.describe(
+            1,
+            Desc::Person {
+                id: 7,
+                file: "../secret.hum".into(),
+            },
+        );
         assert!(up.sources.get(&1).unwrap().riders.is_empty());
-        up.describe(1, Desc::Person { id: 7, file: "Humans/Example.hum".into() });
+        up.describe(
+            1,
+            Desc::Person {
+                id: 7,
+                file: "Humans/Example.hum".into(),
+            },
+        );
         let foreign = PersonState {
             id: 7,
             activity: Activity::Sit,
             place: PersonPlace::Aboard {
-                bus: world::PLAYER_BUS | 2, x: 0.0, y: 0.0, z: 0.0, heading: 0.0, seat: None,
+                bus: world::PLAYER_BUS | 2,
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                heading: 0.0,
+                seat: None,
             },
         };
-        up.frame(1, WorldFrame { people: vec![foreign], ..Default::default() });
+        up.frame(
+            1,
+            WorldFrame {
+                people: vec![foreign],
+                ..Default::default()
+            },
+        );
         assert!(up.visible(2, DVec3::ZERO, 48).is_empty());
         assert!(up.rejected >= 2);
     }
@@ -248,15 +312,45 @@ mod tests {
         let mut up = ClientUpstream::default();
         let clients = HashMap::from([(1, DVec3::ZERO), (2, DVec3::ZERO)]);
         up.retain_peers(&clients);
-        up.describe(1, Desc::Person { id: 7, file: "Humans/Example.hum".into() });
-        up.frame(1, WorldFrame { people: vec![pos(1.0)], ..Default::default() });
+        up.describe(
+            1,
+            Desc::Person {
+                id: 7,
+                file: "Humans/Example.hum".into(),
+            },
+        );
+        up.frame(
+            1,
+            WorldFrame {
+                people: vec![pos(1.0)],
+                ..Default::default()
+            },
+        );
         let id = up.visible(2, DVec3::ZERO, 48)[0].0.id;
-        up.frame(1, WorldFrame { gone: vec![(true, 7)], ..Default::default() });
+        up.frame(
+            1,
+            WorldFrame {
+                gone: vec![(true, 7)],
+                ..Default::default()
+            },
+        );
         assert!(up.visible(2, DVec3::ZERO, 48).is_empty());
         up.retain_peers(&HashMap::from([(2, DVec3::ZERO)]));
         up.retain_peers(&clients);
-        up.describe(1, Desc::Person { id: 7, file: "Humans/Example.hum".into() });
-        up.frame(1, WorldFrame { people: vec![pos(1.0)], ..Default::default() });
+        up.describe(
+            1,
+            Desc::Person {
+                id: 7,
+                file: "Humans/Example.hum".into(),
+            },
+        );
+        up.frame(
+            1,
+            WorldFrame {
+                people: vec![pos(1.0)],
+                ..Default::default()
+            },
+        );
         assert!(up.visible(2, DVec3::ZERO, 48)[0].0.id > id);
     }
 }

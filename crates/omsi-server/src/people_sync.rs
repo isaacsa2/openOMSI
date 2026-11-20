@@ -4,13 +4,13 @@
 //! separate: experimental free-roam currently creates no pedestrians, but
 //! this publisher is ready to handle future CPU-simulated pedestrians.
 
+use crate::people_upstream::{ClientUpstream, RELAY_ID_START};
 use glam::DVec3;
 use omsi_net::traffic_table::TrafficTable;
 use omsi_net::world::{self, Activity, Desc, PersonPlace, PersonState, WorldFrame};
 use omsi_net::{LanSession, Role};
 use omsi_sim::people::{LanPerson, PeopleSim};
 use std::collections::{HashMap, HashSet};
-use crate::people_upstream::{ClientUpstream, RELAY_ID_START};
 
 const PERSON_RADIUS: f64 = 260.0;
 const MAX_PEOPLE_PER_CLIENT: usize = 96;
@@ -156,7 +156,13 @@ impl HeadlessPeopleSync {
                     continue;
                 }
                 if let Some(file) = self.upstream.description(wanted.id) {
-                    lan.send_desc(id, &Desc::Person { id: wanted.id, file });
+                    lan.send_desc(
+                        id,
+                        &Desc::Person {
+                            id: wanted.id,
+                            file,
+                        },
+                    );
                 } else if let Some(ty) = people.lan_people_by_id(wanted.id) {
                     lan.send_desc(
                         id,

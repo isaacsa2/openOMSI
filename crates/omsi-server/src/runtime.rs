@@ -678,7 +678,13 @@ fn run(
                 sim.people.due_at = authoritative;
             }
         }
-        publishers.tick(&mut net, &sim, root, &mut profiler, simulated && live_cfg.passengers);
+        publishers.tick(
+            &mut net,
+            &sim,
+            root,
+            &mut profiler,
+            simulated && live_cfg.passengers,
+        );
         sim.discard_presentation_events_after_publish();
         profiler.tick(started.elapsed());
         meter.completed(Instant::now());
