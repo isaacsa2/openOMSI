@@ -176,11 +176,7 @@ impl CpuTrafficPopulation {
 /// Resolve a smooth drivable surface, or the visible ground only where the
 /// terrain is NOT cut out. A tunnel's [terrainhole] is open air below its road
 /// mesh, not an invisible mound for AI vehicle suspension and placement.
-fn cpu_ground_height(
-    ground: &omsi_sim::world_data::GroundTiles,
-    x: f64,
-    y: f64,
-) -> Option<f64> {
+fn cpu_ground_height(ground: &omsi_sim::world_data::GroundTiles, x: f64, y: f64) -> Option<f64> {
     let (key, (lx, ly)) = omsi_map::world_to_tile_local(x, y);
     let (lx, ly) = (lx as f32, ly as f32);
     let surface = ground.surfaces.get(&key);
@@ -189,9 +185,7 @@ fn cpu_ground_height(
     }
     let terrain = ground.terrains.get(&key)?;
     let height = terrain.sample(lx, ly);
-    if surface.is_some_and(|s| {
-        s.cut_at(lx, ly, height, omsi_sim::world_data::surface_flush())
-    }) {
+    if surface.is_some_and(|s| s.cut_at(lx, ly, height, omsi_sim::world_data::surface_flush())) {
         return None;
     }
     Some(f64::from(height))
