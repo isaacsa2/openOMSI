@@ -507,7 +507,7 @@ function joinPreflightRegression() {
     }
     selectSession(
       { lan_addr: 'OMSI-TEST-SESSION', lan_ws_fallback: null },
-      { map: 'Maps\\\\Grundorf\\\\global.cfg', name: 'Headless LAN test', vehicles: [], fleet_version: 0 }
+      { map: 'Maps\\Grundorf\\global.cfg', name: 'Headless LAN test', vehicles: [], fleet_version: 0 }
     );
     if (S.choice.map !== 'maps/Grundorf/global.cfg' || S.choice.lan_map !== 'Maps/Grundorf/global.cfg') {
       issues.push('joining must preserve the canonical installed map and the announced host path separately');
