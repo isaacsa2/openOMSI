@@ -30,8 +30,12 @@ pub fn verify_explicit_opt_in(cfg: &ServerCfg, path: &Path) -> Result<()> {
     if !cfg.accept_uploads && !cfg.share_maps {
         return Ok(());
     }
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading the experimental mod-sharing policy from {}", path.display()))?;
+    let text = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "reading the experimental mod-sharing policy from {}",
+            path.display()
+        )
+    })?;
     ensure!(
         !cfg.accept_uploads || explicit_enabled(&text, "accept_uploads"),
         "experimental client-bus uploads require an explicit accept_uploads=1 in server.cfg"
@@ -60,7 +64,9 @@ mod tests {
 
     #[test]
     fn transfer_disabled_is_the_default_for_experimental_example() {
-        let (cfg, path) = config(include_str!("../../../scripts/server-headless/server-test.cfg"));
+        let (cfg, path) = config(include_str!(
+            "../../../scripts/server-headless/server-test.cfg"
+        ));
         assert!(!cfg.share_maps);
         assert!(!cfg.accept_uploads);
         assert!(verify_explicit_opt_in(&cfg, &path).is_ok());
@@ -93,8 +99,17 @@ mod tests {
     #[test]
     fn last_setting_wins_and_comments_do_not_count_as_consent() {
         assert!(!explicit_enabled("# share_maps = 1\n", "share_maps"));
-        assert!(!explicit_enabled("share_maps = 1\nshare_maps = 0\n", "share_maps"));
-        assert!(explicit_enabled("share_maps = 0\nSHARE_MAPS = On\n", "share_maps"));
-        assert!(!explicit_enabled("accept_uploads = off\n", "accept_uploads"));
+        assert!(!explicit_enabled(
+            "share_maps = 1\nshare_maps = 0\n",
+            "share_maps"
+        ));
+        assert!(explicit_enabled(
+            "share_maps = 0\nSHARE_MAPS = On\n",
+            "share_maps"
+        ));
+        assert!(!explicit_enabled(
+            "accept_uploads = off\n",
+            "accept_uploads"
+        ));
     }
 }
