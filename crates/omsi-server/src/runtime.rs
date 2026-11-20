@@ -554,6 +554,79 @@ fn start_verified_parked_buses(
     );
 }
 
+/// Apply local console changes on the host tick. A rejected reload/restart
+/// leaves the existing world, joined peers and network services unchanged.
+#[allow(clippy::too_many_arguments)]
+fn process_console_changes(
+    root: &Path,
+    config_path: &Path,
+    simulated: bool,
+    clock: f64,
+    calendar: &mut crate::clock::NativeCalendar,
+    live_cfg: &mut ServerCfg,
+    sim: &mut CpuSimulation,
+    net: &mut HostTransport,
+    schedule: &mut Option<CpuTimetable>,
+    rules: &mut ServerRules<'_>,
+    admin_state: &mut ServerAdmin,
+    streamer: &mut Option<StreamWorker>,
+    keys: &mut Vec<(i32, i32)>,
+    active_keys: &mut Vec<(i32, i32)>,
+    stream_global: &mut omsi_map::global::GlobalCfg,
+    stream_busy: &mut bool,
+    population: &mut CpuTrafficPopulation,
+    publishers: &mut NativePublishers,
+) {
+    if console::take_reload_requested() {
+        if let Err(error) = crate::reload::apply(
+            config_path,
+            live_cfg,
+            simulated,
+            sim,
+            net,
+            schedule,
+            rules,
+            admin_state,
+        ) {
+            log::warn!("server console: /reload refused; settings unchanged: {error}");
+        }
+    }
+    if !console::take_restart_requested() {
+        return;
+    }
+    // Build the candidate before modifying active simulation or LAN state.
+    let result = crate::reboot::read_config(config_path, live_cfg, simulated).and_then(|next| {
+        let current_clock = calendar.at(clock + admin_state.shift).clone();
+        crate::reboot::prepare(root, &next, &current_clock, simulated)
+            .map(|prepared| (next, prepared))
+    });
+    match result {
+        Ok((next, prepared)) => {
+            if let Some(old) = streamer.replace(prepared.streamer) {
+                old.stop();
+            }
+            *sim = prepared.simulation;
+            *schedule = prepared.timetable;
+            *keys = prepared.keys;
+            *active_keys = keys.clone();
+            *stream_global = prepared.global;
+            *stream_busy = false;
+            *population = CpuTrafficPopulation::default();
+            *publishers = NativePublishers::default();
+            admin_state.passenger_density = next.passenger_density;
+            net.session_mut().clock_speed = next.time_speed;
+            omsi_lan::server_cfg::set_server_speed_limit_kmh(next.speed_limit_kmh);
+            *live_cfg = next;
+            log::info!(
+                "server console: /restart completed; CPU world and timetable rebuilt, LAN session, code, mods listener and gateway retained"
+            );
+        }
+        Err(error) => {
+            log::warn!("server console: /restart refused; live world unchanged: {error}");
+        }
+    }
+}
+
 fn run(
     root: &Path,
     plan: &crate::startup::LaunchPlan,
@@ -756,57 +829,26 @@ fn run(
             simulated,
             hub,
         );
-        if console::take_reload_requested() {
-            if let Err(error) = crate::reload::apply(
-                &plan.config_path,
-                &mut live_cfg,
-                simulated,
-                &mut sim,
-                &mut net,
-                &mut schedule,
-                &mut rules,
-                &mut admin_state,
-            ) {
-                log::warn!("server console: /reload refused; settings unchanged: {error}");
-            }
-        }
-        if console::take_restart_requested() {
-            // Prepare and validate independently of the live host. No socket,
-            // authenticated mod listener, gateway, tunnel or LAN code is rebound.
-            let result = crate::reboot::read_config(&plan.config_path, &live_cfg, simulated)
-                .and_then(|next| {
-                    let current_clock = calendar.at(clock + admin_state.shift).clone();
-                    crate::reboot::prepare(root, &next, &current_clock, simulated)
-                        .map(|prepared| (next, prepared))
-                });
-            match result {
-                Ok((next, prepared)) => {
-                    // Stop the previous map worker instead of accumulating background
-                    // threads across repeated operator-initiated restarts.
-                    if let Some(old) = streamer.replace(prepared.streamer) {
-                        old.stop();
-                    }
-                    sim = prepared.simulation;
-                    schedule = prepared.timetable;
-                    keys = prepared.keys;
-                    active_keys = keys.clone();
-                    stream_global = prepared.global;
-                    stream_busy = false;
-                    population = CpuTrafficPopulation::default();
-                    publishers = NativePublishers::default();
-                    admin_state.passenger_density = next.passenger_density;
-                    net.session_mut().clock_speed = next.time_speed;
-                    omsi_lan::server_cfg::set_server_speed_limit_kmh(next.speed_limit_kmh);
-                    live_cfg = next;
-                    log::info!(
-                        "server console: /restart completed; CPU world and timetable rebuilt, LAN session, code, mods listener and gateway retained"
-                    );
-                }
-                Err(error) => {
-                    log::warn!("server console: /restart refused; live world unchanged: {error}");
-                }
-            }
-        }
+        process_console_changes(
+            root,
+            &plan.config_path,
+            simulated,
+            clock,
+            &mut calendar,
+            &mut live_cfg,
+            &mut sim,
+            &mut net,
+            &mut schedule,
+            &mut rules,
+            &mut admin_state,
+            &mut streamer,
+            &mut keys,
+            &mut active_keys,
+            &mut stream_global,
+            &mut stream_busy,
+            &mut population,
+            &mut publishers,
+        );
         sync_native_simulation_settings(&mut sim, &net, &admin_state, &live_cfg, simulated);
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         let authoritative = clock + admin_state.shift;
