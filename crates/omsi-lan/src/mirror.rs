@@ -7,6 +7,33 @@ use omsi_sim::human::Activity;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+/// Serialize the authoritative vehicle script context from a CPU-only or
+/// graphical LAN host. Keeping this in omsi-lan makes scheduled AI buses
+/// display the same stop list and system variables in both host modes.
+pub fn ai_context(host: &omsi_sim::VehicleHost) -> omsi_net::ai_context::Context {
+    omsi_net::ai_context::Context {
+        active: host.schedule_active,
+        line: host.tt_line.clone(),
+        terminus: host.tt_terminus_index,
+        stops: host
+            .tt_stops
+            .iter()
+            .enumerate()
+            .map(|(i, stop)| {
+                (
+                    host.tt_stop_ids.get(i).copied().unwrap_or(0),
+                    stop.0.clone(),
+                    stop.1,
+                    stop.2,
+                )
+            })
+            .collect(),
+        index: host.tt_busstop_index,
+        delay: host.tt_delay,
+        system: host.system_values(),
+    }
+}
+
 /// How long a client guesses on past the last frame of something moving (ms).
 pub const MAX_EXTRAPOLATE: f64 = 300.0;
 
