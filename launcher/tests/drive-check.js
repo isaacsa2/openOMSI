@@ -3,7 +3,8 @@ import { hostLaunchStaysOnDrive } from './drive-mode-check.js';
 import { Tours } from '../ui/js/pages/drive-duty.js';
 import { BusPicker } from '../ui/js/pages/bus-picker.js';
 import { S, set, remember } from '../ui/js/store.js';
-import { applyTheme, choose, curTour, duty, resolveTour, transportRefusal, joinNeedsFleetRefresh, LAUNCHER_LAYOUTS } from '../ui/js/data.js';
+import { applyTheme, choose, curMap, curTour, duty, resolveTour, transportRefusal, joinNeedsFleetRefresh, LAUNCHER_LAYOUTS } from '../ui/js/data.js';
+import { selectSession } from '../ui/js/pages/session-selection.js';
 
 const OPTIONS = {
   Map: () => one('.page-drive .map-row'),
@@ -490,6 +491,31 @@ function joinPreflightRegression() {
     'offline driving must not query a remote session');
   check({ lan_mode: 'host', lan_server: { fleet_version: 1 } }, false,
     'hosting must not query the remote fleet');
+
+  // Reproduce the real Windows case difference in a dedicated session:
+  // host announces Maps/Grundorf, local library stores maps/Grundorf.
+  // Without the canonical lookup, curMap() is falsy and "Join and drive"
+  // has disabled=true even though Grundorf and the selected bus exist.
+  const saved = { maps: S.maps, choice: S.choice, page: S.page, driveBeforeJoin: S.driveBeforeJoin };
+  try {
+    set({
+      maps: [{ file: 'maps/Grundorf/global.cfg', name: 'Grundorf', transport: ['bus'] }],
+      choice: { ...S.choice, lan_mode: 'off', map: 'Maps/Grundorf/global.cfg', bus: 'Vehicles/Local.bus', free: true },
+    });
+    if (curMap()?.file !== 'maps/Grundorf/global.cfg') {
+      issues.push('installed map is hidden by a different case in the server map path');
+    }
+    selectSession(
+      { lan_addr: 'OMSI-TEST-SESSION', lan_ws_fallback: null },
+      { map: 'Maps\\\\Grundorf\\\\global.cfg', name: 'Headless LAN test', vehicles: [], fleet_version: 0 }
+    );
+    if (S.choice.map !== 'maps/Grundorf/global.cfg' || S.choice.lan_map !== 'Maps/Grundorf/global.cfg') {
+      issues.push('joining must preserve the canonical installed map and the announced host path separately');
+    }
+    if (!curMap()) issues.push('selected session map must enable the installed-map launch prerequisite');
+  } finally {
+    set(saved);
+  }
   return issues;
 }
 
