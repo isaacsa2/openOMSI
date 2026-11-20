@@ -441,6 +441,79 @@ impl NativePublishers {
     }
 }
 
+
+/// World commands run on the authoritative tick, never in the network reader.
+fn apply_native_admin_actions(
+    net: &mut HostTransport,
+    admin: &mut ServerAdmin,
+    sim: &mut CpuSimulation,
+    clock: f64,
+    traffic_max: usize,
+    simulated: bool,
+    hub: Option<&omsi_admin::Hub>,
+) {
+    if simulated {
+        let mut traffic = crate::commands::NativeTraffic(&mut sim.traffic);
+        crate::commands::apply_world_jobs(
+            net.session_mut(),
+            admin,
+            Some(&mut traffic),
+            clock,
+            traffic_max,
+            hub,
+        );
+    } else {
+        crate::commands::apply_world_jobs(net.session_mut(), admin, None, clock, 0, hub);
+    }
+}
+
+/// World commands, reload and the native traffic clock must see the same
+/// values before any CPU script advances.
+fn sync_native_simulation_settings(
+    sim: &mut CpuSimulation,
+    net: &HostTransport,
+    admin: &ServerAdmin,
+    cfg: &ServerCfg,
+    simulated: bool,
+) {
+    sim.traffic.time_scale = net.session().clock_speed;
+    sim.people.density = if simulated && cfg.passengers {
+        admin
+            .passenger_density
+            .unwrap_or(cfg.passenger_density.unwrap_or(1.0))
+            .clamp(0.0, 3.0)
+    } else {
+        0.0
+    };
+}
+
+fn advance_native_ai_population(
+    sim: &mut CpuSimulation,
+    population: &mut CpuTrafficPopulation,
+    clock: &omsi_sim::SimClock,
+) -> usize {
+    let centers = sim.traffic.lan_centers.clone();
+    let target = sim.traffic.target;
+    population.tick(&mut sim.traffic, &sim.world, &centers, target, clock, 1.0)
+}
+
+fn live_world_counts(sim: &CpuSimulation, simulated: bool, passengers: bool) -> WorldCounts {
+    let (cars, buses, dormant, parked) = sim.traffic.counts();
+    let (walking, waiting, aboard) = sim.people.counts();
+    WorldCounts {
+        cars,
+        buses,
+        dormant,
+        parked,
+        walking,
+        waiting,
+        aboard,
+        traffic: if simulated { sim.traffic.target } else { 0 },
+        passengers: simulated && passengers,
+        passenger_density: sim.people.density,
+    }
+}
+
 fn run(
     root: &Path,
     plan: &crate::startup::LaunchPlan,
@@ -616,27 +689,15 @@ fn run(
             &|_, _, _| None,
             FIXED_DT,
         );
-        // Apply admin commands to the real CPU traffic, not only the panel.
-        if simulated {
-            let mut traffic_admin = crate::commands::NativeTraffic(&mut sim.traffic);
-            crate::commands::apply_world_jobs(
-                net.session_mut(),
-                &mut admin_state,
-                Some(&mut traffic_admin),
-                clock,
-                live_cfg.traffic,
-                hub,
-            );
-        } else {
-            crate::commands::apply_world_jobs(
-                net.session_mut(),
-                &mut admin_state,
-                None,
-                clock,
-                0,
-                hub,
-            );
-        }
+        apply_native_admin_actions(
+            &mut net,
+            &mut admin_state,
+            &mut sim,
+            clock,
+            live_cfg.traffic,
+            simulated,
+            hub,
+        );
         if console::take_reload_requested() {
             if let Err(error) = crate::reload::apply(
                 &plan.config_path,
@@ -651,17 +712,7 @@ fn run(
                 log::warn!("server console: /reload refused; settings unchanged: {error}");
             }
         }
-        // Keep scripting, pedestrians and LAN clock in lockstep with commands
-        // and /reload, including a speed change issued during a live session.
-        sim.traffic.time_scale = net.session().clock_speed;
-        sim.people.density = if simulated && live_cfg.passengers {
-            admin_state
-                .passenger_density
-                .unwrap_or(live_cfg.passenger_density.unwrap_or(1.0))
-                .clamp(0.0, 3.0)
-        } else {
-            0.0
-        };
+        sync_native_simulation_settings(&mut sim, &net, &admin_state, &live_cfg, simulated);
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         let authoritative = clock + admin_state.shift;
         // Date and time-of-day on the wire must roll over with the world clock;
@@ -694,20 +745,8 @@ fn run(
             sim.sync_host_clients(net.session_mut())
         });
         if simulated && n % 60 == 0 {
-            let viewers = sim.traffic.lan_centers.clone();
-            // A native AI script must start at this session's actual calendar
-            // and clock, not the engine's 1989/09:00 default.
-            // Current calendar follows leap days and years, unlike cfg.date.
-            let spawn_clock = sim_clock.clone();
             profile(&mut profiler, "ai_population", || {
-                population.tick(
-                    &mut sim.traffic,
-                    &sim.world,
-                    &viewers,
-                    sim.traffic.target,
-                    &spawn_clock,
-                    1.0,
-                )
+                advance_native_ai_population(&mut sim, &mut population, &sim_clock)
             });
         }
         // Match LAN clock shifts; TrafficSim advances day_time inside step.
@@ -738,20 +777,7 @@ fn run(
         meter.completed(Instant::now());
         n += 1;
         if report.elapsed() >= Duration::from_secs(1) {
-            let (cars, buses, dormant, parked) = sim.traffic.counts();
-            let (walking, waiting, aboard) = sim.people.counts();
-            let counts = WorldCounts {
-                cars,
-                buses,
-                dormant,
-                parked,
-                walking,
-                waiting,
-                aboard,
-                traffic: if simulated { sim.traffic.target } else { 0 },
-                passengers: simulated && live_cfg.passengers,
-                passenger_density: sim.people.density,
-            };
+            let counts = live_world_counts(&sim, simulated, live_cfg.passengers);
             admin::publish_status(
                 net.session_mut(),
                 &mut admin_state,
