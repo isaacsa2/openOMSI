@@ -24,7 +24,7 @@ enum SurfaceDef {
     None,
     Unsupported,
     Geometry {
-        mesh: Arc<MeshData>,
+        mesh: Option<Arc<MeshData>>,
         drivable: bool,
         holes: Vec<Arc<MeshData>>,
     },
@@ -61,41 +61,47 @@ impl ScenerySurfaces {
         let Some((sco, model, directory)) = resolved_model(def) else {
             return SurfaceDef::Unsupported;
         };
-        if !sco.surface && !sco.render_type.is_ground_layer() {
-            return SurfaceDef::None;
-        }
-        let first = if model.lods.is_empty() {
-            model.meshes.first()
-        } else {
-            model.lod_meshes(0).first()
-        };
-        let Some(first) = first else {
-            return SurfaceDef::Unsupported;
-        };
-        if !first.animations.is_empty() {
-            return SurfaceDef::Unsupported;
-        }
-        let Some(original) = load_checked_mesh(&directory, &first.file) else {
-            return SurfaceDef::Unsupported;
-        };
-        let mut mesh = (*original).clone();
-        if let Some(name) = &sco.crossing_height_deformation {
-            let Some(field) = load_checked_mesh(&directory, name) else {
-                return SurfaceDef::Unsupported;
-            };
-            warp_surface_mesh(&mut mesh, &field);
-        }
+        // The visual host honors terrainhole cutters even on objects that
+        // have no renderable ground surface (tunnel mouths, crossing helpers).
         let mut holes = Vec::new();
         for (hole_dir, name) in sco.terrain_hole_sources(&model) {
-            let Some(hole) = load_checked_mesh(hole_dir, name) else {
-                // A half-loaded cutting is more dangerous than an incomplete
-                // map; do not publish an incorrect drivable surface.
+            let Some(hole) = load_checked_mesh(hole_dir, name, false) else {
                 return SurfaceDef::Unsupported;
             };
             holes.push(hole);
         }
+        let surface = sco.surface || sco.render_type.is_ground_layer();
+        if !surface && holes.is_empty() {
+            return SurfaceDef::None;
+        }
+        let mesh = if surface {
+            let first = if model.lods.is_empty() {
+                model.meshes.first()
+            } else {
+                model.lod_meshes(0).first()
+            };
+            let Some(first) = first else {
+                return SurfaceDef::Unsupported;
+            };
+            if !first.animations.is_empty() {
+                return SurfaceDef::Unsupported;
+            }
+            let Some(original) = load_checked_mesh(&directory, &first.file, true) else {
+                return SurfaceDef::Unsupported;
+            };
+            let mut mesh = (*original).clone();
+            if let Some(name) = &sco.crossing_height_deformation {
+                let Some(field) = load_deformation(&directory, name) else {
+                    return SurfaceDef::Unsupported;
+                };
+                warp_surface_mesh(&mut mesh, &field);
+            }
+            Some(Arc::new(mesh))
+        } else {
+            None
+        };
         SurfaceDef::Geometry {
-            mesh: Arc::new(mesh),
+            mesh,
             drivable: sco.surface,
             holes,
         }
@@ -120,11 +126,18 @@ fn resolved_model(def: &SceneryObject) -> Option<(SceneryObject, Model, PathBuf)
 }
 
 /// Reject oversized, missing or malformed map meshes before triangle indexing.
-fn load_checked_mesh(directory: &Path, name: &str) -> Option<Arc<MeshData>> {
-    let paths = [
-        omsi_cfg::resolve_path(&omsi_cfg::resolve_path(directory, "model"), name),
-        omsi_cfg::resolve_path(directory, name),
-    ];
+fn load_checked_mesh(
+    directory: &Path,
+    name: &str,
+    model_first: bool,
+) -> Option<Arc<MeshData>> {
+    let model = omsi_cfg::resolve_path(&omsi_cfg::resolve_path(directory, "model"), name);
+    let direct = omsi_cfg::resolve_path(directory, name);
+    let paths = if model_first {
+        [model, direct]
+    } else {
+        [direct, model]
+    };
     let path = paths.into_iter().find(|p| omsi_cfg::vfs::is_file(p))?;
     if std::fs::metadata(&path)
         .is_ok_and(|metadata| metadata.len() > MAX_OBJECT_MESH_BYTES)
@@ -153,9 +166,22 @@ fn load_checked_mesh(directory: &Path, name: &str) -> Option<Arc<MeshData>> {
 
 /// Shared with the server's AI lane placement. The deformation field is in
 /// the object's local XY; it is NOT sampled from the terrain under a bridge.
-pub(crate) fn crossing_field(def: &SceneryObject) -> Option<Arc<MeshData>> {
-    let (sco, _, directory) = resolved_model(def)?;
-    load_checked_mesh(&directory, sco.crossing_height_deformation.as_deref()?)
+const MAX_DEFORMATION_FACES: usize = 4_096;
+
+fn load_deformation(directory: &Path, name: &str) -> Option<Arc<MeshData>> {
+    let field = load_checked_mesh(directory, name, true)?;
+    (field.indices.len() / 3 <= MAX_DEFORMATION_FACES).then_some(field)
+}
+
+/// None means the object has no field, Err means an authored field is missing.
+pub(crate) fn crossing_field(
+    def: &SceneryObject,
+) -> Result<Option<Arc<MeshData>>, ()> {
+    let (sco, _, directory) = resolved_model(def).ok_or(())?;
+    match sco.crossing_height_deformation {
+        Some(name) => load_deformation(&directory, &name).map(Some).ok_or(()),
+        None => Ok(None),
+    }
 }
 
 /// Same barycentric field lookup as omsi-scene::place::field_height.
@@ -285,12 +311,16 @@ impl HostWorld {
             let rotation = omsi_geometry::object_rotation(omsi_geometry::map_rotation(raw_rot));
             let ground = Arc::clone(&self.data);
             for (&target, surface) in rasters.iter_mut() {
-                if raster_overlaps_tile(&mesh, &rotation, pos, target) {
-                    surface.rasterize_kind(&mesh, &rotation, pos, target.0, target.1, drivable);
-                    if drivable {
-                        surface.add_drive_mesh(&mesh, &rotation, pos, target.0, target.1);
+                if let Some(mesh) = &mesh {
+                    if raster_overlaps_tile(mesh, &rotation, pos, target) {
+                        surface.rasterize_kind(
+                            mesh, &rotation, pos, target.0, target.1, drivable,
+                        );
+                        if drivable {
+                            surface.add_drive_mesh(mesh, &rotation, pos, target.0, target.1);
+                        }
+                        counts.placed_scenery_surfaces += 1;
                     }
-                    counts.placed_scenery_surfaces += 1;
                 }
                 for hole in &holes {
                     if !raster_overlaps_tile(hole, &rotation, pos, target)
@@ -336,6 +366,25 @@ mod tests {
         warp_surface_mesh(&mut crossing, &field);
         assert!((crossing.positions[0].z - 3.0).abs() < 1e-5);
         assert!((crossing.positions[1].z - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn explicit_terrain_hole_cuts_even_without_a_surface_object() {
+        let hole = MeshData {
+            positions: vec![
+                Vec3::new(4.0, 4.0, 0.0),
+                Vec3::new(16.0, 4.0, 0.0),
+                Vec3::new(16.0, 16.0, 0.0),
+                Vec3::new(4.0, 16.0, 0.0),
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            ..Default::default()
+        };
+        let mut surface = TileSurface::new(128);
+        surface.rasterize_hole(&hole, &Mat4::IDENTITY, DVec3::ZERO, 0, 0);
+        surface.finish();
+        assert!(surface.cut_at(10.0, 10.0, 0.0, 0.12));
+        assert!(!surface.cut_at(30.0, 30.0, 0.0, 0.12));
     }
 
     #[test]
