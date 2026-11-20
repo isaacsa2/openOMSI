@@ -26,17 +26,20 @@ pub struct InterestUpdate {
 /// pathfinding, collision or pedestrian visibility. Legacy clients with no
 /// supplied vehicle box get the same conservative car/bus fallback as the
 /// graphical host until the vehicle's exact model is available server-side.
+
+fn client_position(pose: &Pose) -> Option<DVec3> {
+    let position = DVec3::new(pose.x, pose.y, pose.z);
+    (position.is_finite()
+        && pose.heading.is_finite()
+        && position.to_array().iter().all(|v| v.abs() <= 1.0e8))
+        .then_some(position)
+}
+
 fn vehicle_box(pose: &Pose) -> Option<(DVec3, PlayerBox)> {
-    if !pose.has_vehicle()
-        || !pose.x.is_finite()
-        || !pose.y.is_finite()
-        || !pose.z.is_finite()
-        || !pose.heading.is_finite()
-        || [pose.x, pose.y, pose.z].iter().any(|v| v.abs() > 1.0e8)
-    {
+    if !pose.has_vehicle() {
         return None;
     }
-    let position = DVec3::new(pose.x, pose.y, pose.z);
+    let position = client_position(pose)?;
     let width = if pose.width.is_finite() && pose.width > 0.1 {
         pose.width.clamp(1.0, 5.0)
     } else {
@@ -88,7 +91,7 @@ pub fn update_host_interest(
         if !peer.has_pose || !peer.has_info {
             continue;
         }
-        let Some((position, body)) = vehicle_box(&peer.pose) else {
+        let Some(position) = client_position(&peer.pose) else {
             continue;
         };
         summary.visible_players += 1;
@@ -96,10 +99,14 @@ pub fn update_host_interest(
         traffic
             .lan_eyes
             .push(Viewer::lan_player(position, f64::from(peer.pose.heading)));
-        traffic.others.push((peer.pose.id, body));
-        traffic
-            .other_blinkers
-            .insert(peer.pose.id, peer.pose.blinker);
+        // Pedestrians and the tile streamer follow players on foot too,
+        // but do not pretend that a walking client owns a collision bus.
+        if let Some((_, body)) = vehicle_box(&peer.pose) {
+            traffic.others.push((peer.pose.id, body));
+            traffic
+                .other_blinkers
+                .insert(peer.pose.id, peer.pose.blinker);
+        }
         people.lan_centers.push(position);
     }
 
@@ -233,6 +240,57 @@ mod tests {
         assert_eq!(status.visible_players, 1);
         assert_eq!(traffic.others.len(), 1);
         assert_eq!(people.lan_centers.len(), 1);
+    }
+
+
+    #[test]
+    fn walking_peer_is_a_population_center_but_never_a_phantom_bus() {
+        use omsi_net::WorldInfo;
+        use omsi_sim::ai_traffic::setup::RandomTypes;
+        use omsi_sim::traffic::Network;
+        use std::net::SocketAddr;
+        use std::path::Path;
+
+        let mut host = LanSession::host(0, "Dedicated", WorldInfo::default(), true).unwrap();
+        let addr = SocketAddr::from(([127, 0, 0, 1], host.local_addr().unwrap().port()));
+        let mut walker =
+            LanSession::join_addr(vec![addr], None, "walker", WorldInfo::default()).unwrap();
+        let pose = Pose {
+            name: "walker".into(),
+            x: 4_000.0,
+            y: 20.0,
+            ..Default::default()
+        };
+        for _ in 0..180 {
+            host.tick(0.06, &Pose::default());
+            walker.tick(0.06, &pose);
+            if host.peers().any(|p| p.has_pose && p.has_info) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let random = RandomTypes {
+            types: Vec::new(),
+            groups: Vec::new(),
+            group_curves: false,
+            group_uvg: Vec::new(),
+            uvg_defaults: Vec::new(),
+        };
+        let mut traffic = crate::traffic::assemble(
+            Path::new("."),
+            Network::default(),
+            random,
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        let mut people = PeopleSim::new(Path::new("."), 0);
+        let status = update_host_interest(&mut host, &mut traffic, &mut people);
+        assert_eq!(status.visible_players, 1);
+        assert_eq!(traffic.lan_centers.len(), 1);
+        assert_eq!(people.lan_centers.len(), 1);
+        assert!(traffic.others.is_empty());
+        assert!((people.lan_centers[0].x - 4_000.0).abs() < 0.01);
     }
 
     #[test]

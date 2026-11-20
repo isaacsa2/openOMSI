@@ -181,7 +181,7 @@ impl HeadlessPeopleSync {
         self.elapsed = (self.elapsed - world::MOVING_EVERY).min(world::MOVING_EVERY);
         let clients: Vec<_> = lan
             .peers()
-            .filter(|peer| peer.has_info && peer.has_pose && peer.pose.has_vehicle())
+            .filter(|peer| peer.has_info && peer.has_pose)
             .filter_map(|peer| {
                 let at = DVec3::new(peer.pose.x, peer.pose.y, peer.pose.z);
                 (at.is_finite() && at.x.abs() < 1.0e8 && at.y.abs() < 1.0e8)
