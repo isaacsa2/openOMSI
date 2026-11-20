@@ -19,8 +19,8 @@ const REBUILDABLE: &[&str] = &["timetable", "passengers", "ai_max_humans"];
 
 pub fn read_config(path: &Path, active: &ServerCfg, simulated: bool) -> Result<ServerCfg> {
     ensure!(path.is_file(), "configuration file is missing");
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     crate::reload::check_hot_values(&text)?;
     let next = ServerCfg::load(path, crate::population::MAX_EXPERIMENTAL_TRAFFIC)?;
     crate::mod_policy::verify_explicit_opt_in(&next, path)?;
@@ -62,14 +62,20 @@ pub fn prepare(
     // rather than reinstating the original day from server.cfg.
     let mut map = crate::world::HostWorld::open(root, &path, clock.date_code())
         .with_context(|| format!("reloading CPU map {}", path.display()))?;
-    ensure!(map.index.tiles_read > 0, "restart map has no readable tiles");
+    ensure!(
+        map.index.tiles_read > 0,
+        "restart map has no readable tiles"
+    );
     let keys = initial_tiles(&map.global, &map.index, INITIAL_TILE_LIMIT);
     ensure!(!keys.is_empty(), "restart map has no selected tiles");
     map.install_spline_ground_surfaces(&keys);
     map.install_stop_lists(&keys);
     let signals = map.network_with_traffic_lights(&keys);
     map.install_static_box_collisions(&keys, &signals.network.lanes);
-    ensure!(!signals.network.lanes.is_empty(), "restart found no usable lanes");
+    ensure!(
+        !signals.network.lanes.is_empty(),
+        "restart found no usable lanes"
+    );
     let mut simulation = make_cpu_sim(root, cfg, &map, &keys, signals, simulated, clock.time);
     let timetable = if simulated && cfg.timetable {
         let next = CpuTimetable::new(
@@ -93,7 +99,13 @@ pub fn prepare(
     } else {
         StreamWorker::start(map)?
     };
-    Ok(Prepared { simulation, timetable, streamer, keys, global })
+    Ok(Prepared {
+        simulation,
+        timetable,
+        streamer,
+        keys,
+        global,
+    })
 }
 
 #[cfg(test)]
@@ -103,15 +115,15 @@ mod tests {
     #[test]
     fn restart_accepts_human_budget_and_timetable_but_not_socket_or_map_change() {
         let n = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir()
-            .join(format!("omsi-restart-{}-{n}.cfg", std::process::id()));
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("omsi-restart-{}-{n}.cfg", std::process::id()));
         let original = include_str!("../../../scripts/server-headless/server-simulation.cfg");
         std::fs::write(&path, original).unwrap();
         let current = ServerCfg::load(&path, 320).unwrap();
-        let next = format!(
-            "{original}\npassengers = 0\ntimetable = 0\nai_max_humans = 2000\n"
-        );
+        let next = format!("{original}\npassengers = 0\ntimetable = 0\nai_max_humans = 2000\n");
         std::fs::write(&path, &next).unwrap();
         let accepted = read_config(&path, &current, true).unwrap();
         assert!(!accepted.passengers);
