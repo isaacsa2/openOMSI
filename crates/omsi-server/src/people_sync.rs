@@ -261,8 +261,17 @@ mod tests {
         assert_eq!(limited.len(), MAX_PEOPLE_PER_CLIENT);
         assert_eq!(*limited.last().unwrap(), 95);
         let mut view = ClientPeople::default();
-        assert_eq!(view.frame(&visible[..MAX_PEOPLE_PER_CLIENT], 0.1).people.len(), 96);
-        assert!(view.frame(&visible[..MAX_PEOPLE_PER_CLIENT], 0.1).gone.is_empty());
+        assert_eq!(
+            view.frame(&visible[..MAX_PEOPLE_PER_CLIENT], 0.1)
+                .people
+                .len(),
+            96
+        );
+        assert!(
+            view.frame(&visible[..MAX_PEOPLE_PER_CLIENT], 0.1)
+                .gone
+                .is_empty()
+        );
     }
 
     #[test]
