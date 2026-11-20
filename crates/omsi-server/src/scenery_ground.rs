@@ -184,7 +184,7 @@ pub(crate) fn crossing_field(
     }
 }
 
-/// Same barycentric field lookup as omsi-scene::place::field_height.
+/// Use the barycentric crossing-height lookup of the graphical host.
 pub(crate) fn field_height(field: &MeshData, x: f32, y: f32) -> Option<f32> {
     let mut best: Option<f32> = None;
     for triangle in field.indices.chunks_exact(3) {
