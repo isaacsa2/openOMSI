@@ -461,7 +461,8 @@ fn run(
         "no drivable or foot paths in selected tiles"
     );
     let mut sim = make_cpu_sim(root, cfg, &map, &keys, signals, simulated, initial_time);
-    let mut sim_clock = omsi_sim::SimClock::starting(cfg.date.as_deref(), None, &cfg.time);
+    let mut calendar = crate::clock::NativeCalendar::new(&date, &cfg.time);
+    let mut sim_clock = calendar.snapshot();
     let mut schedule = if simulated && cfg.timetable {
         Some(CpuTimetable::new(
             root,
@@ -611,7 +612,14 @@ fn run(
         }
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         let authoritative = clock + admin_state.shift;
-        net.session_mut().set_clock(&date, authoritative);
+        // Date and time-of-day on the wire must roll over with the world clock;
+        // ScheduleSim still sees the continuous elapsed-day timeline.
+        sim_clock = calendar.at(authoritative).clone();
+        let (day, month) = sim_clock.day_month();
+        net.session_mut().set_clock(
+            &format!("{:04}-{month:02}-{day:02}", sim_clock.year),
+            sim_clock.time,
+        );
         profile(&mut profiler, "network", || net.tick(FIXED_DT));
         if let Some(ref worker) = streamer {
             if !service_streaming(
@@ -657,7 +665,6 @@ fn run(
         profile(&mut profiler, "simulation", || sim.step(FIXED_DT));
         if let Some(ref mut timetable) = schedule {
             if n % 60 == 0 {
-                sim_clock.time = authoritative.rem_euclid(86_400.0);
                 profile(&mut profiler, "timetable", || {
                     timetable.tick(root, &sim.world, &mut sim.traffic, &sim_clock, 1.0)
                 });

@@ -57,3 +57,74 @@ mod tests {
         );
     }
 }
+
+const NATIVE_DAY_SECONDS: f64 = 86_400.0;
+
+/// Convert the monotonic simulation timeline to the date and time of day
+/// advertised by LAN. Timetables keep their continuous day_time separately.
+#[derive(Debug, Clone)]
+pub struct NativeCalendar {
+    date: omsi_sim::SimClock,
+    day_index: i64,
+}
+
+impl NativeCalendar {
+    pub fn new(date: &str, time: &str) -> Self {
+        Self {
+            date: omsi_sim::SimClock::starting(Some(date), None, time),
+            day_index: 0,
+        }
+    }
+
+    pub fn snapshot(&self) -> omsi_sim::SimClock {
+        self.date.clone()
+    }
+
+    pub fn at(&mut self, absolute_seconds: f64) -> &omsi_sim::SimClock {
+        if !absolute_seconds.is_finite() {
+            return &self.date;
+        }
+        let target = (absolute_seconds / NATIVE_DAY_SECONDS).floor() as i64;
+        // Change days only at actual calendar boundaries, not every CPU tick.
+        while self.day_index < target {
+            self.date.next_day();
+            self.day_index += 1;
+        }
+        while self.day_index > target {
+            self.date.prev_day();
+            self.day_index -= 1;
+        }
+        self.date.time = absolute_seconds.rem_euclid(NATIVE_DAY_SECONDS);
+        &self.date
+    }
+}
+
+#[cfg(test)]
+mod native_calendar_tests {
+    use super::NativeCalendar;
+
+    #[test]
+    fn midnight_changes_the_host_date() {
+        let mut c = NativeCalendar::new("1989-12-31", "23:59");
+        assert_eq!(c.at(86_399.5).date_code(), 19891231);
+        assert_eq!(c.at(86_400.5).date_code(), 19900101);
+        assert!((c.at(86_400.5).time - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn leap_day_and_backward_clock_shift_are_reversible() {
+        let mut c = NativeCalendar::new("2024-02-28", "09:00");
+        assert_eq!(c.at(172_800.0).date_code(), 20240301);
+        assert_eq!(c.at(86_400.0).date_code(), 20240229);
+        assert_eq!(c.at(-1.0).date_code(), 20240227);
+        assert!((c.at(-1.0).time - 86_399.0).abs() < 1e-9);
+        assert_eq!(c.at(0.0).date_code(), 20240228);
+    }
+
+    #[test]
+    fn nonfinite_updates_keep_the_last_valid_date() {
+        let mut c = NativeCalendar::new("2026-11-19", "20:00");
+        assert_eq!(c.at(f64::NAN).date_code(), 20261119);
+        assert_eq!(c.at(f64::INFINITY).date_code(), 20261119);
+    }
+}
