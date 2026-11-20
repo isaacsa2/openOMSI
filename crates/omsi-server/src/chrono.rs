@@ -71,6 +71,7 @@ impl ChronoRefresh {
         cfg: &ServerCfg,
         clock: &SimClock,
         simulated: bool,
+        active_keys: &[(i32, i32)],
     ) -> Option<Prepared> {
         let today = clock.date_code();
         if self.observed_date != today {
@@ -121,11 +122,18 @@ impl ChronoRefresh {
             let root = root.to_path_buf();
             let cfg = cfg.clone();
             let next_clock = clock.clone();
+            let retained_tiles = active_keys.to_vec();
             let dirs = self.wanted_dirs.clone();
             match std::thread::Builder::new()
                 .name("omsi-chrono-rebuild".to_string())
                 .spawn(move || {
-                    let result = reboot::prepare(&root, &cfg, &next_clock, simulated);
+                    let result = reboot::prepare_with_active(
+                        &root,
+                        &cfg,
+                        &next_clock,
+                        simulated,
+                        &retained_tiles,
+                    );
                     if let Err(disconnected) = sender.send(Completed {
                         date: today,
                         dirs,
