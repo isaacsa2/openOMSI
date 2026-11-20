@@ -917,7 +917,7 @@ fn run(
         // Date and time-of-day on the wire must roll over with the world clock;
         // ScheduleSim still sees the continuous elapsed-day timeline.
         sim_clock = calendar.at(authoritative).clone();
-        if let Some(prepared) = chrono_refresh.tick(root, &live_cfg, &sim_clock, simulated) {
+        if let Some(prepared) = chrono_refresh.tick(root, &live_cfg, &sim_clock, simulated, &active_keys) {
             if let Some(old) = install_cpu_world(
                 prepared,
                 &mut sim,
