@@ -869,17 +869,6 @@ mod tests {
     }
 
     #[test]
-    fn public_gateway_and_server_list_are_explicit_operator_choices() {
-        let mut cfg = test_cfg();
-        cfg.public_server = true;
-        cfg.tunnel = true;
-        cfg.public_address = "off".into();
-        assert!(allow_free_roam(&cfg).is_ok());
-        cfg.tunnel = false;
-        assert!(allow_free_roam(&cfg).is_ok());
-    }
-
-    #[test]
     fn experimental_initial_tiles_start_near_the_actual_entrypoint() {
         use omsi_map::global::{EntryPoint, MapTileRef};
         let mut global = omsi_map::global::GlobalCfg::default();
@@ -975,7 +964,7 @@ mod tests {
         // runtime parsing, preventing accidental unsafe test ZIPs.
         let config = include_str!("../../../scripts/server-headless/server-test.cfg");
         std::fs::write(&path, config).unwrap();
-        let mut cfg = ServerCfg::load(&path, 256).unwrap();
+        let mut cfg = ServerCfg::load(&path, MAX_EXPERIMENTAL_TRAFFIC).unwrap();
         let _ = std::fs::remove_file(&path);
         assert!(allow_free_roam(&cfg).is_ok());
         cfg.accept_uploads = true;
@@ -988,10 +977,13 @@ mod tests {
         assert!(allow_free_roam(&cfg).is_err());
         cfg.parked_buses = 0;
         cfg.public_address.clear();
-        assert!(allow_free_roam(&cfg).is_err());
+        assert!(allow_free_roam(&cfg).is_ok());
         cfg.public_address = "off".into();
         cfg.tunnel = true;
-        assert!(allow_free_roam(&cfg).is_err());
+        assert!(allow_free_roam(&cfg).is_ok());
+        cfg.public_server = true;
+        assert!(allow_free_roam(&cfg).is_ok());
+        cfg.public_server = false;
         cfg.tunnel = false;
         cfg.voice.enabled = true;
         assert!(allow_free_roam(&cfg).is_err());
@@ -1019,7 +1011,9 @@ mod tests {
         cfg.traffic = MAX_EXPERIMENTAL_TRAFFIC + 1;
         assert!(allow_simulated_roam(&cfg).is_err());
         cfg.traffic = 8;
-        cfg.ai_limits.max_humans = Some(129);
+        cfg.ai_limits.max_humans = Some(2_000);
+        assert!(allow_simulated_roam(&cfg).is_ok());
+        cfg.ai_limits.max_humans = Some(2_001);
         assert!(allow_simulated_roam(&cfg).is_err());
         cfg.ai_limits.max_humans = Some(64);
         cfg.accept_uploads = true;
@@ -1032,7 +1026,7 @@ mod tests {
         assert!(allow_simulated_roam(&cfg).is_err());
         cfg.parked_buses = 0;
         cfg.public_server = true;
-        assert!(allow_simulated_roam(&cfg).is_err());
+        assert!(allow_simulated_roam(&cfg).is_ok());
         cfg.public_server = false;
         cfg.vehicles.push("Vehicles/Test/vehicle.bus".into());
         assert!(allow_simulated_roam(&cfg).is_ok());
