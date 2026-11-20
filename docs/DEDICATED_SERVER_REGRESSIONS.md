@@ -29,16 +29,18 @@ engine's AI road-car physics and scripts, pedestrian population, existing
 `scripts/server-headless/server-simulation.cfg`. The normal
 `--experimental-free-roam` path remains traffic/passenger/timetable-free.
 
-Admission still fails closed on public server discovery, tunnel, file/map
-sharing, vehicle transfer, voice and unauthorized teleport. The AI population
-budget is limited to 32, the human pool to 128 and the scheduled road-bus
-budget to 12. Tests must verify both flags independently and confirm that
-neither may enable public hosting; file sharing requires the explicit,
-restart-only, per-option consent gates and the authenticated LAN mod service.
+The native server keeps voice and unauthorized teleport disabled. Public
+listing, tunnel, map sharing and bus uploads are independent operator opt-ins:
+test each combination for reachability and authorization. Map/vehicle transfers
+must have explicit configuration consent and pass the authenticated LAN
+mod-service and private-content policy. The configurable maximum is 320
+ordinary road cars, 2,000 humans and 12 separate scheduled road buses. These
+ceilings are not a benchmark or a guarantee of simultaneous active entities.
 
-The first CPU-simulation path has **fixed initial tiles** instead of live
-192-tile swaps: populated AI and pedestrian lane indices cannot be rewritten
-without entity-aware migration. It does **not** establish authoritative
+The CPU-simulation path begins with an entrypoint-oriented tile set and
+**additively streams** player-interest tiles without replacing existing lane
+indices. The broader route network, entity-aware unloading and Chrono
+date-specific map-data migration remain incomplete. It does **not** establish authoritative
 player-driven bus input/physics or whole-map, train, articulated consist,
 real-time performance, timetable and complete collision parity.
 
@@ -89,6 +91,27 @@ applying anything. Automated checks require:
   remain connected.
 - A real interactive-console test must verify the command produces an
   applied/unchanged/rejected status in the logs.
+
+## In-session CPU restart regression gates
+
+The local `/restart` consumes a one-shot console request on the tick thread,
+strictly validates the candidate settings, and builds a fresh map, simulation,
+timetable and streaming worker before replacing any active world state.
+It must keep the existing UDP LAN session, host key, join code, authenticated
+TCP manifest listener, gateway/tunnel and already connected clients.
+
+The automated separate-process fixture connects two LAN clients, changes
+restart-only simulation settings, sends `/restart` to stdin, and verifies the
+host stays alive, continues pose relay and serves the same authenticated
+manifest. Also verify that a rejected configuration leaves the live state
+untouched and repeated restarts do not multiply CPU background workers.
+
+Two **graphical** clients must still validate that old AI and passenger IDs
+retire correctly, no ghost entities remain, scheduled buses/timetable data
+are usable, and boarding/CLAIM survives or recovers. Configured map and
+authentication/transfer-policy changes require a complete process restart.
+A restart reopens date-sensitive Chrono data with the current simulated date;
+automatic midnight map migration remains a blocking release gate.
 
 ## Licensed-map CPU smoke and load measurements
 
@@ -153,13 +176,13 @@ worker. The UDP networking loop continues ticking while this work runs.
 Replaced regions release inactive road rasters and terrain outside the active
 neighborhood; current signal clocks are carried across the lane-network swap.
 
-This **free-roam** streaming path is experimental: it keeps AI and
-pedestrian population disabled because active lane/ground indices cannot
-yet migrate on unload. The separate `--experimental-simulation` mode has
-bounded native AI and passenger snapshots plus timed road buses on a fixed
-initial map. Neither mode has entity-aware unloading, crossing-height
-deformation, terrain-hole parity, client-owned passenger relaying, or
-authoritative **player-driven** bus scripts. Rejected
+This **free-roam** streaming path keeps autonomous traffic and pedestrian
+population disabled. The separate `--experimental-simulation` mode now
+**additively** extends the CPU network around actual connected players,
+keeping existing lane IDs stable for active AI and timed road buses.
+Both modes still lack verified entity-aware unloading, complete crossing
+deformation, terrain-hole parity, graphical-client passenger boarding
+and authoritative **player-driven** bus scripts. Rejected
 scenery surfaces, invalid splines and missing definitions remain visible
 as unresolved counts; the road mesh is not proof of full collision parity.
 
