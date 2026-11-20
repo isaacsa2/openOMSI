@@ -51,9 +51,9 @@ impl CpuTrafficPopulation {
             if car.is_bus() {
                 continue;
             }
-            let far = viewers.iter().all(|at| {
-                (car.vehicle.position - *at).truncate().length() > RECYCLE_DISTANCE
-            });
+            let far = viewers
+                .iter()
+                .all(|at| (car.vehicle.position - *at).truncate().length() > RECYCLE_DISTANCE);
             if far {
                 let car = traffic.take_off(index, Removal::Finished);
                 traffic.retired.push(car.id);
@@ -198,7 +198,6 @@ pub fn attach_cpu_ground(vehicle: &mut VehicleInstance, data: &Arc<WorldCell>) {
             as Arc<dyn omsi_sim::rigid::Ground>,
     );
 }
-
 
 #[cfg(test)]
 mod tests {
