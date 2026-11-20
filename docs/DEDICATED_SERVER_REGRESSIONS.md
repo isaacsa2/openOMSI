@@ -295,6 +295,54 @@ Without `--experimental-free-roam`, the native binary deliberately
 Users must not treat a successful relay connection as proof of vehicle,
 map, timetable, or passenger authority.
 
+## Additional native CPU correctness and load checks
+
+**Terrain and AI wheel contact.** The CPU AI ground-height fallback now
+respects explicit `[terrainhole]` cutters. If the road raster does not cover
+a tunnel cutout, it returns *no ground* rather than silently using the
+invisible terrain. Continue comparisons with two graphical clients at
+sloped/deformed crossings and tunnels; do not claim animated or attached
+surface parity. The unit test uses a rasterized cutter and real flat terrain.
+
+**Passenger ownership.** Every inbound `CLAIM` must originate from a
+connected player who currently owns a vehicle and must reference a waiting
+person within the server's generous boarding locality (80 m horizontally,
+10 m vertically). Cap each claimant to 64 candidate IDs and deny claims
+from walkers, invalid poses or distant stops. Reconnecting and receiving a
+new ID must never permit a claim on another player's stop. The server's
+`WORLDUP`/`DESCUP` relay keeps client-owned IDs isolated; an on-foot
+observer receives pedestrians near the *walker's* coordinates, not the last
+vehicle coordinates. Synthetic tests are not a substitute for real boarding,
+ticketing, door action and disembarkation checks with two graphical clients.
+
+**Streaming.** Populated CPU simulation extends lanes additively while
+keeping existing route references stable, but now caps the accumulated
+loaded set at 512 tiles. This prevents indefinite map-wide RAM growth; it
+does **not** implement safe unloading of lanes held by live AI, and travel
+beyond that limit can remain unserved. Test in a large map with separated
+players, then review retained-route correctness after travelling and
+reconnecting. Free-roam's independent active tile window remains 192.
+
+**Performance.** The live host's previously reported steady 59–60 TPS is
+encouraging but is not a 320-car/2,000-person load benchmark. The console
+already supports `timings start`, `timings report` and `timings stop`
+with p95/p99 and max tick samples. An additional once-per-3600-tick
+`native load:` log reports observed AI/people counts and approximate
+terrain/raster/wheel data heap. Compare that with OS RSS/peak RSS,
+per-core CPU, client network traffic and 10-minute p95/p99 at identical
+map/player/AI settings; never label surface heap as total process RAM.
+
+**Player-bus authority is still a separate major milestone.** Current
+vehicle traffic states remain client-owned and relayed. Before enabling
+server-side physics/scripts, introduce explicit client input/control
+messages, authenticated vehicle ownership, deterministic fixed-tick
+script/vehicle stepping with locally licensed model definitions, reconciled
+state snapshots and a backwards-compatible negotiated protocol. Validate
+a two-client door/steering/braking test and an induced-latency test before
+replacing the existing relay. Do not silently reinterpret ordinary `Pose`
+packets as trustworthy control input or activate an incomplete authority
+mode on public servers.
+
 ## Manual end-to-end acceptance gates — blocking
 
 1. **No GPU/no display:** on a clean Linux VPS without X11, Wayland, Vulkan,
