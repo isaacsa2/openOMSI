@@ -8,7 +8,7 @@ use crate::context_sync::HeadlessContextSync;
 use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
 use crate::simulation::CpuSimulation;
-use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
+use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, apply_populated_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
 use crate::timetable::CpuTimetable;
 use crate::transport::HostTransport;
@@ -243,13 +243,21 @@ fn service_streaming(
     active_keys: &mut Vec<(i32, i32)>,
     busy: &mut bool,
     tick: u64,
+    populated: bool,
 ) -> bool {
     match worker.poll() {
         Ok(Some(update)) => {
             *busy = false;
-            *active_keys = profile(profiler, "tile_stream_apply", || {
-                apply_free_roam_update(sim, root, &global.traffic_density_road, update)
-            });
+            if populated {
+                let new = profile(profiler, "tile_stream_apply", || {
+                    apply_populated_update(sim, update)
+                });
+                active_keys.extend(new);
+            } else {
+                *active_keys = profile(profiler, "tile_stream_apply", || {
+                    apply_free_roam_update(sim, root, &global.traffic_density_road, update)
+                });
+            }
         }
         Ok(None) => *busy = false,
         Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -262,14 +270,21 @@ fn service_streaming(
         let centers: Vec<(f64, f64)> = net
             .session()
             .peers()
-            .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
+            .filter(|peer| peer.has_pose && peer.has_info)
             .map(|peer| (peer.pose.x, peer.pose.y))
             .collect();
         let desired = interest_tiles(global, initial, &centers, STREAM_TILE_LIMIT);
         let current: BTreeSet<_> = active_keys.iter().copied().collect();
         let next: BTreeSet<_> = desired.iter().copied().collect();
-        if next != current {
-            *busy = worker.request(desired);
+        let needed = if populated {
+            desired.into_iter().filter(|key| !current.contains(key)).collect()
+        } else if next != current {
+            desired
+        } else {
+            Vec::new()
+        };
+        if !needed.is_empty() {
+            *busy = worker.request(needed);
             if !*busy {
                 log::warn!("native tile stream worker disconnected; retaining the previous world");
             }
@@ -570,13 +585,14 @@ fn run(
     let mut publishers = NativePublishers::default();
     let mut population = CpuTrafficPopulation::default();
     let stream_global = map.global.clone();
-    // A live traffic sim retains lane indices, vehicle paths and pedestrians:
-    // do not replace its network until entity-aware streaming is implemented.
-    let streamer = if simulated {
-        None
+    // Simulation streams new tiles additively: lane IDs and route references
+    // already held by AI cars, scheduled vehicles and pedestrians stay valid.
+    let streamer = Some(if simulated {
+        StreamWorker::start_populated(map, keys.clone())
+            .context("starting populated CPU tile stream worker")?
     } else {
-        Some(StreamWorker::start(map).context("starting CPU tile stream worker")?)
-    };
+        StreamWorker::start(map).context("starting CPU tile stream worker")?
+    });
     let mut stream_busy = false;
     let mut active_keys = keys.clone();
     let mut clock = initial_time;
@@ -669,6 +685,7 @@ fn run(
                 &mut active_keys,
                 &mut stream_busy,
                 n,
+                simulated,
             ) {
                 break;
             }

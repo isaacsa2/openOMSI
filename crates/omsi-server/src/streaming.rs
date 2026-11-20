@@ -124,6 +124,70 @@ pub fn apply_free_roam_update(
     update.keys
 }
 
+
+    /// Append CPU map tiles without renumbering lanes already referenced by AI
+    /// routes, scheduled buses, pedestrian paths or light programs. Unlike the
+    /// free-roam relay, a populated region never replaces the entire network.
+pub fn apply_populated_update(
+    sim: &mut crate::simulation::CpuSimulation,
+    update: StreamUpdate,
+) -> Vec<(i32, i32)> {
+    let mut signals = update.signals;
+    let mut controllers: Vec<_> = signals.controllers.drain(..).map(Some).collect();
+    let mut slots = vec![None; controllers.len()];
+    let mut definitions: Vec<_> = signals.controller_of_object.into_iter().collect();
+    definitions.sort_by_key(|(object, local)| (*local, *object));
+
+    for (object, local) in definitions {
+        if local >= controllers.len() {
+            continue;
+        }
+        let global = if let Some(&existing) = sim.traffic.controller_of_object.get(&object) {
+            existing
+        } else {
+            let Some(controller) = controllers[local].take() else {
+                continue;
+            };
+            let index = sim.traffic.lights.len();
+            sim.traffic.light_prev.push(vec![-100; controller.lights.len()]);
+            sim.traffic.lights.push(controller);
+            sim.traffic.controller_of_object.insert(object, index);
+            index
+        };
+        slots[local] = Some(global);
+    }
+    for lane in &mut signals.network.lanes {
+        if let Some((controller, light)) = lane.traffic_light {
+            lane.traffic_light = slots
+                .get(controller)
+                .and_then(|slot| *slot)
+                .map(|global| (global, light));
+        }
+    }
+    let range = sim.traffic.net.extend(
+        signals.network.lanes,
+        omsi_sim::traffic::LINK_TOLERANCE,
+    );
+    sim.traffic.set_spawn_densities(range.clone());
+    sim.traffic.street_weight += sim.traffic.net.lanes[range.clone()]
+        .iter()
+        .filter_map(omsi_sim::ai_traffic::dormant::street_lane_weight)
+        .sum::<f64>();
+    for &key in &update.keys {
+        sim.traffic.lane_tiles.insert(key);
+    }
+    sim.traffic.lanes_generation = sim.traffic.lanes_generation.wrapping_add(1);
+    log::info!(
+        "native populated tile stream: {} more tiles, {} added lanes ({} total), {} live AI vehicles and {} pedestrians; existing routes retained",
+        update.keys.len(),
+        range.len(),
+        sim.traffic.net.lanes.len(),
+        sim.traffic.cars.len(),
+        sim.people.people.len()
+    );
+    update.keys
+}
+
 pub struct StreamWorker {
     requests: std::sync::mpsc::Sender<Vec<(i32, i32)>>,
     results: std::sync::mpsc::Receiver<Option<StreamUpdate>>,
@@ -135,15 +199,46 @@ impl StreamWorker {
     /// published via immutable snapshots and read by the running simulation.
     /// The restricted relay has no server-owned AI, so old entities cannot
     /// retain lane or surface references during a region replacement.
-    pub fn start(mut world: crate::world::HostWorld) -> std::io::Result<Self> {
+    pub fn start(world: crate::world::HostWorld) -> std::io::Result<Self> {
+        Self::start_mode(world, false, Vec::new())
+    }
+
+    /// The renderer-free AI host may add new regions but must never prune
+    /// ground or replace the lane network out from beneath running scripts.
+    pub fn start_populated(
+        world: crate::world::HostWorld,
+        initial: Vec<(i32, i32)>,
+    ) -> std::io::Result<Self> {
+        Self::start_mode(world, true, initial)
+    }
+
+    fn start_mode(
+        mut world: crate::world::HostWorld,
+        populated: bool,
+        initial: Vec<(i32, i32)>,
+    ) -> std::io::Result<Self> {
         let (requests, pending) = std::sync::mpsc::channel::<Vec<(i32, i32)>>();
         let (complete, results) = std::sync::mpsc::channel();
         let worker = std::thread::Builder::new()
             .name("omsi-cpu-tile-stream".into())
             .spawn(move || {
-                while let Ok(keys) = pending.recv() {
+                let mut retained: BTreeSet<_> = initial.into_iter().collect();
+                while let Ok(requested) = pending.recv() {
+                    // In simulated mode the thread only parses new tiles.
+                    // Older map regions stay attached to live AI route indices.
+                    let keys: Vec<_> = if populated {
+                        requested.into_iter().filter(|key| retained.insert(*key)).collect()
+                    } else {
+                        requested
+                    };
+                    if keys.is_empty() {
+                        if complete.send(None).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
                     let signals = world.network_with_traffic_lights(&keys);
-                    if signals.network.lanes.is_empty() {
+                    if signals.network.lanes.is_empty() && !populated {
                         log::warn!("native tile stream: no road lanes in the selected region");
                         if complete.send(None).is_err() {
                             break;
@@ -151,10 +246,24 @@ impl StreamWorker {
                         continue;
                     }
                     let surfaces = world.install_spline_ground_surfaces(&keys);
-                    world.install_stop_lists(&keys);
-                    let collisions =
-                        world.install_static_box_collisions(&keys, &signals.network.lanes);
-                    world.prune_streamed_ground(&keys);
+                    let collisions = if populated {
+                        // Both functions REPLACE a complete map-wide list.
+                        // Rebuild from the cumulative keys, never from just
+                        // the incremental request, or old waiting places and
+                        // collision obstacles would disappear mid-session.
+                        let all: Vec<_> = retained.iter().copied().collect();
+                        world.install_stop_lists(&all);
+                        let all_lanes = world.network_for_tiles(&all);
+                        world.install_static_box_collisions(&all, &all_lanes.lanes)
+                    } else {
+                        world.install_stop_lists(&keys);
+                        let collision = world.install_static_box_collisions(
+                            &keys,
+                            &signals.network.lanes,
+                        );
+                        world.prune_streamed_ground(&keys);
+                        collision
+                    };
                     if complete
                         .send(Some(StreamUpdate {
                             keys,
