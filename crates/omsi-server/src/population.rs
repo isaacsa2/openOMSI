@@ -175,13 +175,6 @@ pub fn attach_cpu_ground(vehicle: &mut VehicleInstance, data: &Arc<WorldCell>) {
     );
 }
 
-/// Construct an AI host with the actual server calendar and clock, not the
-/// graphical application's default 09:00 time.
-pub fn ai_host_clock(date: Option<&str>, time: &str, day_time: f64) -> SimClock {
-    let mut clock = SimClock::starting(date, None, time);
-    clock.time = day_time.rem_euclid(86_400.0);
-    clock
-}
 
 #[cfg(test)]
 mod tests {
@@ -235,9 +228,11 @@ mod tests {
     }
 
     #[test]
-    fn ai_clock_follows_the_real_server_date_and_time() {
-        let clock = ai_host_clock(Some("2000-05-30"), "21:40", 78_000.0);
-        assert_eq!(clock.date_code(), 20000530);
-        assert_eq!(clock.time, 78_000.0);
+    fn newly_spawned_ai_uses_the_live_calendar_after_midnight() {
+        let mut calendar = crate::clock::NativeCalendar::new("2024-02-28", "23:59");
+        let now = calendar.at(2.0 * 86_400.0 + 78_000.0).clone();
+        let host = VehicleHost::new(now);
+        assert_eq!(host.clock.date_code(), 20240301);
+        assert_eq!(host.clock.time, 78_000.0);
     }
 }

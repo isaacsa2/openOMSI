@@ -126,3 +126,56 @@ pub fn apply_world_jobs<'a>(
         omsi_lan::admin::report(world.lan, hub, &job.actor, job.record, &outcome);
     }
 }
+
+    /// The native CPU simulation's AI traffic, used by the same validated
+    /// administrative world-command handler as the graphical host.
+pub struct NativeTraffic<'a>(pub &'a mut omsi_sim::ai_traffic::TrafficSim);
+
+impl omsi_lan::admin::world::ServerTraffic for NativeTraffic<'_> {
+    fn set_density(&mut self, n: usize) {
+        self.0.target = n;
+    }
+
+    fn clear_cars(&mut self) -> usize {
+        use omsi_sim::ai_traffic::control::Removal;
+        let mut removed = 0;
+        for index in (0..self.0.cars.len()).rev() {
+            if !self.0.cars[index].is_bus() {
+                let car = self.0.take_off(index, Removal::Finished);
+                // Retain the removal until the network publisher has sent it.
+                self.0.retired.push(car.id);
+                removed += 1;
+            }
+        }
+        removed
+    }
+}
+
+#[cfg(test)]
+mod native_traffic_tests {
+    use super::*;
+    use omsi_lan::admin::world::ServerTraffic;
+
+    #[test]
+    fn admin_density_changes_the_population_target_not_just_the_panel() {
+        let random = omsi_sim::ai_traffic::setup::RandomTypes {
+            types: Vec::new(),
+            groups: Vec::new(),
+            group_curves: false,
+            group_uvg: Vec::new(),
+            uvg_defaults: Vec::new(),
+        };
+        let mut traffic = crate::traffic::assemble(
+            std::path::Path::new("."),
+            omsi_sim::traffic::Network::default(),
+            random,
+            Vec::new(),
+            Vec::new(),
+            8,
+        );
+        let mut admin = NativeTraffic(&mut traffic);
+        admin.set_density(3);
+        assert_eq!(admin.0.target, 3);
+        assert_eq!(admin.clear_cars(), 0);
+    }
+}

@@ -597,7 +597,27 @@ fn run(
             &|_, _, _| None,
             FIXED_DT,
         );
-        crate::commands::apply_world_jobs(net.session_mut(), &mut admin_state, None, clock, 0, hub);
+        // Apply admin commands to the real CPU traffic, not only the panel.
+        if simulated {
+            let mut traffic_admin = crate::commands::NativeTraffic(&mut sim.traffic);
+            crate::commands::apply_world_jobs(
+                net.session_mut(),
+                &mut admin_state,
+                Some(&mut traffic_admin),
+                clock,
+                live_cfg.traffic,
+                hub,
+            );
+        } else {
+            crate::commands::apply_world_jobs(
+                net.session_mut(),
+                &mut admin_state,
+                None,
+                clock,
+                0,
+                hub,
+            );
+        }
         if console::take_reload_requested() {
             if let Err(error) = crate::reload::apply(
                 &plan.config_path,
@@ -612,6 +632,17 @@ fn run(
                 log::warn!("server console: /reload refused; settings unchanged: {error}");
             }
         }
+        // Keep scripting, pedestrians and LAN clock in lockstep with commands
+        // and /reload, including a speed change issued during a live session.
+        sim.traffic.time_scale = net.session().clock_speed;
+        sim.people.density = if simulated && live_cfg.passengers {
+            admin_state
+                .passenger_density
+                .unwrap_or(live_cfg.passenger_density.unwrap_or(1.0))
+                .clamp(0.0, 3.0)
+        } else {
+            0.0
+        };
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         let authoritative = clock + admin_state.shift;
         // Date and time-of-day on the wire must roll over with the world clock;
@@ -646,17 +677,14 @@ fn run(
             let viewers = sim.traffic.lan_centers.clone();
             // A native AI script must start at this session's actual calendar
             // and clock, not the engine's 1989/09:00 default.
-            let spawn_clock = crate::population::ai_host_clock(
-                live_cfg.date.as_deref(),
-                &live_cfg.time,
-                authoritative,
-            );
+            // Current calendar follows leap days and years, unlike cfg.date.
+            let spawn_clock = sim_clock.clone();
             profile(&mut profiler, "ai_population", || {
                 population.tick(
                     &mut sim.traffic,
                     &sim.world,
                     &viewers,
-                    live_cfg.traffic,
+                    sim.traffic.target,
                     &spawn_clock,
                     1.0,
                 )
@@ -690,10 +718,19 @@ fn run(
         meter.completed(Instant::now());
         n += 1;
         if report.elapsed() >= Duration::from_secs(1) {
+            let (cars, buses, dormant, parked) = sim.traffic.counts();
+            let (walking, waiting, aboard) = sim.people.counts();
             let counts = WorldCounts {
-                traffic: if simulated { live_cfg.traffic } else { 0 },
+                cars,
+                buses,
+                dormant,
+                parked,
+                walking,
+                waiting,
+                aboard,
+                traffic: if simulated { sim.traffic.target } else { 0 },
                 passengers: simulated && live_cfg.passengers,
-                ..Default::default()
+                passenger_density: sim.people.density,
             };
             admin::publish_status(
                 net.session_mut(),
