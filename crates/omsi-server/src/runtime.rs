@@ -4,9 +4,9 @@
 
 use crate::admin;
 use crate::ai_sync::HeadlessTrafficSync;
+use crate::context_sync::HeadlessContextSync;
 use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
-use crate::context_sync::HeadlessContextSync;
 use crate::simulation::CpuSimulation;
 use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, interest_tiles};
 use crate::tick::{FIXED_DT, TickPacer};
