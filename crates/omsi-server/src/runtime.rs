@@ -616,7 +616,6 @@ fn process_console_changes(
     stream_global: &mut omsi_map::global::GlobalCfg,
     stream_busy: &mut bool,
     population: &mut CpuTrafficPopulation,
-    publishers: &mut NativePublishers,
 ) {
     if console::take_reload_requested() {
         if let Err(error) = crate::reload::apply(
@@ -653,7 +652,8 @@ fn process_console_changes(
             *stream_global = prepared.global;
             *stream_busy = false;
             *population = CpuTrafficPopulation::default();
-            *publishers = NativePublishers::default();
+            // Keep LAN publisher history: clients must receive GONE/retire
+            // deltas for old CPU entities after the swap, not orphaned rows.
             admin_state.passenger_density = next.passenger_density;
             net.session_mut().clock_speed = next.time_speed;
             omsi_lan::server_cfg::set_server_speed_limit_kmh(next.speed_limit_kmh);
@@ -872,7 +872,6 @@ fn run(
             &mut stream_global,
             &mut stream_busy,
             &mut population,
-            &mut publishers,
         );
         sync_native_simulation_settings(&mut sim, &net, &admin_state, &live_cfg, simulated);
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
