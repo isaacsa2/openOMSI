@@ -8,7 +8,9 @@ use crate::context_sync::HeadlessContextSync;
 use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
 use crate::simulation::CpuSimulation;
-use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, apply_populated_update, interest_tiles};
+use crate::streaming::{
+    STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, apply_populated_update, interest_tiles,
+};
 use crate::tick::{FIXED_DT, TickPacer};
 use crate::timetable::CpuTimetable;
 use crate::transport::HostTransport;
@@ -272,15 +274,16 @@ fn service_streaming(
             .session()
             .peers()
             .filter(|peer| peer.has_pose && peer.has_info)
-            .filter_map(|peer| {
-                crate::interest::client_position(&peer.pose).map(|p| (p.x, p.y))
-            })
+            .filter_map(|peer| crate::interest::client_position(&peer.pose).map(|p| (p.x, p.y)))
             .collect();
         let desired = interest_tiles(global, initial, &centers, STREAM_TILE_LIMIT);
         let current: BTreeSet<_> = active_keys.iter().copied().collect();
         let next: BTreeSet<_> = desired.iter().copied().collect();
         let needed = if populated {
-            desired.into_iter().filter(|key| !current.contains(key)).collect()
+            desired
+                .into_iter()
+                .filter(|key| !current.contains(key))
+                .collect()
         } else if next != current {
             desired
         } else {
@@ -443,7 +446,6 @@ impl NativePublishers {
         });
     }
 }
-
 
 /// World commands run on the authoritative tick, never in the network reader.
 fn apply_native_admin_actions(
@@ -698,7 +700,11 @@ fn run(
     let mut rules = ServerRules {
         real_time: false,
         metar: false,
-        traffic_max: if simulated { MAX_EXPERIMENTAL_TRAFFIC } else { 0 },
+        traffic_max: if simulated {
+            MAX_EXPERIMENTAL_TRAFFIC
+        } else {
+            0
+        },
         notice_ok: &|notice| notice.len() <= 2048,
     };
     let mut pacer = TickPacer::new(Instant::now());
@@ -742,7 +748,11 @@ fn run(
             &mut admin_state,
             &mut sim,
             clock,
-            if simulated { MAX_EXPERIMENTAL_TRAFFIC } else { 0 },
+            if simulated {
+                MAX_EXPERIMENTAL_TRAFFIC
+            } else {
+                0
+            },
             simulated,
             hub,
         );
