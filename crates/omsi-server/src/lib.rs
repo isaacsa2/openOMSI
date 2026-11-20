@@ -18,6 +18,7 @@ pub mod interest;
 pub mod lan_world;
 pub mod lanes;
 pub mod metar;
+pub mod mod_policy;
 pub mod people_sync;
 mod people_upstream;
 pub mod population;

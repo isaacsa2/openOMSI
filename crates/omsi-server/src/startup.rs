@@ -50,6 +50,9 @@ pub fn prepare(
             .clone()
             .or_else(omsi_lan::bans::BanStore::default_owner_path),
     ));
+    // Missing keys in legacy configs default to transfer-on. Require a real,
+    // explicit opt-in before applying process-global upload/share policy.
+    crate::mod_policy::verify_explicit_opt_in(&cfg, path)?;
     let _ = SERVER_VEHICLES.set(cfg.vehicles.clone());
     cfg.apply_to_mods();
     let _ = SERVER_PASSENGERS.set((cfg.passengers, cfg.passenger_density));

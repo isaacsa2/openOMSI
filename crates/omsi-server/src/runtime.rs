@@ -134,15 +134,18 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
         !cfg.passengers && !cfg.timetable && cfg.traffic == 0,
         "experimental relay requires passengers=0, timetable=0, traffic=0"
     );
+    // A headless process has no authoritative parked-vehicle model yet.
+    // Maps, approved fleet packages and client uploads are independent,
+    // explicit opt-ins validated against the actual configuration file.
     ensure!(
-        !cfg.accept_uploads && !cfg.share_maps && cfg.parked_buses == 0,
-        "experimental relay requires accept_uploads=0, share_maps=0, parked_buses=0"
+        cfg.parked_buses == 0,
+        "experimental relay requires parked_buses=0 (no parked-world authority)"
     );
-    // A configured fleet activates the selected-bus download path. The
-    // experimental relay supports only locally installed vehicles.
     ensure!(
-        cfg.vehicles.is_empty(),
-        "experimental relay requires an empty vehicles list (no fleet downloads)"
+        cfg.vehicles
+            .iter()
+            .all(|bus| omsi_net::vehicle_path(bus).is_some()),
+        "experimental relay vehicles must contain valid relative vehicle paths"
     );
     ensure!(
         !cfg.public_server && !cfg.tunnel && cfg.public_address.eq_ignore_ascii_case("off"),
@@ -271,7 +274,9 @@ fn service_streaming(
             .session()
             .peers()
             .filter(|peer| peer.has_pose && peer.has_info)
-            .map(|peer| (peer.pose.x, peer.pose.y))
+            .filter_map(|peer| {
+                crate::interest::client_position(&peer.pose).map(|p| (p.x, p.y))
+            })
             .collect();
         let desired = interest_tiles(global, initial, &centers, STREAM_TILE_LIMIT);
         let current: BTreeSet<_> = active_keys.iter().copied().collect();
@@ -529,6 +534,7 @@ fn run(
     } else {
         allow_free_roam(cfg)?;
     }
+    crate::mod_policy::verify_explicit_opt_in(cfg, &plan.config_path)?;
     let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
     let initial_time = checked_clock(&cfg.time)?;
     let global = omsi_cfg::resolve_path(root, &cfg.map);
@@ -589,8 +595,9 @@ fn run(
     // manifest after WELCOME, even when it has the same map and buses.
     // Reserving TCP in LanSession::host is not enough: the original server
     // hands that listener to omsi_lan::mods::serve before accepting players.
-    // Keep the very same service alive for this room. With share_maps=0,
-    // accept_uploads=0 and an empty fleet it serves an empty LIST, not files.
+    // The same authenticated service handles opt-in map manifests, declared
+    // server fleet and permitted client bus uploads. Off by default for tests;
+    // opt-ins are checked before any player joins. Maps are not sent by default.
     let listener = net
         .session_mut()
         .take_mods_listener()

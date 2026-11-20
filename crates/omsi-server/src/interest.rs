@@ -27,10 +27,16 @@ pub struct InterestUpdate {
 /// supplied vehicle box get the same conservative car/bus fallback as the
 /// graphical host until the vehicle's exact model is available server-side.
 
-fn client_position(pose: &Pose) -> Option<DVec3> {
-    let position = DVec3::new(pose.x, pose.y, pose.z);
+pub(crate) fn client_position(pose: &Pose) -> Option<DVec3> {
+    let (position, heading) = if pose.has_vehicle() {
+        (DVec3::new(pose.x, pose.y, pose.z), pose.heading)
+    } else {
+        // On-foot peers publish their world position in Walker, not Pose.
+        let walker = pose.walker?;
+        (DVec3::new(walker.x, walker.y, walker.z), walker.heading)
+    };
     (position.is_finite()
-        && pose.heading.is_finite()
+        && heading.is_finite()
         && position.to_array().iter().all(|v| v.abs() <= 1.0e8))
         .then_some(position)
 }
@@ -96,9 +102,14 @@ pub fn update_host_interest(
         };
         summary.visible_players += 1;
         traffic.lan_centers.push(position);
+        let heading = peer
+            .pose
+            .walker
+            .filter(|_| !peer.pose.has_vehicle())
+            .map_or(peer.pose.heading, |walker| walker.heading);
         traffic
             .lan_eyes
-            .push(Viewer::lan_player(position, f64::from(peer.pose.heading)));
+            .push(Viewer::lan_player(position, f64::from(heading)));
         // Pedestrians and the tile streamer follow players on foot too,
         // but do not pretend that a walking client owns a collision bus.
         if let Some((_, body)) = vehicle_box(&peer.pose) {
@@ -257,8 +268,11 @@ mod tests {
             LanSession::join_addr(vec![addr], None, "walker", WorldInfo::default()).unwrap();
         let pose = Pose {
             name: "walker".into(),
-            x: 4_000.0,
-            y: 20.0,
+            walker: Some(omsi_net::Walker {
+                x: 4_000.0,
+                y: 20.0,
+                ..Default::default()
+            }),
             ..Default::default()
         };
         for _ in 0..180 {
@@ -291,6 +305,7 @@ mod tests {
         assert_eq!(people.lan_centers.len(), 1);
         assert!(traffic.others.is_empty());
         assert!((people.lan_centers[0].x - 4_000.0).abs() < 0.01);
+        assert_eq!(client_position(&pose).unwrap().x, 4_000.0);
     }
 
     #[test]

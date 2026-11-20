@@ -158,6 +158,7 @@ pub fn read_checked(path: &Path, active: &ServerCfg, simulated: bool) -> Result<
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     check_hot_values(&text)?;
     let next = ServerCfg::load(path, PARSE_TRAFFIC_MAX)?;
+    crate::mod_policy::verify_explicit_opt_in(&next, path)?;
     if simulated {
         crate::runtime::allow_simulated_roam(&next)?;
     } else {
