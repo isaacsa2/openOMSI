@@ -519,6 +519,39 @@ fn live_world_counts(sim: &CpuSimulation, simulated: bool, passengers: bool) -> 
     }
 }
 
+/// Reuse the existing server's verified, persisted parked-bus service. This
+/// adds no artificial host driver and keeps uploaded vehicles separate from AI.
+fn start_verified_parked_buses(
+    root: &Path,
+    cfg: &ServerCfg,
+    map: &crate::world::HostWorld,
+    sim: &CpuSimulation,
+) {
+    if cfg.parked_buses == 0 {
+        return;
+    }
+    let spots: Vec<omsi_lan::parked::Spot> = map
+        .global
+        .entry_points
+        .iter()
+        .filter_map(|ep| crate::world::resolve_entry_point(&map.global, &map.index, ep))
+        .filter(|(at, heading)| at.is_finite() && heading[0].is_finite())
+        .map(|(at, heading)| (at.to_array(), heading[0] as f32))
+        .collect();
+    let ground = sim.world.snapshot().ground.clone();
+    omsi_lan::parked::start(root, &cfg.map, &spots, &|x, y, near| {
+        ground
+            .stand_height(x, y, near)
+            .or_else(|| ground.stand_height(x, y, near + 4.0))
+            .or_else(|| ground.ground_height(x, y))
+    });
+    log::info!(
+        "native parked buses: limit {}, {} spawn points",
+        cfg.parked_buses,
+        spots.len()
+    );
+}
+
 fn run(
     root: &Path,
     plan: &crate::startup::LaunchPlan,
@@ -560,25 +593,7 @@ fn run(
         "no drivable or foot paths in selected tiles"
     );
     let mut sim = make_cpu_sim(root, cfg, &map, &keys, signals, simulated, initial_time);
-    // Legacy verified-upload parked bus store and authenticated claim protocol.
-    if cfg.parked_buses > 0 {
-        let spots: Vec<omsi_lan::parked::Spot> = map
-            .global
-            .entry_points
-            .iter()
-            .filter_map(|ep| crate::world::resolve_entry_point(&map.global, &map.index, ep))
-            .filter(|(at, heading)| at.is_finite() && heading[0].is_finite())
-            .map(|(at, heading)| (at.to_array(), heading[0] as f32))
-            .collect();
-        let ground = sim.world.snapshot().ground.clone();
-        omsi_lan::parked::start(root, &cfg.map, &spots, &|x, y, near| {
-            ground
-                .stand_height(x, y, near)
-                .or_else(|| ground.stand_height(x, y, near + 4.0))
-                .or_else(|| ground.ground_height(x, y))
-        });
-        log::info!("native parked buses: limit {}, {} spawn points", cfg.parked_buses, spots.len());
-    }
+    start_verified_parked_buses(root, cfg, &map, &sim);
     let mut calendar = crate::clock::NativeCalendar::new(&date, &cfg.time);
     let mut sim_clock = calendar.snapshot();
     let mut schedule = if simulated && cfg.timetable {
