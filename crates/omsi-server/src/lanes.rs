@@ -297,7 +297,10 @@ pub(crate) fn place_object_paths(
     for lane in lanes {
         for point in &mut lane.points {
             if tilted {
-                *point = origin + tilt.transform_point3((*point - origin).as_vec3()).as_dvec3();
+                *point = origin
+                    + tilt
+                        .transform_point3((*point - origin).as_vec3())
+                        .as_dvec3();
             }
             if let (Some(field), Some(inv)) = (deformation, inverse) {
                 let local = inv.transform_point3((*point - origin).as_vec3());
