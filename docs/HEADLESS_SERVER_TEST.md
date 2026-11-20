@@ -269,9 +269,10 @@ an expensive CPU world rebuild every day.
 ## Streaming-test addendum: drive beyond the starting area
 
 The native experimental host initially loads 64 tiles around the map's
-entrypoints. On a larger map, the CPU world may select up to 192 active tiles,
-prioritizing the tile under every connected driver and filling surrounding
-neighborhoods. A dedicated map worker builds new lanes, road/wheel surfaces,
+entrypoints. On a larger map, the interest selector prioritizes player tiles
+and their neighborhoods within a 192-tile request window. The populated
+simulation retains at most 512 unique tiles across cumulative requests.
+A dedicated map worker builds new lanes, road/wheel surfaces,
 stop lists, collisions and traffic-light programs **without blocking UDP
 keepalives**; the simulation installs the completed region on its next tick.
 
@@ -287,11 +288,16 @@ terrain-hole cutters, but complex/deformable geometry still needs
 side-by-side comparison on licensed maps, especially around crossings,
 bridges, tunnel entrances and Chrono content.
 
-This dynamic tile worker belongs to **free-roam only**. It still disables
-AI cars, pedestrians and timetables. The separate **CPU simulation** mode
-provides limited scheduled/random AI and pedestrians, but deliberately
-keeps its initial tiles fixed while entities are active. Neither mode
-authoritatively executes the **player's** bus scripts or vehicle physics.
+The **free-roam relay** can replace its active region (up to 192 tiles)
+because it has no server-owned AI. The separate **CPU simulation** mode
+extends the road network additively around connected drivers, preserving
+lane IDs already held by AI, pedestrians and scheduled buses. Until safe
+entity-aware unloading exists, it retains up to **512 unique tiles across
+the session**; once full, new distant regions are refused with a warning,
+not silently loaded into unbounded RAM. Its map worker operates off the
+60 Hz network tick but has not yet demonstrated full lifecycle/unloading
+parity. Neither mode authoritatively executes the **player's** bus scripts
+or vehicle physics.
 
 ## AI cars sinking or floating — ground parity re-test
 
@@ -321,6 +327,32 @@ With two graphical clients connected to the **same** native server:
 The related checklist is in `docs/DEDICATED_SERVER_REGRESSIONS.md`
 under **AI road height — graphical-client regression gate**. This is a
 blocking real-world check, not a proven fix on every map.
+
+## TPS, tick latency and memory — practical load test
+
+A steady **59–60 TPS** reported by the live host is a useful baseline;
+it is not proof of capacity for 320 AI cars, 2,000 pedestrians, several
+players or a complex map. TPS measures completed ticks, whereas the
+profiler's p95/p99 reveals short stalls even when the average is 60.
+
+1. Run the server with 2–3 real clients on the same map, date, buses and
+   comparable traffic settings as the graphical host. Record the PR commit.
+2. Enter `timings start`, drive across several tile boundaries, run
+   `timings report` after at least 10 minutes, and then `timings stop`.
+3. Monitor the periodic `native load:` log. Every 60 simulated tick-seconds
+   it reports measured TPS, active CPU tiles, AI/population counts and an
+   **estimated terrain/raster/wheel heap**. This is not total process RAM:
+   also record actual RSS and peak RSS externally on the host OS.
+4. Repeat at traffic targets of 0, 30, 160 and (only if stable) 320; compare
+   passenger demand with and without people. Observe p95/p99/max tick time
+   and CPU usage. The 60 Hz tick budget is about **16.67 ms**.
+5. If the 512-tile accumulated limit is reached, the host will refuse new
+   distant regions rather than accumulate unbounded data. Do **not** treat
+   this as complete map streaming: unloaded-region eviction and live
+   entity migration are separate work.
+
+The test is a measurement plan; no benchmark numbers beyond those actually
+collected from the running system should be claimed.
 
 ## Real-client multiplayer test procedure (2–3 drivers)
 
@@ -374,7 +406,7 @@ pedestrians and schedules, but can stream distant tiles. The separate
 `--experimental-simulation` mode activates bounded AI traffic, passengers,
 Chrono road buses and their shared LAN script-context pages on fixed tiles.
 Neither has complete server-owned player-bus physics, map/crossing collision,
-entity-aware region streaming or verified real-client passenger parity.
+safe entity-aware tile unloading or verified real-client passenger parity.
 Passing this table does **not** make either native mode production-ready.
 
 ## Acceptance checklist
@@ -386,10 +418,11 @@ Passing this table does **not** make either native mode production-ready.
   do not crash the host.
 - Default configuration transfers no private map, vehicle or livery. With explicit mod-sharing opt-in, only redistribution-authorized content is served over the authenticated connection.
 
-**Still missing:** authoritative player-bus physics/scripts, full deformed-road
-and train-signal parity, moving active AI/people between streamed tiles, and
-authenticated remapping/forwarding of other clients' `WORLDUP`/`DESCUP`
-passengers. The native host accepts validated, bounded client-owned upstream queues and forwards
-them with isolated IDs to nearby peers; server-owned people and AI also do
-publish their own snapshots. Multi-client graphical verification remains a
-blocking acceptance gate before merging the replacement server into main.
+**Still missing:** authoritative player-bus physics/scripts, complete
+attached/animated scenery collision, full deformed-road/train-signal parity,
+safe removal of tiles still referenced by active AI and pedestrians, and
+graphical-client validation of boarding/CLAIM and handover continuity.
+The host already accepts bounded `WORLDUP`/`DESCUP` queues, remaps IDs,
+forwards authorized people to nearby peers and validates boarding CLAIM
+proximity. These mechanisms still require real-client verification before
+the dedicated server can replace the graphical host.
