@@ -23,6 +23,7 @@ pub mod people_sync;
 mod people_upstream;
 pub mod population;
 pub mod reload;
+pub mod reboot;
 pub mod runtime;
 mod scenery_ground;
 pub mod signals;

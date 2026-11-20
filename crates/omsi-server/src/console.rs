@@ -15,6 +15,7 @@ const PER_TICK: usize = 16;
 static INPUT: OnceLock<Mutex<mpsc::Receiver<String>>> = OnceLock::new();
 static STOP: AtomicBool = AtomicBool::new(false);
 static RELOAD: AtomicBool = AtomicBool::new(false);
+static RESTART: AtomicBool = AtomicBool::new(false);
 
 /// Start reading lines in a separate thread. In non-interactive containers with
 /// closed stdin this thread simply exits; the host continues to serve players.
@@ -84,6 +85,7 @@ enum Builtin {
     Tps,
     Stop,
     Reload,
+    Restart,
     TimingStart,
     TimingStop,
     TimingReset,
@@ -98,6 +100,7 @@ fn builtin(command: &str) -> Option<Builtin> {
         "tps" => Some(Builtin::Tps),
         "stop" => Some(Builtin::Stop),
         "reload" => Some(Builtin::Reload),
+        "restart" => Some(Builtin::Restart),
         "timings on" | "timings start" | "spark start" | "profile start" => {
             Some(Builtin::TimingStart)
         }
@@ -120,7 +123,7 @@ pub fn run_builtin(
 ) -> bool {
     match builtin(command) {
         Some(Builtin::Help) => {
-            log::info!("server console commands: help, list, status, tps, reload, stop");
+            log::info!("server console commands: help, list, status, tps, reload, restart, stop");
             log::info!("timings on|off|report|reset (also: spark start|stop|report|reset)");
             log::info!(
                 "administration: say <message>, kick <id> [reason], ban <id> [reason], unban <ban-id>, hwban <id> <session|all> [duration] [reason]"
@@ -215,6 +218,10 @@ pub fn run_builtin(
             RELOAD.store(true, Ordering::SeqCst);
             log::info!("server console: config reload requested (on next simulation tick)");
         }
+        Some(Builtin::Restart) => {
+            RESTART.store(true, Ordering::SeqCst);
+            log::info!("server console: in-session simulation restart requested (LAN identity retained)");
+        }
         Some(Builtin::Stop) => {
             STOP.store(true, Ordering::SeqCst);
             log::info!("server console: graceful shutdown requested");
@@ -228,6 +235,12 @@ pub fn run_builtin(
 /// and applies the config; no input thread mutates host/network state.
 pub fn take_reload_requested() -> bool {
     RELOAD.swap(false, Ordering::SeqCst)
+}
+
+/// Restart only the CPU map/simulation while retaining the owning process,
+/// session key/code and WebSocket gateway. Consumed only by the tick thread.
+pub fn take_restart_requested() -> bool {
+    RESTART.swap(false, Ordering::SeqCst)
 }
 
 pub fn stop_requested() -> bool {
@@ -246,6 +259,8 @@ mod tests {
         assert_eq!(normalize(" ".repeat(LINE_LIMIT + 1).as_str()), None);
         assert_eq!(builtin("stop"), Some(Builtin::Stop));
         assert_eq!(builtin("reload"), Some(Builtin::Reload));
+        assert_eq!(builtin("restart"), Some(Builtin::Restart));
+        assert_eq!(builtin("restart now"), None);
         assert_eq!(normalize(" /reload "), Some("reload"));
         assert_eq!(builtin("reload now"), None);
         assert_eq!(builtin("stop now"), None);

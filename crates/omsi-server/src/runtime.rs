@@ -41,7 +41,7 @@ fn profile<T>(profiler: &mut Profiler, name: &'static str, f: impl FnOnce() -> T
 /// not the arbitrary ordering of [map] records in global.cfg. Without this a
 /// large map could load 64 distant empty tiles and reject an otherwise valid
 /// multiplayer test due to missing road paths.
-fn initial_tiles(
+pub(crate) fn initial_tiles(
     global: &omsi_map::global::GlobalCfg,
     index: &omsi_world::map_index::MapIndex,
     limit: usize,
@@ -334,7 +334,7 @@ fn report_entrypoints(map: &crate::world::HostWorld, keys: &[(i32, i32)], simula
         );
     }
 }
-fn make_cpu_sim(
+pub(crate) fn make_cpu_sim(
     root: &Path,
     cfg: &ServerCfg,
     map: &crate::world::HostWorld,
