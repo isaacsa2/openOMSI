@@ -467,7 +467,10 @@ fn run(
             root,
             &sim.world,
             &sim_clock,
-            cfg.ai_limits.max_scheduled.filter(|&count| count > 0).unwrap_or(12) as usize,
+            cfg.ai_limits
+                .max_scheduled
+                .filter(|&count| count > 0)
+                .unwrap_or(12) as usize,
         ))
     } else {
         None
