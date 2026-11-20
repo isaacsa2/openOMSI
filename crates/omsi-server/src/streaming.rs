@@ -8,7 +8,28 @@ use omsi_map::global::GlobalCfg;
 use std::collections::BTreeSet;
 
 pub const STREAM_TILE_LIMIT: usize = 192;
+/// Until entity-aware unloading can retire old lane indices, bound total
+/// populated tiles instead of accumulating the entire map indefinitely.
+pub const MAX_POPULATED_TILES: usize = 512;
 pub const STREAM_NEIGHBOR_RADIUS: i32 = 2;
+
+/// Request only unloaded tiles, keeping the player's prioritized order and
+/// the global retained-memory budget. A stopped worker must never silently
+/// receive more lanes than the CPU world can retain.
+pub fn populated_new_tiles(
+    desired: &[(i32, i32)],
+    loaded: &BTreeSet<(i32, i32)>,
+    limit: usize,
+) -> Vec<(i32, i32)> {
+    let budget = limit.saturating_sub(loaded.len());
+    let mut selected = BTreeSet::new();
+    desired
+        .iter()
+        .copied()
+        .filter(|key| !loaded.contains(key) && selected.insert(*key))
+        .take(budget)
+        .collect()
+}
 
 pub fn interest_tiles(
     global: &GlobalCfg,
@@ -326,6 +347,22 @@ mod tests {
             }
         }
         global
+    }
+
+    #[test]
+    fn populated_tiles_stop_at_the_retained_memory_budget() {
+        let current = BTreeSet::from([(0, 0), (1, 0), (2, 0)]);
+        let desired = [(0, 0), (5, 0), (5, 0), (6, 0), (7, 0), (8, 0)];
+        assert_eq!(
+            populated_new_tiles(&desired, &current, 5),
+            vec![(5, 0), (6, 0)],
+        );
+        assert!(populated_new_tiles(&desired, &current, 2).is_empty());
+        assert!(populated_new_tiles(&desired, &current, 3).is_empty());
+        assert_eq!(
+            populated_new_tiles(&desired, &current, MAX_POPULATED_TILES).len(),
+            4
+        );
     }
 
     #[test]
