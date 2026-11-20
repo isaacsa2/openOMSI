@@ -11,7 +11,8 @@ use crate::people_sync::HeadlessPeopleSync;
 use crate::population::{CpuTrafficPopulation, MAX_EXPERIMENTAL_TRAFFIC};
 use crate::simulation::CpuSimulation;
 use crate::streaming::{
-    STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update, apply_populated_update, interest_tiles,
+    MAX_POPULATED_TILES, STREAM_TILE_LIMIT, StreamWorker, apply_free_roam_update,
+    apply_populated_update, interest_tiles, populated_new_tiles,
 };
 use crate::tick::{FIXED_DT, TickPacer};
 use crate::timetable::CpuTimetable;
@@ -282,10 +283,18 @@ fn service_streaming(
         let current: BTreeSet<_> = active_keys.iter().copied().collect();
         let next: BTreeSet<_> = desired.iter().copied().collect();
         let needed = if populated {
-            desired
-                .into_iter()
-                .filter(|key| !current.contains(key))
-                .collect()
+            let to_load = populated_new_tiles(&desired, &current, MAX_POPULATED_TILES);
+            if to_load.is_empty()
+                && current.len() >= MAX_POPULATED_TILES
+                && desired.iter().any(|key| !current.contains(key))
+                && tick % 3600 == 0
+            {
+                log::warn!(
+                    "native populated tiles: retained limit of {} reached; a distant area was not loaded to protect RAM and live AI lane IDs",
+                    MAX_POPULATED_TILES
+                );
+            }
+            to_load
         } else if next != current {
             desired
         } else {
