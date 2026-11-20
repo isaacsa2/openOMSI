@@ -59,6 +59,12 @@ pub struct HeadlessPeopleSync {
     elapsed: f32,
     clients: HashMap<u32, ClientPeople>,
     pub sent_bytes: u64,
+    /// The graphical client sends its own boarded/walking passengers on
+    /// WORLDUP/DESCUP. Until we can remap and verify client-owned IDs just as
+    /// the graphical host does, discard those queues each tick: otherwise
+    /// they accumulate without bound on a long-lived dedicated host.
+    pub ignored_client_people: u64,
+    warned_client_people: bool,
 }
 
 fn state_of(person: &LanPerson, traffic: &TrafficTable) -> Option<PersonState> {
@@ -121,6 +127,17 @@ impl HeadlessPeopleSync {
     ) -> usize {
         if lan.role != Role::Host || !dt.is_finite() || dt <= 0.0 {
             return 0;
+        }
+        // Client passenger updates are accepted by the legacy wire decoder
+        // even when this experimental host does not yet relay them. Drain
+        // promptly to avoid an attacker or normal clients filling memory.
+        let ignored = lan.take_world_up().len() + lan.take_descs_up().len();
+        self.ignored_client_people += ignored as u64;
+        if ignored > 0 && !self.warned_client_people {
+            self.warned_client_people = true;
+            log::warn!(
+                "native LAN: client-owned pedestrian forwarding is not enabled; discarding WORLDUP/DESCUP until ID-safe relay is integrated"
+            );
         }
         // Same recovery channel as the graphical host when a DESC was lost.
         for (id, wants) in lan.take_wants() {
