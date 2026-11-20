@@ -701,22 +701,26 @@ fn process_console_changes(
     }
 }
 
-fn run(
+/// Prepared CPU world for the first native host tick. Keep bootstrap
+/// parsing outside the fixed-rate LAN loop and below the graphical layer.
+struct CpuBootstrap {
+    date_num: i32,
+    date: String,
+    initial_time: f64,
+    map: crate::world::HostWorld,
+    keys: Vec<(i32, i32)>,
+    sim: CpuSimulation,
+    sim_clock: omsi_sim::SimClock,
+    calendar: crate::clock::NativeCalendar,
+    schedule: Option<CpuTimetable>,
+    collisions: crate::collision::CollisionCounts,
+}
+
+fn load_initial_cpu_world(
     root: &Path,
-    plan: &crate::startup::LaunchPlan,
-    max_ticks: Option<u64>,
+    cfg: &ServerCfg,
     simulated: bool,
-) -> Result<()> {
-    let cfg = &plan.config;
-    // A separate applied snapshot changes only after full /reload validation.
-    let mut live_cfg = cfg.clone();
-    let weather = plan.weather.as_deref();
-    if simulated {
-        allow_simulated_roam(cfg)?;
-    } else {
-        allow_free_roam(cfg)?;
-    }
-    crate::mod_policy::verify_explicit_opt_in(cfg, &plan.config_path)?;
+) -> Result<CpuBootstrap> {
     let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
     let initial_time = checked_clock(&cfg.time)?;
     let global = omsi_cfg::resolve_path(root, &cfg.map);
@@ -743,9 +747,9 @@ fn run(
     );
     let mut sim = make_cpu_sim(root, cfg, &map, &keys, signals, simulated, initial_time);
     start_verified_parked_buses(root, cfg, &map, &sim);
-    let mut calendar = crate::clock::NativeCalendar::new(&date, &cfg.time);
-    let mut sim_clock = calendar.snapshot();
-    let mut schedule = if simulated && cfg.timetable {
+    let calendar = crate::clock::NativeCalendar::new(&date, &cfg.time);
+    let sim_clock = calendar.snapshot();
+    let schedule = if simulated && cfg.timetable {
         Some(CpuTimetable::new(
             root,
             &sim.world,
@@ -762,6 +766,48 @@ fn run(
             sim.people.stop_names = Some(timetable.sim.stop_names());
         }
     }
+    Ok(CpuBootstrap {
+        date_num,
+        date,
+        initial_time,
+        map,
+        keys,
+        sim,
+        sim_clock,
+        calendar,
+        schedule,
+        collisions,
+    })
+}
+
+fn run(
+    root: &Path,
+    plan: &crate::startup::LaunchPlan,
+    max_ticks: Option<u64>,
+    simulated: bool,
+) -> Result<()> {
+    let cfg = &plan.config;
+    // A separate applied snapshot changes only after full /reload validation.
+    let mut live_cfg = cfg.clone();
+    let weather = plan.weather.as_deref();
+    if simulated {
+        allow_simulated_roam(cfg)?;
+    } else {
+        allow_free_roam(cfg)?;
+    }
+    crate::mod_policy::verify_explicit_opt_in(cfg, &plan.config_path)?;
+    let CpuBootstrap {
+        date_num,
+        date,
+        initial_time,
+        map,
+        keys,
+        sim: mut sim,
+        sim_clock: mut sim_clock,
+        calendar: mut calendar,
+        schedule: mut schedule,
+        collisions,
+    } = load_initial_cpu_world(root, cfg, simulated)?;
     let world = WorldInfo {
         map: cfg.map.replace('\\', "/"),
         date: date.clone(),
