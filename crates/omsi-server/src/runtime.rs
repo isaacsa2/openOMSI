@@ -327,7 +327,10 @@ fn make_cpu_sim(
 ) -> CpuSimulation {
     // Only the explicit simulation mode loads installed AI definitions and
     // script programs. The original free-roam relay retains its zero-AI path.
-    let random = if simulated && cfg.traffic > 0 {
+    // The simulation flag opts in to locally installed AI definitions even
+    // with traffic=0. This is essential: /reload may raise traffic from zero
+    // without replacing the road network or reopening the server.
+    let random = if simulated {
         let facts = map.data.snapshot();
         traffic::random_types(root, &map.global, &map.map_dir, &facts.map.ailists)
     } else {
@@ -615,7 +618,9 @@ fn run(
                     timetable.tick(root, &sim.world, &mut sim.traffic, &sim_clock, 1.0)
                 });
             }
-            if live_cfg.passengers && n % 3600 == 0 {
+            // Keep passenger stop demand in sync with Chrono when the
+            // simulation clock is accelerated by time_speed.
+            if live_cfg.passengers && n % 60 == 0 {
                 sim.people.due_dests = Some(timetable.sim.due_destinations(authoritative));
                 sim.people.due_at = authoritative;
             }
