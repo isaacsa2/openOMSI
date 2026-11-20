@@ -10,11 +10,13 @@ use omsi_net::world::{self, Activity, Desc, PersonPlace, PersonState, WorldFrame
 use omsi_net::{LanSession, Role};
 use omsi_sim::people::{LanPerson, PeopleSim};
 use std::collections::{HashMap, HashSet};
+use crate::people_upstream::{ClientUpstream, RELAY_ID_START};
 
 const PERSON_RADIUS: f64 = 260.0;
 const MAX_PEOPLE_PER_CLIENT: usize = 96;
 const MAX_WANTS_PER_CLIENT: usize = 64;
 const MAX_GONE_PER_FRAME: usize = 63;
+const MAX_RELAY_PER_CLIENT: usize = 48;
 
 #[derive(Default)]
 struct ClientPeople {
@@ -59,16 +61,13 @@ pub struct HeadlessPeopleSync {
     elapsed: f32,
     clients: HashMap<u32, ClientPeople>,
     pub sent_bytes: u64,
-    /// The graphical client sends its own boarded/walking passengers on
-    /// WORLDUP/DESCUP. Until we can remap and verify client-owned IDs just as
-    /// the graphical host does, discard those queues each tick: otherwise
-    /// they accumulate without bound on a long-lived dedicated host.
+    upstream: ClientUpstream,
+    /// Client updates rejected when passenger simulation is disabled.
     pub ignored_client_people: u64,
-    warned_client_people: bool,
 }
 
 fn state_of(person: &LanPerson, traffic: &TrafficTable) -> Option<PersonState> {
-    if person.id > world::MAX_ID
+    if person.id >= RELAY_ID_START
         || !person.pos.is_finite()
         || !person.heading.is_finite()
         || !person.speed.is_finite()
@@ -124,20 +123,31 @@ impl HeadlessPeopleSync {
         people: &PeopleSim,
         table: &TrafficTable,
         dt: f32,
+        allow_client_people: bool,
     ) -> usize {
         if lan.role != Role::Host || !dt.is_finite() || dt <= 0.0 {
             return 0;
         }
-        // Client passenger updates are accepted by the legacy wire decoder
-        // even when this experimental host does not yet relay them. Drain
-        // promptly to avoid an attacker or normal clients filling memory.
-        let ignored = lan.take_world_up().len() + lan.take_descs_up().len();
-        self.ignored_client_people += ignored as u64;
-        if ignored > 0 && !self.warned_client_people {
-            self.warned_client_people = true;
-            log::warn!(
-                "native LAN: client-owned pedestrian forwarding is not enabled; discarding WORLDUP/DESCUP until ID-safe relay is integrated"
-            );
+        let positions: HashMap<u32, DVec3> = lan
+            .peers()
+            .filter(|p| p.has_info && p.has_pose && p.pose.has_vehicle())
+            .filter_map(|p| {
+                let at = DVec3::new(p.pose.x, p.pose.y, p.pose.z);
+                at.is_finite().then_some((p.pose.id, at))
+            })
+            .collect();
+        self.upstream.retain_peers(&positions);
+        let descs = lan.take_descs_up();
+        let frames = lan.take_world_up();
+        if allow_client_people {
+            for (peer, desc) in descs {
+                self.upstream.describe(peer, desc);
+            }
+            for (peer, _, frame) in frames {
+                self.upstream.frame(peer, frame);
+            }
+        } else {
+            self.ignored_client_people += (descs.len() + frames.len()) as u64;
         }
         // Same recovery channel as the graphical host when a DESC was lost.
         for (id, wants) in lan.take_wants() {
@@ -145,7 +155,9 @@ impl HeadlessPeopleSync {
                 if !wanted.person {
                     continue;
                 }
-                if let Some(ty) = people.lan_people_by_id(wanted.id) {
+                if let Some(file) = self.upstream.description(wanted.id) {
+                    lan.send_desc(id, &Desc::Person { id: wanted.id, file });
+                } else if let Some(ty) = people.lan_people_by_id(wanted.id) {
                     lan.send_desc(
                         id,
                         &Desc::Person {
@@ -179,10 +191,15 @@ impl HeadlessPeopleSync {
             // Enforce the per-client bound BEFORE emitting descriptions.
             // Previously filter_map() sent DESC for every nearby pedestrian
             // and only then take(96) capped the WORLD snapshot.
-            let visible: Vec<_> = nearby
+            let relayed = if allow_client_people {
+                self.upstream.visible(id, near, MAX_RELAY_PER_CLIENT)
+            } else {
+                Vec::new()
+            };
+            let mut visible: Vec<_> = nearby
                 .iter()
                 .filter_map(|person| state_of(person, table).map(|state| (person, state)))
-                .take(MAX_PEOPLE_PER_CLIENT)
+                .take(MAX_PEOPLE_PER_CLIENT - relayed.len())
                 .map(|(person, state)| {
                     if view.described.insert(state.id) {
                         lan.send_desc(
@@ -196,6 +213,12 @@ impl HeadlessPeopleSync {
                     state
                 })
                 .collect();
+            for (state, file) in relayed {
+                if view.described.insert(state.id) {
+                    lan.send_desc(id, &Desc::Person { id: state.id, file });
+                }
+                visible.push(state);
+            }
             let frame = view.frame(&visible, world::MOVING_EVERY);
             if !frame.people.is_empty() || !frame.gone.is_empty() {
                 bytes += lan.send_world(id, &frame);

@@ -392,6 +392,7 @@ impl NativePublishers {
         sim: &CpuSimulation,
         root: &Path,
         profiler: &mut Profiler,
+        allow_client_people: bool,
     ) {
         profile(profiler, "world_sync", || {
             self.signals.tick(net.session_mut(), &sim.traffic, FIXED_DT)
@@ -416,6 +417,7 @@ impl NativePublishers {
                 &sim.people,
                 &self.traffic.table,
                 FIXED_DT,
+                allow_client_people,
             )
         });
     }
@@ -676,7 +678,7 @@ fn run(
                 sim.people.due_at = authoritative;
             }
         }
-        publishers.tick(&mut net, &sim, root, &mut profiler);
+        publishers.tick(&mut net, &sim, root, &mut profiler, simulated && live_cfg.passengers);
         sim.discard_presentation_events_after_publish();
         profiler.tick(started.elapsed());
         meter.completed(Instant::now());
