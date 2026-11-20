@@ -5,11 +5,12 @@ use anyhow::{Context, Result, ensure};
 use omsi_lan::server_cfg::ServerCfg;
 use omsi_map::global::GlobalCfg;
 use omsi_sim::SimClock;
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::runtime::{INITIAL_TILE_LIMIT, initial_tiles, make_cpu_sim};
 use crate::simulation::CpuSimulation;
-use crate::streaming::StreamWorker;
+use crate::streaming::{STREAM_TILE_LIMIT, StreamWorker};
 use crate::timetable::{CpuTimetable, scheduled_budget};
 
 /// Sim changes that can safely be applied after recreating the CPU world.
@@ -57,6 +58,42 @@ pub fn prepare(
     clock: &SimClock,
     simulated: bool,
 ) -> Result<Prepared> {
+    prepare_with_active(root, cfg, clock, simulated, &[])
+}
+
+/// A Chrono transition must not forget the remote drivers' already streamed
+/// neighborhoods. Keep their active tiles first, followed by the normal
+/// entrypoint selection, with the same bounded CPU tile budget.
+fn selected_tiles(
+    global: &GlobalCfg,
+    index: &omsi_world::map_index::MapIndex,
+    previous: &[(i32, i32)],
+) -> Vec<(i32, i32)> {
+    let valid: HashSet<_> = global.tiles.iter().map(|t| (t.x, t.y)).collect();
+    let mut selected = Vec::new();
+    let mut seen = HashSet::new();
+    for key in previous
+        .iter()
+        .copied()
+        .chain(initial_tiles(global, index, INITIAL_TILE_LIMIT))
+    {
+        if valid.contains(&key) && seen.insert(key) {
+            selected.push(key);
+            if selected.len() == STREAM_TILE_LIMIT {
+                break;
+            }
+        }
+    }
+    selected
+}
+
+pub(crate) fn prepare_with_active(
+    root: &Path,
+    cfg: &ServerCfg,
+    clock: &SimClock,
+    simulated: bool,
+    previous: &[(i32, i32)],
+) -> Result<Prepared> {
     let path = omsi_cfg::resolve_path(root, &cfg.map);
     // Chrono overrides use the actual current simulated date after midnight,
     // rather than reinstating the original day from server.cfg.
@@ -66,7 +103,7 @@ pub fn prepare(
         map.index.tiles_read > 0,
         "restart map has no readable tiles"
     );
-    let keys = initial_tiles(&map.global, &map.index, INITIAL_TILE_LIMIT);
+    let keys = selected_tiles(&map.global, &map.index, previous);
     ensure!(!keys.is_empty(), "restart map has no selected tiles");
     map.install_spline_ground_surfaces(&keys);
     map.install_stop_lists(&keys);
@@ -111,6 +148,30 @@ pub fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chrono_rebuild_keeps_valid_loaded_player_tiles_without_duplicates() {
+        use omsi_map::global::MapTileRef;
+        let mut global = GlobalCfg::default();
+        global.tiles = (0..220)
+            .map(|x| MapTileRef {
+                x,
+                y: 0,
+                ..Default::default()
+            })
+            .collect();
+        let index = omsi_world::map_index::MapIndex::default();
+        let retained = selected_tiles(
+            &global,
+            &index,
+            &[(210, 0), (211, 0), (210, 0), (999, 0)],
+        );
+        assert_eq!(&retained[..2], &[(210, 0), (211, 0)]);
+        assert!(!retained.contains(&(999, 0)));
+        assert!(retained.contains(&(0, 0)));
+        assert_eq!(retained.len(), retained.iter().copied().collect::<HashSet<_>>().len());
+        assert!(retained.len() <= STREAM_TILE_LIMIT);
+    }
 
     #[test]
     fn restart_accepts_human_budget_and_timetable_but_not_socket_or_map_change() {
