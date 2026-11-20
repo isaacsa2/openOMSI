@@ -266,14 +266,46 @@ tile boundaries. Look for `native tile stream:` in the host console and
 verify that both players stay connected and their buses continue to update.
 Return to the starting area, repeat the journey and reconnect another
 client. Note stalls, new invisible walls, missing signals and unexpected
-terrain or surface heights. These remain open parity risks until tested on
-licensed maps, especially with complex crossings and Chrono content.
+terrain or surface heights. The dedicated CPU road loader now applies
+static crossing deformation fields, tilted object AI paths and explicit
+terrain-hole cutters, but complex/deformable geometry still needs
+side-by-side comparison on licensed maps, especially around crossings,
+bridges, tunnel entrances and Chrono content.
 
 This dynamic tile worker belongs to **free-roam only**. It still disables
 AI cars, pedestrians and timetables. The separate **CPU simulation** mode
 provides limited scheduled/random AI and pedestrians, but deliberately
 keeps its initial tiles fixed while entities are active. Neither mode
 authoritatively executes the **player's** bus scripts or vehicle physics.
+
+## AI cars sinking or floating — ground parity re-test
+
+The original headless multiplayer report described **AI cars partially
+sinking at certain road sections** while other sections were normal.
+After updating to a server build containing the crossing/ground correction,
+test the same positions again. The command `/restart` only rebuilds world
+state; it cannot replace an older executable with newer code.
+
+With two graphical clients connected to the **same** native server:
+
+1. Keep the prior problem section and one known-good road section in the
+   test plan. Observe an identical AI car on both screens; compare against
+   the graphical game's non-dedicated host at that map position.
+2. Include sloped intersections, `[crossing_heightdeformation]` junctions,
+   `[absheight]` bridges, `[terrainhole]` tunnel mouths and tile seams.
+3. Note whether the car is already below the road when spawned, crosses
+   into the asphalt while moving, appears to hover, or differs between
+   clients. Test both random AI and scheduled road buses.
+4. Record `map`, road/landmark, date/time, PR commit and AI model.
+   Capture paired screenshots only where the defect is visible. Collect
+   a nearby log excerpt and the `tps`/`timings report` output.
+5. Do not confuse successful CPU geometry unit tests with full graphical
+   wheel-ground parity: animated/attached scenery, some terrain shaping
+   and complete player-bus physics remain experimental.
+
+The related checklist is in `docs/DEDICATED_SERVER_REGRESSIONS.md`
+under **AI road height — graphical-client regression gate**. This is a
+blocking real-world check, not a proven fix on every map.
 
 ## Real-client multiplayer test procedure (2–3 drivers)
 
