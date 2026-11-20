@@ -159,10 +159,14 @@ impl HeadlessPeopleSync {
         for (id, near) in clients {
             let view = self.clients.entry(id).or_default();
             let nearby = people.lan_people(near, PERSON_RADIUS);
+            // Enforce the per-client bound BEFORE emitting descriptions.
+            // Previously filter_map() sent DESC for every nearby pedestrian
+            // and only then take(96) capped the WORLD snapshot.
             let visible: Vec<_> = nearby
                 .iter()
-                .filter_map(|person| {
-                    let state = state_of(person, table)?;
+                .filter_map(|person| state_of(person, table).map(|state| (person, state)))
+                .take(MAX_PEOPLE_PER_CLIENT)
+                .map(|(person, state)| {
                     if view.described.insert(state.id) {
                         lan.send_desc(
                             id,
@@ -172,9 +176,8 @@ impl HeadlessPeopleSync {
                             },
                         );
                     }
-                    Some(state)
+                    state
                 })
-                .take(MAX_PEOPLE_PER_CLIENT)
                 .collect();
             let frame = view.frame(&visible, world::MOVING_EVERY);
             if !frame.people.is_empty() || !frame.gone.is_empty() {
@@ -228,6 +231,21 @@ mod tests {
         assert!(view.frame(&[], 0.1).gone.is_empty());
         assert!(!view.described.contains(&12));
         assert_eq!(view.frame(&[person(12, 2.0)], 0.1).people.len(), 1);
+    }
+
+    #[test]
+    fn visibility_limit_also_caps_description_candidates() {
+        let visible: Vec<_> = (0..200).map(|id| person(id, id as f64)).collect();
+        let limited: Vec<_> = visible
+            .iter()
+            .take(MAX_PEOPLE_PER_CLIENT)
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(limited.len(), MAX_PEOPLE_PER_CLIENT);
+        assert_eq!(*limited.last().unwrap(), 95);
+        let mut view = ClientPeople::default();
+        assert_eq!(view.frame(&visible[..MAX_PEOPLE_PER_CLIENT], 0.1).people.len(), 96);
+        assert!(view.frame(&visible[..MAX_PEOPLE_PER_CLIENT], 0.1).gone.is_empty());
     }
 
     #[test]
