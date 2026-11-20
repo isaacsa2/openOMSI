@@ -29,7 +29,7 @@ pub struct HostWorld {
     chrono_dirs: Vec<PathBuf>,
     spline_defs: HashMap<String, Option<Arc<Spline>>>,
     object_defs: HashMap<String, Option<Arc<SceneryObject>>>,
-    crossing_fields: HashMap<PathBuf, Option<Arc<MeshData>>>,
+    crossing_fields: HashMap<PathBuf, Result<Option<Arc<MeshData>>, ()>>,
 }
 
 /// LRU cache for immutable OMSI tile records. A map can have tens of thousands
@@ -313,7 +313,7 @@ impl HostWorld {
     /// Cache the authored height field; every crossing of this type reuses it.
     /// A field is optional, but a declared field that cannot be loaded must
     /// never produce a pretend flat crossing in the AI path network.
-    fn crossing_field(&mut self, def: &SceneryObject) -> Option<Arc<MeshData>> {
+    fn crossing_field(&mut self, def: &SceneryObject) -> Result<Option<Arc<MeshData>>, ()> {
         if let Some(field) = self.crossing_fields.get(&def.path) {
             return field.clone();
         }
@@ -377,7 +377,13 @@ impl HostWorld {
                 origin.y + object.pos[1],
                 object.pos[2] + height,
             );
-            let field = self.crossing_field(&def);
+            let Ok(field) = self.crossing_field(&def) else {
+                log::warn!(
+                    "dedicated AI: skipped crossing paths with unavailable deformation {}",
+                    def.path.display()
+                );
+                continue;
+            };
             let mut made = crate::lanes::object_lanes(
                 &def,
                 place,
