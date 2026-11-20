@@ -363,6 +363,9 @@ fn make_cpu_sim(
         },
     );
     sim.people.players_only = true;
+    // Preserve the ordinary player experience, but concentrate the limited
+    // headless human pool around actual connected drivers (never the host).
+    sim.people.lan_population_boost = 1.75;
     sim.people.density = if simulated && cfg.passengers {
         cfg.passenger_density.unwrap_or(1.0).clamp(0.0, 3.0)
     } else {

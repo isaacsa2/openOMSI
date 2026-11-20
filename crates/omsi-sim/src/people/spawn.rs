@@ -178,6 +178,7 @@ impl PeopleSim {
             mirror: false,
             lan_centers: Vec::new(),
             players_only: false,
+            lan_population_boost: 1.0,
             remote_now: Vec::new(),
             placed_now: Vec::new(),
             claims_out: Vec::new(),

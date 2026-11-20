@@ -97,6 +97,17 @@ impl PeopleSim {
         self.anchors().all(|c| (p - c).length() > r)
     }
 
+    /// Density used when filling pedestrian places. Never inflate a normal
+    /// graphical session, only the population owned by a headless host.
+    pub fn focused_density(&self) -> f32 {
+        let bonus = if self.players_only {
+            self.lan_population_boost.clamp(1.0, 3.0)
+        } else {
+            1.0
+        };
+        (self.density.max(0.0) * bonus).clamp(0.0, 3.0)
+    }
+
     /// The stops and pavements around the other players of a LAN session (host).
     pub fn populate_lan_centers(
         &mut self,
@@ -107,7 +118,12 @@ impl PeopleSim {
             return;
         }
         let mine = self.center;
-        for c in self.lan_centers.clone() {
+        // Round-robin the starting player each second so the first peer in
+        // the LAN table cannot monopolize the bounded population pool.
+        let mut centers = self.lan_centers.clone();
+        let offset = (self.time.max(0.0) as usize) % centers.len();
+        centers.rotate_left(offset);
+        for c in centers {
             // (near us they are there already - unless nobody plays here)
             if !self.players_only && (c - mine).length() < 150.0 {
                 continue;
@@ -402,5 +418,37 @@ impl PeopleSim {
                 self.claims_out.push(*id);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod native_focus_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn headless_population_has_no_phantom_host_player() {
+        let mut people = PeopleSim::new(Path::new("."), 16);
+        people.center = DVec3::ZERO;
+        people.players_only = true;
+        people.lan_centers = vec![DVec3::new(5_000.0, 0.0, 0.0)];
+        let centers: Vec<_> = people.anchors().collect();
+        assert_eq!(centers, people.lan_centers);
+        assert!(people.far_from_players(DVec3::ZERO, 450.0));
+        assert!(!people.far_from_players(centers[0], 450.0));
+    }
+
+    #[test]
+    fn headless_focus_only_boosts_remote_player_population() {
+        let mut people = PeopleSim::new(Path::new("."), 16);
+        people.density = 1.0;
+        people.lan_population_boost = 1.75;
+        assert_eq!(people.focused_density(), 1.0);
+        people.players_only = true;
+        assert_eq!(people.focused_density(), 1.75);
+        people.density = 2.5;
+        assert_eq!(people.focused_density(), 3.0);
+        people.density = 0.0;
+        assert_eq!(people.focused_density(), 0.0);
     }
 }

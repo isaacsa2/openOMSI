@@ -464,6 +464,9 @@ pub struct PeopleSim {
     /// too, the stops there took the whole pool (`max_people`) for people nobody saw, and
     /// none were left for the stops and pavements around the players.
     pub players_only: bool,
+    /// Extra population pressure only around LAN players on the native host.
+    /// Defaults to 1 for graphical games; bounded by the usual 3x density cap.
+    pub lan_population_boost: f32,
     /// LAN play: the other players' buses this frame (`set_remote_buses`), for their riders
     /// to sit in. Nobody of ours boards them: their doors count as shut.
     pub remote_now: Vec<BusNow>,

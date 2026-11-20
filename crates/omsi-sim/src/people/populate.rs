@@ -263,7 +263,7 @@ impl PeopleSim {
                 // stop no trip leaves from, nobody)
                 let none_due = self.due_dests.as_ref().is_some_and(|d| d.get(&id).is_none_or(|set| set.is_empty()));
                 let served = if self.stop_targets.is_some() && (s.lines.is_empty() || none_due) { 0.0 } else { 1.0 };
-                let w = (self.density.max(0.0) * mean * s.factor * served).round().max(0.0) as usize;
+                let w = (self.focused_density() * mean * s.factor * served).round().max(0.0) as usize;
                 forced.unwrap_or(w).min(s.spots.len())
             };
             let s = self.stops.get_mut(&id).unwrap();
@@ -394,7 +394,7 @@ impl PeopleSim {
             .collect();
         let crowd = (lanes.len() as f32 / 120.0).clamp(0.6, 3.0);
         let target =
-            (self.pedestrians as f32 * crowd * self.density.clamp(0.0, 3.0)).round() as usize;
+            (self.pedestrians as f32 * crowd * self.focused_density()).round() as usize;
         // (0x62463c: walking the pavements only while fewer than half the pool do, and never
         // past the pool)
         let target = target.min(self.max_people / 2).min((self.max_people + self.people.iter().filter(|p| matches!(p.state, State::Strolling(_))).count()).saturating_sub(self.pool_used()));

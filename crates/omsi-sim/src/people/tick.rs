@@ -113,8 +113,13 @@ impl PeopleSim {
             self.stroll_timer -= dt;
             if self.stroll_timer <= 0.0 && !defer {
                 self.stroll_timer = 1.0;
-                let c = self.center;
-                self.populate_with(world, Some(n), c);
+                // A headless server has no host player or camera. Preparing
+                // stops around its zero-position wastes work and can reserve
+                // metadata for a place no connected player will visit.
+                if !self.players_only {
+                    let c = self.center;
+                    self.populate_with(world, Some(n), c);
+                }
                 if !self.mirror {
                     if !self.players_only {
                         self.populate_on_foot(world, n, 1.0);
