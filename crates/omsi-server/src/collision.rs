@@ -152,6 +152,23 @@ fn static_box(
     Ok(candidate)
 }
 
+/// MapIndex adds terrain height to ordinary scenery records. Objects
+/// declaring [absheight] must retain their authored Z instead, even when an
+/// indexed pose is available (bridge decks and raised collision barriers).
+fn collision_position(
+    base: DVec2,
+    authored_z: f64,
+    indexed: Option<DVec3>,
+    absolute_height: bool,
+    ground: impl FnOnce() -> f64,
+) -> DVec3 {
+    if absolute_height {
+        DVec3::new(base.x, base.y, authored_z)
+    } else {
+        indexed.unwrap_or_else(|| DVec3::new(base.x, base.y, authored_z + ground()))
+    }
+}
+
 impl HostWorld {
     /// Rebuild the complete active set of **box** obstacles and publish one
     /// WorldData snapshot. An LRU eviction of the tile parser does not evict
@@ -202,16 +219,17 @@ impl HostWorld {
                             .get(&obj.id)
                             .and_then(|(owner, p, _)| (*owner == key).then_some(*p))
                     });
-                let pos = indexed.unwrap_or_else(|| {
-                    let ground = if def.absolute_height() {
-                        0.0
-                    } else {
+                let pos = collision_position(
+                    base,
+                    obj.pos[2],
+                    indexed,
+                    def.absolute_height(),
+                    || {
                         self.terrain_height(base.x, base.y)
                             .map(f64::from)
                             .unwrap_or(0.0)
-                    };
-                    DVec3::new(base.x, base.y, obj.pos[2] + ground)
-                });
+                    },
+                );
                 // Decorative and terrain-render objects are not rigid
                 // obstacles even when their map placement is tilted.
                 if !(def.fixed || def.crash_mode_pole.is_some())
@@ -301,6 +319,24 @@ mod tests {
         assert_eq!(
             static_box(&def, 1, at, 0.0, &RoadPoints::default()).unwrap_err(),
             Exclusion::NotSolid
+        );
+    }
+
+    #[test]
+    fn absolute_collision_height_is_not_shifted_by_indexed_terrain() {
+        let base = DVec2::new(100.0, 200.0);
+        let indexed = Some(DVec3::new(100.0, 200.0, 35.0));
+        assert_eq!(
+            collision_position(base, 5.0, indexed, true, || panic!("terrain sampled")),
+            DVec3::new(100.0, 200.0, 5.0),
+        );
+        assert_eq!(
+            collision_position(base, 5.0, indexed, false, || panic!("terrain sampled")),
+            DVec3::new(100.0, 200.0, 35.0),
+        );
+        assert_eq!(
+            collision_position(base, 5.0, None, false, || 30.0),
+            DVec3::new(100.0, 200.0, 35.0),
         );
     }
 
