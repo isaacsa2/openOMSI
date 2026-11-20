@@ -127,8 +127,8 @@ pub fn apply_world_jobs<'a>(
     }
 }
 
-    /// The native CPU simulation's AI traffic, used by the same validated
-    /// administrative world-command handler as the graphical host.
+/// The native CPU simulation's AI traffic, used by the same validated
+/// administrative world-command handler as the graphical host.
 pub struct NativeTraffic<'a>(pub &'a mut omsi_sim::ai_traffic::TrafficSim);
 
 impl omsi_lan::admin::world::ServerTraffic for NativeTraffic<'_> {
