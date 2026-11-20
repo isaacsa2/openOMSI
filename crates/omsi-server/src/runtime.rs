@@ -374,6 +374,53 @@ fn make_cpu_sim(
     sim
 }
 
+/// Isolate renderer-free world publication from the authoritative 60 Hz
+/// simulation runner. The existing LAN traffic table, rotating script
+/// context and pedestrian publishers share a single immutable sim snapshot.
+#[derive(Default)]
+struct NativePublishers {
+    signals: crate::lan_world::HeadlessWorldSync,
+    traffic: HeadlessTrafficSync,
+    context: HeadlessContextSync,
+    people: HeadlessPeopleSync,
+}
+
+impl NativePublishers {
+    fn tick(
+        &mut self,
+        net: &mut HostTransport,
+        sim: &CpuSimulation,
+        root: &Path,
+        profiler: &mut Profiler,
+    ) {
+        profile(profiler, "world_sync", || {
+            self.signals.tick(net.session_mut(), &sim.traffic, FIXED_DT)
+        });
+        profile(profiler, "traffic_sync", || {
+            self.traffic.update(&sim.traffic, root);
+            self.traffic.publish(net.session_mut(), FIXED_DT)
+        });
+        // The traffic table only describes car poses and appearances:
+        // the same scripts and timetable context must accompany each car.
+        profile(profiler, "ai_context", || {
+            self.context.tick(
+                net.session_mut(),
+                &sim.traffic,
+                &self.traffic.table,
+                FIXED_DT,
+            )
+        });
+        profile(profiler, "people_sync", || {
+            self.people.tick(
+                net.session_mut(),
+                &sim.people,
+                &self.traffic.table,
+                FIXED_DT,
+            )
+        });
+    }
+}
+
 fn run(
     root: &Path,
     plan: &crate::startup::LaunchPlan,
@@ -514,10 +561,7 @@ fn run(
         notice_ok: &|notice| notice.len() <= 2048,
     };
     let mut pacer = TickPacer::new(Instant::now());
-    let mut world_sync = crate::lan_world::HeadlessWorldSync::default();
-    let mut traffic_sync = HeadlessTrafficSync::default();
-    let mut context_sync = HeadlessContextSync::default();
-    let mut people_sync = HeadlessPeopleSync::default();
+    let mut publishers = NativePublishers::default();
     let mut population = CpuTrafficPopulation::default();
     let stream_global = map.global.clone();
     // A live traffic sim retains lane indices, vehicle paths and pedestrians:
@@ -625,35 +669,7 @@ fn run(
                 sim.people.due_at = authoritative;
             }
         }
-        profile(&mut profiler, "world_sync", || {
-            world_sync.tick(net.session_mut(), &sim.traffic, FIXED_DT)
-        });
-        // The graphical host writes an acknowledged traffic table after
-        // physics. Keep the same wire contract even when experimental
-        // free-roam has no server-owned AI cars.
-        profile(&mut profiler, "traffic_sync", || {
-            traffic_sync.update(&sim.traffic, root);
-            traffic_sync.publish(net.session_mut(), FIXED_DT)
-        });
-        // Clients need their AI script context before they can display
-        // the car/timetable: the traffic table alone is not enough.
-        profile(&mut profiler, "ai_context", || {
-            context_sync.tick(
-                net.session_mut(),
-                &sim.traffic,
-                &traffic_sync.table,
-                FIXED_DT,
-            )
-        });
-        profile(&mut profiler, "people_sync", || {
-            people_sync.tick(
-                net.session_mut(),
-                &sim.people,
-                &traffic_sync.table,
-                FIXED_DT,
-            )
-        });
-        // AI vehicle and passenger snapshots remain unsupported in free-roam.
+        publishers.tick(&mut net, &sim, root, &mut profiler);
         sim.discard_presentation_events_after_publish();
         profiler.tick(started.elapsed());
         meter.completed(Instant::now());
