@@ -161,12 +161,18 @@ preserves the `OMSI_HEIGHTPROFILE_GROUND` switch, alpha-only overlays and
 the overhead-spline exclusion rules. Tests exercise triangle-height sampling
 and road geometry overlapping two adjacent tiles.
 
-Static scenery `[surface]` objects can now contribute their first CPU
+Static scenery `[surface]` objects can contribute their first CPU
 O3D mesh to the road raster and wheel-probe grid, with proper world rotation
-and a bounded mesh-definition cache. The loader rejects animated, missing,
-corrupted and unusually large surface meshes, and leaves terrain-deformed
-crossings and explicit cutter-backed geometry pending rather than placing
-incorrect flat surfaces.
+and a bounded mesh-definition cache. The experimental CPU loader now applies
+authored `[crossing_heightdeformation]` fields to static crossing road meshes
+and object AI lanes, including pitch/bank, and installs explicit
+`[terrainhole]` cutters (also on non-drivable tunnel/crossing objects).
+Absolute-height objects preserve their authored Z. Tests cover tilted lanes,
+barycentric field sampling, the deformed road mesh, raster hole coverage and
+rejection of a cutter buried far below the terrain. Animated, attached,
+missing, corrupt and oversized surfaces remain unsupported or reported as
+incomplete. This is **partial** parity: neither an automated raster test nor
+a green headless build establishes visible wheel contact on a real map.
 
 **Not yet parity:** the native executable starts with up to 64
 entrypoint-oriented tiles. Restricted free-roam now chooses additional tiles
@@ -181,10 +187,43 @@ population disabled. The separate `--experimental-simulation` mode now
 **additively** extends the CPU network around actual connected players,
 keeping existing lane IDs stable for active AI and timed road buses.
 Both modes still lack verified entity-aware unloading, complete crossing
-deformation, terrain-hole parity, graphical-client passenger boarding
-and authoritative **player-driven** bus scripts. Rejected
+deformation and terrain-hole parity across all map content, graphical-client
+passenger boarding and authoritative **player-driven** bus scripts. Rejected
 scenery surfaces, invalid splines and missing definitions remain visible
 as unresolved counts; the road mesh is not proof of full collision parity.
+
+## AI road height — graphical-client regression gate
+
+This gate addresses the reported issue where AI cars sank into some road
+sections but not others. **Use matching client/server builds from this PR**
+with a licensed map. At least two players should observe the same AI vehicle:
+
+1. Compare a plain road spline, a sloped crossing (.sco object paths),
+   a junction using `[crossing_heightdeformation]`, an elevated bridge
+   with `[absheight]`, a tunnel mouth with `[terrainhole]`, and a
+   tile-boundary crossing. Include one known bad section from the previous
+   build and a known working reference section.
+2. On each client record whether the **same AI car** starts sunk, enters
+   the pavement as it moves, floats above the asphalt, or has correct
+   tire contact. Report if only one client sees the error; that distinguishes
+   a client rendering/synchronization problem from shared CPU placement.
+3. Compare the same location against the ordinary graphical host, keeping
+   the map, date, traffic content and AI vehicle type consistent. Check
+   unscheduled cars and scheduled buses separately.
+4. During the test, inspect the server's reported skipped/unsupported
+   ground geometry and missing definitions. A rejected corrupted mesh must
+   not crash the server, silently become a flat road, or authorize
+   redistributing any missing mod. Recheck the location after a full
+   server-process restart using a build containing the latest commit.
+5. Keep at least two clients connected and monitor `tps` and
+   `timings report` while crossing these sections. A green geometry
+   comparison does not validate a loaded multiplayer server's performance.
+
+**Pass condition:** no new sinking, floating or tire-gap regression at
+these locations, and both clients agree on the vehicle's placement.
+**Not yet established:** real-map graphical confirmation, dynamic/attached
+surface parity, complete spline-cut/deformed terrain parity or
+authoritative player-bus physics. Do not merge based only on unit tests.
 
 ## Native boot smoke fixture
 
