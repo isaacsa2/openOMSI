@@ -87,19 +87,22 @@ cars through the acknowledged LAN traffic table and people through existing
 `WORLD` and `DESC` packets. Chrono-based road-bus departures and lines are
 experimental; not all consist, train and timetable edge cases are supported.
 
-This test mode currently allows up to **320 ordinary AI cars**, **128
-humans** and **12 scheduled road buses**, without renderer or audio. The
-example uses much lower limits. The road network is held on the **initial
-64 entrypoint-oriented tiles** to preserve vehicle lane indexes. Dynamic
-tile replacement is intentionally disabled while the CPU sim owns vehicles
-or passengers; the free-roam relay's 192-tile streaming does not apply to
-this mode. Maps or routes outside the initial region may not complete.
+This test mode permits configuring up to **320 ordinary AI cars**,
+**2,000 humans** and **12 scheduled road buses**, without renderer or audio.
+The example uses much lower values; these are configurable ceilings, not
+guaranteed simultaneous active counts or tested performance targets.
+Scheduled buses have a separate budget and are not removed by proximity
+recycling. The CPU road network starts with up to **64 entrypoint-oriented
+tiles** and supports **additive player-interest tile streaming** while
+preserving existing lane indices. Routing across unfinished or untested map
+regions may still fail, so test buses and walkers near map edges.
 
-Only use an isolated LAN/VPS firewall allowing trusted testers. Public
-listing and tunnels remain forbidden. Content sharing stays disabled by
-default; enabling it for your private test intentionally sends selected
-files to connected players, so do not use private or paid content without
-permission. Neither mode provides authoritative
+Start with a private LAN/VPS firewall allowing trusted testers. Public
+listing and a tunnel are now separate, **explicit operator opt-ins** for
+experimental tests; they do not make this a supported production server.
+Content sharing stays disabled by default; enabling it intentionally sends
+selected files to connected players, so do not use private or paid content
+without permission. Neither mode provides authoritative
 **player-driven bus** physics/scripts; those remain client-controlled and
 validated by the existing network relay. Do not use this experimental mode
 for production or publish it as full multiplayer parity.
@@ -145,7 +148,7 @@ content, set these keys explicitly in the active server configuration:
 share_maps = 1
 # Accept a player's bus, livery and required dependencies for other clients.
 accept_uploads = 1
-# Still unsupported in the native CPU world.
+# Optional: verified stored parked buses (up to 32) with uploads enabled.
 parked_buses = 0
 # Optional: permit downloadable server-owned buses via LISTBUS.
 # Only list assets you are explicitly authorized to distribute.
@@ -198,7 +201,7 @@ log; an unchanged file prints `no changes`.
 
 The only **hot-reloadable** keys in this experimental native host are:
 
-- `traffic`: random AI population target (up to 32 in CPU simulation).
+- `traffic`: random AI population target (up to 320 in CPU simulation).
   Reducing it removes excess unscheduled AI cars; scheduled road buses keep
   their existing trips.
 - `passenger_density`: demand factor 0–3, if passengers were enabled at boot.
@@ -223,6 +226,29 @@ while it is half-written; save atomically from your editor if possible. The
 initial free-roam mode still requires `traffic=0`,
 `passengers=0`, and `timetable=0`; it cannot turn itself into the
 simulation mode through `/reload`.
+
+## Restart the CPU world without dropping the tunnel
+
+After editing the **local** configuration, use `/restart` (or `restart`) in
+the server terminal to rebuild the CPU map, AI and pedestrian simulation,
+timetable and streaming worker. The process does **not** rebind its LAN
+socket/session, regenerate the join code, or recreate the existing web
+gateway, tunnel or authenticated TCP manifest listener.
+
+Only `passengers`, `timetable` and `ai_max_humans` are additionally
+rebuildable with `/restart`. The `/reload` hot values remain accepted
+here too. Changes to `map`, ports, public exposure, mod sharing, fleet
+authorization, authentication and other restart-only settings still require
+**stopping and launching the entire process**. Validation failure leaves
+the current world running; it never partially applies a candidate.
+
+The CPU state is rebuilt, so AI and pedestrian entities can be recreated.
+Before relying on this command with players connected, test two real game
+clients for synchronized removals, AI/timetable state, passenger boarding,
+scripts and reconnects. An automated synthetic LAN process regression does
+not prove complete in-game continuity. Date-specific Chrono content is
+loaded afresh on `/restart` using the current simulation date, but automatic
+Chrono map migration exactly at midnight is still a blocking limitation.
 
 ## Streaming-test addendum: drive beyond the starting area
 
