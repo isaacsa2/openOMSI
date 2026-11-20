@@ -144,22 +144,21 @@ pub fn update_host_interest(
         .collect();
     for (player, requested) in lan.take_claims() {
         summary.boarding_claims += requested.len();
-        let eligible: Vec<u32> = buses
-            .get(&player)
-            .into_iter()
-            .flat_map(|&bus| {
-                requested
-                    .iter()
-                    .copied()
-                    .take(MAX_BOARDING_CLAIMS)
-                    .filter(move |id| {
-                        people
-                            .people
-                            .iter()
-                            .any(|person| person.id == *id && can_claim_at(bus, person.position))
-                    })
-            })
-            .collect();
+        let eligible: Vec<u32> = if let Some(&bus) = buses.get(&player) {
+            requested
+                .iter()
+                .copied()
+                .take(MAX_BOARDING_CLAIMS)
+                .filter(|id| {
+                    people
+                        .people
+                        .iter()
+                        .any(|person| person.id == *id && can_claim_at(bus, person.position))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let granted = people.hand_over(player, &eligible);
         let granted_set: HashSet<u32> = granted.iter().copied().collect();
         let denied: Vec<u32> = requested
