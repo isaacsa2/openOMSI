@@ -46,10 +46,11 @@ cargo run --locked --release -p omsi-server --bin omsi-server -- /path/to/OMSI2 
 
 The sample configuration starts with `traffic=0`, `passengers=0`,
 `timetable=0`, `accept_uploads=0` and `share_maps=0`.
-Public listing, tunnels, unapproved parked buses and remote address
-advertising remain prohibited. Map and vehicle transfer can be opted
-into separately at startup as documented below. To use another installed map, change only the `map`
-entry initially and ensure it contains usable paths.
+Public listing, tunnels, verified parked buses and redistribution-authorized
+content sharing are independent **explicit opt-ins**, disabled by default
+in this example. Full process restart is required to change those network,
+fleet and transfer policies. To use another installed map, change only the
+`map` entry initially and ensure it contains usable paths.
 
 **Important:** `public_address=off` prevents automatic address advertisement;
 it is **not a firewall**. Restrict your server's UDP/TCP ports to trusted
