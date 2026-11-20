@@ -19,7 +19,7 @@ pub struct Reloaded {
 /// The normal config reader is intentionally tolerant (invalid numbers can
 /// fall back to defaults). A live reload must not silently turn a typo into a
 /// new active runtime setting, so verify explicitly supported numeric keys.
-fn check_hot_values(text: &str) -> Result<()> {
+pub(crate) fn check_hot_values(text: &str) -> Result<()> {
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
