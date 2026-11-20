@@ -554,6 +554,47 @@ fn start_verified_parked_buses(
     );
 }
 
+/// Keep native console, gateway and authenticated moderator actions on one
+/// authoritative tick before mutating AI/people state.
+#[allow(clippy::too_many_arguments)]
+fn service_native_admin_tick(
+    net: &mut HostTransport,
+    admin: &mut ServerAdmin,
+    meter: &TickMeter,
+    profiler: &mut Profiler,
+    sim: &mut CpuSimulation,
+    clock: f64,
+    rules: &ServerRules<'_>,
+    simulated: bool,
+) {
+    let positions = peer_positions(net);
+    let hub = omsi_lan::admin::hub().map(|h| &**h);
+    crate::commands::service_commands(
+        net.session_mut(),
+        admin,
+        meter,
+        profiler,
+        &|id| positions.get(&id).copied(),
+        rules,
+        hub,
+        &|_, _, _| None,
+        FIXED_DT,
+    );
+    apply_native_admin_actions(
+        net,
+        admin,
+        sim,
+        clock,
+        if simulated {
+            MAX_EXPERIMENTAL_TRAFFIC
+        } else {
+            0
+        },
+        simulated,
+        hub,
+    );
+}
+
 /// Apply local console changes on the host tick. A rejected reload/restart
 /// leaves the existing world, joined peers and network services unchanged.
 #[allow(clippy::too_many_arguments)]
@@ -803,31 +844,15 @@ fn run(
             break;
         }
         let started = Instant::now();
-        let positions = peer_positions(&net);
-        let hub = omsi_lan::admin::hub().map(|h| &**h);
-        crate::commands::service_commands(
-            net.session_mut(),
+        service_native_admin_tick(
+            &mut net,
             &mut admin_state,
             &meter,
             &mut profiler,
-            &|id| positions.get(&id).copied(),
-            &rules,
-            hub,
-            &|_, _, _| None,
-            FIXED_DT,
-        );
-        apply_native_admin_actions(
-            &mut net,
-            &mut admin_state,
             &mut sim,
             clock,
-            if simulated {
-                MAX_EXPERIMENTAL_TRAFFIC
-            } else {
-                0
-            },
+            &rules,
             simulated,
-            hub,
         );
         process_console_changes(
             root,
