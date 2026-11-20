@@ -15,6 +15,16 @@ use std::sync::Arc;
 
 pub const MAX_EXPERIMENTAL_SCHEDULED: usize = 12;
 
+/// The legacy server.cfg defines 0 as "no configured limit". A native
+/// experimental host still caps it at 12 for bounded CPU testing. Use this
+/// helper at bootstrap and hot reload so both paths interpret it identically.
+pub fn scheduled_budget(setting: Option<u32>) -> usize {
+    setting
+        .filter(|&count| count > 0)
+        .map(|count| (count as usize).min(MAX_EXPERIMENTAL_SCHEDULED))
+        .unwrap_or(MAX_EXPERIMENTAL_SCHEDULED)
+}
+
 pub struct CpuTimetable {
     pub sim: ScheduleSim,
     elapsed: f32,
@@ -228,5 +238,19 @@ impl CpuTimetable {
             p.trip_name
         );
         Placed::Spawned
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_zero_and_missing_limits_use_the_experimental_safety_cap() {
+        assert_eq!(scheduled_budget(None), MAX_EXPERIMENTAL_SCHEDULED);
+        assert_eq!(scheduled_budget(Some(0)), MAX_EXPERIMENTAL_SCHEDULED);
+        assert_eq!(scheduled_budget(Some(5)), 5);
+        assert_eq!(scheduled_budget(Some(12)), 12);
+        assert_eq!(scheduled_budget(Some(10_000)), MAX_EXPERIMENTAL_SCHEDULED);
     }
 }
