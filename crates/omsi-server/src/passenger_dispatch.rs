@@ -353,8 +353,13 @@ mod tests {
             waiting.remove(id);
         }
         counts.insert(70, 5);
-        let second = dispatch.choose(2, &requested, &waiting, &counts, &stops);
+        let still_waiting: Vec<u32> = requested
+            .into_iter()
+            .filter(|id| waiting.contains_key(id))
+            .collect();
+        let second = dispatch.choose(2, &still_waiting, &waiting, &counts, &stops);
         assert_eq!(second.len(), 5);
+        assert!(second.iter().all(|id| !first.contains(id)));
     }
 
     #[test]
