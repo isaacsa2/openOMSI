@@ -98,6 +98,7 @@ pub(super) fn queue_near_restores(
     t0: std::time::Instant,
 ) -> usize {
     let mut queued = 0;
+    let mut blocked = Vec::new();
     for (d, p) in entries {
         if *d >= near || queued >= 24 || pending.contains(p) || gpu.wants_restore.contains(p) {
             continue;
@@ -111,6 +112,7 @@ pub(super) fn queue_near_restores(
         let needed = texture_restore_cost(e);
         let peak = e.full_bytes.max(needed);
         if peak > card_room || (e.squeezed && needed > squeezed_room) {
+            blocked.push(p.clone());
             continue;
         }
         card_room -= peak;
@@ -160,6 +162,17 @@ pub(super) fn queue_near_restores(
                 e.near_restore = true;
                 gpu.wants_restore.push(p.clone());
                 queued = 1;
+            }
+        }
+    }
+    // A nearby texture may be reduced yet none fits today's GPU allowance.
+    // Force an admission recheck after a brief cooldown, even if the camera
+    // and aggregate memory changed by less than the idle memo's 64 MiB margin.
+    // Defer this until after the partial-mip fallback so it is not starved.
+    if queued == 0 {
+        if let Some(path) = blocked.first() {
+            if let Some(e) = gpu.textures.get_mut(path) {
+                e.retry_after = Some(t0 + std::time::Duration::from_secs(2));
             }
         }
     }
