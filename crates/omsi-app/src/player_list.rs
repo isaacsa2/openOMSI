@@ -149,7 +149,11 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
             {
                 if let Some(remote) = app.net.remotes.remotes.get(&p.id) {
                     let ty = &remote.vehicle().ty;
-                    let doors = omsi_sim::door_keys::door_keys(ty).len().min(8);
+                    let doors = omsi_sim::door_keys::door_keys(ty)
+                        .iter()
+                        .filter(|group| !(group.len() == 1 && group[0] == "bus_dooraft"))
+                        .count()
+                        .min(8);
                     for i in 1..=doors {
                         out.push((format!("Conductor: door {i}"), format!("coopcmd {} door {i}", p.id)));
                     }
