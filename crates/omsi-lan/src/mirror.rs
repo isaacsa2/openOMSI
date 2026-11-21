@@ -46,7 +46,14 @@ pub fn vehicle_position(
     let mut position = pose.pos;
     if pose.extrapolated {
         if let Some((kind, z)) = latest {
-            if kind != omsi_net::traffic_table::Kind::Rail && z.is_finite() {
+            if matches!(
+                kind,
+                omsi_net::traffic_table::Kind::Car
+                    | omsi_net::traffic_table::Kind::Bus
+                    | omsi_net::traffic_table::Kind::Truck
+                    | omsi_net::traffic_table::Kind::Motorcycle
+            ) && z.is_finite()
+            {
                 position[2] = z;
             }
         }
@@ -302,6 +309,7 @@ mod tests {
         };
         assert_eq!(vehicle_position(&between, Some((Kind::Car, 10.0)))[2], 7.6);
         assert_eq!(vehicle_position(&pose, Some((Kind::Rail, 10.0)))[2], 7.6);
+        assert_eq!(vehicle_position(&pose, Some((Kind::Other, 10.0)))[2], 7.6);
         assert_eq!(vehicle_position(&pose, None)[2], 7.6);
     }
 
