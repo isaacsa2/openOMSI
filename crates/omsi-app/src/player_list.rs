@@ -129,6 +129,43 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                     (tr("Voice chat: audible. Mute them"), format!("vmute {}", t.tag()))
                 },
             ];
+            // The bus owner explicitly grants one passenger the conductor role.
+            // This is not a server administration permission.
+            let aboard_our_bus = app.player.is_some() && app.net.lan.as_ref().is_some_and(|lan| {
+                lan.peers().any(|peer| peer.pose.id == p.id && peer.conn == p.conn
+                    && peer.has_info && peer.has_pose
+                    && peer.pose.walker.and_then(|w| w.aboard)
+                        .is_some_and(|aboard| aboard.owner == lan.my_id))
+            });
+            if aboard_our_bus {
+                let assigned = app.net.conductor_grant.is_some_and(|g| g.actor == p.id && g.connection == p.conn);
+                let label = if assigned { "Revoke conductor controls" } else { "Let this passenger work doors and windows (conductor)" };
+                out.push((tr(label), format!("coopgrant {} {}", p.id, p.conn)));
+            }
+            // On the guest's own menu: operate only controls that the bus's
+            // model actually implements and the owner has authorized.
+            if app.net.lan.as_ref().is_some_and(|lan| app.net.conductor_owner == Some((p.id, lan.session)))
+                && app.net.inside_remote == Some(p.id)
+            {
+                if let Some(remote) = app.net.remotes.remotes.get(&p.id) {
+                    let ty = &remote.vehicle().ty;
+                    let doors = omsi_sim::door_keys::door_keys(ty)
+                        .iter()
+                        .filter(|group| !(group.len() == 1 && group[0] == "bus_dooraft"))
+                        .count()
+                        .min(8);
+                    for i in 1..=doors {
+                        out.push((format!("Conductor: door {i}"), format!("coopcmd {} door {i}", p.id)));
+                    }
+                    let mut windows: Vec<_> = ty.program.triggers.keys()
+                        .filter(|name| omsi_lan::coop_permissions::passenger_window_trigger(name))
+                        .collect();
+                    windows.sort();
+                    for name in windows.into_iter().take(12) {
+                        out.push((format!("Conductor: window {name}"), format!("coopcmd {} window {name}", p.id)));
+                    }
+                }
+            }
             // (an admin's: silencing a player's voice for the whole session, or taking them away)
             let acts = rights.is_some() && !(rights == Some(Role::Moderator) && p.admin == Some(Role::Admin));
             if acts {
@@ -219,6 +256,27 @@ pub(crate) fn run(app: &mut App, kind: &ListKind, action: &str) -> Option<ListKi
         }
         "reason" => {
             REASON.store((REASON.load(Ordering::Relaxed) + 1) % REASONS.len(), Ordering::Relaxed);
+            Some(kind.clone())
+        }
+        "coopgrant" => {
+            let mut parts = arg.split_whitespace();
+            if let (Some(id), Some(conn), None) = (
+                parts.next().and_then(|s| s.parse::<u32>().ok()),
+                parts.next().and_then(|s| s.parse::<u64>().ok()),
+                parts.next(),
+            ) {
+                app.coop_toggle_conductor(id, conn);
+            }
+            Some(kind.clone())
+        }
+        "coopcmd" => {
+            let mut parts = arg.split_whitespace();
+            let owner = parts.next().and_then(|s| s.parse::<u32>().ok());
+            let control = parts.next();
+            let value = parts.next();
+            if let (Some(owner), Some(control), Some(value), None) = (owner, control, value, parts.next()) {
+                app.coop_send_control(owner, control, value);
+            }
             Some(kind.clone())
         }
         // (the administration's own line, checked once more where it is done)

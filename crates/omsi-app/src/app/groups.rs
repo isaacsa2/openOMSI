@@ -59,6 +59,13 @@ pub(crate) struct NetState {
     /// LAN session, and the other players' buses (drawn and heard like AI vehicles) with the
     /// chat line.
     pub(crate) lan: Option<omsi_net::LanSession>,
+    /// Session-bound, opt-in conductor grant for this player's own vehicle.
+    pub(crate) conductor_grant: Option<omsi_lan::coop_permissions::CabGrant>,
+    /// The player whose bus has granted us a conductor role (id, session).
+    pub(crate) conductor_owner: Option<(u32, u64)>,
+    pub(crate) conductor_seq: u64,
+    /// Held model trigger buttons receive their _off event on a later frame.
+    pub(crate) conductor_release: Option<(std::time::Instant, Vec<String>)>,
     /// Negotiate once per welcome/reconnect; never poll old servers every 180 frames.
     pub(crate) speed_limit_welcome: Option<u32>,
     /// Set only by the dedicated server's teleport capability response.
