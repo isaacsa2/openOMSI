@@ -556,6 +556,15 @@ fn report_native_ground_load(
         });
     let (cars, buses, _, _) = sim.traffic.counts();
     let (walking, waiting, aboard) = sim.people.counts();
+    let (player_buses, player_aboard, reported_boarded, reported_alighted) =
+        sim.player_passenger_totals();
+    log::info!(
+        "native player passengers: {} active buses, {} currently aboard (client-reported), {} observed boardings, {} observed alightings since the current CPU world started; GRANT is not counted as boarding",
+        player_buses,
+        player_aboard,
+        reported_boarded,
+        reported_alighted,
+    );
     let profile = profiler.report();
     log::info!(
         "native load: TPS {:.1}/{:.0}, {} active CPU tiles, {} AI cars, {} AI buses, {} pedestrians ({} walking, {} waiting, {} aboard); ground heap est.: {:.1} MiB terrain, {:.1} MiB raster, {:.1} MiB wheel; tick p95 {:.1} ms p99 {:.1} ms (profiling {})",
