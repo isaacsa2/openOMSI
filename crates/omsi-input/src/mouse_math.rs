@@ -14,7 +14,12 @@ pub fn drag_heading(
     Some(d.x.atan2(d.y).to_degrees())
 }
 
-pub fn part_in_reach(eye: glam::DVec3, at: glam::DVec3, heading: f64, bb: Option<[f32; 6]>) -> bool {
+pub fn part_in_reach(
+    eye: glam::DVec3,
+    at: glam::DVec3,
+    heading: f64,
+    bb: Option<[f32; 6]>,
+) -> bool {
     let bb = bb.unwrap_or([2.5, 12.0, 3.0, 0.0, 0.0, 1.5]);
     let h = heading.to_radians();
     let (fwd, right) = (
