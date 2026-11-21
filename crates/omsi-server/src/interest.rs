@@ -163,7 +163,7 @@ pub(crate) fn update_host_interest_with_dispatch(
         .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
         .filter_map(|peer| client_position(&peer.pose).map(|pos| (peer.pose.id, pos)))
         .collect();
-    let passenger_positions: HashMap<u32, DVec3> =
+    let mut passenger_positions: HashMap<u32, DVec3> =
         people.people.iter().map(|p| (p.id, p.position)).collect();
     // Only genuinely waiting people with a known physical platform belong
     // to the fair-share pool. Other people stay subject to hand_over checks.
@@ -210,8 +210,11 @@ pub(crate) fn update_host_interest_with_dispatch(
         let granted = people.hand_over(player, &coordinated);
         dispatch.granted(player, &granted, &waiting);
         for id in &granted {
-            if let Some(stop) = waiting.get(id) {
-                if let Some(count) = stop_counts.get_mut(stop) {
+            // Multiple peers may claim in one network tick. A transferred
+            // person must not remain eligible in the next claim batch.
+            passenger_positions.remove(id);
+            if let Some(stop) = waiting.remove(id) {
+                if let Some(count) = stop_counts.get_mut(&stop) {
                     *count = count.saturating_sub(1);
                 }
             }
