@@ -856,6 +856,19 @@ impl App {
             }
             // the free camera's keys are its own
             _ if self.session.on_foot.as_ref().map(|f| f.cam == FootCam::Free).unwrap_or(false) => false,
+            // A rider can ask the owner to work a real door or window control.
+            _ if ctrl && alt && !self.chord_bound(code, shift, ctrl, alt)
+                && (crate::player::digit_of(code).is_some() || (code == KeyCode::KeyW && !shift)) => {
+                if pressed && !repeat {
+                    let action = match crate::player::digit_of(code) {
+                        Some(number) if shift => omsi_lan::coop_permissions::CabinAction::Window(number - 1),
+                        Some(number) => omsi_lan::coop_permissions::CabinAction::Door(number - 1),
+                        None => omsi_lan::coop_permissions::CabinAction::Window(0),
+                    };
+                    self.request_coop_cabin(action);
+                }
+                true
+            }
             KeyCode::KeyG => {
                 if get_up_chord(&self.input.game_keys, ctrl, shift) {
                     return false;

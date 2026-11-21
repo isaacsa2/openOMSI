@@ -15,11 +15,11 @@ pub mod commands;
 pub mod config;
 pub mod game;
 pub mod gateway;
-pub mod host;
 pub mod handover;
+pub mod host;
 mod join;
-pub mod mirror;
 pub mod map_pack;
+pub mod mirror;
 pub mod mods;
 pub mod parked;
 pub mod passenger;
@@ -70,6 +70,7 @@ pub mod animation_sync;
 pub mod variable_schema;
 
 pub mod clock;
+pub mod coop_permissions;
 pub mod script_texture;
 
 pub mod freetex;

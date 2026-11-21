@@ -140,6 +140,9 @@ impl PeopleSim {
             voice_said: HashMap::new(),
             voices: 0,
             last_chat: -1e9,
+            ambient_talk: false,
+            ambient_talk_at: 0.0,
+            ambient_talk_reply: None,
             avatars: HashMap::new(),
             avatar_cmds: HashMap::new(),
             avatar_hidden: HashMap::new(),
@@ -164,6 +167,7 @@ impl PeopleSim {
             visual_hailing: false,
             visual_full_bus_reaction: false,
             bad_driving: true,
+            bad_driving_alight: true,
             board_when_stopped: false,
             boarding: "auto".into(),
             stand_chance: 0.05,
@@ -181,6 +185,7 @@ impl PeopleSim {
             mirror: false,
             lan_centers: Vec::new(),
             players_only: false,
+            lan_population_boost: 1.0,
             remote_now: Vec::new(),
             placed_now: Vec::new(),
             claims_out: Vec::new(),
@@ -623,6 +628,7 @@ impl PeopleSim {
             why: "",
             puppet: None,
             remote: false,
+            remote_seat: None,
         });
         Some(self.people.len() - 1)
     }

@@ -3,6 +3,7 @@
 use super::*;
 
 /// The value of the slider setting `verb` (`arg`: the seat's axis).
+#[rustfmt::skip]
 pub(super) fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
     if let Some(field) = verb.strip_prefix("vr_nav_") {
         return if app.vr_active() && app.player.is_some() { app.vr_nav_profile().value(field) } else { None };
@@ -91,6 +92,7 @@ pub(super) fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
 }
 
 /// Set the slider setting `verb` to `v`; the key and value to keep for the next game.
+#[rustfmt::skip]
 pub(super) fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option<(&'static str, String)> {
     if let Some(field) = verb.strip_prefix("vr_nav_") {
         app.vr_nav_set(field, v);
@@ -393,6 +395,7 @@ pub(super) fn option_set(app: &mut App, verb: &str, arg: &str, v: f32) -> Option
 
 /// The two new graphics sliders, kept separate to avoid growing the already-long
 /// general settings handler past the size budget.
+#[rustfmt::skip]
 fn set_graphics_brightness(app: &mut App, verb: &str, v: f32) -> Option<(&'static str, String)> {
     match verb {
         "road_glare" => {
@@ -409,6 +412,7 @@ fn set_graphics_brightness(app: &mut App, verb: &str, v: f32) -> Option<(&'stati
 
 /// The cab wheel's rotation lock to lock (`cab_wheel_rotation`): the player's bus takes it at
 /// once, the AI buses keep their own wheels.
+#[rustfmt::skip]
 fn set_cab_wheel_rotation(app: &mut App, v: f32) -> (&'static str, String) {
     app.settings.cab_wheel_rotation = crate::settings::cab_wheel_rotation(v);
     if let Some(p) = app.player.as_mut() {
@@ -418,10 +422,12 @@ fn set_cab_wheel_rotation(app: &mut App, v: f32) -> (&'static str, String) {
 }
 
 /// Whether the switch `id` is on (None: `id` is no switch).
+#[rustfmt::skip]
 pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
     let s = &app.settings;
     Some(match id {
         "passenger_connections" => s.passenger_connections,
+        "passenger_ambient_talk" => s.passenger_ambient_talk,
         "passenger_hailing" => s.passenger_hailing,
         "passenger_full_bus_reaction" => s.passenger_full_bus_reaction,
         "pax_short_rides_stand" => s.pax_short_rides_stand,
@@ -475,6 +481,7 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "nav_map_arrows" => s.nav_map_arrows,
         "exact_fare" => s.exact_fare,
         "pax_bad_driving" => s.pax_bad_driving,
+        "pax_bad_driving_alight" => s.pax_bad_driving_alight,
         "auto_announce" => s.auto_announce,
         "collision_pedestrians" => s.collision_pedestrians,
         "ssao" => s.ssao,
@@ -533,6 +540,7 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
 }
 
 /// Switch `id` on or off; the key and value to keep for the next game.
+#[rustfmt::skip]
 pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static str, String)> {
     let bit = (on as u8).to_string();
     match id {
@@ -544,6 +552,11 @@ pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static 
                 } else { 0.0 };
             }
             Some(("passenger_connections", bit))
+        }
+        "passenger_ambient_talk" => {
+            app.settings.passenger_ambient_talk = on;
+            if let Some(h) = app.session.humans.as_mut() { h.ambient_talk = on; }
+            Some(("passenger_ambient_talk", bit))
         }
         "passenger_hailing" => {
             app.settings.passenger_hailing = on;
@@ -811,6 +824,11 @@ pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static 
             app.settings.pax_bad_driving = on;
             Some(("pax_bad_driving", bit))
         }
+        "pax_bad_driving_alight" => {
+            app.settings.pax_bad_driving_alight = on;
+            if let Some(h) = app.session.humans.as_mut() { h.bad_driving_alight = on; }
+            Some(("pax_bad_driving_alight", bit))
+        }
         "auto_announce" => {
             app.settings.auto_announce = on;
             Some(("auto_announce", bit))
@@ -825,6 +843,7 @@ pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static 
 
 /// `toggle_set`'s second half: the picture, the screens and VR, sound, the controls and the
 /// interface (`bit` is the switch's value as kept).
+#[rustfmt::skip]
 fn toggle_set_graphics_and_controls(app: &mut App, id: &str, on: bool, bit: String) -> Option<(&'static str, String)> {
     match id {
         "ssao" => {
@@ -1037,6 +1056,7 @@ fn toggle_set_graphics_and_controls(app: &mut App, id: &str, on: bool, bit: Stri
 }
 
 /// Change the setting `verb` (a switch or a slider) as `mv` says; false when it is neither.
+#[rustfmt::skip]
 pub(crate) fn option_do(app: &mut App, verb: &str, arg: &str, mv: Move) -> bool {
     // (the weather is the METAR report's while the sync is on)
     if app.metar_locked() && matches!(verb, "visibility" | "rain_amt" | "wet" | "brightness" | "humidity" | "temp" | "wind_speed" | "wind_dir" | "snow_cover" | "snow_road") {
@@ -1078,6 +1098,7 @@ pub(crate) fn option_do(app: &mut App, verb: &str, arg: &str, mv: Move) -> bool 
     false
 }
 
+#[rustfmt::skip]
 fn set_connection_percent(app: &mut App, value: f32) -> Option<(&'static str, String)> {
     if !value.is_finite() { return None; }
     app.settings.passenger_transfer_percent = value.round().clamp(0.0, 100.0);

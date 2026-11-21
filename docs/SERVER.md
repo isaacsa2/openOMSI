@@ -89,6 +89,63 @@ failure - informational lines go there as well; the exit code says whether it fa
 with spaces or accents are passed as they are, quoted. A map is named as in the game, relative
 to the OMSI 2 folder (`maps/<folder>/global.cfg`), and found in the content folder (mods) too.
 
+## Interactive server console and TPS
+
+When launched from a terminal with stdin attached, the dedicated server accepts
+one command per line. A leading slash is optional (as in Minecraft). Commands
+run on the **server simulation thread**, not the stdin reader; admin actions use
+the existing LAN authorization, moderation and audit path. The server does not
+open a remote command socket and **the web panel cannot execute arbitrary shell
+commands**. Running as a Docker service without interactive stdin is supported:
+the console reader simply exits while the server continues.
+
+| Command | Effect |
+|---|---|
+| `help` | Show commands |
+| `list` / `players` | Show connected players and IDs (no IP addresses) |
+| `status` | Report whether the server is running, player count and measured TPS |
+| `tps` | Report completed simulation ticks per wall-clock second against the target |
+| `say <message>` | Send a server-wide chat announcement |
+| `kick <id> [reason]`, `ban <id> [reason]` | Moderate a connected player |
+| `traffic <count|clear>`, `passengers <density>` | Change host-world density |
+| `clock <seconds>`, `speed <factor>`, `weather next` | Change the host-world clock or weather if allowed |
+| `stop` | Request the same graceful server exit used for signal shutdown |
+
+### Optional timings / Spark-like profiling
+
+By default, the per-stage profiler is **off**: only the lightweight TPS
+counter runs. On the server terminal, use `timings on`, `timings report`,
+`timings off`, or `timings reset`. The aliases `spark start`,
+`spark report`, `spark stop` and `spark reset` work too.
+
+The authenticated **Server timings** panel offers Start, Stop and Reset to
+admins only. The same-origin JSON endpoint `POST /api/admin/profiler` accepts
+exactly `{"action":"start"}`, `{"action":"stop"}` or
+`{"action":"reset"}` with the existing Bearer token, and queues the change
+for the server's simulation thread. Moderators get HTTP 403. There is no
+new public profiler endpoint, remote command shell or RCON.
+
+A report contains the last 1,024 completed tick durations (average, p95,
+p99 and maximum), total tick count, and the fixed server stages sorted by
+total time with mean/max per-stage duration. A report is retained after
+`timings off`. The stage percentages indicate **wall-clock time spent in
+those stages**, not overall CPU utilization or a full sampling flamegraph.
+Intentional tick waiting is excluded from the stage timings.
+
+Other existing administration commands (e.g. `tell`, `hwban`, `unban`,
+`vmute`, `vunmute`, `unstick` and `service`) remain available through the
+same parser. Passwords do not need to be typed into local stdin.
+
+The authenticated panel at `http://127.0.0.1:<web_port>/admin/` displays
+**TPS** prominently above its server facts. This is an actual measurement of
+completed simulation/network ticks divided by elapsed *wall time*, sampled
+about once per second. The target is the engine's fixed simulation rate
+(currently **60 TPS**, independent of display FPS). The meter starts with
+"Measuring TPS" until the first sample; overload shows a lower reading.
+The panel checks for new state every few seconds when visible. These
+diagnostics do not require enabling public player positions or the remote admin
+panel, and no new unauthenticated endpoint is added.
+
 Players reach it two ways:
 
 * UDP at `host:port` (a server with a public address, or on the LAN);

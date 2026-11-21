@@ -8,6 +8,7 @@ impl App {
     pub(crate) fn tick_lan(&mut self, dt: f32) {
         let lan_tick_started = std::time::Instant::now();
         if self.net.lan.is_none() {
+            self.coop_cab_enabled = false;
             omsi_lan::commands::set_speed_limit_kmh(0);
             self.net.speed_limit_welcome = None;
             self.net.dedicated_teleport = None;
@@ -33,6 +34,7 @@ impl App {
         if lan.role == omsi_net::Role::Client {
             lan.set_parked_drawn(crate::on_foot::parked_drawn(self.settings.parked_buses_drawn, self.world.as_ref().map(|w| w.texture_budget_bytes()).unwrap_or(0)));
             if !lan.connected {
+                self.coop_cab_enabled = false;
                 self.net.speed_limit_welcome = None;
                 self.net.dedicated_teleport = None;
                 omsi_lan::commands::set_speed_limit_kmh(0);
@@ -150,6 +152,12 @@ impl App {
     /// (`omsi_lan::commands::Command`), carried out here.
     pub(crate) fn lan_command(&mut self, from: u32, text: &str) {
         use omsi_lan::commands::Command;
+        if text.starts_with("coop-") {
+            if let Some(action) = omsi_lan::coop_permissions::parse_cabin_action(text) {
+                self.receive_coop_cabin(from, action);
+            }
+            return;
+        }
         if let Some(request) = text.strip_prefix("pax_request ") {
             self.receive_passenger_door_request(from, request);
             return;
@@ -231,6 +239,50 @@ impl App {
             }
             command => crate::admin::carry_out(self, from, command),
         }
+    }
+
+    fn receive_coop_cabin(&mut self, from: u32, action: omsi_lan::coop_permissions::CabinAction) {
+        use omsi_lan::coop_permissions::{CabinAction, cabin_window_trigger};
+        let permitted = self.net.lan.as_ref().is_some_and(|lan| {
+            omsi_lan::passenger::may_work_cabin(
+                lan,
+                from,
+                self.player.as_ref().map(|p| &p.vehicle),
+                self.coop_cab_enabled,
+                action,
+            )
+        });
+        if !permitted {
+            log::debug!("LAN: co-op cabin control denied for player {from}: {action:?}");
+            return;
+        }
+        let Some(player) = self.player.as_mut() else { return };
+        let worked = match action {
+            CabinAction::Door(index) => {
+                omsi_sim::door_keys::door_keys(&player.vehicle.ty)
+                    .get(index)
+                    .map(|group| crate::player::door_group_to_fire(&mut player.vehicle, group))
+                    .is_some_and(|events| {
+                        let any = !events.is_empty();
+                        for event in events { player.vehicle.trigger(&event); }
+                        any
+                    })
+            }
+            CabinAction::Window(index) => {
+                let mut controls: Vec<_> = player.vehicle.ty.model.meshes.iter()
+                    .filter_map(|mesh| mesh.mouse_event.as_ref())
+                    .filter(|name| cabin_window_trigger(name))
+                    .cloned()
+                    .collect();
+                controls.sort_unstable();
+                controls.dedup();
+                controls.get(index).is_some_and(|event| {
+                    if player.vehicle.ty.program.trigger(event).is_none() { return false; }
+                    player.vehicle.trigger(event)
+                })
+            }
+        };
+        log::info!("LAN: co-op cabin action {action:?} from player {from}: {}", if worked { "applied" } else { "unsupported by vehicle model" });
     }
 
     /// The host's world as LAN play asks for it: its clock (set or caught up with) and its

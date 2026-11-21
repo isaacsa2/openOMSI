@@ -3281,6 +3281,7 @@ fn passenger_defaults(v: &mut Value) {
     v["passenger_connections"] = json!(false);
     v["passenger_transfer_percent"] = json!(20.0);
     v["passenger_hailing"] = json!(false);
+    v["passenger_ambient_talk"] = json!(false);
     v["passenger_full_bus_reaction"] = json!(false);
     v["pax_short_rides_stand"] = json!(false);
 }
@@ -3404,6 +3405,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     // stop, as in OMSI; #1773)
     v["ai_wait_timed_stops_only"] = json!(false);
     v["pax_bad_driving"] = json!(true);
+    v["pax_bad_driving_alight"] = json!(true);
     v["pax_board_when_stopped"] = json!(false);
     passenger_defaults(&mut v);
     // the arrival half of the stops of a depot file that keeps two recordings per stop
@@ -4244,9 +4246,11 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             | "mirror_particles"
             | "ai_wait_timed_stops_only"
             | "pax_bad_driving"
+            | "pax_bad_driving_alight"
             | "pax_board_when_stopped"
             | "passenger_connections"
             | "passenger_hailing"
+            | "passenger_ambient_talk"
             | "passenger_full_bus_reaction"
             | "pax_short_rides_stand"
             | "auto_announce"
@@ -5007,6 +5011,10 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     ));
     text.push_str(&format!("pax_bad_driving={}\n", b("pax_bad_driving", true)));
     text.push_str(&format!(
+        "pax_bad_driving_alight={}\n",
+        b("pax_bad_driving_alight", true)
+    ));
+    text.push_str(&format!(
         "pax_board_when_stopped={}\n",
         b("pax_board_when_stopped", false)
     ));
@@ -5018,6 +5026,10 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     text.push_str(&format!(
         "passenger_hailing={}\n",
         b("passenger_hailing", false)
+    ));
+    text.push_str(&format!(
+        "passenger_ambient_talk={}\n",
+        b("passenger_ambient_talk", false)
     ));
     text.push_str(&format!(
         "passenger_full_bus_reaction={}\n",

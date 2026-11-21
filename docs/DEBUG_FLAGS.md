@@ -271,7 +271,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_GL_TEXTURE_UNITS` | bool | off | use | render | Use the texture-unit layout of the OpenGL backend on any device. |
 | `OMSI_GPU_ARRAYS` | text | - | use | render | textures, nostorage or lighttextures: take that texture array path on any device. |
 | `OMSI_GUARD_DEADLINE` | num | 120 | use | guard | The start guard: seconds the launcher may take to its first frames before its start counts as hung (it is then ended and the guard heals the installation). |
-| `OMSI_HEIGHTPROFILE_GROUND` | bool | off | once | scene | The wheels stand on the splines' [heightprofile]s again (A/B). |
+| `OMSI_HEIGHTPROFILE_GROUND` | bool | off | once | scene, server | The wheels stand on the splines' [heightprofile]s again (A/B). |
 | `OMSI_HTML_ENGINE` | text | classic | use | htmlpage | `modern` runs every [htmltexture] page on the modern engine (flexbox, modern JavaScript) instead of only those that ask with <meta name="omsi-engine" content="modern">; for comparing the two. |
 | `OMSI_HTML_FALLBACK_FONT` | text | - | use | htmlengine, htmlpage | Font file for the html pages' characters Inter lacks (Hangul, CJK); else Malgun Gothic (Windows) or AppleGothic (macOS). |
 | `OMSI_HTML_FALLBACK_FONT_BOLD` | text | - | use | htmlengine, htmlpage | With OMSI_HTML_FALLBACK_FONT: its bold face. |
@@ -313,7 +313,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_HARDWARE_ID` | bool | off | once | lan | LAN: the game sends no hardware identifier (a host can then turn the player away, and cannot ban the machine). |
 | `OMSI_NO_INTERP` | bool | off | once | lan | The old way without interpolation, for comparing. |
 | `OMSI_NO_LAMP_SIGHT` | bool | off | use | render | Enhanced by night: every lamp near the line of sight dazzles, hidden or not. |
-| `OMSI_NO_LAN_MODS` | bool | off | use | app, lan, net | LAN: do not exchange mods. |
+| `OMSI_NO_LAN_MODS` | bool | off | use | lan, net, server | LAN: do not exchange mods. |
 | `OMSI_NO_LAN_UPLOADS` | bool | off | use | lan | LAN: a game hosting a session takes no buses from the players who join. |
 | `OMSI_NO_LIGHT_MAP` | bool | off | use | scene | No night light maps on the tiles (A/B). |
 | `OMSI_NO_MATERIAL_SPLINE_BATCHING` | bool | off | use | scene | No batching of splines by material. |
@@ -346,7 +346,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_NO_TEXCOMPRESS` | bool | off | use | render | No runtime texture compression. |
 | `OMSI_NO_TEXTURE_CACHE` | bool | off | once | texture | Compress every texture at each start (no ~/.openomsi/cache/textures). |
 | `OMSI_NO_TUNNEL` | bool | off | use | lan | LAN: no tunnel. |
-| `OMSI_NO_UPDATE` | bool | off | use | app, launcher-api | No update check. |
+| `OMSI_NO_UPDATE` | bool | off | use | app, launcher-api, server | No update check. |
 | `OMSI_NO_VAR_SYNC` | bool | off | use | lan | LAN: no variable sync. |
 | `OMSI_NO_WHEEL_SLIP` | bool | off | use | sim | Every wheel grips, as before wheels turned on their own (A/B). |
 | `OMSI_OLD_WORLD_GRID` | bool | off | use | map | Maps with world coordinates take the one tile size of 371.9 m (comparison). |
@@ -363,7 +363,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_TERRAIN_ALIGN` | bool | off | use | scene | Align the terrain to the splines again at load (A/B; Omsi.exe does not). |
 | `OMSI_TEXTURE_RAIN` | bool | off | use | scene | OMSI 2's own texture rain on the glass instead of the drops. |
 | `OMSI_TRACKIR_NATIVE` | text | on | use | input | 0 turns the native TrackIR interface off. |
-| `OMSI_TRAFFIC_ALL_GROUPS` | bool | off | use | app | Let restricted AI groups (aircraft, depot fleets) drive everywhere. |
+| `OMSI_TRAFFIC_ALL_GROUPS` | bool | off | use | server | Let restricted AI groups (aircraft, depot fleets) drive everywhere. |
 | `OMSI_TYRE_SUSPENSION` | bool | off | once | sim | The old suspension with wheel mass, tyre and bump stops (A/B). |
 
 ## Tuning
@@ -395,6 +395,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SURFACE_BIAS` | num | -24 | use | render | Depth bias of road surfaces. |
 | `OMSI_SURFACE_FLUSH` | num | 0.12 | once | sim | Height in metres under which a surface counts as flush with the road. |
 | `OMSI_TEXTURE_MEMORY` | num | settings | use | app | Texture budget in MB. |
+| `OMSI_TEXTURE_RAM_CACHE_MB` | num | 128 desktop / 0 mobile | once | scene | Keep at most this many MiB of compressed static texture sources in system RAM (0 disables; capped at 512). |
 | `OMSI_TONE_CONTRAST` | text | 1 | once | render | day[,night]: tone mapping contrast. |
 | `OMSI_VIDEO_MEMORY` | num | settings | use | app | What the game may hold on the graphics card all together (textures, meshes, render targets), in MB. |
 | `OMSI_WIDE_AO` | text | - | use | render | reach,strength,gain,max: the street-scale occlusion of the sky and the bounced light (m, 0..1, 0..1, radiance). |

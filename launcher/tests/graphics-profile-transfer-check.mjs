@@ -49,7 +49,8 @@ const fixture = ${JSON.stringify(fixture)};
 window.settings = fixture.settings;
 S.settings = fixture.settings; S.boot = {...fixture, platform: 'windows'}; S.config = fixture.config;
 localStorage.setItem('settings-tab', 'graphics');
-render(html\`<\$\{SettingsPage\} />\`, document.querySelector('#app'));
+window.renderPage = () => render(html\`<\$\{SettingsPage\} />\`, document.querySelector('#app'));
+window.renderPage();
 window.ready = true;
 </script></body></html>`.replaceAll('\\`', '`').replaceAll('\\$\\{', '${');
 const server = createServer((req, res) => {
@@ -122,9 +123,9 @@ try {
   await wait("card().textContent.includes('Loaded')");
   assert.equal(await evaluate("calls.filter(([cmd, args]) => cmd === 'call' && args.cmd === 'settings_patch').at(-1)[1].args.patch.msaa"), 8);
   await evaluate("window.profileCard = card(); window.profileStart = [...profileCard.querySelectorAll('.setting-row')].find(r => r.textContent.startsWith('Saved profile')).previousElementSibling;");
-  await evaluate("import('/ui/js/i18n.js').then(m => m.setLanguage('zh-tw'))");
-  await evaluate("window.importResult = null; button('Import graphics profile').click()");
+  await evaluate("import('/ui/js/i18n.js').then(m => m.setLanguage('zh-tw')).then(() => window.renderPage())");
   await wait("profileCard.textContent.includes('匯入圖像設定檔')");
+  await evaluate("window.importResult = null; button('匯入圖像設定檔').click()");
   assert.equal(await evaluate("profileCard.textContent.includes('匯出圖像設定檔')"), true);
   for (const theme of ['dark', 'light']) {
     await evaluate("document.documentElement.dataset.theme = '" + theme + "'; profileStart.scrollIntoView({block:'start'});");

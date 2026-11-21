@@ -428,6 +428,12 @@ impl App {
     fn shortcut_key(&mut self, code: KeyCode, pressed: bool, repeat: bool, ctrl: bool, alt: bool, shift_now: bool) -> bool {
         if pressed && !repeat {
             match code {
+                // The bus owner opts in before another player may act as conductor.
+                KeyCode::KeyK if ctrl && alt && !shift_now && self.net.lan.is_some() && self.player.is_some() && !self.chord_bound(code, shift_now, ctrl, alt) => {
+                    self.coop_cab_enabled = !self.coop_cab_enabled;
+                    self.service_msg = Some((format!("Co-op cab controls: {}", if self.coop_cab_enabled { "allowed" } else { "disabled" }), 4.0));
+                    return true;
+                }
                 // OMSI's `toggel_mouse_ctrl` (O): steering and pedals with the mouse
                 KeyCode::KeyO if !ctrl && !alt && !shift_now && self.input.key_left_free(code, "toggel_mouse_ctrl") => {
                     self.game_action("toggel_mouse_ctrl");
