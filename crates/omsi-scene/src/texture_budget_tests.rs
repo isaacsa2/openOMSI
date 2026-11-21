@@ -400,6 +400,11 @@ fn an_idle_look_is_kept_until_something_changes() {
         "room for a texture to come back"
     );
     assert!(m.unchanged(1, 900, limit, 64 << 20, &c));
+    // The idle fast path tolerates card jitter, but reduced textures need a
+    // fresh admission check after a much smaller amount of space returns.
+    assert!(!m.restore_room_improved(1 << 20, true));
+    assert!(m.restore_room_improved(2 << 20, true));
+    assert!(!m.restore_room_improved(2 << 20, false));
     assert!(
         !m.unchanged(1, 900, limit, 100 << 20, &c),
         "the card has room again"
