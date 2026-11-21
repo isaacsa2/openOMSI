@@ -70,8 +70,7 @@ fn old_linked_splines_go_on_from_the_one_before() {
 
 #[test]
 fn cold_child_stop_keeps_its_spline_attached_parent_and_metadata() {
-    let dir =
-        std::env::temp_dir().join(format!("omsi-index-child-spline-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("omsi-index-child-spline-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("tile_3_-2.map");
     // The parent's 625 m distance includes 600 m before its own 50 m segment.
@@ -116,8 +115,7 @@ fn authored_offsets_keep_stops_on_tiles_with_duplicate_spline_ids() {
             &dir,
         );
         assert_eq!(index.splines[&10].map_chain_offset, Some(600.0));
-        for (tile_index, stop, x, y, path) in [(0, 100, 0, 0, &first), (1, 200, 2, -1, &second)]
-        {
+        for (tile_index, stop, x, y, path) in [(0, 100, 0, 0, &first), (1, 200, 2, -1, &second)] {
             let origin = DVec2::new(x as f64 * tile_size(), y as f64 * tile_size());
             let pos = index
                 .objects
@@ -145,8 +143,7 @@ fn authored_offsets_keep_stops_on_tiles_with_duplicate_spline_ids() {
 
 #[test]
 fn legacy_stops_survive_modern_chrono_with_reused_spline_id() {
-    let dir =
-        std::env::temp_dir().join(format!("omsi-index-chrono-spline-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("omsi-index-chrono-spline-{}", std::process::id()));
     let chrono = dir.join("Chrono/addition");
     std::fs::create_dir_all(&chrono).unwrap();
     let path = dir.join("tile_0_0.map");
@@ -178,8 +175,7 @@ fn legacy_stops_survive_modern_chrono_with_reused_spline_id() {
 
 #[test]
 fn cold_index_resolves_chained_spline_stops() {
-    let dir =
-        std::env::temp_dir().join(format!("omsi-index-stop-chain-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("omsi-index-stop-chain-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for version in [10, 14] {
         // Entirely synthetic: the stop lies 25 m into the second segment, but its
@@ -218,8 +214,7 @@ fn cold_index_resolves_chained_spline_stops() {
             .get(&100)
             .expect("the cold index must know the stop");
         assert!(
-            (*pos - DVec3::new(3.0 * tile_size() - 3.0, -2.0 * tile_size() + 625.0, 2.0))
-                .length()
+            (*pos - DVec3::new(3.0 * tile_size() - 3.0, -2.0 * tile_size() + 625.0, 2.0)).length()
                 < 1e-8
         );
         let tile = read_tile(&path, &[]).unwrap();
@@ -403,12 +398,7 @@ fn spline(id: i64, prev: i64, next: i64, length: f64) -> MapSpline {
     }
 }
 
-fn row(
-    interval: f64,
-    range: f64,
-    d: f64,
-    repeater: Option<(usize, usize)>,
-) -> SplineAttachment {
+fn row(interval: f64, range: f64, d: f64, repeater: Option<(usize, usize)>) -> SplineAttachment {
     SplineAttachment {
         file: "lamp.sco".into(),
         id: 5,
@@ -433,9 +423,7 @@ fn master_row() {
         "{at:?}"
     );
     // right of a spline heading north is east, the height is above the spline
-    assert!(
-        (objs[0].pose.pos.x - 3.0).abs() < 1e-6 && (objs[0].pose.pos.z - 10.25).abs() < 1e-6
-    );
+    assert!((objs[0].pose.pos.x - 3.0).abs() < 1e-6 && (objs[0].pose.pos.z - 10.25).abs() < 1e-6);
     // range 45 m: objects 0 and 1 only
     assert_eq!(
         row_objects(&row(30.0, 45.0, 10.0, None), &s, DVec2::ZERO, None).len(),
@@ -644,8 +632,7 @@ fn tangential_row_keeps_its_frame_when_the_spline_runs_backwards() {
     assert!((forward.pos - backward.pos).length() < 1e-8);
     for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
         assert!(
-            (forward.rot.transform_vector3(axis) - backward.rot.transform_vector3(axis))
-                .length()
+            (forward.rot.transform_vector3(axis) - backward.rot.transform_vector3(axis)).length()
                 < 1e-6
         );
     }
@@ -1112,9 +1099,7 @@ fn repeater_continues_the_row() {
         Some(&ix),
     );
     assert_eq!(objs.iter().map(|o| o.index).collect::<Vec<_>>(), vec![3, 4]);
-    assert!(
-        (objs[0].pose.pos.y - 110.0).abs() < 1e-6 && (objs[1].pose.pos.y - 140.0).abs() < 1e-6
-    );
+    assert!((objs[0].pose.pos.y - 110.0).abs() < 1e-6 && (objs[1].pose.pos.y - 140.0).abs() < 1e-6);
     // on a spline that runs against the chain the record's own copy still starts where it
     // says: 20 m along this spline, then every 30 m
     let s3 = MapSpline {
@@ -1211,4 +1196,3 @@ fn attachment_order() {
         child.heading()
     );
 }
-
