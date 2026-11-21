@@ -35,6 +35,10 @@ jobs:
           cargo metadata --manifest-path Cargo.toml --format-version 1 > /dev/null
           git add -- crates/omsi-sim/src/people.rs Cargo.lock launcher/src-tauri/Cargo.lock
           git diff --cached --check
+      - name: Install the same Linux native dependencies as release CI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libgtk-3-dev libxkbcommon-dev libwayland-dev libssl-dev libwebkit2gtk-4.1-dev zip clang lld
       - name: Check converter and launcher against merged main
         run: cargo check --locked -p omsi-proton -p omsi-launcher-core -p omsi-scene -p omsi-sim --all-targets
       - name: Commit and publish validated merge
