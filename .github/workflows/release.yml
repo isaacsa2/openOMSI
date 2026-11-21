@@ -211,6 +211,7 @@ jobs:
             New-Item -ItemType Directory -Force dist/server-headless-test | Out-Null
             Copy-Item "target/$env:TARGET/release/omsi-server.exe", scripts/server-headless/server-test.cfg, scripts/server-headless/server-simulation.cfg, scripts/server-headless/run-test.cmd, scripts/server-headless/run-simulation.cmd, LICENSE dist/server-headless-test/
             Copy-Item docs/HEADLESS_SERVER_TEST.md dist/server-headless-test/README.md
+             Copy-Item scripts/server-headless/apply-update.ps1 dist/server-headless-test/
             Compress-Archive -Path dist/server-headless-test/* -DestinationPath "out/openOMSI-$env:OPENOMSI_VERSION-headless-test-windows-x64.zip"
           }
       - name: Installer
