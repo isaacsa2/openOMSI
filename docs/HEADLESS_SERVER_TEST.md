@@ -328,6 +328,37 @@ The related checklist is in `docs/DEDICATED_SERVER_REGRESSIONS.md`
 under **AI road height — graphical-client regression gate**. This is a
 blocking real-world check, not a proven fix on every map.
 
+## Player passenger counts and multiple buses on the same line
+
+The native server now reads the existing `Pose.passengers` field from
+each connected player's bus instead of confusing passengers in a **player
+bus** with host-owned walking/AI people. Once per minute the console logs
+`native player passengers:` for the aggregate and `native player bus #ID:`
+for each driver's reported onboard count and changes observed since the
+current CPU world was created. A `GRANT` alone does **not** prove someone
+boarded: actual onboard changes come from the client's vehicle state. The
+wire counter is eight bits and saturates at 255; it cannot distinguish
+higher loads or produce an exact event history if state updates are lost.
+
+When two players concurrently serve the same physical stop, advertise the
+same line and destination, and face the same direction, the headless host
+distributes competing `CLAIM` requests using their initial onboard loads
+and the number waiting. A lighter bus can receive a larger share. Players
+with unknown/different services are not grouped; a bus that leaves or
+disconnects loses its reservation. Each person is handed over only once,
+even when multiple CLAIM datagrams arrive in one server tick.
+
+This is a conservative **boarding coordination** layer, not validated
+end-to-end route planning. It cannot authenticate a driver's displayed
+line, inspect every subsequent stop of the player's current duty, enforce
+each custom bus's seat capacity or prove that a granted rider eventually
+entered. Test two buses on the same line (equal loads, unequal loads and
+opposite headings), doors opening/closing, boarding, disembarkation and
+reconnect with real graphical clients before declaring route/CLAIM parity.
+Do not change `accept_uploads` or `share_maps` as part of passenger testing:
+they are separate explicit server-owner choices.
+
+
 ## TPS, tick latency and memory — practical load test
 
 A steady **59–60 TPS** reported by the live host is a useful baseline;
