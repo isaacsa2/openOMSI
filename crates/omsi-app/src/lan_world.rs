@@ -530,7 +530,9 @@ impl LanWorld {
         }
         // people
         let forget = std::time::Duration::from_secs_f32(nw::FORGET_AFTER);
-        m.people.retain(|id, t| t.heard.elapsed() < forget || m.claim_queue.is_awaiting(*id));
+        m.people.retain(|id, t| {
+            t.heard.elapsed() < forget || m.claim_queue.is_awaiting(*id)
+        });
         if let Some(h) = humans.as_deref_mut() {
             m.update_people(lan, h, view, world, renderer, scene, render_ms);
         }
@@ -729,7 +731,10 @@ impl Mirror {
                 world.mirror_departed(renderer, scene, &keys, *complete);
             }
             for (person, id) in f.gone {
-                if person && !m.claim_queue.is_awaiting(id) && m.people.get(&id).is_some_and(|t| t.remove_is_current(ms)) {
+                if person
+                    && !m.claim_queue.is_awaiting(id)
+                    && m.people.get(&id).is_some_and(|t| t.remove_is_current(ms))
+                {
                     m.people.remove(&id);
                 }
             }
