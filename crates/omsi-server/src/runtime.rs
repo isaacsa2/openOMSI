@@ -565,6 +565,36 @@ fn report_native_ground_load(
             "native player bus #{player_id}: {aboard} aboard, {boarded} observed boardings and {alighted} observed alightings (player-reported)",
         );
     }
+    // Debug-only vertical sanity sample at the reporting cadence (one minute).
+    // Never snap network cars to this value: the client/server may be viewing
+    // different bridge decks, and a model's origin need not lie on the road.
+    if omsi_cfg::flags::OMSI_DEBUG_TRAFFIC.is_set() {
+        let mut below = Vec::new();
+        let mut without_ground = 0usize;
+        for car in &sim.traffic.cars {
+            let p = car.vehicle.position;
+            match world.drawn_ground(p.x, p.y, p.z + 3.0) {
+                Some(z) if z - p.z > 1.0 => {
+                    if below.len() < 5 {
+                        below.push(format!(
+                            "id={} at ({:.1},{:.1},{:.2}), drawn ground {:.2}, difference +{:.2} m",
+                            car.id, p.x, p.y, p.z, z, z - p.z
+                        ));
+                    }
+                }
+                None => without_ground += 1,
+                _ => {}
+            }
+        }
+        if !below.is_empty() || without_ground > 0 {
+            log::warn!(
+                "native AI ground check (diagnostic only): {} sample(s) with surface above the vehicle origin; {} without drawable ground; examples: {}",
+                below.len(),
+                without_ground,
+                below.join("; ")
+            );
+        }
+    }
     let profile = profiler.report();
     log::info!(
         "native load: TPS {:.1}/{:.0}, {} active CPU tiles, {} AI cars, {} AI buses, {} pedestrians ({} walking, {} waiting, {} aboard); ground heap est.: {:.1} MiB terrain, {:.1} MiB raster, {:.1} MiB wheel; tick p95 {:.1} ms p99 {:.1} ms (profiling {})",
