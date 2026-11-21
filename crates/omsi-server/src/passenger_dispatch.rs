@@ -374,6 +374,30 @@ mod tests {
     }
 
     #[test]
+    fn a_bus_can_serve_the_remaining_stop_after_its_competitor_disconnects() {
+        let mut dispatch = PassengerDispatch::default();
+        dispatch.update(vec![driver(1, 0, "terminal"), driver(2, 0, "terminal")]);
+        let (mut waiting, mut counts, stops) = sample();
+        let all: Vec<u32> = (1..=10).collect();
+        let first = dispatch.choose(1, &all, &waiting, &counts, &stops);
+        assert_eq!(first.len(), 5);
+        dispatch.granted(1, &first, &waiting);
+        for id in &first {
+            waiting.remove(id);
+        }
+        counts.insert(70, 5);
+        dispatch.update(vec![driver(1, 0, "terminal")]);
+        let pending: Vec<_> = all
+            .into_iter()
+            .filter(|id| waiting.contains_key(id))
+            .collect();
+        assert_eq!(
+            dispatch.choose(1, &pending, &waiting, &counts, &stops),
+            pending
+        );
+    }
+
+    #[test]
     fn lighter_bus_receives_more_when_two_buses_share_a_line() {
         let mut dispatch = PassengerDispatch::default();
         dispatch.update(vec![driver(1, 10, "terminal"), driver(2, 0, "terminal")]);
