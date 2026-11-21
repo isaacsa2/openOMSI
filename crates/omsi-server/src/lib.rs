@@ -21,6 +21,7 @@ pub mod lanes;
 pub mod metar;
 pub mod mod_policy;
 pub mod people_sync;
+mod passenger_dispatch;
 mod people_upstream;
 pub mod population;
 pub mod reboot;
