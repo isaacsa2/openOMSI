@@ -57,6 +57,7 @@ struct Driver {
     service: Option<Service>,
     position: DVec3,
     onboard: u32,
+    heading: f32,
     boarded: u64,
     alighted: u64,
     stopped: bool,
@@ -76,6 +77,7 @@ impl Driver {
             service: Service::of(pose),
             position,
             onboard: pose.passengers,
+            heading: pose.heading,
             boarded: 0,
             alighted: 0,
             stopped: pose.speed_kmh.is_finite() && pose.speed_kmh.abs() <= 5.0,
@@ -87,6 +89,13 @@ impl Driver {
     fn near(&self, stop: DVec3) -> bool {
         (self.position - stop).truncate().length() <= SAME_STOP_RADIUS
             && (self.position.z - stop.z).abs() <= SAME_STOP_VERTICAL
+    }
+
+    fn same_direction(&self, other: &Self) -> bool {
+        (f64::from(self.heading) - f64::from(other.heading))
+            .to_radians()
+            .cos()
+            >= 0.5
     }
 }
 
@@ -225,7 +234,8 @@ impl PassengerDispatch {
                 .filter(|d| {
                     d.service.as_ref() == Some(service)
                         && d.near(position)
-                        && (d.id == player || (d.stopped && d.doors_open))
+                        && (d.id == player
+                            || (d.stopped && d.doors_open && d.same_direction(owner)))
                 })
                 .collect();
             if candidates.len() <= 1 {
@@ -314,6 +324,7 @@ mod tests {
             }),
             position: DVec3::new(10.0, 0.0, 0.0),
             onboard: count,
+            heading: 0.0,
             boarded: 0,
             alighted: 0,
             stopped: true,
@@ -383,6 +394,22 @@ mod tests {
         dispatch.update(vec![driver(1, 0, "terminal a")]);
         assert_eq!(dispatch.totals().0, 1);
         assert_eq!(dispatch.choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).len(), 10);
+    }
+
+    #[test]
+    fn opposite_running_direction_does_not_split_a_platform() {
+        let mut dispatch = PassengerDispatch::default();
+        let first = driver(1, 0, "terminal");
+        let mut opposite = driver(2, 0, "terminal");
+        opposite.heading = 180.0;
+        dispatch.update(vec![first, opposite]);
+        let (waiting, counts, stops) = sample();
+        assert_eq!(
+            dispatch
+                .choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops)
+                .len(),
+            10
+        );
     }
 
     #[test]
