@@ -29,6 +29,27 @@ impl<T: Clone> OnceByKey<T> {
     }
 }
 
+fn load_terrain_holes(sco: &SceneryObject, model: &Model) -> Vec<MeshData> {
+    sco.terrain_hole_sources(model)
+        .filter_map(|(hole_dir, f)| {
+            // The cutter may live with the object or in its model subfolder.
+            let mp = omsi_cfg::resolve_path(hole_dir, f);
+            let mp = if omsi_cfg::vfs::is_file(&mp) {
+                mp
+            } else {
+                omsi_cfg::resolve_path(&omsi_cfg::resolve_path(hole_dir, "model"), f)
+            };
+            match omsi_o3d::load_mesh(&mp) {
+                Ok(m) => Some(mesh_from_o3d(&m)),
+                Err(e) => {
+                    log::warn!("terrain hole {}: {e}", mp.display());
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 impl World {
     pub fn open(root: &Path, global_cfg: &Path, date: i32) -> Result<World> {
         let mut global = GlobalCfg::load(global_cfg)
@@ -526,26 +547,7 @@ impl World {
             }
             // [terrainhole] <mesh>: the cutter that takes the ground away under a junction
             // or an underpass, so the carriageway is not buried under a mound of terrain
-            let holes: Vec<MeshData> = sco
-                .terrain_hole_sources(&model)
-                .filter_map(|(hole_dir, f)| {
-                    // the cutter sits next to the model, which is either the object's own
-                    // folder or a `model` folder inside it
-                    let mp = omsi_cfg::resolve_path(hole_dir, f);
-                    let mp = if omsi_cfg::vfs::is_file(&mp) {
-                        mp
-                    } else {
-                        omsi_cfg::resolve_path(&omsi_cfg::resolve_path(hole_dir, "model"), f)
-                    };
-                    match omsi_o3d::load_mesh(&mp) {
-                        Ok(m) => Some(mesh_from_o3d(&m)),
-                        Err(e) => {
-                            log::warn!("terrain hole {}: {e}", mp.display());
-                            None
-                        }
-                    }
-                })
-                .collect();
+            let holes = load_terrain_holes(&sco, &model);
             let collision = sco
                 .collision_mesh
                 .as_ref()
