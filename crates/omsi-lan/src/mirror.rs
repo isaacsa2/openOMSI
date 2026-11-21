@@ -34,6 +34,26 @@ pub fn ai_context(host: &omsi_sim::VehicleHost) -> omsi_net::ai_context::Context
     }
 }
 
+/// The host owns road height. Network traffic interpolation can extrapolate
+/// X/Y when a frame is late, but extrapolating its vertical velocity without
+/// road contact information may push cars through asphalt or above bridges.
+/// Hold the latest host Z only in that short extrapolation window; ordinary
+/// between-packet interpolation, rail motion and horizontal movement stay intact.
+pub fn vehicle_position(
+    pose: &omsi_net::traffic_table::Pose,
+    latest: Option<(omsi_net::traffic_table::Kind, f64)>,
+) -> [f64; 3] {
+    let mut position = pose.pos;
+    if pose.extrapolated {
+        if let Some((kind, z)) = latest {
+            if kind != omsi_net::traffic_table::Kind::Rail && z.is_finite() {
+                position[2] = z;
+            }
+        }
+    }
+    position
+}
+
 /// How long a client guesses on past the last frame of something moving (ms).
 pub const MAX_EXTRAPOLATE: f64 = 300.0;
 
@@ -246,6 +266,34 @@ mod tests {
             relative_to_roots(Path::new("/elsewhere/x.bus"), &roots),
             None
         );
+    }
+
+    #[test]
+    fn mirrored_road_cars_keep_server_z_when_packets_are_late() {
+        use omsi_net::traffic_table::{Kind, Pose};
+        let pose = Pose {
+            pos: [30.0, 40.0, 7.6],
+            heading: 90.0,
+            pitch: 0.0,
+            bank: 0.0,
+            speed: 18.0,
+            steer: 0.0,
+            blinker: 0,
+            brake: false,
+            lights: false,
+            at_station: 0,
+            extrapolated: true,
+            teleported: false,
+        };
+        for kind in [Kind::Car, Kind::Bus, Kind::Truck, Kind::Motorcycle] {
+            assert_eq!(vehicle_position(&pose, Some((kind, 10.0))), [30.0, 40.0, 10.0]);
+        }
+        let high = Pose { pos: [30.0, 40.0, 12.4], ..pose };
+        assert_eq!(vehicle_position(&high, Some((Kind::Car, 10.0)))[2], 10.0);
+        let between = Pose { extrapolated: false, ..pose };
+        assert_eq!(vehicle_position(&between, Some((Kind::Car, 10.0)))[2], 7.6);
+        assert_eq!(vehicle_position(&pose, Some((Kind::Rail, 10.0)))[2], 7.6);
+        assert_eq!(vehicle_position(&pose, None)[2], 7.6);
     }
 
     #[test]
