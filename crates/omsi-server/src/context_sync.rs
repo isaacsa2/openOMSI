@@ -87,18 +87,22 @@ impl HeadlessContextSync {
             .collect();
         let active: HashSet<_> = viewers.iter().map(|(id, _)| *id).collect();
         self.peers.retain(|id, _| active.contains(id));
+        // Build once for the snapshot, not once per player. Keep each
+        // player's exact original radius and car-list priority, including
+        // MAX_CARS_PER_PEER, so LAN payloads and client behavior do not change.
+        let nearby_cars = SpatialIndex::from_positions(
+            traffic.cars.iter().map(|car| car.vehicle.position.truncate()),
+        );
+        let mut candidates = Vec::new();
         let mut bytes = 0;
         for (peer, at) in viewers {
             let view = self.peers.entry(peer).or_default();
             let mut nearby = HashSet::new();
             let mut sent_packets = 0;
             let mut sent_bytes = 0;
-            for car in traffic
-                .cars
-                .iter()
-                .filter(|car| (car.vehicle.position - at).truncate().length() <= CAR_RADIUS)
-                .take(MAX_CARS_PER_PEER)
-            {
+            nearby_cars.within(at.truncate(), CAR_RADIUS, &mut candidates);
+            for &index in candidates.iter().take(MAX_CARS_PER_PEER) {
+                let car = &traffic.cars[index];
                 let Some(table_id) = table.id_of(car.id) else {
                     continue;
                 };
