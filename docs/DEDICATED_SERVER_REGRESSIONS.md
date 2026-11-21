@@ -318,11 +318,22 @@ waiting on the server** remain available to the following vehicle. Tests
 cover equal and unequal onboard loads, different/opposite services, distinct
 grants, a bypassing bus and a departing bus.
 
-An accepted GRANT transfers person ownership to the client immediately,
-before the person physically boards; if that client later abandons the
-stop, the current protocol does not yet return the unboarded person to
-the server. Client-confirmed boarding and explicit unboarded GRANT
-cancellation/restore remain a blocking follow-up for complete parity.
+An accepted GRANT is now held in a native server escrow until explicit
+client confirmation. `PAXBOARD` commits ownership only once the original
+person is inside the player's bus; `PAXRETURN` restores that same person
+to its original stop and ID if the client abandons boarding while still
+on the ground. `PAXACK` terminates reliable UDP retry for either path.
+The host validates the sender and isolates retained people by the actual
+LAN connection identity, not just the numeric player ID.
+
+**Acceptance remains blocking:** prove cancellation during active boarding
+with two real graphical clients, both lost return/ACK packets, Chrono
+reload during an escrow, passenger model/loading failure and reconnect
+after leaving. A disconnected or replaced session cannot safely assume
+that the rider did not board: current escrow entries are discarded rather
+than resurrecting a passenger who might already be inside the offline
+player's bus. The graphical LAN-host path still uses the legacy
+non-escrow handover and needs a compatibility test.
 
 **Still blocking:** a truthful duty/route graph, destination-aware rider
 choice, bus-specific capacity, reconciliation after a GRANT never boards
