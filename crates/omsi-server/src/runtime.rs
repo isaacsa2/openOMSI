@@ -154,16 +154,18 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
     );
     // Public discovery uses the normal authenticated gateway and moderated
     // listing. Both remain explicit operator opt-ins via server.cfg.
+    // This host has a real clock and an asynchronous METAR relay; neither
+    // feature needs a renderer or native vehicle-script authority.
     ensure!(
-        !cfg.real_time && !cfg.metar_sync,
-        "experimental relay requires real_time=0 and metar_sync=0"
+        !cfg.metar_sync || cfg.metar_station.len() == 4,
+        "native METAR requires a four-letter metar_station in server.cfg"
     );
     // Voice/radio is transported as validated, rate-limited opaque LAN packets;
     // the native host already applies server.cfg's policy without audio devices.
     // Self-teleport requests use the same authenticated per-player gate as LAN.
     ensure!(
-        cfg.date.is_some(),
-        "experimental relay requires an explicit server.cfg date"
+        cfg.date.is_some() || cfg.real_time,
+        "experimental relay requires a date or real_time=1"
     );
     Ok(())
 }
@@ -828,8 +830,23 @@ struct CpuBootstrap {
 }
 
 fn load_initial_cpu_world(root: &Path, cfg: &ServerCfg, simulated: bool) -> Result<CpuBootstrap> {
-    let (date_num, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
-    let initial_time = checked_clock(&cfg.time)?;
+    let (date_num, date, initial_time, time_label) = if cfg.real_time {
+        let now = omsi_career::real_time::now().context("local real-time clock unavailable")?;
+        let (_, date) = checked_date(&format!(
+            "{:04}-{:02}-{:02}",
+            now.year, now.month, now.day
+        ))?;
+        let (number, _) = checked_date(&date)?;
+        let time = format!(
+            "{:02}:{:02}",
+            (now.secs / 3600.0) as u32,
+            (now.secs as u32 / 60) % 60
+        );
+        (number, date, now.secs, time)
+    } else {
+        let (number, date) = checked_date(cfg.date.as_deref().context("missing date")?)?;
+        (number, date, checked_clock(&cfg.time)?, cfg.time.clone())
+    };
     let global = omsi_cfg::resolve_path(root, &cfg.map);
     let mut map = crate::world::HostWorld::open(root, &global, date_num)
         .with_context(|| format!("loading {}", global.display()))?;
@@ -854,7 +871,7 @@ fn load_initial_cpu_world(root: &Path, cfg: &ServerCfg, simulated: bool) -> Resu
     );
     let mut sim = make_cpu_sim(root, cfg, &map, &keys, signals, simulated, initial_time);
     start_verified_parked_buses(root, cfg, &map, &sim);
-    let calendar = crate::clock::NativeCalendar::new(&date, &cfg.time);
+    let calendar = crate::clock::NativeCalendar::new(&date, &time_label);
     let sim_clock = calendar.snapshot();
     let schedule = if simulated && cfg.timetable {
         Some(CpuTimetable::new(
@@ -926,7 +943,7 @@ fn run(
     // protocol discovery must be the same as the legacy host.
     let mut net = HostTransport::bind_configured(plan, world)
         .with_context(|| format!("binding dedicated UDP port {}", cfg.port))?;
-    net.session_mut().clock_speed = cfg.time_speed;
+    net.session_mut().clock_speed = if cfg.real_time { 1.0 } else { cfg.time_speed };
     // A graphical client ALWAYS requests the host's authenticated TCP
     // manifest after WELCOME, even when it has the same map and buses.
     // Reserving TCP in LanSession::host is not enough: the original server
@@ -998,8 +1015,8 @@ fn run(
     admin_state.password = cfg.admin_password.clone();
     admin_state.moderator_password = cfg.moderator_password.clone();
     let mut rules = ServerRules {
-        real_time: false,
-        metar: false,
+        real_time: cfg.real_time,
+        metar: cfg.metar_sync,
         traffic_max: if simulated {
             MAX_EXPERIMENTAL_TRAFFIC
         } else {
@@ -1024,6 +1041,10 @@ fn run(
     let mut keys = keys;
     let mut active_keys = keys.clone();
     let mut clock = initial_time;
+    let metar_station = cfg.metar_sync.then(|| cfg.metar_station.clone());
+    let mut metar_due = Instant::now();
+    let mut metar_rx = None;
+    let mut weather_name = weather.unwrap_or_default().to_owned();
     let mut n = 0_u64;
     let mut report = Instant::now();
     loop {
@@ -1064,8 +1085,24 @@ fn run(
             let current_date = calendar.at(clock + admin_state.shift).date_code();
             chrono_refresh.manual_restart(current_date);
         }
+        crate::weather::tick_metar(
+            net.session_mut(),
+            metar_station.as_ref(),
+            &mut metar_rx,
+            &mut metar_due,
+            &mut weather_name,
+        );
         sync_native_simulation_settings(&mut sim, &net, &admin_state, &live_cfg, simulated);
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
+        if live_cfg.real_time && n % 60 == 0 {
+            let current = calendar.at(clock + admin_state.shift).clone();
+            if let Some(real) = omsi_career::real_time::clock_now(&current) {
+                let drift = omsi_career::real_time::gap(&current, &real);
+                if drift.abs() > 0.25 {
+                    admin_state.shift += drift;
+                }
+            }
+        }
         let authoritative = clock + admin_state.shift;
         // Date and time-of-day on the wire must roll over with the world clock;
         // ScheduleSim still sees the continuous elapsed-day timeline.
@@ -1161,8 +1198,8 @@ fn run(
                 net.session_mut(),
                 &mut admin_state,
                 authoritative,
-                weather.unwrap_or_default(),
-                None,
+                &weather_name,
+                metar_station.as_deref(),
                 counts,
                 &meter,
                 &profiler,
