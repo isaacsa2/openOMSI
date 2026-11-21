@@ -310,9 +310,19 @@ stationary boarding buses only if their displayed line, destination and
 heading agree. It divides server-owned waiting-person grants according to
 the buses' initial occupancies and their existing granted shares. The
 claim handler updates pending person IDs immediately within a LAN tick so
-two drivers cannot receive the same person, and clears reservations after
-departure, vehicle change or disconnection. Tests cover equal and unequal
-onboard loads, different/opposite services and distinct grants.
+two drivers cannot receive the same person. Claimants must be stationary
+(5 km/h or less) and have open/unknown doors; moving buses and buses with
+known closed doors cannot pre-claim a stop they skip. Any departing or
+closed-door bus loses its unused stop share, so people who are **still
+waiting on the server** remain available to the following vehicle. Tests
+cover equal and unequal onboard loads, different/opposite services, distinct
+grants, a bypassing bus and a departing bus.
+
+An accepted GRANT transfers person ownership to the client immediately,
+before the person physically boards; if that client later abandons the
+stop, the current protocol does not yet return the unboarded person to
+the server. Client-confirmed boarding and explicit unboarded GRANT
+cancellation/restore remain a blocking follow-up for complete parity.
 
 **Still blocking:** a truthful duty/route graph, destination-aware rider
 choice, bus-specific capacity, reconciliation after a GRANT never boards
