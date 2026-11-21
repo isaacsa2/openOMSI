@@ -135,7 +135,14 @@ struct Visit {
 
 struct EscrowEntry {
     connection: u64,
+    bus: String,
     person: HandedPerson,
+}
+
+/// A reused player id or a bus switch is not the same boarding owner,
+/// even when it happened on an otherwise valid LAN connection.
+fn same_escrow_owner(driver: Option<&Driver>, connection: u64, bus: &str) -> bool {
+    driver.is_some_and(|driver| driver.connection == connection && driver.bus == bus)
 }
 
 /// Owns only player-reported occupancy and temporary stop allocations.
@@ -169,14 +176,12 @@ impl PassengerDispatch {
     fn reclaim_disconnected(&mut self, drivers: &[Driver], people: &mut PeopleSim) {
         self.recovery_tick = self.recovery_tick.wrapping_add(1);
         if !self.escrow.is_empty() {
-            let connections: HashMap<u32, u64> = drivers
-                .iter()
-                .map(|driver| (driver.id, driver.connection))
-                .collect();
+            let active: HashMap<u32, &Driver> =
+                drivers.iter().map(|driver| (driver.id, driver)).collect();
             let previous = std::mem::take(&mut self.escrow);
             for (player, entries) in previous {
                 for (id, entry) in entries {
-                    if connections.get(&player) == Some(&entry.connection) {
+                    if same_escrow_owner(active.get(&player).copied(), entry.connection, &entry.bus) {
                         self.escrow.entry(player).or_default().insert(id, entry);
                     } else {
                         // This person is not confirmed aboard. A reconnect with
@@ -263,7 +268,7 @@ impl PassengerDispatch {
             held.retain(|_, entry| {
                 self.drivers
                     .get(player)
-                    .is_some_and(|driver| driver.connection == entry.connection)
+                    .is_some_and(|driver| same_escrow_owner(Some(driver), entry.connection, &entry.bus))
             });
             !held.is_empty()
         });
@@ -401,19 +406,34 @@ impl PassengerDispatch {
     /// Retain original, server-owned waiting people after GRANT. The client
     /// can return only its own IDs, never someone else's passengers.
     pub(crate) fn escrow_granted(&mut self, player: u32, granted: Vec<HandedPerson>) {
-        let Some(connection) = self.drivers.get(&player).map(|driver| driver.connection) else {
+        let Some((connection, bus)) = self
+            .drivers
+            .get(&player)
+            .map(|driver| (driver.connection, driver.bus.clone()))
+        else {
             return;
         };
         let holding = self.escrow.entry(player).or_default();
         for person in granted {
-            holding.insert(person.person.id, EscrowEntry { connection, person });
+            holding.insert(
+                person.person.id,
+                EscrowEntry {
+                    connection,
+                    bus: bus.clone(),
+                    person,
+                },
+            );
         }
     }
 
     /// The client has confirmed crossing into its vehicle. Discard only
     /// escrow entries actually owned by this peer; duplicates are idempotent.
     pub(crate) fn confirm_boarded(&mut self, player: u32, ids: &[u32]) {
-        let Some(connection) = self.drivers.get(&player).map(|driver| driver.connection) else {
+        let Some((connection, bus)) = self
+            .drivers
+            .get(&player)
+            .map(|driver| (driver.connection, driver.bus.clone()))
+        else {
             return;
         };
         let Some(holding) = self.escrow.get_mut(&player) else {
@@ -422,7 +442,7 @@ impl PassengerDispatch {
         for id in ids {
             if holding
                 .get(id)
-                .is_some_and(|entry| entry.connection == connection)
+                .is_some_and(|entry| entry.connection == connection && entry.bus == bus)
             {
                 holding.remove(id);
             }
@@ -443,14 +463,21 @@ impl PassengerDispatch {
         people: &mut PeopleSim,
     ) -> Vec<u32> {
         let mut acknowledged = Vec::new();
-        let connection = self.drivers.get(&player).map(|driver| driver.connection);
+        let owner = self
+            .drivers
+            .get(&player)
+            .map(|driver| (driver.connection, driver.bus.clone()));
         for id in ids {
             let entry = self
                 .escrow
                 .get_mut(&player)
                 .and_then(|holding| holding.remove(id));
             match entry {
-                Some(entry) if Some(entry.connection) == connection => {
+                Some(entry)
+                    if owner
+                        .as_ref()
+                        .is_some_and(|(conn, bus)| *conn == entry.connection && *bus == entry.bus) =>
+                {
                     // Do not throw away the original person if their stop was
                     // removed by streaming or a Chrono map swap.
                     if !people
@@ -723,6 +750,31 @@ mod tests {
                 .len(),
             10
         );
+    }
+
+    #[test]
+    fn a_switch_to_a_different_bus_cannot_inherit_a_prior_boarding_grant() {
+        let original = driver(7, 0, "terminal");
+        assert!(same_escrow_owner(
+            Some(&original),
+            original.connection,
+            &original.bus
+        ));
+        let mut replacement = original.clone();
+        replacement.bus = "Vehicles/Replacement.bus".into();
+        assert!(!same_escrow_owner(
+            Some(&replacement),
+            original.connection,
+            &original.bus
+        ));
+        replacement.bus = original.bus.clone();
+        replacement.connection += 1;
+        assert!(!same_escrow_owner(
+            Some(&replacement),
+            original.connection,
+            &original.bus
+        ));
+        assert!(!same_escrow_owner(None, original.connection, &original.bus));
     }
 
     #[test]
