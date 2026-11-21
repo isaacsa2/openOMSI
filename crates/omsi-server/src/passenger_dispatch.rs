@@ -321,14 +321,12 @@ impl PassengerDispatch {
             if !seen.insert(id) {
                 continue;
             }
+            // Unknown stops cannot be validated against the bus's actual
+            // position. Fail closed instead of transferring a distant rider.
             let Some(&stop) = waiting.get(&id) else {
-                // A waiting passenger with no stop record cannot be grouped
-                // by service, but legacy hand_over still validates its state.
-                chosen.push(id);
                 continue;
             };
             let Some(&position) = stop_positions.get(&stop) else {
-                chosen.push(id);
                 continue;
             };
             // A claimant who skipped this stop must not take passengers
@@ -585,6 +583,19 @@ mod tests {
             dispatch.choose(1, &pending, &waiting, &counts, &stops),
             pending
         );
+    }
+
+    #[test]
+    fn a_claim_without_an_authoritative_stop_position_is_never_granted() {
+        let mut dispatch = PassengerDispatch::default();
+        dispatch.update(vec![driver(1, 0, "terminal")]);
+        let (waiting, counts, positions) = sample();
+        let claim = [1];
+        assert!(dispatch.choose(1, &claim, &waiting, &counts, &HashMap::new()).is_empty());
+        assert!(dispatch.choose(1, &claim, &HashMap::new(), &counts, &positions).is_empty());
+        // The same real waiting person is eligible when the map gives a
+        // physical stop position and the bus is actually serving it.
+        assert_eq!(dispatch.choose(1, &claim, &waiting, &counts, &positions), claim);
     }
 
     #[test]
