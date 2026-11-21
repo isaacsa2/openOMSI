@@ -1284,6 +1284,28 @@ mod tests {
         assert!(allow_free_roam(&cfg).is_ok());
     }
     #[test]
+    fn experimental_traffic_config_accepts_512_and_caps_larger_requests() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "omsi-traffic-limit-{}-{nanos}.cfg",
+            std::process::id()
+        ));
+        let sample = include_str!("../../../scripts/server-headless/server-simulation.cfg");
+        std::fs::write(&path, sample.replace("traffic = 8", "traffic = 512")).unwrap();
+        let cfg = ServerCfg::load(&path, MAX_EXPERIMENTAL_TRAFFIC).unwrap();
+        assert_eq!(cfg.traffic, 512);
+        assert!(allow_simulated_roam(&cfg).is_ok());
+
+        std::fs::write(&path, sample.replace("traffic = 8", "traffic = 513")).unwrap();
+        let cfg = ServerCfg::load(&path, MAX_EXPERIMENTAL_TRAFFIC).unwrap();
+        assert_eq!(cfg.traffic, 512);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
     fn experimental_simulation_admission_is_explicit_and_still_private() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
