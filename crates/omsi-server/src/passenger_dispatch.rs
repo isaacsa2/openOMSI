@@ -299,6 +299,19 @@ impl PassengerDispatch {
         buses
     }
 
+    fn may_repeat_pending_grant(
+        driver: &Driver,
+        connection: u64,
+        bus: &str,
+        stop: Option<i64>,
+        stop_positions: &HashMap<i64, DVec3>,
+    ) -> bool {
+        same_escrow_owner(Some(driver), connection, bus)
+            && stop
+                .and_then(|stop| stop_positions.get(&stop))
+                .is_some_and(|position| driver.boarding_at(*position))
+    }
+
     /// A GRANT can be lost over UDP after the host removed this waiting
     /// person from its live population. The same connected bus may request
     /// the same person again while still boarding at the original platform;
@@ -327,10 +340,13 @@ impl PassengerDispatch {
             .filter(|id| seen.insert(*id))
             .filter(|id| {
                 holding.get(id).is_some_and(|entry| {
-                    same_escrow_owner(Some(driver), entry.connection, &entry.bus)
-                        && entry.person.stop
-                            .and_then(|stop| stop_positions.get(&stop))
-                            .is_some_and(|position| driver.boarding_at(*position))
+                    Self::may_repeat_pending_grant(
+                        driver,
+                        entry.connection,
+                        &entry.bus,
+                        entry.person.stop,
+                        stop_positions,
+                    )
                 })
             })
             .collect()
@@ -836,6 +852,26 @@ mod tests {
             &original.bus
         ));
         assert!(!same_escrow_owner(None, original.connection, &original.bus));
+    }
+
+    #[test]
+    fn a_lost_grant_retries_only_for_the_original_bus_at_its_stop() {
+        let owner = driver(7, 0, "terminal");
+        let stops = HashMap::from([(70, DVec3::ZERO)]);
+        let check = |driver: &Driver, connection, bus, stop| {
+            PassengerDispatch::may_repeat_pending_grant(driver, connection, bus, stop, &stops)
+        };
+        assert!(check(&owner, 7, "Vehicles/7.bus", Some(70)));
+        assert!(!check(&owner, 8, "Vehicles/7.bus", Some(70)));
+        assert!(!check(&owner, 7, "Vehicles/Other.bus", Some(70)));
+        assert!(!check(&owner, 7, "Vehicles/7.bus", None));
+        assert!(!check(&owner, 7, "Vehicles/7.bus", Some(71)));
+        let mut moving = owner.clone();
+        moving.stopped = false;
+        assert!(!check(&moving, 7, "Vehicles/7.bus", Some(70)));
+        let mut doors_shut = owner.clone();
+        doors_shut.doors_open = false;
+        assert!(!check(&doors_shut, 7, "Vehicles/7.bus", Some(70)));
     }
 
     #[test]
