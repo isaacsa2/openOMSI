@@ -243,6 +243,9 @@ pub fn arrive(from: DVec2, to: DVec2, pace: f64) -> DVec2 {
 /// Seconds after one passenger's greeting or complaint before anybody says another.
 pub const CHAT_PAUSE: f64 = 12.0;
 
+/// The maximum speed (m/s) treated as stopped for optional door-aware boarding.
+pub const BOARD_STOPPED_SPEED: f64 = 0.2;
+
 /// A cell of `PeopleSim::wall_cells`: when it was made, and its walls with their heights.
 pub type WallCell = (f64, Vec<(Block, f64, f64)>);
 
@@ -442,6 +445,8 @@ pub struct PeopleSim {
     pub bad_driving: bool,
     /// When false, passengers may complain without leaving the bus early.
     pub bad_driving_alight: bool,
+    /// Optional stop boarding gate; defaults to false to preserve OMSI behavior.
+    pub board_when_stopped: bool,
     /// How passengers board (`boarding` in the settings): `auto` - pay and take the
     /// ticket by themselves after a moment; `pay` - wait at the desk for the driver to
     /// sell it (and show a pass after `PAY_PATIENCE`); `walk` - no cash desk at all.

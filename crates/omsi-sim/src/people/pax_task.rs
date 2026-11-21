@@ -470,6 +470,14 @@ impl PeopleSim {
                     }
                     self.pax_mut(i).unwrap().shunned = None;
                 }
+                // When enabled, wait until the bus is stationary and an entry door is open.
+                // Do not alter the legacy boarding path when the option is disabled.
+                if self.board_when_stopped
+                    && (bn.speed.abs() > super::model::BOARD_STOPPED_SPEED
+                        || !bn.entry_open.iter().any(|open| *open))
+                {
+                    return;
+                }
                 self.pax_mut(i).unwrap().bus = Some(b);
                 // still rolling in, or standing in the stop's box: to the gather point
                 if bn.speed.abs() <= 2.0 && !self.in_stop_box(stop, b) {

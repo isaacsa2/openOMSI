@@ -85,6 +85,8 @@ pub mod bodies;
 mod desk_ticket_tests;
 #[cfg(test)]
 mod destination_tests;
+#[cfg(test)]
+mod board_when_stopped_tests;
 pub mod money;
 #[cfg(test)]
 mod population_limit_tests;
