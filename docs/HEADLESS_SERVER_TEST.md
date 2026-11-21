@@ -352,10 +352,27 @@ even when multiple CLAIM datagrams arrive in one server tick.
 doors cannot claim waiting people. A bus that passes or closes its doors
 loses its reserved share, leaving *not-yet-granted* people for the next
 bus that actually stops and opens doors. With legacy/unknown door telemetry,
-a stationary bus may still claim. This intentionally does not recall people
-already granted to a client: returning an unboarded GRANT to the host needs
-an explicit client acknowledgement/cancellation protocol. Test the sequence
-bus A bypasses stop, bus B stops, then B boards, and compare both clients.
+a stationary bus may still claim. The native host now keeps each granted person's original state in a bounded
+session ownership escrow until the client's physical-boarding confirmation.
+The graphical client sends `PAXBOARD` only after the person is actually
+inside its own bus. If it moves away from the original stop while a granted
+person remains on the ground, it removes the local copy and sends
+`PAXRETURN`. The host restores the original person at the same stop and
+ID and responds with `PAXACK`; both `PAXBOARD` and `PAXRETURN` are retried
+on UDP packet loss, and duplicate requests are idempotent. Authentication
+binds each request to the original connected player. A failed client-side
+`GRANT` materialization also sends `PAXRETURN`.
+
+**Manual acceptance:** have bus A claim people with its door open, then
+pull away before all have entered. Watch native server logs and verify the
+remaining people visibly reappear in the original stop's queue; bus B of
+the matching line, destination and direction must be able to board them.
+Repeat when A drives through without opening doors, A actually boards some
+first, and with forced packet loss/reconnect. Nobody already aboard A may
+be returned to B. If the client disconnects without returning unboarded
+people, the server cannot assume they were never aboard; this still needs
+a separate reconnect reconciliation strategy. The ordinary graphical-host
+path does not hold the native escrow and needs compatibility validation.
 
 This is a conservative **boarding coordination** layer, not validated
 end-to-end route planning. It cannot authenticate a driver's displayed
