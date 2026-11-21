@@ -580,7 +580,12 @@ fn report_native_ground_load(
                     if below.len() < 5 {
                         below.push(format!(
                             "id={} at ({:.1},{:.1},{:.2}), drawn ground {:.2}, difference +{:.2} m",
-                            car.id, p.x, p.y, p.z, z, z - p.z
+                            car.id,
+                            p.x,
+                            p.y,
+                            p.z,
+                            z,
+                            z - p.z
                         ));
                     }
                 }
