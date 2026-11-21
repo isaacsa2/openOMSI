@@ -147,6 +147,7 @@ struct Mirror {
     granted_waiting: HashMap<u32, (i64, Instant)>,
     return_pending: HashMap<u32, Option<Instant>>,
     boarded_pending: HashMap<u32, Option<Instant>>,
+    claim_queue: omsi_lan::passenger::ClaimQueue,
 }
 
 impl Mirror {
@@ -631,6 +632,7 @@ impl Mirror {
             m.granted_waiting.clear();
             m.return_pending.clear();
             m.boarded_pending.clear();
+            m.claim_queue.clear();
             m.drawn_cars.clear();
             m.drawn_people.clear();
             m.shown.clear();
@@ -1104,13 +1106,7 @@ impl Mirror {
                 m.drawn_people.insert(*id);
             }
         }
-        let claims = h.take_claims();
-        if !claims.is_empty() {
-            log::info!(
-                "LAN: our bus stands at a stop: asking the host for waiting passengers {claims:?}"
-            );
-            lan.claim(&claims);
-        }
+        m.claim_queue.send_due(lan, h.take_claims(), Instant::now());
     }
 }
 
