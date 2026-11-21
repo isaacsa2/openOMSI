@@ -367,6 +367,40 @@ and physical boarding/alighting continuity on two graphical clients.
 Client-reported displays and occupancy alone cannot certify these.
 
 
+## Player-first headless proximity optimizations (experimental)
+
+The graphical LAN path remains unchanged. The headless host keeps the same
+authoritative AI and pedestrian states, original distance cutoffs, per-client
+entity caps, ordered selection and wire formats. There is **no new LAN protocol
+requirement**. The normal game's established traffic mirror still uses the
+host's poses and locally handles rendering/animation; its player bus continues
+to run immediately in the client.
+
+- **AI context:** `HeadlessContextSync` builds one short-lived spatial index
+  per eligible context update instead of scanning all AI cars separately for
+  every player. The stable original list order and 650-metre selection radius
+  are preserved before the existing per-peer bandwidth and context budgets.
+- **Pedestrians:** `HeadlessPeopleSync` reuses the same index across viewers.
+  Each XY broad-phase result still passes the original exact 3D person-range
+  filter and original `Place`/ownership restrictions in `PeopleSim`; the
+  graphical LAN host's `lan_people` API retains its old behavior.
+- **Graphics:** timetable-driver cleanup in the normal renderer uses a set to
+  test retained IDs; no driver creation, visibility or animation policy
+  changes. The shared `omsi_sim::spatial::SpatialIndex` has unit coverage
+  comparing ordered results with a reference linear scan across 512 objects
+  and many positions/radii.
+
+**Gates:** compare server p95/p99, CPU and bandwidth at 64/320/512 road cars,
+500/2000 people and at least 2/8 connected clients. Confirm per-client
+visible entity IDs, DESC/WORLD and AI context ordering are unchanged, and
+the legacy graphical LAN host continues working. A data-structure speedup is
+plausible, but **not measured or guaranteed** until these benchmarks pass.
+
+**Deferred:** tile unloading with stable lane/route references, frequency-
+adaptive AI simulation, player-vehicle server authority, route/capacity
+reconciliation and reconnect persistence. None may be called complete or
+turned on by default merely because proximity queries are faster.
+
 ## Additional native CPU correctness and load checks
 
 **Terrain and AI wheel contact.** The CPU AI ground-height fallback now
