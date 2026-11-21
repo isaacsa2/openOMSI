@@ -991,7 +991,17 @@ impl World {
             memo.resume = false;
             return 0;
         }
-        if pass != BudgetPass::Now && !memo.resume && !retry_due && memo.unchanged(generation, usage, limit, card_restore_room(video_limit, card), centers) {
+        // With reduced textures already in the scene, a small gain in card
+        // headroom can fit a nearby mip. Do not cache the old no-room decision
+        // until the card gains 64 MiB: that can leave a blurred road or building
+        // stuck even after enough space for an individual texture was freed.
+        let restore_room = card_restore_room(video_limit, card);
+        if pass != BudgetPass::Now
+            && !memo.resume
+            && !retry_due
+            && !memo.restore_room_improved(restore_room, any_dropped)
+            && memo.unchanged(generation, usage, limit, restore_room, centers)
+        {
             return 0;
         }
         let ts = tile_size();
@@ -1479,6 +1489,12 @@ impl BudgetMemo {
                 .iter()
                 .zip(centers)
                 .all(|(a, b)| a.truncate().distance_squared(b.truncate()) < Self::MOVED * Self::MOVED)
+    }
+
+    /// Only revisit an idle texture budget for modestly regained capacity
+    /// when there are still reduced textures eligible to return to full detail.
+    fn restore_room_improved(&self, room: u64, has_dropped: bool) -> bool {
+        has_dropped && room > self.room.saturating_add(1 << 20)
     }
 
     fn remember(&mut self, generation: u64, usage: u64, limit: u64, room: u64, centers: &[DVec3], idle: bool) {
