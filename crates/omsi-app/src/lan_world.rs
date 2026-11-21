@@ -141,6 +141,11 @@ struct Mirror {
     bytes_at: u64,
     granted: u32,
     denied: u32,
+    /// Locally owned GRANT people that have not crossed into our bus yet.
+    granted_waiting: HashMap<u32, (i64, Instant)>,
+    /// UDP cancellation/boarding messages retried until host PAXACK.
+    return_pending: HashMap<u32, Option<Instant>>,
+    boarded_pending: HashMap<u32, Option<Instant>>,
 }
 
 impl Mirror {
@@ -837,6 +842,9 @@ impl Mirror {
                 lan.traffic_client_mut().clear();
             }
             m.people.clear();
+            m.granted_waiting.clear();
+            m.return_pending.clear();
+            m.boarded_pending.clear();
             m.drawn_cars.clear();
             m.drawn_people.clear();
             m.shown.clear();
@@ -1201,18 +1209,125 @@ impl Mirror {
                 if granted {
                     if h.grant(id) {
                         m.granted += 1;
+                        if let Some(stop) = h
+                            .people
+                            .iter()
+                            .find(|p| p.id == id)
+                            .and_then(|p| match &p.state {
+                                omsi_sim::people::State::Pax(pax) => pax.stop,
+                                _ => None,
+                            })
+                        {
+                            m.granted_waiting.insert(id, (stop, Instant::now()));
+                        }
                         log::info!("LAN: the host hands waiting passenger {id} over to our bus");
                     } else {
-                        // the host has let them go (they are ours now, and the host
-                        // says no more of them): a copy kept here would stand at the
-                        // stop for good, one more after every stop
+                        // The host already gave up ownership but this client
+                        // could not materialize the person. Ask the native host
+                        // to restore it instead of silently losing it.
                         h.mirror_remove(id);
+                        m.return_pending.insert(id, None);
                     }
                     m.people.remove(&id);
                     m.drawn_people.remove(&id);
                 } else {
                     m.denied += 1;
                 }
+            }
+        }
+        // Host acknowledges both the physical-boarding notification and a
+        // cancelled claim. Never stop retrying a UDP return before PAXACK.
+        for id in lan.take_pax_acks() {
+            m.return_pending.remove(&id);
+            m.boarded_pending.remove(&id);
+        }
+        // A GRANT is only a provisional transfer. Keep its original identity
+        // until the person physically crosses the player's bus boundary.
+        // Passing the point without boarding returns it to the next driver.
+        let current_bus = h
+            .last_buses
+            .iter()
+            .find(|bus| bus.id == omsi_sim::people::BusId::Player);
+        let mut finished = Vec::new();
+        let mut cancelled = Vec::new();
+        for (&id, &(stop, received)) in &m.granted_waiting {
+            let Some(person) = h.people.iter().find(|p| p.id == id) else {
+                // Locally retired/disappeared people must not be recreated
+                // without proof that they stayed outside the bus.
+                finished.push(id);
+                continue;
+            };
+            if matches!(
+                person.place,
+                omsi_sim::people::Place::Bus(omsi_sim::people::BusId::Player, _)
+            ) {
+                m.boarded_pending.insert(id, None);
+                finished.push(id);
+                continue;
+            }
+            if received.elapsed() < std::time::Duration::from_secs(2) {
+                continue;
+            }
+            let stop_position = h.stops.get(&stop).map(|s| s.pos);
+            let moved_away = match (current_bus, stop_position) {
+                (Some(bus), Some(point)) => {
+                    let distance = (bus.pos - point).truncate().length();
+                    distance > 75.0 || (distance > 25.0 && bus.speed.abs() > 2.0)
+                }
+                (None, _) => true,
+                _ => false,
+            };
+            if moved_away {
+                cancelled.push(id);
+                finished.push(id);
+            }
+        }
+        for id in finished {
+            m.granted_waiting.remove(&id);
+        }
+        if !cancelled.is_empty() {
+            for id in &cancelled {
+                if let Some(index) = h.people.iter().position(|p| p.id == *id) {
+                    // Only the not-yet-boarded people can be removed here.
+                    if matches!(h.people[index].place, omsi_sim::people::Place::Ground) {
+                        h.release(index);
+                        let person = h.people.swap_remove(index);
+                        h.retire(&person);
+                        m.return_pending.insert(*id, None);
+                    }
+                }
+            }
+            crate::view_sync::apply_people(h, &mut view.people, world, renderer, scene);
+        }
+        // Retry both positive boarding acknowledgements and cancellations
+        // once per second. The server restores each original person at most
+        // once and sends an idempotent PAXACK to stop the retries.
+        let now = Instant::now();
+        let due = |last: &Option<Instant>| {
+            last.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_secs(1))
+        };
+        let returning: Vec<u32> = m
+            .return_pending
+            .iter()
+            .filter(|(_, at)| due(at))
+            .map(|(id, _)| *id)
+            .collect();
+        if !returning.is_empty() {
+            lan.return_unboarded(&returning);
+            for id in returning {
+                m.return_pending.insert(id, Some(now));
+            }
+        }
+        let boarded: Vec<u32> = m
+            .boarded_pending
+            .iter()
+            .filter(|(_, at)| due(at))
+            .map(|(id, _)| *id)
+            .collect();
+        if !boarded.is_empty() {
+            lan.confirm_boarded(&boarded);
+            for id in boarded {
+                m.boarded_pending.insert(id, Some(now));
             }
         }
         let gone: Vec<u32> = m
