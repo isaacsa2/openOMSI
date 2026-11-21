@@ -103,10 +103,7 @@ mod tests {
     fn boarding_retries_accept_the_client_hashbrown_pending_ledger() {
         // Compile-time regression for the exact HashMap implementation used
         // by omsi-app::lan_world, which differs from std::collections::HashMap.
-        fn accepts_client_ledger(
-            _: &mut hashbrown::HashMap<u32, Option<std::time::Instant>>,
-        ) {
-        }
+        fn accepts_client_ledger(_: &mut hashbrown::HashMap<u32, Option<std::time::Instant>>) {}
         let mut pending = hashbrown::HashMap::new();
         pending.insert(7, None);
         accepts_client_ledger(&mut pending);
