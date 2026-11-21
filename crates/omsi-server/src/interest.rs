@@ -148,12 +148,9 @@ pub(crate) fn update_host_interest_with_dispatch(
         people.lan_centers.push(position);
     }
 
-    // The existing Pose.passengers count is the player's onboard report.
-    // Do not infer that everyone receiving GRANT actually crossed the door.
-    dispatch.observe(lan);
-    // A confirmed boarding discards its original waiting-person snapshot.
-    // A cancelled GRANT returns that same person to its old stop instead.
-    // Both messages are authenticated by the LAN session's peer checks.
+    // Process authenticated BOARD/RETURN messages before pruning a departed
+    // peer's ledger: a final UDP acknowledgement may arrive on the same tick
+    // as a disconnect. GRANT is never proof of physical boarding.
     for (player, ids) in lan.take_pax_boarded() {
         dispatch.confirm_boarded(player, &ids);
         lan.acknowledge_returns(player, &ids);
@@ -162,6 +159,9 @@ pub(crate) fn update_host_interest_with_dispatch(
         let restored = dispatch.return_unboarded(player, &ids, people);
         lan.acknowledge_returns(player, &restored);
     }
+    // Pose.passengers remains a player-reported count, not the GRANT count.
+    // Restore abandoned escrow only when the owning connection is truly gone.
+    dispatch.observe(lan, people);
     // Keep the authoritative claim decision on the same physics tick as
     // PeopleSim::hand_over. Never trust a caller-supplied passenger ID alone.
     let claims = lan.take_claims();
