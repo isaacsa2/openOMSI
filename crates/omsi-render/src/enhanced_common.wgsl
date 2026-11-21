@@ -69,6 +69,13 @@ struct Enhanced {
     // the glass on a slope, `pane_local`)
     pane_tilt: vec4<f32>,
 };
+// Heavy rain scatters less ambient light into the view. The fog still blocks
+// the same fraction of the scene at each distance.
+fn weather_fog_radiance(ambient: vec3<f32>, rain_intensity: f32) -> vec3<f32> {
+    let rain = smoothstep(0.15, 0.85, rain_intensity);
+    return ambient * mix(1.0, 0.82, rain);
+}
+
 @group(0) @binding(11) var<uniform> enh: Enhanced;
 @group(0) @binding(13) var s_lin: sampler;
 @group(0) @binding(14) var t_sky_lut: texture_2d<f32>;
@@ -166,13 +173,6 @@ fn layer_depth(sigma: f32, k: f32, h0: f32, h1: f32, dist: f32) -> f32 {
     return sigma * dist * (exp(-k * a) - exp(-k * b)) / (k * dh);
 }
 
-// Heavy rain scatters less ambient light into the view. The fog still blocks
-// the same fraction of the scene at each distance.
-fn weather_fog_radiance() -> vec3<f32> {
-    let rain = smoothstep(0.15, 0.85, enh.weather.z);
-    return enh.fog_color.rgb * mix(1.0, 0.82, rain);
-}
-
 // The air between the camera and a point dist metres away in direction dir (from the
 // camera), at heights h0 (camera) and h1 (point) above the fog's base: rgb the light it
 // scatters towards the camera (radiance), a what it lets through of the point.
@@ -193,7 +193,7 @@ fn air_of(dir: vec3<f32>, dist: f32, h0: f32, h1: f32, clear: f32) -> vec4<f32> 
     // already holds the glow round the sun); a weather fog glows with the light around it
     // and brighter towards the sun
     let horizon = sky_table(normalize(vec3<f32>(dir.x, dir.y, max(dir.z, 0.0) * 0.3 + 0.03)));
-    let fog_in = weather_fog_radiance() + enh.sun.rgb * hg_phase(dot(dir, camera.sun_dir.xyz), 0.55) * 0.9;
+    let fog_in = weather_fog_radiance(enh.fog_color.rgb, enh.weather.z) + enh.sun.rgb * hg_phase(dot(dir, camera.sun_dir.xyz), 0.55) * 0.9;
     let inscatter = mix(horizon, fog_in, tau_fog / tau);
     return vec4<f32>(inscatter * (1.0 - t), t);
 }
