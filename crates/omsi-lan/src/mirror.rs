@@ -2,6 +2,7 @@
 //! as they came (`Track`), the moment they are drawn at (`PlayClock`), the files named
 //! relative to the content roots, and the activities on the wire and in the simulation.
 
+use omsi_net::traffic_table::Kind;
 use omsi_net::world::Activity as NetActivity;
 use omsi_sim::human::Activity;
 use std::path::{Path, PathBuf};
@@ -41,19 +42,13 @@ pub fn ai_context(host: &omsi_sim::VehicleHost) -> omsi_net::ai_context::Context
 /// between-packet interpolation, rail motion and horizontal movement stay intact.
 pub fn vehicle_position(
     pose: &omsi_net::traffic_table::Pose,
-    latest: Option<(omsi_net::traffic_table::Kind, f64)>,
+    latest: Option<(Kind, f64)>,
 ) -> [f64; 3] {
     let mut position = pose.pos;
     if pose.extrapolated {
         if let Some((kind, z)) = latest {
-            if matches!(
-                kind,
-                omsi_net::traffic_table::Kind::Car
-                    | omsi_net::traffic_table::Kind::Bus
-                    | omsi_net::traffic_table::Kind::Truck
-                    | omsi_net::traffic_table::Kind::Motorcycle
-            ) && z.is_finite()
-            {
+            let road = matches!(kind, Kind::Car | Kind::Bus | Kind::Truck | Kind::Motorcycle);
+            if road && z.is_finite() {
                 position[2] = z;
             }
         }
