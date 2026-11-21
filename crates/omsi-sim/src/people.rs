@@ -53,6 +53,7 @@ use std::sync::Arc;
 // The simulation: the people and what they do. It does not draw: what the renderer has to
 // follow it writes down (`bodies`), and omsi-app's `humans` view replays that at the end
 // of the public calls that make people (`tick`, `populate`, `avatar`, ...).
+pub mod ambient_talk;
 pub mod bus_view;
 pub mod buses;
 pub mod cabin;

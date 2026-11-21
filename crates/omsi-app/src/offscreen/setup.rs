@@ -527,6 +527,8 @@ fn new_humans(
         h.visual_full_bus_reaction =
             settings.passenger_full_bus_reaction && settings.passenger_animation == "enhanced";
         h.bad_driving = settings.pax_bad_driving;
+        h.bad_driving_alight = settings.pax_bad_driving_alight;
+        h.ambient_talk = settings.passenger_ambient_talk;
         h.boarding = settings.boarding.clone();
         h.stand_chance = settings.standing_chance;
         h.short_rides_stand = settings.pax_short_rides_stand;
