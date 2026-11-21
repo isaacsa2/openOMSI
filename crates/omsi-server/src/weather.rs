@@ -51,3 +51,40 @@ pub fn tick_metar(
         }
     }
 }
+
+/// Server-owned state for asynchronous METAR requests, never a UI dependency.
+pub struct NativeWeather {
+    station: Option<String>,
+    due: Instant,
+    receiver: Option<Receiver<Option<Weather>>>,
+    name: String,
+}
+
+impl NativeWeather {
+    pub fn new(station: Option<String>, initial: &str) -> Self {
+        Self {
+            station,
+            due: Instant::now(),
+            receiver: None,
+            name: initial.to_owned(),
+        }
+    }
+
+    pub fn tick(&mut self, session: &mut LanSession) {
+        tick_metar(
+            session,
+            self.station.as_ref(),
+            &mut self.receiver,
+            &mut self.due,
+            &mut self.name,
+        );
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn station(&self) -> Option<&str> {
+        self.station.as_deref()
+    }
+}

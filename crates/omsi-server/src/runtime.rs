@@ -832,10 +832,7 @@ struct CpuBootstrap {
 fn load_initial_cpu_world(root: &Path, cfg: &ServerCfg, simulated: bool) -> Result<CpuBootstrap> {
     let (date_num, date, initial_time, time_label) = if cfg.real_time {
         let now = omsi_career::real_time::now().context("local real-time clock unavailable")?;
-        let (_, date) = checked_date(&format!(
-            "{:04}-{:02}-{:02}",
-            now.year, now.month, now.day
-        ))?;
+        let (_, date) = checked_date(&format!("{:04}-{:02}-{:02}", now.year, now.month, now.day))?;
         let (number, _) = checked_date(&date)?;
         let time = format!(
             "{:02}:{:02}",
@@ -1041,10 +1038,10 @@ fn run(
     let mut keys = keys;
     let mut active_keys = keys.clone();
     let mut clock = initial_time;
-    let metar_station = cfg.metar_sync.then(|| cfg.metar_station.clone());
-    let mut metar_due = Instant::now();
-    let mut metar_rx = None;
-    let mut weather_name = weather.unwrap_or_default().to_owned();
+    let mut weather_state = crate::weather::NativeWeather::new(
+        cfg.metar_sync.then(|| cfg.metar_station.clone()),
+        weather.unwrap_or_default(),
+    );
     let mut n = 0_u64;
     let mut report = Instant::now();
     loop {
@@ -1085,23 +1082,11 @@ fn run(
             let current_date = calendar.at(clock + admin_state.shift).date_code();
             chrono_refresh.manual_restart(current_date);
         }
-        crate::weather::tick_metar(
-            net.session_mut(),
-            metar_station.as_ref(),
-            &mut metar_rx,
-            &mut metar_due,
-            &mut weather_name,
-        );
+        weather_state.tick(net.session_mut());
         sync_native_simulation_settings(&mut sim, &net, &admin_state, &live_cfg, simulated);
         clock += f64::from(FIXED_DT) * net.session().clock_speed;
         if live_cfg.real_time && n % 60 == 0 {
-            let current = calendar.at(clock + admin_state.shift).clone();
-            if let Some(real) = omsi_career::real_time::clock_now(&current) {
-                let drift = omsi_career::real_time::gap(&current, &real);
-                if drift.abs() > 0.25 {
-                    admin_state.shift += drift;
-                }
-            }
+            crate::clock::correct_real_time(&mut calendar, clock, &mut admin_state);
         }
         let authoritative = clock + admin_state.shift;
         // Date and time-of-day on the wire must roll over with the world clock;
@@ -1198,8 +1183,8 @@ fn run(
                 net.session_mut(),
                 &mut admin_state,
                 authoritative,
-                &weather_name,
-                metar_station.as_deref(),
+                weather_state.name(),
+                weather_state.station(),
                 counts,
                 &meter,
                 &profiler,

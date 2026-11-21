@@ -25,6 +25,21 @@ pub fn sync_clock(
     }
 }
 
+/// Real-time correction is done by the headless host, not by each client.
+pub fn correct_real_time(
+    calendar: &mut NativeCalendar,
+    clock: f64,
+    admin: &mut ServerAdmin,
+) {
+    let current = calendar.at(clock + admin.shift).clone();
+    if let Some(real) = omsi_career::real_time::clock_now(&current) {
+        let drift = omsi_career::real_time::gap(&current, &real);
+        if drift.abs() > 0.25 {
+            admin.shift += drift;
+        }
+    }
+}
+
 pub fn follow_server_clock(day_time: f64, want: f64) -> (f64, Option<f64>) {
     let jump = want - day_time;
     (want, (jump.abs() >= 120.0).then_some(jump))
