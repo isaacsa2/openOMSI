@@ -25,7 +25,7 @@ fn location(f: &OnFoot, h: &Humans) -> (DVec3, Option<BusId>) {
 }
 
 impl App {
-    fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
+    pub(super) fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
         let owner = match self.foot_bus() {
             Some(BusId::Ai(id)) => crate::humans::remote_bus_player(id),
             _ => None,
