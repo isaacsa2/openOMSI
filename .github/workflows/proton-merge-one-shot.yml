@@ -12,29 +12,32 @@ jobs:
   merge-main:
     if: github.repository == 'isaacsa2/openOMSI' && contains(github.event.head_commit.message, '[proton-merge:run]')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Merge latest fork main (report unresolved files without taking sides)
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Merge current main, preferring main only at overlapping conflict hunks
         run: |
           git fetch origin main
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git merge --no-edit origin/main; then
-            echo '::error::Merge conflicts need source-aware resolution; no merge will be pushed.'
-            echo 'CONFLICTED FILES:'
-            git diff --name-only --diff-filter=U
-            for conflicted in crates/omsi-launcher-core/src/lib.rs crates/omsi-sim/src/people.rs; do
-              if grep -q '^<<<<<<< ' "$conflicted"; then
-                echo "CONFLICT HUNKS in $conflicted:"
-                awk '/^<<<<<<< / { printing=1; n=0 } printing {print NR ":" $0; n++} /^>>>>>>> / {printing=0} n>160 {printing=0}' "$conflicted"
-              fi
-            done
-            echo 'MERGE STATUS:'
-            git status --short
-            exit 1
+          git merge --no-commit --no-ff -X theirs origin/main
+          if ! grep -q '^mod unscheduled_tests;' crates/omsi-sim/src/people.rs; then
+            printf '\n#[cfg(test)]\nmod unscheduled_tests;\n' >> crates/omsi-sim/src/people.rs
           fi
+          rustfmt --edition 2024 crates/omsi-sim/src/people.rs
+          cargo metadata --manifest-path launcher/src-tauri/Cargo.toml --format-version 1 > /dev/null
+          cargo metadata --manifest-path Cargo.toml --format-version 1 > /dev/null
+          git add -- crates/omsi-sim/src/people.rs Cargo.lock launcher/src-tauri/Cargo.lock
+          git diff --cached --check
+      - name: Check converter and launcher against merged main
+        run: cargo check --locked -p omsi-proton -p omsi-launcher-core -p omsi-scene -p omsi-sim --all-targets
+      - name: Commit and publish validated merge
+        run: |
+          git commit -m "Merge latest main into Proton conversion preview"
           git push origin HEAD:preview/next-test-build
