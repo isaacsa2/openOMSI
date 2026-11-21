@@ -25,6 +25,51 @@ pub fn may_work(lan: &omsi_net::LanSession, from: u32, bus: Option<&omsi_sim::Ve
     aboard.is_some() && inside && passenger_trigger(ev)
 }
 
+
+/// Whether a pending boarding grant should be returned after the owner's bus
+/// leaves the stop. This is pure LAN policy, independent of game rendering.
+pub fn left_boarding_stop(
+    bus: Option<(glam::DVec3, f64)>,
+    stop: Option<glam::DVec3>,
+) -> bool {
+    match (bus, stop) {
+        (Some((position, speed)), Some(point)) => {
+            let distance = (position - point).truncate().length();
+            distance > 75.0 || (distance > 25.0 && speed.abs() > 2.0)
+        }
+        (None, _) => true,
+        _ => false,
+    }
+}
+
+/// Resend physical BOARD/RETURN reports until the authoritative host ACKs;
+/// a dropped UDP acknowledgement must not lose a rider.
+pub fn resend_until_ack(
+    lan: &mut omsi_net::LanSession,
+    pending: &mut std::collections::HashMap<u32, Option<std::time::Instant>>,
+    now: std::time::Instant,
+    boarded: bool,
+) {
+    let due: Vec<u32> = pending
+        .iter()
+        .filter(|(_, last)| {
+            last.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_secs(1))
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    if due.is_empty() {
+        return;
+    }
+    if boarded {
+        lan.confirm_boarded(&due);
+    } else {
+        lan.return_unboarded(&due);
+    }
+    for id in due {
+        pending.insert(id, Some(now));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -36,6 +81,26 @@ mod tests {
         assert!(inside(&bus, [0.8, -5.5, 1.0]));
         assert!(!inside(&bus, [5.0, 0.0, 1.0]));
         assert!(!inside(&bus, [0.0, 200.0, 1.0]));
+    }
+
+    #[test]
+    fn boarding_grant_returns_only_after_bus_leaves_a_stop() {
+        let stop = Some(glam::DVec3::ZERO);
+        assert!(!left_boarding_stop(Some((glam::DVec3::ZERO, 0.0)), stop));
+        assert!(!left_boarding_stop(
+            Some((glam::DVec3::new(26.0, 0.0, 0.0), 1.0)),
+            stop
+        ));
+        assert!(left_boarding_stop(
+            Some((glam::DVec3::new(26.0, 0.0, 0.0), 3.0)),
+            stop
+        ));
+        assert!(left_boarding_stop(
+            Some((glam::DVec3::new(80.0, 0.0, 0.0), 0.0)),
+            stop
+        ));
+        assert!(left_boarding_stop(None, stop));
+        assert!(!left_boarding_stop(Some((glam::DVec3::ZERO, 0.0)), None));
     }
 
     #[test]

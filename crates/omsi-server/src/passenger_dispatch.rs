@@ -169,8 +169,10 @@ impl PassengerDispatch {
     fn reclaim_disconnected(&mut self, drivers: &[Driver], people: &mut PeopleSim) {
         self.recovery_tick = self.recovery_tick.wrapping_add(1);
         if !self.escrow.is_empty() {
-            let connections: HashMap<u32, u64> =
-                drivers.iter().map(|driver| (driver.id, driver.connection)).collect();
+            let connections: HashMap<u32, u64> = drivers
+                .iter()
+                .map(|driver| (driver.id, driver.connection))
+                .collect();
             let previous = std::mem::take(&mut self.escrow);
             for (player, entries) in previous {
                 for (id, entry) in entries {
@@ -189,16 +191,18 @@ impl PassengerDispatch {
         }
         // Only retry suspended people once a second; CPU traffic stays at
         // 60 TPS regardless of how many stops are temporarily unloaded.
-        if self.recovery_tick % 60 != 0
-            && self.orphaned_returns.len() <= MAX_ESCROW_PER_PLAYER
-        {
+        if self.recovery_tick % 60 != 0 && self.orphaned_returns.len() <= MAX_ESCROW_PER_PLAYER {
             return;
         }
         let mut waiting = Vec::new();
         let mut restored = 0usize;
         for saved in std::mem::take(&mut self.orphaned_returns) {
             // A pre-existing person with this ID has already been restored.
-            if people.people.iter().any(|person| person.id == saved.person.id) {
+            if people
+                .people
+                .iter()
+                .any(|person| person.id == saved.person.id)
+            {
                 continue;
             }
             if !saved.stop.is_some_and(|id| people.stops.contains_key(&id)) {

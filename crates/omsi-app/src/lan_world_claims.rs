@@ -42,15 +42,10 @@ impl Mirror {
             if received.elapsed() < std::time::Duration::from_secs(2) {
                 continue;
             }
-            let stop_position = h.stops.get(&stop).map(|s| s.pos);
-            let moved_away = match (current_bus, stop_position) {
-                (Some(bus), Some(point)) => {
-                    let distance = (bus.pos - point).truncate().length();
-                    distance > 75.0 || (distance > 25.0 && bus.speed.abs() > 2.0)
-                }
-                (None, _) => true,
-                _ => false,
-            };
+            let moved_away = omsi_lan::passenger::left_boarding_stop(
+                current_bus.map(|bus| (bus.pos, bus.speed)),
+                h.stops.get(&stop).map(|s| s.pos),
+            );
             if moved_away {
                 cancelled.push(id);
                 finished.push(id);
@@ -73,33 +68,8 @@ impl Mirror {
             crate::view_sync::apply_people(h, &mut view.people, world, renderer, scene);
         }
         let now = Instant::now();
-        resend_until_ack(lan, &mut self.return_pending, now, false);
-        resend_until_ack(lan, &mut self.boarded_pending, now, true);
+        omsi_lan::passenger::resend_until_ack(lan, &mut self.return_pending, now, false);
+        omsi_lan::passenger::resend_until_ack(lan, &mut self.boarded_pending, now, true);
     }
 }
 
-fn resend_until_ack(
-    lan: &mut LanSession,
-    pending: &mut HashMap<u32, Option<Instant>>,
-    now: Instant,
-    boarded: bool,
-) {
-    let due: Vec<u32> = pending
-        .iter()
-        .filter(|(_, last)| {
-            last.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_secs(1))
-        })
-        .map(|(id, _)| *id)
-        .collect();
-    if due.is_empty() {
-        return;
-    }
-    if boarded {
-        lan.confirm_boarded(&due);
-    } else {
-        lan.return_unboarded(&due);
-    }
-    for id in due {
-        pending.insert(id, Some(now));
-    }
-}
