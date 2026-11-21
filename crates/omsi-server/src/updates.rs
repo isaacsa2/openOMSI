@@ -7,7 +7,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -155,7 +155,8 @@ fn check_and_stage(download: bool) -> Result<()> {
         .set("Accept", "application/vnd.github+json")
         .call()
         .context("checking official GitHub release")?;
-    let json: Value = response.into_json().context("reading official release metadata")?;
+    let body = response.into_string().context("reading official release metadata")?;
+    let json: Value = serde_json::from_str(&body).context("parsing official release metadata")?;
     let Some(candidate) = parse_release(&json, current())? else {
         status(format!("already at the newest stable headless release ({})", current()));
         return Ok(());
