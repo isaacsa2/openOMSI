@@ -160,6 +160,16 @@ impl Navigator {
                 pal.card_dim,
             );
         }
+        // A countdown appears only when the live traffic program can tell us
+        // precisely when the red light on this lane turns green.
+        if let Some(secs) = f.traffic.and_then(|t| crate::signal_countdown::green_in(t, f.bus, f.heading)) {
+            let label = format!("Green in {secs}s");
+            let px = 13.0 * s;
+            let w = self.fonts.width(&label, px, Weight::Bold) + 24.0 * s;
+            let badge = Rect::new(map.x + (map.w - w) * 0.5, map.bottom() - 86.0 * s, w, 26.0 * s);
+            ui.rounded(badge, 12.0 * s, BANNER);
+            ui.text_in(&mut self.atlas, &self.fonts, &label, px, Weight::Bold, badge, Align::Center, BANNER_TEXT);
+        }
         let bottom_h = 52.0 * s;
         let card = Rect::new(
             map.x + pad,
