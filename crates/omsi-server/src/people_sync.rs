@@ -190,6 +190,9 @@ impl HeadlessPeopleSync {
             .collect();
         let live: HashSet<u32> = clients.iter().map(|(id, _)| *id).collect();
         self.clients.retain(|id, _| live.contains(id));
+        if clients.is_empty() {
+            return 0;
+        }
         // The native host can have thousands of pedestrians and dozens of
         // observers. Build the broad-phase once and reuse it across players.
         // The people layer still performs the original exact 3D test.
