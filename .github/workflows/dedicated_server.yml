@@ -11,6 +11,7 @@ on:
       - "crates/omsi-lan/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "scripts/server-headless/**"
       - ".github/workflows/dedicated_server.yml"
   push:
     branches:
@@ -37,6 +38,9 @@ jobs:
             echo "::error::Headless server must not pull in the graphical or audio runtime"
             exit 1
           fi
+
+      - name: Native timing report parser tests
+        run: python3 -m unittest discover -s scripts/server-headless/tests -p 'test_*.py'
 
       - name: Headless transport, clock, CPU tiles, lanes and profiler regressions
         run: cargo test --locked -p omsi-server --all-targets -- --test-threads=2
