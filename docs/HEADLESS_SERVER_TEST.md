@@ -348,6 +348,15 @@ with unknown/different services are not grouped; a bus that leaves or
 disconnects loses its reservation. Each person is handed over only once,
 even when multiple CLAIM datagrams arrive in one server tick.
 
+**Skipped stops:** a moving bus (over 5 km/h) or a bus with known closed
+doors cannot claim waiting people. A bus that passes or closes its doors
+loses its reserved share, leaving *not-yet-granted* people for the next
+bus that actually stops and opens doors. With legacy/unknown door telemetry,
+a stationary bus may still claim. This intentionally does not recall people
+already granted to a client: returning an unboarded GRANT to the host needs
+an explicit client acknowledgement/cancellation protocol. Test the sequence
+bus A bypasses stop, bus B stops, then B boards, and compare both clients.
+
 This is a conservative **boarding coordination** layer, not validated
 end-to-end route planning. It cannot authenticate a driver's displayed
 line, inspect every subsequent stop of the player's current duty, enforce
