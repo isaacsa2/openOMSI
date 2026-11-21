@@ -55,8 +55,7 @@ fn multiplayer_messages_are_translated_in_traditional_chinese() {
 fn a_translated_template_is_left_as_it_is_when_translated_again() {
     let t = templates(super::locale_keys(super::_LOCALES));
     for lang in super::_rust_i18n_available_locales() {
-        let tr =
-            |key: &str| super::_rust_i18n_try_translate(&lang, key).map(|t| t.into_owned());
+        let tr = |key: &str| super::_rust_i18n_try_translate(&lang, key).map(|t| t.into_owned());
         for (key, pieces) in &t {
             // the text the code would draw: a value per placeholder, the same one for a name used twice
             let mut names: Vec<&str> = Vec::new();
