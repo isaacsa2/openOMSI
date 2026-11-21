@@ -211,13 +211,15 @@ pub(crate) fn update_host_interest_with_dispatch(
         } else {
             Vec::new()
         };
+        let mut granted = dispatch.repeat_grants(player, &requested, &stop_positions);
         let coordinated =
             dispatch.choose(player, &eligible, &waiting, &stop_counts, &stop_positions);
         let saved = people.hand_over_saved(player, &coordinated);
-        let granted: Vec<u32> = saved.iter().map(|held| held.person.id).collect();
+        let newly_granted: Vec<u32> = saved.iter().map(|held| held.person.id).collect();
         dispatch.escrow_granted(player, saved);
-        dispatch.granted(player, &granted, &waiting);
-        for id in &granted {
+        dispatch.granted(player, &newly_granted, &waiting);
+        granted.extend(newly_granted.iter().copied());
+        for id in &newly_granted {
             // Multiple peers may claim in one network tick. A transferred
             // person must not remain eligible in the next claim batch.
             passenger_positions.remove(id);
