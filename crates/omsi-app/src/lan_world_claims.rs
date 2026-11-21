@@ -1,12 +1,9 @@
 //! Client-side reliable boarding completion and rollback for headless GRANT.
-//! Keep all transport retries outside the already large graphical lan_world module.
 
 use super::*;
 
 impl Mirror {
     /// A granted person is the client's only until boarding is confirmed.
-    /// If its bus passes the platform before boarding, the client deletes
-    /// its own copy and retries PAXRETURN until the native host acknowledges.
     pub(super) fn settle_passenger_claims(
         &mut self,
         lan: &mut LanSession,
@@ -78,8 +75,6 @@ impl Mirror {
     }
 }
 
-/// Keep the UDP boarding or return notification alive until the host's
-/// authenticated acknowledgement arrives.
 fn resend_until_ack(
     lan: &mut LanSession,
     pending: &mut HashMap<u32, Option<Instant>>,
