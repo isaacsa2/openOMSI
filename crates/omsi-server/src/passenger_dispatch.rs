@@ -91,6 +91,13 @@ impl Driver {
             && (self.position.z - stop.z).abs() <= SAME_STOP_VERTICAL
     }
 
+    /// A bus driving through a stop (or parked with shut doors) cannot
+    /// pre-claim its waiting people. Empty door lists are legacy/unknown;
+    /// they may claim only while stopped, never while driving through.
+    fn boarding_at(&self, stop: DVec3) -> bool {
+        self.near(stop) && self.stopped && self.doors_open
+    }
+
     fn same_direction(&self, other: &Self) -> bool {
         (f64::from(self.heading) - f64::from(other.heading))
             .to_radians()
@@ -160,7 +167,7 @@ impl PassengerDispatch {
                     driver.connection == member.connection
                         && driver.bus == member.bus
                         && driver.service.as_ref() == Some(&key.service)
-                        && driver.near(visit.position)
+                        && driver.boarding_at(visit.position)
                 })
             });
             !visit.members.is_empty()
@@ -220,6 +227,11 @@ impl PassengerDispatch {
                 chosen.push(id);
                 continue;
             };
+            // A claimant who skipped this stop must not take passengers
+            // away from the server; the following bus can still claim them.
+            if !owner.boarding_at(position) {
+                continue;
+            }
             let Some(service) = service.as_ref() else {
                 chosen.push(id);
                 continue;
@@ -233,9 +245,8 @@ impl PassengerDispatch {
                 .values()
                 .filter(|d| {
                     d.service.as_ref() == Some(service)
-                        && d.near(position)
-                        && (d.id == player
-                            || (d.stopped && d.doors_open && d.same_direction(owner)))
+                        && d.boarding_at(position)
+                        && d.same_direction(owner)
                 })
                 .collect();
             if candidates.len() <= 1 {
@@ -395,6 +406,60 @@ mod tests {
             dispatch.choose(1, &pending, &waiting, &counts, &stops),
             pending
         );
+    }
+
+    #[test]
+    fn skipping_a_stop_does_not_take_people_from_the_next_bus() {
+        let mut dispatch = PassengerDispatch::default();
+        let mut first = driver(1, 0, "terminal");
+        first.stopped = false; // driving past without serving the stop
+        first.doors_open = false;
+        let mut next = driver(2, 0, "terminal");
+        next.stopped = false; // has not pulled up yet
+        next.doors_open = false;
+        dispatch.update(vec![first.clone(), next.clone()]);
+        let (waiting, counts, stops) = sample();
+        let all: Vec<_> = (1..=10).collect();
+        assert!(dispatch.choose(1, &all, &waiting, &counts, &stops).is_empty());
+        // No GRANT occurred: the host's same ten waiting people remain.
+        first.position = DVec3::new(100.0, 0.0, 0.0);
+        next.stopped = true;
+        next.doors_open = true;
+        dispatch.update(vec![first, next]);
+        assert_eq!(dispatch.choose(2, &all, &waiting, &counts, &stops), all);
+    }
+
+    #[test]
+    fn closing_doors_and_departing_releases_an_unused_boarding_share() {
+        let mut dispatch = PassengerDispatch::default();
+        let first = driver(1, 0, "terminal");
+        let second = driver(2, 0, "terminal");
+        dispatch.update(vec![first.clone(), second.clone()]);
+        let (waiting, counts, stops) = sample();
+        let all: Vec<_> = (1..=10).collect();
+        assert_eq!(dispatch.choose(1, &all, &waiting, &counts, &stops).len(), 5);
+        assert_eq!(dispatch.visits.len(), 1);
+
+        let mut departed = first;
+        departed.stopped = false;
+        departed.doors_open = false;
+        dispatch.update(vec![departed, second]);
+        // The still-waiting passengers have not been removed via hand_over.
+        assert!(dispatch.visits.is_empty());
+        assert_eq!(dispatch.choose(2, &all, &waiting, &counts, &stops), all);
+    }
+
+    #[test]
+    fn closed_doors_do_not_hold_a_share_against_a_bus_that_opens() {
+        let mut dispatch = PassengerDispatch::default();
+        let mut bypassing = driver(1, 0, "terminal");
+        bypassing.doors_open = false;
+        let serving = driver(2, 0, "terminal");
+        dispatch.update(vec![bypassing, serving]);
+        let (waiting, counts, stops) = sample();
+        let all: Vec<_> = (1..=10).collect();
+        assert!(dispatch.choose(1, &all, &waiting, &counts, &stops).is_empty());
+        assert_eq!(dispatch.choose(2, &all, &waiting, &counts, &stops), all);
     }
 
     #[test]
