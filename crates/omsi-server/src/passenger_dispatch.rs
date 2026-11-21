@@ -176,18 +176,13 @@ impl PassengerDispatch {
     fn reclaim_disconnected(&mut self, drivers: &[Driver], people: &mut PeopleSim) {
         self.recovery_tick = self.recovery_tick.wrapping_add(1);
         if !self.escrow.is_empty() {
-            let active: HashMap<u32, &Driver> = drivers
-                .iter()
-                .map(|driver| (driver.id, driver))
-                .collect();
+            let active: HashMap<u32, &Driver> =
+                drivers.iter().map(|driver| (driver.id, driver)).collect();
             let previous = std::mem::take(&mut self.escrow);
             for (player, entries) in previous {
                 for (id, entry) in entries {
-                    if same_escrow_owner(
-                        active.get(&player).copied(),
-                        entry.connection,
-                        &entry.bus,
-                    ) {
+                    if same_escrow_owner(active.get(&player).copied(), entry.connection, &entry.bus)
+                    {
                         self.escrow.entry(player).or_default().insert(id, entry);
                     } else {
                         // This person is not confirmed aboard. A reconnect with
@@ -272,11 +267,9 @@ impl PassengerDispatch {
         // that new connection (or let it return someone else's old claim).
         self.escrow.retain(|player, held| {
             held.retain(|_, entry| {
-                self.drivers
-                    .get(player)
-                    .is_some_and(|driver| {
-                        same_escrow_owner(Some(driver), entry.connection, &entry.bus)
-                    })
+                self.drivers.get(player).is_some_and(|driver| {
+                    same_escrow_owner(Some(driver), entry.connection, &entry.bus)
+                })
             });
             !held.is_empty()
         });
@@ -482,9 +475,9 @@ impl PassengerDispatch {
                 .and_then(|holding| holding.remove(id));
             match entry {
                 Some(entry)
-                    if owner
-                        .as_ref()
-                        .is_some_and(|(conn, bus)| *conn == entry.connection && *bus == entry.bus) =>
+                    if owner.as_ref().is_some_and(|(conn, bus)| {
+                        *conn == entry.connection && *bus == entry.bus
+                    }) =>
                 {
                     // Do not throw away the original person if their stop was
                     // removed by streaming or a Chrono map swap.
