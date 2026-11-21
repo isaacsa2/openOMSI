@@ -71,7 +71,9 @@ impl LanSession {
 
     /// Answer a player's claim (host).
     pub fn answer_claim(&self, id: u32, granted: &[u32], denied: &[u32]) {
-        let Some(to) = self.peer_addr(id) else { return };
+        let Some(to) = self.peer_addr(id) else {
+            return;
+        };
         for (word, list) in [("GRANT", granted), ("DENY", denied)] {
             for chunk in list.chunks(64).filter(|c| !c.is_empty()) {
                 let ids: Vec<String> = chunk.iter().map(|i| i.to_string()).collect();
@@ -79,6 +81,7 @@ impl LanSession {
             }
         }
     }
+
     pub(super) fn on_pax_message(&mut self, parts: &[&str], from: SocketAddr) {
         let Some(id) = field(parts, 1).parse::<u32>().ok() else {
             return;
