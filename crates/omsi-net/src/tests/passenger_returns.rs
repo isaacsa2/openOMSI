@@ -6,7 +6,9 @@ use std::net::SocketAddr;
 fn connected_pair() -> (LanSession, LanSession) {
     let world = WorldInfo::default();
     let mut host = LanSession::host(0, "host", world.clone(), true).unwrap();
-    let addr: SocketAddr = host.local_addr().unwrap();
+    // Binding on port 0 commonly returns 0.0.0.0, which is not a
+    // routable destination for a loopback client on all platforms.
+    let addr = SocketAddr::from(([127, 0, 0, 1], host.local_addr().unwrap().port()));
     let mut client = LanSession::join_addr(vec![addr], None, "passenger-test", world).unwrap();
     let bus = Pose {
         bus: "Vehicles/Bus.bus".into(),
