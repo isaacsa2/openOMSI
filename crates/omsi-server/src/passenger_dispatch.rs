@@ -473,7 +473,9 @@ mod tests {
         let mut dispatch = PassengerDispatch::default();
         dispatch.update(vec![driver(1, 10, "terminal"), driver(2, 0, "terminal")]);
         let (waiting, counts, stops) = sample();
-        assert!(dispatch.choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).is_empty());
+        assert!(dispatch
+            .choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops)
+            .is_empty());
         assert_eq!(
             dispatch.choose(2, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).len(),
             10
@@ -485,10 +487,20 @@ mod tests {
         let mut dispatch = PassengerDispatch::default();
         dispatch.update(vec![driver(1, 0, "terminal a"), driver(2, 0, "terminal b")]);
         let (waiting, counts, stops) = sample();
-        assert_eq!(dispatch.choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).len(), 10);
+        assert_eq!(
+            dispatch
+                .choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops)
+                .len(),
+            10
+        );
         dispatch.update(vec![driver(1, 0, "terminal a")]);
         assert_eq!(dispatch.totals().0, 1);
-        assert_eq!(dispatch.choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).len(), 10);
+        assert_eq!(
+            dispatch
+                .choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops)
+                .len(),
+            10
+        );
     }
 
     #[test]
