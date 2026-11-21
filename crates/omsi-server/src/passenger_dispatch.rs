@@ -18,6 +18,8 @@ const SAME_STOP_RADIUS: f64 = 60.0;
 const SAME_STOP_VERTICAL: f64 = 10.0;
 const MAX_WAITING_PER_TICK: usize = 64;
 const MAX_ESCROW_PER_PLAYER: usize = 96;
+// Bounded recovery while the original stop is temporarily outside streamed tiles.
+const MAX_ORPHANED_RETURNS: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Service {
@@ -145,16 +147,81 @@ pub(crate) struct PassengerDispatch {
     /// Original server-owned people, pending the client's explicit physical
     /// boarding confirmation or cancellation. A GRANT alone is not boarding.
     escrow: HashMap<u32, HashMap<u32, EscrowEntry>>,
+    /// Disconnected players' unboarded people awaiting their original stop.
+    orphaned_returns: Vec<HandedPerson>,
+    recovery_tick: u32,
 }
 
 impl PassengerDispatch {
-    pub(crate) fn observe(&mut self, lan: &LanSession) {
+    pub(crate) fn observe(&mut self, lan: &LanSession, people: &mut PeopleSim) {
         let drivers: Vec<_> = lan
             .peers()
             .filter(|peer| peer.has_pose && peer.has_info)
             .filter_map(|peer| Driver::from_pose(peer.pose.id, peer.conn, &peer.pose))
             .collect();
+        self.reclaim_disconnected(&drivers, people);
         self.update(drivers);
+    }
+
+    /// A disconnect or an ID reused by a new connection must not silently
+    /// discard a granted person before BOARD. Restore their original person
+    /// on the authoritative host, or hold it until the stop streams back.
+    fn reclaim_disconnected(&mut self, drivers: &[Driver], people: &mut PeopleSim) {
+        self.recovery_tick = self.recovery_tick.wrapping_add(1);
+        if !self.escrow.is_empty() {
+            let connections: HashMap<u32, u64> =
+                drivers.iter().map(|driver| (driver.id, driver.connection)).collect();
+            let previous = std::mem::take(&mut self.escrow);
+            for (player, entries) in previous {
+                for (id, entry) in entries {
+                    if connections.get(&player) == Some(&entry.connection) {
+                        self.escrow.entry(player).or_default().insert(id, entry);
+                    } else {
+                        // This person is not confirmed aboard. A reconnect with
+                        // the same numeric player id may not inherit its grant.
+                        self.orphaned_returns.push(entry.person);
+                    }
+                }
+            }
+        }
+        if self.orphaned_returns.is_empty() {
+            return;
+        }
+        // Only retry suspended people once a second; CPU traffic stays at
+        // 60 TPS regardless of how many stops are temporarily unloaded.
+        if self.recovery_tick % 60 != 0
+            && self.orphaned_returns.len() <= MAX_ESCROW_PER_PLAYER
+        {
+            return;
+        }
+        let mut waiting = Vec::new();
+        let mut restored = 0usize;
+        for saved in std::mem::take(&mut self.orphaned_returns) {
+            // A pre-existing person with this ID has already been restored.
+            if people.people.iter().any(|person| person.id == saved.person.id) {
+                continue;
+            }
+            if !saved.stop.is_some_and(|id| people.stops.contains_key(&id)) {
+                waiting.push(saved);
+                continue;
+            }
+            if people.restore_unboarded(saved) {
+                restored += 1;
+            } else {
+                log::warn!("native coop: cannot restore disconnected rider at its stop");
+            }
+        }
+        if restored > 0 {
+            log::info!("native coop: restored {restored} unboarded people after disconnect");
+        }
+        if waiting.len() > MAX_ORPHANED_RETURNS {
+            let excess = waiting.len() - MAX_ORPHANED_RETURNS;
+            waiting.drain(..excess);
+            log::warn!(
+                "native coop: {excess} stale riders exceeded the bounded return queue; unloaded stops could not be restored"
+            );
+        }
+        self.orphaned_returns = waiting;
     }
 
     fn update(&mut self, drivers: Vec<Driver>) {
