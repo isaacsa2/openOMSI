@@ -26,12 +26,15 @@ members = [
     "crates/omsi-plugin",
     "crates/omsi-plugin/demo",
     "crates/omsi-ui",
+    "crates/omsi-settings-ui",
+    "crates/omsi-multiplayer-ui",
     "crates/omsi-launcher-core",
     "crates/omsi-launcher-api",
     "crates/omsi-launcher-model",
     "crates/omsi-admin",
     "crates/omsi-lan",
     "crates/omsi-serverlist",
+    "crates/omsi-remote",
     "crates/omsi-platform",
     "crates/omsi-guard",
     "crates/omsi-input",
@@ -70,7 +73,7 @@ walkdir = "2"
 clap = { version = "4", features = ["derive"] }
 hashbrown = "0.17"
 smallvec = "1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 # (the world snapshot the simulation reads without a lock: `omsi-sim::world_data`)
 arc-swap = "1.7"
 rand = "0.10"
@@ -79,6 +82,7 @@ wgpu = { version = "29", default-features = false, features = ["std", "parking_l
 # match wgpu's (Dependabot's `wgpu` group updates the three together)
 wgpu-hal = "29"
 naga = "29"
+wgpu-mx = { git = "https://github.com/openOMSI-org/mX", rev = "a5185eb9288f0d7e56c3d18658df69dc928c7ca0", features = ["custom"] }
 winit = "0.30"
 bytemuck = { version = "1", features = ["derive"] }
 memmap2 = "0.9"
@@ -87,7 +91,7 @@ pollster = "1.0"
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "tga", "dds", "jpeg", "webp", "gif", "tiff", "hdr", "exr", "pnm", "qoi", "ico", "ff"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-zip = { version = "9.0", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 ureq = { version = "2", default-features = false, features = ["tls"] }
 # (an address read as a browser reads it, WHATWG's URL standard: ureq's own)
 url = "2"
@@ -101,6 +105,7 @@ ab_glyph = "0.2"
 rfd = "0.15"
 libc = "0.2"
 windows = "0.62"
+windows-core = "0.62"
 winresource = "0.1"
 
 [profile.release]

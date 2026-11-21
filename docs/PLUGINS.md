@@ -338,7 +338,7 @@ end)
 F10 gives the panels the mouse; a click on the button sounds the horn. The whole example is
 [`docs/examples/plugins/trip_panel.lua`](examples/plugins/trip_panel.lua).
 
-`omsi.ui.version` is `6` (`5` before a navigator panel in the whole frame and the `map`
+`omsi.ui.version` is `7` (`6` before the interface themes, `5` before a navigator panel in the whole frame and the `map`
 element, `4` before `grab`, `3` before boxes, stop lists and the other
 elements and keys marked 4 below, `2` before the navigator's board, `1` before the controls):
 test `if omsi.ui and omsi.ui.version >= 2` in a plugin that should also run in an older openOMSI.
@@ -480,6 +480,24 @@ The label is shown as the plugin gives it, so the plugin writes it in the player
 The icon is one of the game's Material Symbols; without one, or with one the game does not
 have, the line gets the plugins' own icon. The lines go when the plugin stops
 (`ui.remove_menu_item` takes one out before that).
+
+#### An interface theme
+
+A plugin can bring a look for the game's own screens - the colours of the menus, their panels as
+frosted glass over the picture, the loading screen with the plugin's logo, which may itself be the
+loading bar: a `theme.json` in the plugin's folder makes it a theme of the plugin's name (see
+[THEMES.md](THEMES.md)). The player chooses it in Options › Interface; the plugin may switch to
+it, once and after asking, with `ui.set_theme`:
+
+```lua
+if omsi.ui.set_theme and not omsi.data.theme_offered then
+  omsi.data.theme_offered = true
+  if omsi.ui.theme() == "" then omsi.ui.set_theme("myplugin") end
+end
+```
+
+The choice is the player's setting from then on, kept for the next start; `ui.themes()` lists
+the themes there are.
 
 ### Example plugins
 
@@ -632,6 +650,7 @@ On macOS, helpers extracted from ZIP files may need their executable bit restore
 
 | Function | Returns | What it does | Since |
 | --- | --- | --- | --- |
+| `omsi.body_frame([section])` | x, y, z, rx, ry, rz, fx, fy, fz, ux, uy, uz | The bus's body now, as the last simulation step left it: its origin (map metres) and its model's axes in the world - right, forward and up, each a unit vector - with the heading, the climb and the lean on the springs in them. A point of the model at (mx, my, mz) is at origin + mx·right + my·forward + mz·up. `section` 1, 2, ... is a section coupled behind (an articulated bus's rear one). Nothing on foot. | 0.2.22 |
 | `omsi.bus.acceleration()` | across, along, up | Its acceleration in its own frame, m/s² without gravity: to the right, forwards, up. | 0.2.22 |
 | `omsi.bus.action(name, [down])` | boolean | A key action of the vehicles (`[vehicles]` of keyboard.cfg: `horn`, `parking_brake_toggle`, `kw_scheinwerfer_toggle`, `blinker_left_set`, `ticket_give`, ...): pressed and let go, or held (`down` true) and let go (`false`). `true` when the bus knows it. *Permission: `vehicle_write`.* | 0.2.22 |
 | `omsi.bus.controls()` | throttle, brake, clutch, steering | What the bus drives with now: the pedals (0 to 1) and the steering (-1 left to 1 right), from the keys, the mouse or a controller. | 0.2.22 |
@@ -690,6 +709,7 @@ On macOS, helpers extracted from ZIP files may need their executable bit restore
 | `omsi.bus.wheels()` | list of tables | Each wheel: `{axle, side, rpm, radius, suspension, driven}` (`side` 0 left, 1 right; `suspension` the spring's travel). | 0.2.22 |
 | `omsi.distance(x, y)` | number or nil | Metres from the bus to a map point, or `nil` on foot. | 0.1.10 |
 | `omsi.has_vehicle()` | boolean | `true` while the player drives a vehicle. | 0.1.5 |
+| `omsi.mesh_point(mesh, x, y, z, [section])` | x, y, z | Where a point of one of the bus's meshes is now, in map metres: `mesh` names the mesh's file (`"sht_bashmak.o3d"`, or a part of its path), `x, y, z` is the point in the model's frame (x right, y forward, z up) as the mesh stands at rest; its animations and the body's lean move it. `section` (0, the default) looks in a section coupled behind instead (1, 2, ...: an articulated bus's rear part), its point in that section's model frame. For a plugin that lines a part of the bus up with something outside it. Nothing when the bus or the section has no such mesh, or `mesh` is empty. | 0.2.22 |
 | `omsi.position()` | x, y, z, heading | Where the bus is: map metres (x east, y north, z up) and its heading in degrees clockwise from north; nothing on foot. | 0.1.10 |
 | `omsi.press(name)` | nil | Holds a key of the bus down: fires the trigger `name` (let it go with `release`). *Permission: `vehicle_write`.* | 0.1.5 |
 | `omsi.release(name)` | nil | Lets a key go: fires `<name>_off`. *Permission: `vehicle_write`.* | 0.1.5 |
@@ -788,6 +808,8 @@ On macOS, helpers extracted from ZIP files may need their executable bit restore
 
 | Function | Returns | What it does | Since |
 | --- | --- | --- | --- |
+| `omsi.other_body_frame(id, [section])` | x, y, z, rx, ry, rz, fx, fy, fz, ux, uy, uz | `body_frame` of one of `others`: its body now, origin and axes. | 0.2.22 |
+| `omsi.other_mesh_point(id, mesh, x, y, z, [section])` | x, y, z | `mesh_point` of one of `others`: where a point of one of its meshes (or, with `section`, of one of its coupled sections') is now. | 0.2.22 |
 | `omsi.other_var(id, name)` | number or nil | A script variable of one of `others`, or `nil`. | 0.2.21 |
 | `omsi.others([radius])` | list of tables | The other vehicles within `radius` m of the bus (default 300): each `{id, kind, name, x, y, z, heading}`, `kind` being `"ai"` (the traffic) or `"player"` (another player's bus in a LAN game); empty on foot. | 0.2.21 |
 | `omsi.set_other_var(id, name, value)` | boolean | Sets a script variable of one of `others`; `true` when that vehicle has it. An AI vehicle keeps it until its scripts write it again; another player's bus takes its values from the network again. *Permission: `traffic_write`.* | 0.2.21 |
@@ -797,7 +819,7 @@ On macOS, helpers extracted from ZIP files may need their executable bit restore
 | `omsi.traffic.density()` | cars, share | How many cars the traffic keeps around the camera, and the share of them that do not run to a timetable (0 to 1). | 0.2.22 |
 | `omsi.traffic.get(id)` | table or nil | One AI vehicle by its id, as `traffic.list` gives them. | 0.2.22 |
 | `omsi.traffic.light_ahead([reach])` | table or nil | The traffic light the player's bus comes to within `reach` m (default 80): `{aspect, change_in, distance}` - `aspect` `"red"`, `"red_yellow"`, `"green"`, `"green_yellow"`, `"yellow"` or `"dark"`, `change_in` the seconds to its next change. | 0.2.22 |
-| `omsi.traffic.list([radius])` | list of tables | The AI vehicles (within `radius` m of the player's bus, when given): `{id, kind, name, x, y, z, heading, speed, max_speed, waiting_for, standing, braking, blinker, line, distance}`. `kind`: `"car"`, `"taxi"`, `"bus"`, `"truck"`, `"timetable_bus"`, `"tram"`, `"bicycle"`; `waiting_for` why it waits or slows (`"lead"`, `"light"`, `"yield"`, `"people"`, ...); `standing` the seconds it has stood. | 0.2.22 |
+| `omsi.traffic.list([radius])` | list of tables | The AI vehicles (within `radius` m of the player's bus, when given): `{id, kind, name, x, y, z, heading, speed, max_speed, waiting_for, standing, braking, blinker, line, bounding_box, distance}`. `kind`: `"car"`, `"taxi"`, `"bus"`, `"truck"`, `"timetable_bus"`, `"tram"`, `"bicycle"`; `waiting_for` why it waits or slows (`"lead"`, `"light"`, `"yield"`, `"people"`, ...); `standing` the seconds it has stood; `bounding_box` the body's `[boundingbox]` as `{width, length, height, cx, cy, cz, heading, default}` (metres, the .bus/.ovh order; `cx`/`cy`/`cz` the box centre's offset from the vehicle's x, y, z along the body's right, forward and up, which follow `heading`; `default` when the file gives no box and the collision code's 2.5 x 12 x 3 m is used). | 0.2.22 |
 | `omsi.traffic.nearest([kind])` | table or nil | The AI vehicle nearest to the player's bus (of that `kind`, when given), with its `distance`. | 0.2.22 |
 | `omsi.traffic.remove(id)` | boolean | Takes an AI vehicle off the road (a timetable bus too: its timetable forgets it); its passengers get out. *Permission: `traffic_write`.* | 0.2.22 |
 | `omsi.traffic.set_density(cars, [share])` | boolean | Changes the traffic's amount (as the game menu's slider: 0 to 500 cars) and, when given, the share not running to a timetable; it fills up or thins out over the next seconds. *Permission: `traffic_write`.* | 0.2.22 |
@@ -900,12 +922,23 @@ On macOS, helpers extracted from ZIP files may need their executable bit restore
 | `omsi.ui.screen()` | width, height, scale | The screen in the panels' pixels, and how many of the screen's own pixels one of them is. | 0.2.21 |
 | `omsi.ui.set(id, panel)` | true, or false and the reason | Creates the panel `id` or replaces it; a table that is not right gives `false` and where (`"children[2].size: a number is expected"`). The same table again changes nothing. *Permission: `ui`.* | 0.2.21 |
 | `omsi.ui.set_menu_item(id, label, [icon])` | true, or false and the reason | Puts a line in the game's pause menu, or changes the plugin's line `id`: its label (40 characters at most, shown as it is) and a Material Symbols icon of the game's (`"departure_board"`; the plugins' own icon without one). Choosing it closes the menu and sends `menu_item` with `id` - to open the plugin's panel, say. A plugin has 3 lines at most; they go when it stops. *Permission: `ui`.* | 0.3.36 |
+| `omsi.ui.set_theme(id)` | true, or false and the reason | Switches the game's interface to theme `id` (`""` or `"openomsi"`: openOMSI's own look), as if the player chose it in Options › Interface: it is kept for the next start. Ask the player first; they can switch back there. *Permission: `ui`.* | 0.3.42 |
 | `omsi.ui.show(panel, [on])` | boolean | Shows a panel (or hides it with `false`; it is kept); `false` when there is none. *Permission: `ui`.* | 0.2.22 |
+| `omsi.ui.theme()` | string | The id of the interface theme in use (`""`: openOMSI's own look). | 0.3.42 |
+| `omsi.ui.themes()` | list of tables | The game's interface themes: each `{ id, name }`, openOMSI's own look first (its id `""`). A theme is a folder with a `theme.json` (`Themes/<id>/`, or a plugin's own folder: see docs/THEMES.md). | 0.3.42 |
 | `omsi.ui.toast(text, [opts])` | true, or false and the reason | A notification card at the top right, newest at the top; it goes after `opts.seconds` (1 to 60, default 5). `opts`: `title`, `icon`, `color`. A plugin shows 8 at most: a ninth makes its oldest go. *Permission: `ui`.* | 0.2.21 |
 | `omsi.ui.toggle(panel)` | boolean | Shows a hidden panel or hides a shown one; whether it shows now. *Permission: `ui`.* | 0.2.22 |
 | `omsi.ui.typing()` | boolean | Whether the player types into a text field of a plugin now (the keys then go to the field, not to the bus). | 0.2.22 |
 | `omsi.ui.update(panel, element, values)` | true, or false and the reason | Changes one element of a panel in place, by its id: `text`, `color`, `value` (a bar, a slider), `segments` (a bar), `checked`, `selected`, `name` (an icon), `values` (a chart), `rows` and `aligns` (a table), `stops` (a stop list), `src` (an image) - cheaper than setting the whole panel again. *Permission: `ui`.* | 0.2.22 |
 | `omsi.ui.value(panel, element)` | any | The value of a checkbox, slider, text field or tabs element now (as `ui_change` gives it). *Permission: `ui`.* | 0.2.22 |
+
+#### Cables in the world
+
+| Function | Returns | What it does | Since |
+| --- | --- | --- | --- |
+| `omsi.cable.clear()` | integer | Takes every cable of the plugin away; how many went. They go by themselves when the plugin stops. *Permission: `ui`.* | 0.2.22 |
+| `omsi.cable.remove(id)` | boolean | Takes the cable `id` away; `true` when there was one. *Permission: `ui`.* | 0.2.22 |
+| `omsi.cable.set(id, points, [options])` | boolean | Lays the cable `id` or moves it: a thin round tube through `points` (a flat list `{x1, y1, z1, x2, ...}` or a list of `{x, y, z}`, metres), lit and shaded as the scene. `options`: `radius` (m, default 0.006), `color` (`{r, g, b}` or `{r, g, b, a}`, 0 to 1, default dark grey) and `frame`: `"world"` (the map's coordinates, z up; the default) or `"bus"` (the player's bus's model frame: x right, y forward, z up, so a rope tied to the bus moves with it as drawn). Set it again whenever it moves; `false` (and the cable stays as it was) when the plugin would have more than 4096 cables, or more than 65536 points in all its cables together. *Permission: `ui`.* | 0.2.22 |
 
 #### Events, timers and watches
 

@@ -318,8 +318,10 @@ impl Offscreen<'_> {
             // the navigator, as the window shows it (its camera settled first)
             if settings.navigator {
                 let mut nav = navigator::Navigator::new(true, settings.ui_opacity, &settings.navigator_corner);
+                nav.set_screen(navigator::Screen::of_vehicle(&p.vehicle, &p.render));
                 nav.schedule = omsi_cfg::flags::OMSI_NAV_SCHEDULE.is_set();
                 nav.show_ai = settings.nav_ai;
+                nav.show_cars = settings.nav_ai_cars;
                 nav.show_surface = settings.nav_surface;
                 nav.light = settings.is_light_theme();
                 nav.show_3d = settings.nav_3d;
@@ -348,6 +350,9 @@ impl Offscreen<'_> {
                     nav.debug_lines(spec);
                 }
                 let (line, terminus, stops, trip) = navigator::duty_parts(duty.as_ref());
+                if nav.screen_wants_history() {
+                    nav.set_completed_stops(duty.as_ref());
+                }
                 if let (Some((key, name)), Some(sch)) = (trip, schedule.as_ref()) {
                     let lanes = sch.trip_route_in(nav.map_net().unwrap(), &name);
                     let g = nav.global_version + (1 << 40);
@@ -468,7 +473,7 @@ impl Offscreen<'_> {
                 glam::Mat4::perspective_rh(
                     c.fov_deg.to_radians(),
                     w as f32 / h as f32,
-                    c.far,
+                    c.depth_far(),
                     c.near,
                 )
             });

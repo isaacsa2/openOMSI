@@ -15,7 +15,10 @@ fn mods_route(host: std::net::SocketAddr, session: u64) -> Option<std::net::Sock
     if joined_url.is_none() && std::net::TcpStream::connect_timeout(&host, Duration::from_secs(3)).is_ok() {
         return Some(host);
     }
-    let base = joined_url.or_else(|| omsi_net::bridge::lookup_tunnel(session).and_then(|u| omsi_net::ws::ws_url(&u)))?;
+    let base = joined_url
+        .or_else(|| omsi_net::bridge::lookup_tunnel(session).and_then(|u| omsi_net::ws::ws_url(&u)))
+        // (joined straight over UDP: the host's own web port, as for the start's fetch)
+        .or_else(|| crate::gateway::host_web_gateway(host))?;
     let tcp_url = format!("{}/tcp", base.strip_suffix("/ws").unwrap_or(&base));
     match omsi_net::ws::tcp_forward(&tcp_url) {
         Ok(local) => {
@@ -65,6 +68,10 @@ pub(super) fn tick(lan: &mut LanSession, args: &LanConfig, mine: &Pose, player: 
                 ROUTING.store(false, std::sync::atomic::Ordering::Relaxed);
             });
         }
+    }
+    // (a parked bus taken from the server is the server's own already: nothing to work out or send)
+    if crate::mods::upload::drives_kept(player.and_then(|v| crate::mods::vehicles::mounted(&v.ty.def.path)).map(|m| m.0)) {
+        return;
     }
     // what our bus is, by its content (`mods::identity`), for whoever draws it
     crate::mods::upload::identify(&args.root, &mine.bus, &mine.paint, crate::mods::upload::own_files(&args.root, player));

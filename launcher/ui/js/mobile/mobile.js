@@ -8,12 +8,13 @@ import { html, useState, useEffect } from '../../vendor/preact-htm.js';
 import { S, useStore, set } from '../store.js';
 import { t, hhmm, longDate } from '../i18n.js';
 import { Icon } from '../icons.js';
-import { Spinner, Toggle, Slider } from '../ui.js';
+import { Spinner, Toggle, Slider, useConfirm } from '../ui.js';
 import { BusPreview } from '../preview.js';
 import { RouteMap } from '../routemap.js';
-import { tourId, choose, curMap, curBus, curLine, curTour, pickedTrip, realTime, realDate, start, weatherName, weatherOfItsOwn, askJoined, noServerBus, mapName, serverBuses, busFile, transportRefusal } from '../data.js';
+import { tourId, choose, curMap, curBus, curLine, curTour, pickedTrip, realTime, realDate, start, weatherName, weatherOfItsOwn, askJoined, noServerBus, mapName, serverBuses, busFile, transportRefusal, serverFleetSelection } from '../data.js';
 import { hms, mapPicture, tripAt, depotRun, pickTrip, lineMatches, findTours, chooseLine, chooseTour, setSeason, localNow, SEASONS, PHASES, TripEnds, tripTime, weatherFacts, entryName } from '../pages/drive.js';
 import { MultiplayerPage } from '../pages/multiplayer.js';
+import { DriveMode } from '../pages/drive-mode.js';
 import { ProfilePage } from '../pages/profile.js';
 import { ModsPage } from '../pages/mods.js';
 import { TroubleshootPage, problems } from '../pages/troubleshoot.js';
@@ -26,7 +27,7 @@ import { AddonsPage } from '../pages/addons.js';
 
 const TABS = [
   ['drive', 'Drive', 'bus'],
-  ['multiplayer', 'Multiplayer', 'users'],
+  ['multiplayer', 'Servers', 'globe'],
   ['profile', 'Profile', 'user'],
   ['mods', 'Mods', 'puzzle'],
   ['settings', 'Settings', 'sliders'],
@@ -72,6 +73,7 @@ function More() {
 
 function MobileDrive() {
   const s = useStore();
+  const [ask, consent] = useConfirm();
   const [sheet, setSheet] = useState(null);
   const [busy, setBusy] = useState(false);
   const c = s.choice;
@@ -92,8 +94,19 @@ function MobileDrive() {
   const mapLabel = joined && c.lan_map ? mapName(c.lan_map.replace(/\\/g, '/')) : m ? m.friendly || m.name : '-';
   const go = async (extra) => {
     setBusy(true);
-    await start(extra);
-    setBusy(false);
+    try {
+      if (c.lan_mode === 'join') await askJoined({ refresh: true });
+      if (serverFleetSelection()) {
+        const approved = await ask({
+          title: t('Download server vehicle'),
+          text: t('The selected bus or repaint may need files from this server. Matching local files are reused; other files are checked and cached for this session without replacing your installed mods. Continue?'),
+          yes: t('Download and join'),
+        });
+        if (!approved) return;
+        extra = { ...extra, __fleetApproved: true };
+      }
+      await start(extra);
+    } finally { setBusy(false); }
   };
   const row = (id, icon, label, value, sub, locked) => html`<button class="m-row" disabled=${locked} onClick=${() => !locked && setSheet(id)}>
     <span class="m-row-icon"><${Icon} name=${icon} /></span>
@@ -101,6 +114,7 @@ function MobileDrive() {
     <span class="m-row-value">${value}</span>${!locked && html`<${Icon} name="right" />`}
   </button>`;
   return html`<div class="m-drive">
+    ${consent}
     <section class="m-stage">
       ${v ? html`<${BusPreview} class="m-preview" look=${{ bus: v.file, paint: c.paint, map: c.map, weather: c.weather, time: c.time, date: c.date }} />` : html`<div class="viewer m-preview"><div class="state"><${Spinner} /></div></div>`}
       <div class="m-chips">
@@ -110,29 +124,19 @@ function MobileDrive() {
       <div class="m-go">
         ${trip && !depotRun(trip) ? html`<div class="sign"><span class="no">${trip.line}</span><span class="to">${trip.terminus}</span></div>` : c.free && html`<div class="sign"><span class="no"><${Icon} name="route" /></span><span class="to">${t('Free drive')}</span></div>`}
         <button class="m-start" disabled=${!ready || busy} onClick=${() => go()}>
-          <${Icon} name="play" size=${24} />${busy ? t('Starting…') : joined ? t('Join and drive') : c.free ? t('Start driving') : t('Start the duty')}
+          <${Icon} name="play" size=${24} />${busy ? t('Starting…') : joined ? t('Join and drive') : c.lan_mode === 'host' ? t('Host and drive') : c.free ? t('Start driving') : t('Start the duty')}
         </button>
       </div>
     </section>
     <section class="m-list">
-      ${joined && html`<div class="m-group">
-        <button class="m-row" onClick=${() => choose({ lan_mode: 'off' })}>
-          <span class="m-row-icon"><${Icon} name="users" /></span>
-          <span class="m-row-label">${t('Joining {server}', { server: srv.name || c.lan_addr })}${noServerBus() && html`<small>${t('The server offers none of the vehicles installed here')}</small>`}</span>
-          <span class="m-row-value">${t('Leave the server')}</span>
-        </button>
-      </div>`}
-      ${c.lan_mode === 'host' && html`<div class="m-group">
-        <button class="m-row" onClick=${() => choose({ lan_mode: 'off' })}>
-          <span class="m-row-icon"><${Icon} name="users" /></span>
-          <span class="m-row-label">${t('Host my next duty')}<small>${t('Start the duty to create your session, then return to Multiplayer to copy the code.')}</small></span>
-          <span class="m-row-value">${t('Cancel')}</span>
-        </button>
-      </div>`}
+      <${DriveMode} />
+      ${joined && noServerBus() && html`<p class="muted small">${t('The server offers none of the vehicles installed here')}</p>`}
       <div class="m-group">
         ${row('map', 'map', 'Map', mapLabel, joined ? t('Set by {server}', { server: srv.name || c.lan_addr }) : null, joined)}
         ${row('bus', 'bus', 'Bus', v ? v.name : s.vehicles || !s.boot?.root ? '-' : html`<${Spinner} />`)}
+        ${v && row('number', 'ticket', 'Fleet number', c.number || t('Automatic'))}
         ${v && row('paint', 'sun', 'Paint', c.paint || v.default_paint || t('Standard'))}
+        ${v && row('plate', 'badge', 'Number plate', c.plate || t('Automatic'))}
       </div>
       <div class="m-seg">
         <button class=${!c.free ? 'on' : ''} onClick=${() => choose({ free: false })}>${t('Timetable')}</button>
@@ -172,8 +176,8 @@ const rt = (c) => (realTime() || realDate() ? t('Follows the computer\'s clock (
 
 /** A full-screen sheet: a title bar with Back, and what to choose from. */
 function Sheet({ which, close }) {
-  const titles = { map: 'Choose a map', bus: 'Choose a bus', paint: 'Paint', line: 'Line', tour: 'Tour', trip: 'Trips of the tour', entry: 'Start at', time: 'Time and date', weather: 'Weather' };
-  const Body = { map: MapSheet, bus: BusSheet, paint: PaintSheet, line: LineSheet, tour: TourSheet, trip: TripSheet, entry: EntrySheet, time: TimeSheet, weather: WeatherSheet }[which];
+  const titles = { map: 'Choose a map', bus: 'Choose a bus', paint: 'Paint', number: 'Fleet number', line: 'Line', tour: 'Tour', trip: 'Trips of the tour', entry: 'Start at', time: 'Time and date', weather: 'Weather', plate: 'Number plate' };
+  const Body = { map: MapSheet, bus: BusSheet, paint: PaintSheet, number: NumberSheet, line: LineSheet, tour: TourSheet, trip: TripSheet, entry: EntrySheet, time: TimeSheet, weather: WeatherSheet, plate: PlateSheet }[which];
   useEffect(() => {
     // the phone's Back closes the sheet
     const k = (e) => (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') && close();
@@ -306,6 +310,25 @@ function TimeSheet() {
     </div>
     <div class="m-seg">${SEASONS.map(([v, l]) => html`<button class=${c.season === v ? 'on' : ''} onClick=${() => setSeason(v, c.phase)}>${t(l)}</button>`)}</div>
     ${c.season !== 'auto' && html`<div class="m-seg">${PHASES.map(([v, l]) => html`<button class=${c.phase === v ? 'on' : ''} onClick=${() => setSeason(c.season, v)}>${t(l)}</button>`)}</div>`}
+  </div>`;
+}
+
+function PlateSheet() {
+  const c = useStore().choice;
+  return html`<input class="m-search" value=${c.plate || ''} placeholder=${t('Automatic')} onInput=${(e) => choose({ plate: e.currentTarget.value })} />`;
+}
+
+/** The bus's fleet number (its prefix): typed, or one of the numbers the bus itself lists. Set
+ * before the session starts it reaches every vehicle, even one that cannot change it any more
+ * once it stands on the map (#4056). */
+function NumberSheet({ close }) {
+  const s = useStore();
+  const v = curBus();
+  const numbers = v?.numbers || [];
+  const number = s.choice.number || '';
+  return html`<div>
+    <input class="m-search" value=${number} placeholder=${t('Automatic')} onInput=${(e) => choose({ number: e.currentTarget.value })} />
+    ${numbers.map(([n, p]) => pick(number === n, () => (choose({ number: n }), close()), html`<span class="m-pick-text"><b>${n}</b>${p && html`<small>${p}</small>`}</span>`))}
   </div>`;
 }
 

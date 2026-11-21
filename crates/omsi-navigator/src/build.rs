@@ -9,6 +9,20 @@ use super::*;
 use omsi_ui::Vertex;
 use std::sync::Arc;
 
+// Bound CPU meshes before GPU upload only on pathological geometry builds.
+// Four parts have separate budgets: ground and three house painters. Applies to
+// the panel and the full city map, including fast mouse drags on huge maps.
+// Each vertex occupies 60 bytes: 2M ground + 3 x 750k house vertices
+// bound a pathological rebuild to ~243 MiB. Normal maps keep exact geometry.
+// The earlier 260k cap visibly coarsened Berlin-Spandau (see #3249).
+const MAX_GROUND_VERTS: usize = 2_000_000;
+const MAX_HOUSE_VERTS: usize = 750_000;
+
+pub(super) mod view;
+
+#[cfg(test)]
+mod tests;
+
 /// What a build reads: the network's carriageways (each with whether the map's paving covers
 /// it), the network for the switches, the map's layers and its package.
 #[derive(Clone)]
@@ -19,6 +33,8 @@ pub(super) struct GroundParts {
     pub surface: Option<Arc<omsi_map::package::Package>>,
     /// The terrain view: how strong the contour lines are (None: off).
     pub contours: Option<f32>,
+    /// Tall buildings can project into the view from beyond the ground footprint.
+    pub house_reach: Option<f64>,
 }
 
 /// What a build makes, relative to `anchor`: the ground, and the houses' shadows, standing
@@ -57,19 +73,11 @@ impl Built {
 }
 
 /// Everything within `reach` of `anchor`. `paved`: the map's paving is the roads (else every
-/// carriageway is a band, as from far); `houses`: build them too.
-pub(super) fn build(parts: &GroundParts, anchor: DVec2, reach: f64, pal: &Palette, look: GroundLook, paved: bool, houses: Option<usize>) -> Built {
-    let mut p = Painter::new();
-    let mut layers = None;
-    if let Some(sf) = parts.surface.as_deref() {
-        layers = Some(super::surface::build_surface(&mut p, sf, anchor, Some((anchor, reach)), pal, parts.contours.is_some()));
-    }
-    if let Some(md) = parts.md.as_deref() {
-        md.build_land(&mut p, anchor, anchor, reach, pal, look);
-    }
-    if let (Some(layers), Some(k)) = (layers.as_ref(), parts.contours) {
-        super::surface::build_contours(&mut p, layers, anchor, pal, k);
-    }
+/// carriageway is a band, as from far); `houses`: build them too. `capped`: within the GPU
+/// budget above; `mpp`: world metres per pixel at the build's centre (ribbon width in a fallback).
+pub(super) fn build(parts: &GroundParts, anchor: DVec2, reach: f64, pal: &Palette, look: GroundLook, paved: bool, houses: Option<usize>, capped: bool, mpp: f32) -> Built {
+    let painter = |max| if capped { Painter::with_vertex_budget(max) } else { Painter::new() };
+    let mut p = if capped { Painter::with_ground_budget(MAX_GROUND_VERTS - 6, reach as f32, mpp) } else { Painter::new() };
     let paved = paved && parts.md.is_some();
     let rel = |q: DVec3| Vec3::new((q.x - anchor.x) as f32, (q.y - anchor.y) as f32, 0.0);
     // the network's carriageways where the map has no paving of its own for them (else the
@@ -82,7 +90,14 @@ pub(super) fn build(parts: &GroundParts, anchor: DVec2, reach: f64, pal: &Palett
     let near: Vec<(&MapRoad, Vec<Vec3>)> = parts
         .roads
         .iter()
-        .filter(|(l, covered)| !(paved && *covered) && l.points.iter().any(|q| (q.truncate() - anchor).length() < reach))
+        .filter(|(l, covered)| !(paved && *covered) && l.points.windows(2).any(|segment| {
+            let a = segment[0].truncate() - anchor;
+            let b = segment[1].truncate() - anchor;
+            let margin = l.width as f64 + 1.0;
+            let lo = a.min(b);
+            let hi = a.max(b);
+            lo.x <= reach + margin && lo.y <= reach + margin && hi.x >= -reach - margin && hi.y >= -reach - margin
+        }))
         .map(|(l, _)| (l, simplify(&l.points.iter().map(|q| rel(*q)).collect::<Vec<_>>(), tol)))
         // (a road shorter than a pixel is a dot its neighbours' ends already cover)
         .filter(|(_, pts)| look.tol == 0.0 || span(pts) >= look.tol * 2.0)
@@ -102,11 +117,32 @@ pub(super) fn build(parts: &GroundParts, anchor: DVec2, reach: f64, pal: &Palett
     if let Some(md) = parts.md.as_deref() {
         md.build_lines(&mut p, anchor, anchor, reach, pal, look);
     }
-    let (mut sh, mut so, mut fl) = (Painter::new(), Painter::new(), Painter::new());
-    if let (Some(models), Some(md)) = (houses, parts.md.as_deref()) {
-        md.build_houses(&mut sh, &mut so, &mut fl, anchor, anchor, reach, models, pal);
+    // Build the roads first so dense terrain cannot spend their geometry budget.
+    // Draw order stays background, then roads; only the remaining budget goes to terrain.
+    let roads_reduced = p.ground_reduced();
+    let roads = p.finish_ground();
+    let mut p = if capped { Painter::with_ground_budget(MAX_GROUND_VERTS - roads.len(), reach as f32, mpp) } else { Painter::new() };
+    let mut layers = None;
+    if let Some(sf) = parts.surface.as_deref() {
+        layers = Some(super::surface::build_surface(&mut p, sf, anchor, Some((anchor, reach)), pal, parts.contours.is_some()));
     }
-    Built::new(anchor, [p.verts, sh.verts, so.verts, fl.verts])
+    if let Some(md) = parts.md.as_deref() {
+        md.build_land(&mut p, anchor, anchor, reach, pal, look);
+    }
+    if let (Some(layers), Some(k)) = (layers.as_ref(), parts.contours) {
+        super::surface::build_contours(&mut p, layers, anchor, pal, k);
+    }
+    let (mut sh, mut so, mut fl) = (painter(MAX_HOUSE_VERTS), painter(MAX_HOUSE_VERTS), painter(MAX_HOUSE_VERTS));
+    if let (Some(models), Some(md)) = (houses, parts.md.as_deref()) {
+        md.build_houses(&mut sh, &mut so, &mut fl, anchor, anchor, reach.max(parts.house_reach.unwrap_or(reach)), models, pal);
+    }
+    let reduced = p.ground_reduced();
+    let mut ground = p.finish_ground();
+    ground.extend(roads);
+    if capped && (reduced || roads_reduced || [sh.verts.len(), so.verts.len(), fl.verts.len()].into_iter().any(|n| n >= MAX_HOUSE_VERTS - 3)) {
+        log::warn!("navigator: map geometry reached its safety budget; ground coarsened: {reduced}, roads coarsened: {roads_reduced} ({} ground, {} shadow, {} walls, {} flat vertices)", ground.len(), sh.verts.len(), so.verts.len(), fl.verts.len());
+    }
+    Built::new(anchor, [ground, sh.verts, so.verts, fl.verts])
 }
 
 /// A map's ground read outside a session - the launcher's map - built by the very code the
@@ -126,7 +162,7 @@ impl MapGround {
                 (l, c)
             })
             .collect();
-        MapGround { parts: GroundParts { roads: Arc::new(roads), net: Some(net), md, surface: package.map(Arc::new), contours: None } }
+        MapGround { parts: GroundParts { roads: Arc::new(roads), net: Some(net), md, surface: package.map(Arc::new), contours: None, house_reach: None } }
     }
 
     /// Everything within `reach` of `anchor` as the city map shows it at `mpp` metres a pixel
@@ -134,7 +170,8 @@ impl MapGround {
     pub fn build(&self, anchor: DVec2, reach: f64, mpp: f64, light: bool) -> Built {
         // (a road's line to half a pixel: finer points only make triangles no one sees)
         let look = GroundLook { surfaces: mpp < 0.7, trees: mpp < 0.7, dashes: mpp < 3.5, tol: (mpp * 0.5) as f32 };
-        build(&self.parts, anchor, reach, style::palette(light), look, mpp < 2.2, (mpp < 6.0).then_some(omsi_mapdraw::MODEL_TRIANGLES))
+        // (no GPU buffer here: the launcher's page gets the whole ground)
+        build(&self.parts, anchor, reach, style::palette(light), look, mpp < 2.2, (mpp < 6.0).then_some(omsi_mapdraw::MODEL_TRIANGLES), false, mpp as f32)
     }
 }
 
@@ -150,9 +187,7 @@ impl<T> Job<T> {
         std::thread::Builder::new()
             .name("navigator ground".into())
             .spawn(move || {
-                // (a graphics device lost under the build makes its vertex buffer invalid and
-                // wgpu panics: no result then - `poll` says the worker is gone - and no report
-                // of the end of the game, which the restart after the loss is already taking)
+                // The graphics device can be lost while a worker builds navigation geometry.
                 if let Some(built) = omsi_cfg::panic_guard::catch(f) {
                     let _ = tx.send(built);
                 }
@@ -236,6 +271,7 @@ impl Navigator {
             md: self.map_data.clone(),
             surface: self.surface.clone().filter(|_| self.show_surface),
             contours,
+            house_reach: None,
         }
     }
 }

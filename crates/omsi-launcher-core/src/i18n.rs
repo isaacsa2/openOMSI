@@ -3,7 +3,19 @@ use std::fmt::Display;
 use omsi_cfg::template::Index;
 use std::sync::{Arc, Mutex, OnceLock};
 
-pub static TABLES: &str = include_str!("../../omsi-app/locales/app.yml");
+pub static TABLES: &str = concat!(
+    include_str!("../../omsi-app/locales/app.yml"), "\n",
+    include_str!("../../omsi-app/locales/storage.yml"), "\n",
+    include_str!("../../omsi-app/locales/graphics.yml"), "\n",
+    include_str!("../../omsi-app/locales/server_fleet.yml"),
+);
+
+macro_rules! languages {
+    ($($lang:literal)*) => {
+        pub static LANGUAGES: &[(&str, &str)] = &[$(($lang, include_str!(concat!("../../omsi-app/locales/app.", $lang, ".yml")))),*];
+    };
+}
+languages!("be" "ca" "cs" "de" "es" "fr" "hi" "hu" "id" "it" "ja" "ka" "kk" "ko" "ms" "nl" "pl" "pt" "pt-pt" "ru" "sr" "sv" "th" "tl" "tr" "uk" "vi" "zh" "zh-tw");
 
 static PINNED: OnceLock<&'static str> = OnceLock::new();
 
@@ -50,6 +62,30 @@ pub fn table(text: &str, lang: &str) -> HashMap<String, String> {
     out
 }
 
+pub fn pairs(text: &str) -> HashMap<String, String> {
+    text.lines()
+        .filter_map(|line| {
+            // the key's closing quote: the first `"` not escaped by a `\`
+            let mut escaped = false;
+            let end = line.char_indices().skip(1).find(|&(_, c)| {
+                let close = c == '"' && !escaped;
+                escaped = c == '\\' && !escaped;
+                close
+            })?.0;
+            let (key, rest) = line.split_at(end + 1);
+            Some((unquote(key)?, unquote(rest.strip_prefix(": ")?)?))
+        })
+        .collect()
+}
+
+pub fn language_table(lang: &str) -> HashMap<String, String> {
+    let mut out = table(TABLES, lang);
+    for (_, text) in LANGUAGES.iter().filter(|(l, _)| *l == lang) {
+        out.extend(pairs(text));
+    }
+    out
+}
+
 pub fn pin_language(code: &str) {
     let _ = PINNED.set(crate::language_iso(code));
 }
@@ -86,7 +122,7 @@ pub fn tr(text: &str) -> String {
         match g.as_ref() {
             Some((l, t)) if *l == lang => t.clone(),
             _ => {
-                let t = table(TABLES, lang);
+                let t = language_table(lang);
                 let keys: Vec<String> = t.keys().filter(|k| k.contains('{')).cloned().collect();
                 let t = Arc::new((t, Index::new(keys)));
                 *g = Some((lang, t.clone()));
@@ -119,13 +155,42 @@ pub fn trf(text: &str, vars: &[(&str, &dyn Display)]) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn storage_and_graphics_messages_reach_every_launcher_language() {
+        for lang in "ca ru de fr uk be kk pl cs hu es pt pt-pt it nl tr ja zh hi zh-tw ko th vi id ms tl sv sr ka".split(' ') {
+            let table = super::language_table(lang);
+            for key in ["Road glare", "Traffic headlight brightness", "Apply graphics changes?", "Disk cache and multiplayer downloads", "Unknown cache scope."] {
+                assert!(table.get(key).is_some_and(|value| !value.is_empty() && value != key), "{lang}: {key}");
+            }
+            assert_eq!(table.get("AMD FSR 1").map(String::as_str), Some("AMD FSR 1"));
+        }
+    }
+
+    #[test]
+    fn full_bus_labels_and_help_are_translated_in_all_29_languages() {
+        let langs = "ca ru de fr uk be kk pl cs hu es pt pt-pt it nl tr ja zh hi zh-tw ko th vi id ms tl sv sr ka";
+        let texts = [
+            "Passengers react to full buses",
+            "Optional visual acknowledgement when an approaching compatible bus is at passenger capacity",
+        ];
+        for lang in langs.split(' ') {
+            let table = super::language_table(lang);
+            for text in texts {
+                assert!(table.get(text).is_some_and(|value| !value.is_empty() && value != text),
+                    "{lang}: missing translation for {text}");
+            }
+        }
+    }
+    #[test]
     fn a_language_is_read_from_the_tables() {
         let yml = "_version: 2\n\n\"Mon\":\n  fr: \"lun.\"\n  de: \"Mo\"\n\"a \\\"b\\\"\":\n  fr: \"c\\n\"\n";
         let fr = super::table(yml, "fr");
         assert_eq!(fr.get("Mon").map(String::as_str), Some("lun."));
         assert_eq!(fr.get("a \"b\"").map(String::as_str), Some("c\n"));
         assert_eq!(super::table(yml, "de").len(), 1);
-        assert!(super::table(super::TABLES, "fr").contains_key("Mon"));
+        assert!(super::language_table("fr").contains_key("Mon"));
+        // a language's own file: the key may hold `": "` itself
+        let de = super::pairs("# a comment\n\n\"a \\\"b\\\": c\": \"d: \\\"e\\\"\"\n");
+        assert_eq!(de.get("a \"b\": c").map(String::as_str), Some("d: \"e\""));
     }
 
     /// The built-up snow switch's label and help (the Graphics page, the game's Settings)
@@ -138,7 +203,7 @@ mod tests {
         ];
         let langs = "de fr ru uk be kk pl cs hu es pt pt-pt it nl tr ja zh-tw ko th vi id ms tl zh hi ca sv sr ka";
         for lang in langs.split(' ') {
-            let table = super::table(super::TABLES, lang);
+            let table = super::language_table(lang);
             for text in texts {
                 let got = table.get(text).map(String::as_str).unwrap_or("");
                 assert!(!got.is_empty() && got != text, "{lang}: {text}");

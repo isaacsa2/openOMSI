@@ -3,6 +3,11 @@
 
 use super::*;
 
+/// A standing place's floor, lifted onto a pavement up to a step above it; never lowered: the road beside a kerb sank them.
+fn raised_by_ground(world: &dyn World, floor: f64, x: f64, y: f64) -> f64 {
+    world.walk_height_near(x, y, floor).filter(|g| *g > floor).unwrap_or(floor)
+}
+
 impl PeopleSim {
     /// The world position and heading of a passenger.
     pub fn pax_world(&self, p: &Pax, buses: &[BusNow], bus_ix: &HashMap<BusId, usize>) -> Option<(DVec3, f64)> {
@@ -33,11 +38,14 @@ impl PeopleSim {
         for r in self.entry_req.iter_mut().chain(self.exit_req.iter_mut()) {
             *r = false;
         }
-        let mut ai_req: HashMap<BusId, (Vec<bool>, Vec<bool>)> = HashMap::new();
+        self.pax_req.retain(|id, _| bus_ix.contains_key(id));
         for bn in buses {
-            ai_req.insert(bn.id, (vec![false; bn.cabin.entries.len()], vec![false; bn.cabin.exits.len()]));
+            let (entry, exit) = self.pax_req.entry(bn.id).or_default();
+            entry.resize(bn.cabin.entries.len(), false);
+            exit.resize(bn.cabin.exits.len(), false);
+            entry.fill(false);
+            exit.fill(false);
         }
-        self.pax_req = ai_req;
         // (`remove` as a mask, brought up to date with what was added to it before each
         // look: a search of the list per person was quadratic)
         let mut gone = std::mem::take(&mut self.scratch.gone);
@@ -70,16 +78,12 @@ impl PeopleSim {
         // walking the pavement, among them a rider who has just stepped off, still on the
         // step until they are clear of the door. Not those who stand where they got off
         // with no pavement to go on along: they would hold the door open for good.)
-        let at: Vec<(Option<BusId>, DVec3)> = self
-            .people
-            .iter()
-            .filter_map(|p| match &p.state {
-                State::Pax(x) => Some((x.inside, x.pos)),
-                State::Strolling(_) | State::Leaving { .. } => Some((None, p.position)),
-                _ => None,
-            })
-            .collect();
-        let busy: HashMap<BusId, (Vec<bool>, Vec<bool>)> = buses.iter().map(|bn| (bn.id, doorways_taken(bn, &at))).collect();
+        self.scratch.file_doorways(self.people.iter().filter_map(|p| match &p.state {
+            State::Pax(x) => Some((x.inside, x.pos)),
+            State::Strolling(_) | State::Leaving { .. } => Some((None, p.position)),
+            _ => None,
+        }));
+        let busy: HashMap<BusId, (Vec<bool>, Vec<bool>)> = buses.iter().map(|bn| (bn.id, self.scratch.doorways(bn))).collect();
         if debug_pax() {
             for (b, (e, x)) in &busy {
                 let before = self.pax_busy.get(b);
@@ -95,7 +99,7 @@ impl PeopleSim {
         self.pax_busy = busy;
         // the places' own occupancy variables (#721): the riders at their places, and the
         // players' figures sitting on one (a player on foot, a LAN player's)
-        let sitting: Vec<(BusId, usize)> = self
+        let sitting: HashSet<(BusId, usize)> = self
             .people
             .iter()
             .filter_map(|p| match &p.state {
@@ -104,7 +108,7 @@ impl PeopleSim {
             })
             .chain(self.avatar_cmds.values().filter_map(|c| c.seat))
             .collect();
-        self.pax_places = buses.iter().map(|bn| (bn.id, places_taken(bn, &sitting))).collect();
+        self.pax_places = buses.iter().map(|bn| (bn.id, places_taken_in(bn, &sitting))).collect();
         // the player's bus reads its requests from `entry_req` / `exit_req`
         if let Some((e, x)) = self.pax_req.get(&BusId::Player) {
             self.entry_req = e.clone();
@@ -128,26 +132,33 @@ impl PeopleSim {
         // still on their way to the gather point do not hold it: they walk up to the doors
         // as soon as the bus has a place for them, and with the bus full they stood there
         // and kept it at the stop with its doors open for good (#767)
+        let mut holds_by_bus: HashMap<BusId, (bool, Vec<i64>)> = HashMap::new();
+        for p in &self.people {
+            let State::Pax(x) = &p.state else { continue };
+            let Some(bus) = x.bus else { continue };
+            match holds_bus(x, bus) {
+                Some(None) => holds_by_bus.entry(bus).or_default().0 = true,
+                Some(Some(stop)) => {
+                    let stops = &mut holds_by_bus.entry(bus).or_default().1;
+                    if !stops.contains(&stop) {
+                        stops.push(stop);
+                    }
+                }
+                None => {}
+            }
+        }
         for bn in buses {
             let BusId::Ai(id) = bn.id else { continue };
             if bn.speed.abs() > 0.5 {
                 continue;
             }
-            let mut any_exit = false;
-            let mut stops: Vec<i64> = Vec::new();
-            for p in &self.people {
-                let State::Pax(x) = &p.state else { continue };
-                match holds_bus(x, bn.id) {
-                    Some(None) => any_exit = true,
-                    Some(Some(s)) if !stops.contains(&s) => stops.push(s),
-                    _ => {}
+            if let Some((any_exit, stops)) = holds_by_bus.get(&bn.id) {
+                if *any_exit {
+                    self.holds.push((id, None, 2.5));
                 }
-            }
-            if any_exit {
-                self.holds.push((id, None, 2.5));
-            }
-            for s in stops {
-                self.holds.push((id, Some(s), 2.5));
+                for &s in stops {
+                    self.holds.push((id, Some(s), 2.5));
+                }
             }
         }
     }
@@ -352,6 +363,8 @@ impl PeopleSim {
         // the people in the way (sub_626860)
         let (mut block, free_r, free_l) = if st == 1 || st == 5 { self.pax_blockers(i, buses, bus_ix) } else { (0, true, true) };
         let waiting_height = self.waiting_height(i);
+        let lift = !self.waits_seated(i);
+        let floor_at = |f: f64, x: f64, y: f64| if lift { raised_by_ground(world, f, x, y) } else { f };
         let p = self.pax_mut(i).unwrap();
         // Inside a bus, people going opposite ways along the aisle or the stairs stood face to
         // face for good (the whole upper deck of a double-decker on its way out, the people
@@ -409,10 +422,11 @@ impl PeopleSim {
             // tick in every state but turning (0x62b852 -> 0x7aec3c, not when seated); the
             // waiting people stood at the height of their [passpos]'s object - a shelter
             // on the terrain - 25-35 cm down in the platform
-            // (the people waiting keep the floor of their place: see `waiting_height`)
+            // (the people waiting keep the floor of their place, or the pavement just above
+            // it: see `waiting_height`)
             if p.inside.is_none() && p.pax_state != 2.0 {
                 if let Some(f) = waiting_height {
-                    p.pos.z = f;
+                    p.pos.z = floor_at(f, p.pos.x, p.pos.y);
                 } else if let Some(g) = world.walk_height_near(p.pos.x, p.pos.y, p.pos.z) {
                     p.pos.z = g;
                 }
@@ -448,7 +462,7 @@ impl PeopleSim {
             step.z = if slope.is_finite() { moved as f64 * slope } else { d.z };
         } else {
             let at = p.pos + step;
-            step.z = match waiting_height.or_else(|| world.walk_height_near(at.x, at.y, p.pos.z)) {
+            step.z = match waiting_height.map(|f| floor_at(f, at.x, at.y)).or_else(|| world.walk_height_near(at.x, at.y, p.pos.z)) {
                 Some(g) => g - p.pos.z,
                 None => 0.0,
             };
@@ -552,3 +566,7 @@ impl PeopleSim {
         (block, free_r, free_l)
     }
 }
+
+#[cfg(test)]
+#[path = "waiting_floor_tests.rs"]
+mod waiting_floor_tests;

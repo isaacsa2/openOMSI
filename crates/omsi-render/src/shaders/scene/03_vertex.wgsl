@@ -11,8 +11,8 @@ struct VsOut {
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
-    @location(3) params: vec4<f32>,
-    @location(4) params2: vec4<f32>,
+    @location(3) @interpolate(flat) params: vec4<f32>,
+    @location(4) @interpolate(flat) params2: vec4<f32>,
     // the D3D material's highlight, lit at the vertex as Omsi.exe's fixed function lights
     // it: from the sun (light A) and from the light above (light B)
     @location(5) spec_sun: vec3<f32>,
@@ -20,8 +20,7 @@ struct VsOut {
     // where a [matl_envmap] reads its sphere map, made at the vertex (see `sphere_map_uv`)
     @location(7) env_uv: vec2<f32>,
     @location(8) wipe_uv: vec3<f32>,
-    // the classic picture's headlight, lit at the vertex as Omsi.exe's fixed function lights
-    // it (see `classic_spot`): its diffuse and its ambient light
+    // The classic headlight is lit at the vertices, as OMSI's fixed function light is.
     @location(9) spot_diffuse: vec3<f32>,
     @location(10) spot_ambient: vec3<f32>,
     // the vertex as its mesh has it: a vehicle's snow lies on the vehicle, not on the
@@ -36,8 +35,8 @@ struct FsIn {
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
-    @location(3) params: vec4<f32>,
-    @location(4) params2: vec4<f32>,
+    @location(3) @interpolate(flat) params: vec4<f32>,
+    @location(4) @interpolate(flat) params2: vec4<f32>,
     @location(5) spec_sun: vec3<f32>,
     @location(6) spec_sky: vec3<f32>,
     @location(7) env_uv: vec2<f32>,
@@ -240,15 +239,66 @@ fn scene_clip(e: u32, wp: vec4<f32>, nw: vec3<f32>) -> vec4<f32> {
     // (The plane's distance is at least 5 % of the vertex's own: the edge of a curved mesh,
     // whose tangent plane runs through the eye, is not pulled metres forward.)
     let clip = camera.view_proj * vec4<f32>(cp, 1.0);
-    let level = models[e * 4u].w;
+    let level_code = u32(round(models[e * 4u].w));
+    var level = f32(level_code & 3u);
     if (level <= 0.0) {
         return clip;
     }
+    if ((level_code & 4096u) != 0u) {
+        // Keep the depth step within half the measured gap.
+        let cap = f32((level_code >> 2u) & 1023u) * 1e-6;
+        let distance = length(cp - camera.cam_pos.xyz);
+        level = min(level, cap / max(3e-5 * distance, 1e-9));
+        if (level <= 0.0) {
+            return clip;
+        }
+    }
     // (the depth of the eye's own point: n f / (f - n), about the near plane)
     let at_eye = (camera.view_proj * vec4<f32>(camera.cam_pos.xyz, 1.0)).z;
-    let plane = max(abs(dot(safe_normal(nw), cp - camera.cam_pos.xyz)), 0.05 * length(cp - camera.cam_pos.xyz));
+    // Use geometric plane normals; lighting normals may be smoothed or authored independently.
+    let encoded = vec2<f32>(models[e * 4u + 1u].w, models[e * 4u + 2u].w);
+    var depth_n = nw;
+    if (all(abs(encoded) <= vec2<f32>(1.0))) {
+        var n = vec3<f32>(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
+        let t = clamp(-n.z, 0.0, 1.0);
+        n.x += select(t, -t, n.x >= 0.0);
+        n.y += select(t, -t, n.y >= 0.0);
+        depth_n = n;
+    }
+    let plane = max(abs(dot(safe_normal(depth_n), cp - camera.cam_pos.xyz)), 0.05 * length(cp - camera.cam_pos.xyz));
     let slant = level * 2e-5 * at_eye * clip.w / plane;
     return vec4<f32>(clip.x, clip.y, clip.z * (1.0 + level * 1e-5) + slant, clip.w);
+}
+
+fn is_tree_card() -> bool {
+    return material.params.y > 0.1 && material.params.y < 0.2;
+}
+
+fn detailed_trees() -> bool {
+    return DETAILED_TREES;
+}
+
+fn tree_crown_normal(local: vec3<f32>, m: mat4x4<f32>, up: vec3<f32>) -> vec3<f32> {
+    let pivot = select(0.28, material.sway.y, material.sway.x > 0.5);
+    let centre = mix(pivot, select(1.0, material.sway.z, material.sway.x > 0.5), 0.45);
+    let out = (m * vec4<f32>(local.x, local.y, local.z - centre, 0.0)).xyz;
+    let crown = smoothstep(pivot * 0.5, pivot + 0.1, local.z);
+    return safe_normal(mix(up, safe_normal(out), 0.65 * crown));
+}
+
+fn tree_card_fade(world: vec3<f32>) -> f32 {
+    if (!detailed_trees() || (!is_tree_card() && material.sway.x < 0.5)) {
+        return 1.0;
+    }
+    let c = cross(dpdx(world), dpdy(world));
+    let v = (camera.cam_pos.xyz - world).xy;
+    if (dot(c, c) < 1e-20 || dot(v, v) < 1e-6) {
+        return 1.0;
+    }
+    let n = normalize(c);
+    let upright = smoothstep(0.6, 0.9, length(n.xy));
+    let facing = abs(dot(normalize(n.xy + vec2<f32>(1e-6, 0.0)), normalize(v)));
+    return mix(1.0, smoothstep(0.3, 0.62, facing), upright);
 }
 
 @vertex
@@ -261,12 +311,22 @@ fn vs_main(in: VsIn) -> VsOut {
     out.world = wp.xyz;
     out.local = in.pos;
     out.normal = safe_normal((m * vec4<f32>(in.normal, 0.0)).xyz);
+    if (detailed_trees() && (is_tree_card() || (material.sway.x > 0.5 && material.sway.z - material.sway.y > 2.5))) {
+        out.normal = tree_crown_normal(in.pos, m, out.normal);
+    }
     let sp = vertex_specular(wp.xyz, out.normal);
     out.spec_sun = sp[0];
     out.spec_sky = sp[1];
-    let spot = classic_spot(wp.xyz, out.normal);
-    out.spot_diffuse = spot[0];
-    out.spot_ambient = spot[1];
+    // Ray blocking is disabled for exterior cameras; never light our own body or cabin.
+    // The vehicle surface code keeps roads and scenery in the same box illuminated.
+    out.spot_diffuse = vec3<f32>(0.0);
+    out.spot_ambient = vec3<f32>(0.0);
+    let own_vehicle = inst_params[e * 2u + 1u].w < -500.0 && near_player_vehicle(wp.xyz) > 0.5;
+    if (!own_vehicle) {
+        let spot = classic_spot(wp.xyz, out.normal);
+        out.spot_diffuse = spot[0];
+        out.spot_ambient = spot[1];
+    }
     out.env_uv = sphere_map_uv(wp.xyz, out.normal, camera.cam_pos.xyz);
     let pr = inst_params[e * 2u];
     out.uv = in.uv + pr.zw;
@@ -288,15 +348,28 @@ fn vs_main(in: VsIn) -> VsOut {
 struct DepthOut {
     @builtin(position) @invariant clip: vec4<f32>,
     @location(2) uv: vec2<f32>,
-    @location(3) params: vec4<f32>,
+    @location(3) @interpolate(flat) params: vec4<f32>,
     // the instance's surface code (`inst_params` w, see `scene_clip`)
     @location(4) surf: f32,
+    @location(5) world: vec3<f32>,
 };
 struct DepthIn {
     @builtin(position) clip: vec4<f32>,
     @location(2) uv: vec2<f32>,
-    @location(3) params: vec4<f32>,
+    @location(3) @interpolate(flat) params: vec4<f32>,
     @location(4) surf: f32,
+    @location(5) world: vec3<f32>,
+};
+
+struct ShadowOut {
+    @builtin(position) @invariant clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) params: vec4<f32>,
+};
+struct ShadowIn {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) params: vec4<f32>,
 };
 
 @vertex
@@ -306,6 +379,7 @@ fn vs_depth(in: VsIn) -> DepthOut {
     let wp = m * vec4<f32>(in.pos, 1.0) + vec4<f32>(tree_sway(in.pos, m), 0.0);
     var out: DepthOut;
     out.clip = scene_clip(e, wp, (m * vec4<f32>(in.normal, 0.0)).xyz);
+    out.world = wp.xyz;
     let pr = inst_params[e * 2u];
     out.uv = in.uv + pr.zw;
     out.params = pr;

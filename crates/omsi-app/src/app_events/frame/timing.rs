@@ -45,6 +45,7 @@ impl App {
         }
         if let Some(why) = self.renderer.as_ref().and_then(|r| r.device_lost()) {
             crate::support_bundle::record(self);
+            omsi_platform::diagnostics::ended("device_lost", Some(crate::support_bundle::diagnostics(self)));
             if self.restart_after_device_loss() {
                 log::warn!("device lost ({why}): the game goes on in a new start");
             } else {
@@ -55,12 +56,13 @@ impl App {
         }
         let desktop_vsync = self.settings.vsync && !self.vr_active() && !self.optimiser_holds_frame_rate();
         if let (Some(surface), Some(renderer)) = (self.gfx.surface.as_mut(), self.renderer.as_ref()) {
-            surface.set_vsync(renderer, desktop_vsync);
+            surface.set_vsync(renderer, desktop_vsync, (1..1000).contains(&self.settings.max_fps) && !cfg!(target_os = "android"));
         }
         // in the own bus's cab: at the wheel, a passenger's view, or sitting in a
         // seat of it after getting up (its inside is drawn and heard from inside)
         self.cam.in_cab = matches!(self.view.as_str(), "driver" | "pax")
             || (self.view == "foot" && self.foot_bus() == Some(crate::humans::BusId::Player));
+        self.cam.heard_inside = self.cam.in_cab || (self.view == "foot" && matches!(self.foot_bus(), Some(crate::humans::BusId::Ai(_))));
         // standing or sitting in another player's bus: that bus is drawn and heard
         // from inside (its interior meshes, not the outside ones over them)
         self.net.inside_remote = match self.foot_bus() {
@@ -143,10 +145,26 @@ impl App {
                 let fps = self.perf.governor.1 as f32 / self.perf.governor.0;
                 let wait_share = self.perf.governor.2 / self.perf.governor.0;
                 self.perf.governor = (0.0, 0, 0.0);
+                // Frame generation under Apple's 30 drawn frames a second: its generated frames
+                // cost the card more than they bring (an M2 at 2940x1846: 35 a second fell to 13
+                // with it). Off for this drive, as SSAO and the shadows below.
+                let settled = self.perf.generation_since.is_some_and(|t| t.elapsed().as_secs_f32() >= GENERATION_SETTLE);
+                if self.perf.generation_too_slow < GENERATION_SLOW_READINGS && settled {
+                    self.perf.generation_too_slow = if fps < 30.0 { self.perf.generation_too_slow + 1 } else { 0 };
+                    if self.perf.generation_too_slow >= GENERATION_SLOW_READINGS {
+                        log::warn!("frame rate {fps:.0} fps with frame generation: frame generation off to keep up");
+                        let what = "frame generation off";
+                        self.service_msg = Some((format!("The graphics card cannot keep up: {what} for this drive"), 4.0));
+                    }
+                }
                 let free = self.settings.scene_render_scale() <= 0.0
                     && (self.settings.max_fps == 0 || self.settings.max_fps >= 50)
                     && !omsi_cfg::flags::OMSI_FIXED_SCALE.is_set()
                     && !self.optimiser_holds_frame_rate();
+                if let Some(r) = self.renderer.as_mut().filter(|r| !free && r.dynamic_scale() < 1.0) {
+                    r.set_dynamic_scale(1.0);
+                    log::info!("the 3D picture is drawn at the full size of the window again (render scale no longer automatic)");
+                }
                 if let (Some(r), true) = (self.renderer.as_mut(), free) {
                     let s = r.dynamic_scale();
                     let mut step = render_scale_step(fps, wait_share);
@@ -178,7 +196,11 @@ impl App {
                         // at the smallest scale and still waiting for the card: after
                         // two such readings the picture gets lighter itself (a weak or
                         // old graphics chip keeps a playable frame rate)
-                        self.perf.governor_low += 1;
+                        // (not on a reading taken with frame generation on: it goes first, and
+                        // its slow frames once took SSAO and the shadows along with it)
+                        if self.perf.generation_since.is_none() {
+                            self.perf.governor_low += 1;
+                        }
                         if self.perf.governor_low >= 2 && fps < 30.0 {
                             self.perf.governor_low = 0;
                             // (SSAO first, then the shadows; for this drive only)
@@ -204,7 +226,8 @@ impl App {
 
     /// The start menu (drawn here, nothing else this frame) and the map's first area still
     /// loading: false when the frame ends here.
-    pub(super) fn frame_menus(&mut self, event_loop: &ActiveEventLoop, dt: f32) -> bool {
+    pub(super) fn frame_menus(&mut self, event_loop: &ActiveEventLoop, dt: f32, raw_dt: f32) -> bool {
+        self.tick_room_switch(raw_dt);
         // (the cursor over the game menu: a hand over what can be clicked)
         if self.menus.game_menu.is_some() {
             let kind = self.menu_cursor_kind();

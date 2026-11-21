@@ -4,8 +4,11 @@
 use crate::*;
 
 mod instances;
+pub(crate) mod depth_plane;
 pub(crate) mod overlay;
 mod upload;
+mod lod;
+pub(crate) use lod::object_screen_size;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct InstanceBounds {
@@ -174,6 +177,8 @@ pub struct Instance {
     /// The draw order's depth step of each material slot (see `draw_order_level`): above 0
     /// only for a slot lying on an earlier surface of the same object (`overlay`).
     pub(crate) slot_levels: Vec<u8>,
+    /// Depth-bias limit for slots near another surface.
+    pub(crate) slot_depth_caps: Vec<f32>,
 }
 
 /// The rain the renderer draws round the camera (rain.wgsl): every drop is worked out on
@@ -193,6 +198,9 @@ pub struct Rainfall {
 }
 
 pub struct Scene {
+    /// Which scene this is, different for every one made (`Renderer::new_scene`): what keeps
+    /// ids of the scene's meshes and instances can tell they belong to one replaced since.
+    pub serial: u64,
     pub meshes: Vec<GpuMesh>,
     pub textures: Vec<GpuTexture>,
     /// Texture slot read by procedural rain films.
@@ -223,6 +231,9 @@ pub struct Scene {
     /// (and whether the run belongs to the vehicle the camera is in, drawn after it)
     pub(crate) corona_runs: Vec<(u16, u32, u32, bool)>,
     pub(crate) model_buf: Option<GpuArray>,
+    /// Bumped each time every entry is laid out again (`prepare`): an entry's matrix of the
+    /// last frame is its own only while this stays (temporal upscaling's motion vectors).
+    pub(crate) model_epoch: u64,
     pub(crate) params_buf: Option<GpuArray>,
     pub(crate) light_buf: Option<GpuArray>,
     pub(crate) grid_buf: Option<GpuArray>,

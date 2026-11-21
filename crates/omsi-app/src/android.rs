@@ -38,8 +38,10 @@ fn android_main(app: AndroidApp) {
             log::warn!("caught by the renderer: {info}");
             return;
         }
-        let text = format!("the game stopped on an error (build {BUILD}): {info}\n{}", std::backtrace::Backtrace::force_capture());
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let text = format!("the game stopped on an error (build {BUILD}): {info}\n{backtrace}");
         log::error!("{text}");
+        omsi_platform::diagnostics::panicked(omsi_platform::diagnostics::panic_report(info, &backtrace));
         for f in &crash_files {
             let _ = std::fs::write(f, &text);
         }
@@ -106,6 +108,7 @@ fn android_main(app: AndroidApp) {
     let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) % 1_000_000_000;
     omsi_script::set_session_seed(seed);
 
+    let _ = APP.set(app.clone());
     let event_loop = match EventLoop::builder().with_android_app(app).build() {
         Ok(e) => e,
         Err(e) => {
@@ -206,13 +209,15 @@ impl log::Log for TeeLogger {
         if !self.enabled(r.metadata()) {
             return;
         }
-        self.system.log(r);
-        use std::io::Write;
-        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-        if let Some(f) = self.file.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-            // (the desktop's env_logger layout: the launcher's `crash_of` reads it)
-            let _ = writeln!(f, "[{secs:.3} {:<5} {}] {}", r.level(), r.target(), r.args());
-        }
+        crate::logmask::with_record(r, |r| {
+            self.system.log(r);
+            use std::io::Write;
+            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            if let Some(f) = self.file.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                // (the desktop's env_logger layout: the launcher's `crash_of` reads it)
+                let _ = writeln!(f, "[{secs:.3} {:<5} {}] {}", r.level(), r.target(), r.args());
+            }
+        });
     }
 
     fn flush(&self) {
@@ -359,6 +364,7 @@ impl Shell {
             drop(game);
             lan_mods::clean_up();
             log::info!("session ended: back to the launcher");
+            crate::android_launcher::preview_rests(false);
             // (the launcher page over the window again)
             crate::android_launcher::session_ended();
             self.spare = window;
@@ -402,15 +408,19 @@ impl Shell {
                 return;
             }
         };
+        // (before the map is read, which takes the most memory of the whole start)
+        crate::android_launcher::preview_rests(true);
         let game = prepare(args, false).and_then(|p| match p {
             Some((args, server)) => make_app(args, server),
             None => Ok(None),
         });
         let mut app = match game {
             Ok(Some(app)) => app,
-            Ok(None) => return,
-            Err(e) => {
-                log::error!("the game could not start: {e:#}");
+            no_game => {
+                if let Err(e) = no_game {
+                    log::error!("the game could not start: {e:#}");
+                }
+                crate::android_launcher::preview_rests(false);
                 return;
             }
         };
@@ -495,6 +505,18 @@ static TILT_THREAD: std::sync::Once = std::sync::Once::new();
 
 pub(crate) fn tilt() -> Option<f32> {
     (TILT_ON.load(Ordering::Relaxed) && TILT_SEEN.load(Ordering::Relaxed)).then(|| f32::from_bits(TILT.load(Ordering::Relaxed)))
+}
+
+static APP: std::sync::OnceLock<AndroidApp> = std::sync::OnceLock::new();
+
+pub(crate) fn soft_keyboard(show: bool) {
+    if let Some(app) = APP.get() {
+        if show {
+            app.show_soft_input(false);
+        } else {
+            app.hide_soft_input(false);
+        }
+    }
 }
 
 pub(crate) fn set_tilt(on: bool) {

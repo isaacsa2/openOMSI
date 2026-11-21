@@ -35,8 +35,7 @@ impl<'a> Offscreen<'a> {
         crate::lights::set_corona_root(&args.root);
         let mut scene = renderer.new_scene();
         let (world, camera) = lan::answering_while(&mut lan_off, args.bus.as_deref(), || load_world(args, &renderer, &mut scene))?;
-        // the map's own route arrows, with OMSI 2's route arrows
-        world.show_help_arrows(&renderer, &mut scene, settings.nav_arrows);
+        world.show_help_arrows(&renderer, &mut scene, settings.nav_map_arrows);
         let lan_seed = lan_off.as_ref().map(lan::population_seed);
         // (a player who joins another's game draws the host's traffic in it, whatever their own
         // count says: without it the host's cars had nowhere to go - "passengers, but no
@@ -208,6 +207,7 @@ impl<'a> Offscreen<'a> {
         }
         let mut run_clock = start_clock(args);
         run_clock.advance(service_seconds as f32);
+        crate::server::park_buses(server, args, &world);
         // a dedicated server's administration and clock (see `admin`)
         let mut srv_admin = crate::admin::ServerAdmin::default();
         let srv_clock = 0.0f64;
@@ -291,6 +291,7 @@ impl<'a> Offscreen<'a> {
             cabin_air,
             srv_admin,
             srv_clock,
+            srv_wall: Default::default(),
             srv_metar,
             srv_metar_due,
             srv_metar_rx,
@@ -317,6 +318,7 @@ fn new_traffic(
     let mut t = traffic::Traffic::new(&args.root, world, args.traffic)?;
     t.lights_only = !(args.traffic > 0 || args.schedule || crate::rail_drive::args_rail(args) || args.lan_join.is_some());
     t.no_timetable_buses = args.no_timetable_buses;
+    t.drive_through_parked = args.ai_drive_through_parked;
     if let Some(seed) = lan_seed {
         t.set_lan_seed(seed);
     }
@@ -423,9 +425,15 @@ fn new_humans(
         // the map's camera they filled the whole pool, and the players met nobody)
         h.players_only = args.server.is_some() && player.is_none();
         h.exact_fare = settings.exact_fare;
+        h.transfer_percent = if args.passenger_connections_allowed(false) && settings.passenger_connections {
+            settings.passenger_transfer_percent
+        } else { 0.0 };
+        h.visual_hailing = settings.passenger_hailing && settings.passenger_animation == "enhanced";
+        h.visual_full_bus_reaction = settings.passenger_full_bus_reaction && settings.passenger_animation == "enhanced";
         h.bad_driving = settings.pax_bad_driving;
         h.boarding = settings.boarding.clone();
         h.stand_chance = settings.standing_chance;
+        h.short_rides_stand = settings.pax_short_rides_stand;
         h.voices = match settings.pax_voices.as_str() { "off" => 2, "tickets" => 1, _ => 0 };
         if let Some(p) = player.as_mut() {
             h.set_cabin(&mut p.vehicle);

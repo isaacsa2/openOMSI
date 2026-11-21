@@ -22,10 +22,20 @@ pub struct ServerCfg {
     /// file (or not a valid number), and the server goes on using its machine's
     /// `settings.cfg` `pax_density`, as it always did.
     pub passenger_density: Option<f32>,
+    /// The AI limits of `settings.cfg`, set for this server (`ai_unsched_factor`,
+    /// `ai_max_scheduled`, `ai_max_parked`, `ai_max_humans`); a key left out or empty keeps
+    /// the machine's own.
+    pub ai_limits: AiLimits,
+    /// Optional RP road speed limit (0 = off; 60, 75 or 80 km/h).
+    pub speed_limit_kmh: u32,
     pub port: u16,
     pub web_port: u16,
     pub max_players: usize,
     pub tunnel: bool,
+    /// The address players may reach the web port at without the tunnel (`host:port`), which
+    /// a game joining through the tunnel tries first. Empty: found by itself (`server::direct`);
+    /// `off`: none told.
+    pub public_address: String,
     pub radius: i32,
     pub icon: Vec<u8>,
     /// Players who say `/admin <password>` in the chat administer the server (empty: nobody).
@@ -33,6 +43,9 @@ pub struct ServerCfg {
     /// The same with this password gives the moderator's role: the players and the chat,
     /// not the world (empty: none; one equal to `admin_password` is the admin's).
     pub moderator_password: String,
+    /// Whether ordinary players may teleport their own bus via F4, minimap and entrypoints.
+    /// Admins and moderators may always request self-teleports on a dedicated server.
+    pub allow_player_teleport: bool,
     /// Who may reach the web panel and its API (`admin_web`: `local`, `remote`, `off`).
     pub admin_web: omsi_admin::WebMode,
     /// Pages of these origins may act besides the server's own (`admin_web_origins`).
@@ -67,6 +80,9 @@ pub struct ServerCfg {
     pub accept_uploads: bool,
     /// Days a bus players sent is kept when nobody uses it (`mods::vehicles::collect`).
     pub uploads_keep_days: u64,
+    /// How many of the buses players sent stand parked in the world, for any player to take
+    /// (`parked`; 0: none).
+    pub parked_buses: usize,
     /// The map (and what it uses) goes to players who join without it (`mods`); off,
     /// they install it themselves - the server's line is kept for the players' buses. A
     /// `server.cfg` without the key shares it, as servers did before the key came; the new
@@ -83,6 +99,14 @@ pub struct ServerCfg {
     pub owner_bans: Option<std::path::PathBuf>,
     /// A player whose game sends no hardware identifier is turned away.
     pub require_hardware_id: bool,
+    /// The AI drives on through a parked car standing in its lane (`ai_drive_through_parked
+    /// = 1`), as Omsi.exe's traffic does; by default it stops behind it and goes round it when
+    /// it can (on maps whose parked cars stand in the lane with no way round, that froze the
+    /// traffic).
+    pub ai_drive_through_parked: bool,
+    /// The players' internet addresses go into the log whole (`log_addresses`); off, a
+    /// public one keeps only its network (`203.0.113.x`).
+    pub log_addresses: bool,
     /// Where `server.cfg` is (its folder keeps the session's ban list).
     pub dir: std::path::PathBuf,
 }
@@ -107,12 +131,32 @@ weather =
 traffic = 30
 timetable = 1
 passengers = 1
+# the AI stops behind a parked car standing in its lane and goes round it when it can (0);
+# 1 = it drives on through it, as OMSI 2's does - for maps where a parked car stands in the
+# lane with no way round and holds the traffic for good
+ai_drive_through_parked = 0
 
 # how many people the map's stops and pavements get: a factor on the map's own demand for
 # the time of day (1 = as the map says, 0.5 = half, 2 = twice; 0 to 3). 0 brings no new
 # people but keeps the passengers on (passengers = 0 switches them off). Not the AI traffic.
 # The admins can change it while the server runs; the people already there stay
 passenger_density = 1
+
+# the AI limits, as the game's options have them; left empty, the machine's settings.cfg
+# says. They are for the whole server, not for each player: with players all over the map,
+# raise them with the players (and the machine's CPU).
+# ai_unsched_factor: the random traffic, percent of the map's density (100 = as the map
+#   says, 25 = a quarter, 300 at most)
+# ai_max_scheduled: timetable vehicles on the road at once (0 = no limit)
+# ai_max_parked: parked cars in the loaded tiles (0 = every space, -1 = none at all)
+# ai_max_humans: people at once, waiting, walking and riding (1 to 4096; 200 by default)
+ai_unsched_factor =
+ai_max_scheduled =
+ai_max_parked =
+ai_max_humans =
+
+# Optional multiplayer RP road-speed governor, 0 = off (default), or 60/75/80.
+speed_limit_kmh = 0
 
 # UDP port of the session, TCP port of the web gateway (status, icon, WebSocket players)
 port = 27015
@@ -121,6 +165,13 @@ max_players = 16
 
 # start a free Cloudflare quick tunnel (needs cloudflared) and print its https address
 tunnel = 1
+# the address players reach this server's web port at without the tunnel: a game joining
+# through the tunnel tries it first, as a quick tunnel breaks its connections now and then.
+# Empty: found by itself - this machine's internet address when it has one, else the one the
+# internet sees if the server reaches itself there (not behind a carrier's NAT, CGNAT).
+# Or an address of your own (1.2.3.4:27025, a name), or off: told to nobody. It is told to
+# whoever asks the server's status, as the join code tells it already
+public_address =
 
 # how many tiles round the map's first entry point are kept loaded (0: all of them)
 radius = 0
@@ -134,6 +185,10 @@ admin_password =
 # players to their bus alone
 # (at least 12 characters; empty: no moderators)
 moderator_password =
+
+# Allow ordinary players to teleport their OWN bus (F4, minimap, entrypoints).
+# 0 = only authenticated moderators/admins; 1 = everyone. Never moves another player.
+allow_player_teleport = 0
 
 # the web panel (http://127.0.0.1:<web_port>/admin/) and its API: local = from this machine
 # only (not through the tunnel or a proxy); remote = also over HTTPS through the proxies in
@@ -182,6 +237,13 @@ accept_uploads = 1
 # days a bus players sent is kept when nobody drives it; when the disk runs short, the buses
 # nobody drives now go first, the least lately used first (no bus is refused for its size)
 uploads_keep_days = 30
+# the buses players sent stand in the world when nobody drives them, where their last driver
+# left them (also after a restart), and any player who walks up to one takes it with the key
+# that takes a seat: up to this many of them, one of each bus (0 = none, 536 at most; a
+# game is told the ones near its player, so they cost nothing where nobody is). Needs
+# accept_uploads = 1. Players on a release before this one see them as other players' parked
+# buses (a driver at the wheel, counted among the players) and cannot take them
+parked_buses = 0
 # a player who joins without the server's map gets it from the server (the map and the
 # objects, splines and vehicles it uses - gigabytes for a big map). Off: players install the
 # map themselves and are told which one is missing; the server's bandwidth goes to the
@@ -212,6 +274,25 @@ public_server = 0
 # (older games, or players who switched it off)
 owner_bans =
 require_hardware_id = 0
+
+# What this server keeps and passes on about its players - tell them, e.g. in the motd:
+# - server.log (beside this file, written by run-server and start.sh): who joined and left
+#   and their names, the chat (every message), the admins' actions and errors. Their
+#   internet addresses keep only their network (203.0.113.x) unless log_addresses = 1
+#   (whole: for an abuse report); the local network's addresses are written whole.
+# - log_keep: how many earlier server.log files are kept (server.1.log the newest); a new
+#   one is begun at every start and when it passes log_max_mb (0: no size limit). log_keep
+#   = 0 keeps none.
+# - admin-audit.log: logins, refused passwords and the admins' and moderators' actions.
+#   Web logins and refused passwords include their whole source addresses, regardless of
+#   log_addresses. Rotated at 1 MB, keeping .1 and .2 (about 3 MB total).
+# - bans.json and the owner_bans list: the banned players' machine identifiers.
+# - with public_server = 1 the public list gets the name, icon, map, players and motd;
+#   with share_positions = 1 anyone who asks the web port sees names, buses and positions;
+#   voice is passed on, never recorded; the players' buses are kept uploads_keep_days.
+log_addresses = 0
+log_keep = 5
+log_max_mb = 20
 ";
 
 impl ServerCfg {
@@ -221,6 +302,7 @@ impl ServerCfg {
     pub fn apply_to_mods(&self) {
         crate::mods::upload::accept(self.accept_uploads);
         crate::mods::vehicles::keep_for_days(self.uploads_keep_days);
+        crate::parked::allow(if self.accept_uploads { self.parked_buses } else { 0 });
         crate::mods::share_maps(self.share_maps);
     }
 
@@ -259,14 +341,24 @@ impl ServerCfg {
             passenger_density: kv.get("passenger_density").filter(|v| !v.is_empty()).and_then(|v| {
                 passenger_density(v).map_err(|e| log::warn!("server.cfg: passenger_density = {v}: {e}; the machine's own passengers setting is used")).ok()
             }),
+            ai_limits: AiLimits::parse(&kv),
+            speed_limit_kmh: parse_speed_limit(kv.get("speed_limit_kmh").map(String::as_str)),
             port: num("port", 27015).clamp(1, 65535) as u16,
             web_port: num("web_port", 27025).clamp(1, 65535) as u16,
             max_players: num("max_players", 16).clamp(1, 64) as usize,
             tunnel: flag("tunnel", true),
+            public_address: kv.get("public_address").map(|v| v.trim().trim_start_matches("http://").trim_end_matches('/').to_string()).map(|v| {
+                let ok = v.is_empty() || v.eq_ignore_ascii_case("off") || (v.len() <= 200 && omsi_net::ws::http_base(&format!("http://{v}")).is_some());
+                if ok { if v.eq_ignore_ascii_case("off") { "off".into() } else { v } } else {
+                    log::warn!("server.cfg: public_address = {v} is not an address (host:port); it is found by itself");
+                    String::new()
+                }
+            }).unwrap_or_default(),
             radius: num("radius", 0) as i32,
             icon,
             admin_password: admin_password(kv.get("admin_password").cloned().unwrap_or_default()),
             moderator_password: checked_password(kv.get("moderator_password").cloned().unwrap_or_default(), "moderator_password"),
+            allow_player_teleport: flag("allow_player_teleport", false),
             admin_web: web_mode(kv.get("admin_web").map(String::as_str)),
             admin_web_origins: kv.get("admin_web_origins").map(|v| v.split(';').map(|o| o.trim().trim_end_matches('/').to_string()).filter(|o| o.starts_with("https://") || o.starts_with("http://")).collect()).unwrap_or_default(),
             admin_trusted_proxies: trusted_proxies(kv.get("admin_trusted_proxies").map(String::as_str).unwrap_or("")),
@@ -280,15 +372,41 @@ impl ServerCfg {
             share_positions: flag("share_positions", false),
             accept_uploads: flag("accept_uploads", true),
             uploads_keep_days: num("uploads_keep_days", 30).clamp(1, 3650) as u64,
+            parked_buses: num("parked_buses", 0).clamp(0, 536) as usize,
             share_maps: flag("share_maps", true),
             voice: voice_policy(&kv),
             public_server: flag("public_server", false),
             public_list_url: kv.get("public_list_url").cloned().unwrap_or_default(),
             owner_bans: kv.get("owner_bans").filter(|v| !v.is_empty()).map(std::path::PathBuf::from),
             require_hardware_id: flag("require_hardware_id", false),
+            ai_drive_through_parked: flag("ai_drive_through_parked", false),
+            log_addresses: flag("log_addresses", false),
             dir: dir.to_path_buf(),
         }))
     }
+}
+
+/// The only supported RP presets; invalid configuration is safely disabled.
+pub fn parse_speed_limit(value: Option<&str>) -> u32 {
+    match value.unwrap_or("0").trim().parse::<u32>() {
+        Ok(v @ (0 | 60 | 75 | 80)) => v,
+        _ => {
+            log::warn!("server.cfg: speed_limit_kmh must be 0, 60, 75 or 80; limiter is disabled");
+            0
+        }
+    }
+}
+
+/// Published by the dedicated host to clients; not a preference clients may set.
+static SERVER_SPEED_LIMIT_KMH: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+pub fn set_server_speed_limit_kmh(value: u32) {
+    SERVER_SPEED_LIMIT_KMH.store(value, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn server_speed_limit_kmh() -> u32 {
+    SERVER_SPEED_LIMIT_KMH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// `admin_web = remote` puts the login on the internet: its passwords need
@@ -376,6 +494,58 @@ fn checked_password(password: String, key: &str) -> String {
 /// The buses a dedicated server allows (`vehicles`; empty: every bus it has).
 pub static SERVER_VEHICLES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
 
+/// The AI limits a server sets for itself (`server.cfg`), over its machine's `settings.cfg`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AiLimits {
+    /// The random traffic, percent of the map's density (0 to 300).
+    pub unsched_factor: Option<f32>,
+    /// Timetable vehicles on the road at once (0 = no limit).
+    pub max_scheduled: Option<u32>,
+    /// Parked cars in the loaded tiles (0 = every space, -1 = none).
+    pub max_parked: Option<i32>,
+    /// People at once (1 to 4096).
+    pub max_humans: Option<u32>,
+}
+
+impl AiLimits {
+    fn parse(kv: &std::collections::HashMap<String, String>) -> AiLimits {
+        fn read<T: std::str::FromStr + PartialOrd + std::fmt::Display + Copy>(kv: &std::collections::HashMap<String, String>, key: &str, lo: T, hi: T) -> Option<T> {
+            let v = kv.get(key).map(|v| v.trim().trim_end_matches('%')).filter(|v| !v.is_empty())?;
+            match v.parse::<T>() {
+                Ok(x) if x >= lo && x <= hi => Some(x),
+                _ => {
+                    log::warn!("server.cfg: {key} = {v} is not a number from {lo} to {hi}; the machine's settings.cfg says");
+                    None
+                }
+            }
+        }
+        AiLimits {
+            unsched_factor: read(kv, "ai_unsched_factor", 0.0f32, 300.0),
+            max_scheduled: read(kv, "ai_max_scheduled", 0u32, 4096),
+            max_parked: read(kv, "ai_max_parked", -1i32, 100_000),
+            max_humans: read(kv, "ai_max_humans", 1u32, 4096),
+        }
+    }
+
+    /// The lines of `settings.cfg` they stand for (empty: none set).
+    pub fn settings_lines(&self) -> String {
+        let mut s = String::new();
+        if let Some(v) = self.unsched_factor {
+            s.push_str(&format!("ai_unsched_factor={v}\n"));
+        }
+        if let Some(v) = self.max_scheduled {
+            s.push_str(&format!("ai_max_scheduled={v}\n"));
+        }
+        if let Some(v) = self.max_parked {
+            s.push_str(&format!("ai_max_parked={v}\n"));
+        }
+        if let Some(v) = self.max_humans {
+            s.push_str(&format!("ai_max_humans={v}\n"));
+        }
+        s
+    }
+}
+
 /// Whether a `vehicles` list allows the bus `file` (an empty list: every bus). A player's
 /// game may name it with a folder before it (`D:/OMSI 2/Vehicles/…/….bus`).
 pub fn allows(list: &[String], file: &str) -> bool {
@@ -420,6 +590,8 @@ pub fn player_info<'a>(q: &omsi_net::Pose, pose_of: impl Fn(u32) -> Option<&'a o
         line: if driving { q.line.clone() } else { String::new() },
         destination: if driving { q.destination.clone() } else { String::new() },
         tour: q.tour.clone(),
+        paint: if driving { q.paint.clone() } else { String::new() },
+        parked: omsi_net::is_parked(q.id),
         x,
         y,
         heading,
@@ -466,6 +638,31 @@ mod passenger_density_tests {
         assert!(!load("passengers = 50\n").passengers);
     }
 
+    /// The AI limits of the game's options, set for the server: left empty, the machine's
+    /// settings.cfg says; out of range, the same (with a warning); set, they go over it as
+    /// settings.cfg lines.
+    #[test]
+    fn the_ai_limits_are_the_servers_own_when_set() {
+        assert_eq!(load(super::DEFAULT_CFG).ai_limits, super::AiLimits::default(), "the default file leaves them to settings.cfg");
+        assert_eq!(load(super::DEFAULT_CFG).ai_limits.settings_lines(), "");
+        let set = load("ai_unsched_factor = 25%\nai_max_scheduled = 256\nai_max_parked = -1\nai_max_humans = 720\n").ai_limits;
+        assert_eq!(set, super::AiLimits { unsched_factor: Some(25.0), max_scheduled: Some(256), max_parked: Some(-1), max_humans: Some(720) });
+        assert_eq!(set.settings_lines(), "ai_unsched_factor=25\nai_max_scheduled=256\nai_max_parked=-1\nai_max_humans=720\n");
+        let bad = load("ai_unsched_factor = 400\nai_max_humans = 0\nai_max_parked = -2\nai_max_scheduled = many\n").ai_limits;
+        assert_eq!(bad, super::AiLimits::default());
+    }
+
+    /// `public_address`: as it is written (`http://` and a last `/` aside), `off`, or empty
+    /// (found by itself: the default, and what an address that is none falls back to).
+    #[test]
+    fn the_public_address_is_an_address_or_none() {
+        assert_eq!(load(super::DEFAULT_CFG).public_address, "");
+        assert_eq!(load("public_address = 203.0.113.7:27025\n").public_address, "203.0.113.7:27025");
+        assert_eq!(load("public_address = http://bus.example.org:27025/\n").public_address, "bus.example.org:27025");
+        assert_eq!(load("public_address = not an address\n").public_address, "", "found by itself");
+        assert_eq!(load("public_address = OFF\n").public_address, "off");
+    }
+
     /// The file written for a new server says what it means, and is read back as 1.
     #[test]
     fn the_default_file_has_the_density() {
@@ -476,6 +673,13 @@ mod passenger_density_tests {
         assert_eq!(d.admin_web, omsi_admin::WebMode::Local);
         assert_eq!(d.admin_trusted_proxies, omsi_admin::WebCfg::default().trusted_proxies);
         assert_eq!(d.admin_proxy_header, omsi_admin::ProxyHeader::ForwardedFor);
+        // the players' addresses are cut in the log unless the owner asks for them whole
+        assert!(!d.log_addresses);
+        assert!(load("log_addresses = 1\n").log_addresses);
+        // (the file says what the log keeps; the scripts read log_keep and log_max_mb)
+        for key in ["log_addresses = 0", "log_keep = 5", "log_max_mb = 20", "the chat (every message)"] {
+            assert!(super::DEFAULT_CFG.contains(key), "{key}");
+        }
     }
 
     /// The web administration's keys: a wrong word is never the open door.
@@ -624,5 +828,20 @@ mod players_tests {
         assert_eq!((oa.x, oa.y, oa.on_foot, oa.aboard), (100.0, 200.0, true, Some(2)));
         // neither a bus nor a walker: not listed
         assert!(player_info(&Pose { id: 4, ..Default::default() }, none).is_none());
+    }
+}
+
+#[cfg(test)]
+mod rp_speed_limit_tests {
+    use super::parse_speed_limit;
+    #[test]
+    fn only_declared_speed_presets_are_accepted() {
+        for speed in [0, 60, 75, 80] {
+            assert_eq!(parse_speed_limit(Some(&speed.to_string())), speed);
+        }
+        for bad in ["-1", "59", "65", "81", "unlimited", "NaN", ""] {
+            assert_eq!(parse_speed_limit(Some(bad)), 0, "{bad}");
+        }
+        assert_eq!(parse_speed_limit(None), 0);
     }
 }

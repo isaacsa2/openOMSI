@@ -54,6 +54,8 @@ impl Renderer {
             self.fall_back_without_ray_tracing(scene);
         } else if self.errors.gpu_error.load(std::sync::atomic::Ordering::Relaxed) {
             self.fall_back_to_single_sample(scene);
+        } else if self.options.temporal.is_some() && (self.temporal_failed || self.temporal_pipes.is_none()) {
+            self.fall_back_without_upscaler(scene);
         }
         true
     }
@@ -71,8 +73,22 @@ impl Renderer {
         // from here on `width` and `height` are the size of the picture, `full_*` the
         // window's (the HUD is drawn at that size). Mirrors keep their own size.
         let (full_w, full_h) = (width, height);
-        let (width, height) = if with_overlays {
+        // With temporal upscaling the window's picture (only it: no mirror, headset eye or
+        // texture) is drawn at the size the upscaler asks for, and the upscaler does what FXAA
+        // and the render scale would
+        let temporal_frame = with_overlays && projection.is_none() && self.temporal_window && self.texture_aspect.is_none() && self.temporal_fits((full_w, full_h)) && self.temporal_start();
+        let (width, height) = if temporal_frame {
+            let size = self.temporal_render_size((full_w, full_h));
+            self.temporal_targets(size, (full_w, full_h));
+            size
+        } else if with_overlays && self.temporal_window {
             self.scene_size(full_w, full_h)
+        } else if with_overlays && self.options.temporal.is_some() {
+            // (a photo, or a triple screen turned on in the menu: no upscaler's picture, and not
+            // the render scale either, whose row is hidden while an upscaler is chosen)
+            (full_w, full_h)
+        } else if with_overlays {
+            self.scaled_size(full_w, full_h)
         } else if let Some(s) = self.xr_fsr_scale().filter(|_| projection.is_some()) {
             // (a VR eye with FSR 1: drawn smaller, scaled up to the headset's image)
             (((full_w as f32 * s).round() as u32).max(1), ((full_h as f32 * s).round() as u32).max(1))
@@ -83,6 +99,7 @@ impl Renderer {
         // edges (the Enhanced path has it in its post passes): the picture is drawn into a
         // texture of the window's size and smoothed on its way to the window, the HUD after
         let vanilla_fxaa = with_overlays
+            && !temporal_frame
             && (width, height) == (full_w, full_h)
             && self.options.fxaa
             && self.options.msaa <= 1
@@ -95,8 +112,11 @@ impl Renderer {
             && scene.glass_slot.is_some()
             && (lighting.rain > 0.001 || lighting.wetness > 0.02)
             && !env.no_glass_picture;
-        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view);
-        let scene_target: Option<(wgpu::TextureView, wgpu::BindGroup)> = if scaled {
+        let scaled = (width, height) != (full_w, full_h) || vanilla_fxaa || (glass_on && !enhanced_view) || temporal_frame;
+        let scene_target: Option<(wgpu::TextureView, wgpu::BindGroup)> = if temporal_frame {
+            // (the picture goes into the upscaler's input, not into the render scale's target)
+            self.temporal.as_ref().and_then(|d| d.targets.as_ref()).map(|t| (t.color_view.clone(), t.color_bg.clone()))
+        } else if scaled {
             Some(self.scale_target(width, height))
         } else {
             None
@@ -124,6 +144,7 @@ impl Renderer {
         let puddles_wanted = with_overlays
             && self.puddles.is_some()
             && self.options.reflections
+            && self.options.puddle_reflections
             && lighting.puddles > 0
             && lighting.wetness * (1.0 - lighting.snow.clamp(0.0, 1.0)) > 0.05
             && scene.materials.iter().any(|m| m.uniform.params2[2] > 0.0)
@@ -151,7 +172,7 @@ impl Renderer {
         let ao_on = with_overlays && self.rt.is_none() && self.options.ssao && self.ssao_pipeline.is_some() && !env.no_ao;
         // the enhanced path's shading is costly: the depth prepass keeps it to the visible
         // surface (without multisampling, see `share_depth`)
-        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none());
+        let depth_wanted = puddles_wanted || glass_on || (enhanced && (with_overlays || xr_view)) || (self.depth_readback && projection.is_none()) || temporal_frame;
         let prepass_on = ao_on || depth_wanted;
         // the terrain's paint laid into one albedo picture first: the window's enhanced
         // picture, single-sampled, with the camera group's slot 8 free of the AO
@@ -217,6 +238,7 @@ impl Renderer {
             second_eye,
             ro,
             full_w,
+            temporal_frame,
             width,
             height,
             vanilla_fxaa,
@@ -265,6 +287,9 @@ impl Renderer {
             .projection
             .map(|p| p * Mat4::look_to_rh((camera.position - ro).as_vec3(), camera.forward(), camera.up()))
             .unwrap_or_else(|| camera.view_proj(aspect, ro));
+        // (temporal upscaling: the projection moved by this frame's sub-pixel offset)
+        self.temporal_pending = None;
+        let vp_mat = if f.temporal_frame { self.temporal_jitter(scene, f, vp_mat) } else { vp_mat };
         // the last frame's picture for the bounced light, found again under this frame's view
         if lead_view {
             let size = (f.width, f.height);
@@ -443,8 +468,9 @@ impl Renderer {
                 }
                 std::array::from_fn(|r| std::array::from_fn(|c| at[r * 4 + c]))
             },
-            lod: [self.fsr_mip_bias(f), 0.0, 0.0, 0.0],
-            spot: classic_spot(scene, ro),
+            // y belongs to the ground prepass and is set only by render_inner.
+            lod: [self.fsr_mip_bias(f), 0.0, lighting.road_glare.clamp(0.0, 2.0), 0.0],
+            spot: classic_spot(&scene.lights, ro),
         };
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
@@ -452,7 +478,7 @@ impl Renderer {
             self.write_precip_camera(&cu, m);
         }
         if rt_frame {
-            let proj = Mat4::perspective_rh(camera.fov_deg.to_radians(), aspect, camera.far, camera.near);
+            let proj = Mat4::perspective_rh(camera.fov_deg.to_radians(), aspect, camera.depth_far(), camera.near);
             self.prepare_ray_tracing(scene, camera, lighting, vp_mat, proj, f.width, f.height, f.dt);
             clock.stage(self, "ray tracing", "mirror.ray tracing");
         }
@@ -460,8 +486,9 @@ impl Renderer {
         // unless it comes before the window's first frame)
         if enhanced && lead_view {
             let ground = lighting.fog_base.or(lighting.inside.map(|v| v.0.z)).map(|z| (z - scene.render_origin.z) as f32);
+            let device_lost = self.device_lost().is_some();
             if let Some(s) = self.tone.lamp_sight.as_mut() {
-                s.take();
+                s.take(device_lost);
             }
             let sight = self.tone.lamp_sight.as_ref();
             let seen = |at: DVec3| sight.map_or(1.0, |s| s.seen(at));
@@ -500,22 +527,75 @@ impl Renderer {
     }
 }
 
-/// The camera uniform's `spot`: the player's `[spotlight]`, the one classic spot of kind 1
+/// The camera uniform's `spot`: the player's `[spotlight]`, the one classic player spot
 /// (the scene gives the player's alone, as Omsi.exe lights the road by it alone, 0x708acc);
 /// none while it is off or in a frame without a player's vehicle.
-fn classic_spot(scene: &Scene, ro: DVec3) -> [[f32; 4]; 4] {
-    let spot = scene.lights.iter().find_map(|l| {
-        let [range, setback, kind] = l.d3d_spot?;
-        (kind > 0.5 && l.mode == crate::LightMode::Vanilla && l.intensity > 0.0).then_some((l, range, setback))
+fn classic_spot(lights: &[crate::PointLight], ro: DVec3) -> [[f32; 4]; 4] {
+    let spot = lights.iter().find_map(|l| {
+        let s = l.d3d_spot?;
+        (s.player && l.mode == crate::LightMode::Vanilla && l.intensity > 0.0).then_some((l, s))
     });
-    let Some((l, range, setback)) = spot else { return [[0.0; 4]; 4] };
+    let Some((l, s)) = spot else { return [[0.0; 4]; 4] };
     let at = (l.position - ro).as_vec3();
+    let source = (s.source - ro).as_vec3();
     let d = l.direction.normalize_or_zero();
     let c = l.color;
     [
-        [at.x, at.y, at.z, range],
+        [at.x, at.y, at.z, s.range],
         [d.x, d.y, d.z, l.cone[1]],
         [c[0] * l.intensity, c[1] * l.intensity, c[2] * l.intensity, l.cone[0]],
-        [setback, 0.0, 0.0, 0.0],
+        [source.x, source.y, source.z, 0.0],
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{D3dSpot, LightMode, PointLight};
+
+    #[test]
+    fn classic_spot_keeps_the_declared_source_on_a_tilted_vehicle() {
+        let origin = DVec3::new(1_000_000.0, -2_000_000.0, 300.0);
+        let body = glam::Mat4::from_rotation_z(0.7) * glam::Mat4::from_rotation_x(0.2);
+        let source = origin + body.transform_point3(Vec3::new(0.4, 2.0, 0.8)).as_dvec3();
+        let face = origin + body.transform_point3(Vec3::new(0.4, 5.9, 0.8)).as_dvec3();
+        // Sideways aim and pitch must not be used to reconstruct the vehicle's Y axis.
+        let direction = body.transform_vector3(Vec3::new(0.2, 1.0, -0.3).normalize());
+        let lamp = PointLight {
+            position: face, direction, mode: LightMode::Vanilla,
+            color: [1.0, 0.9, 0.8], intensity: 0.5, cone: [0.95, 0.8],
+            d3d_spot: Some(D3dSpot { range: 100.0, source, player: true }),
+            ..Default::default()
+        };
+        let spot = classic_spot(&[lamp], origin);
+        let p = (face - origin).as_vec3();
+        let s = (source - origin).as_vec3();
+        assert_eq!(spot[0], [p.x, p.y, p.z, 100.0]);
+        assert_eq!(spot[3], [s.x, s.y, s.z, 0.0]);
+        assert_eq!(spot[2], [0.5, 0.45, 0.4, 0.95]);
+        let d = direction.normalize_or_zero();
+        assert_eq!(spot[1], [d.x, d.y, d.z, 0.8]);
+        // Both positions must be rebased, including a change of render origin.
+        let shift = DVec3::new(512.0, -256.0, 16.0);
+        let moved = classic_spot(&[lamp], origin + shift);
+        assert!((Vec3::from_slice(&moved[3]) - (s - shift.as_vec3())).length() < 1e-4);
+    }
+
+    #[test]
+    fn classic_spot_ignores_non_player_and_disabled_lights() {
+        let player = PointLight {
+            mode: LightMode::Vanilla,
+            d3d_spot: Some(D3dSpot { range: 100.0, source: DVec3::ZERO, player: true }),
+            ..Default::default()
+        };
+        let other = PointLight {
+            d3d_spot: Some(D3dSpot { player: false, ..player.d3d_spot.unwrap() }),
+            ..player
+        };
+        let off = PointLight { intensity: 0.0, ..player };
+        let enhanced = PointLight { mode: LightMode::Enhanced, ..player };
+        assert_eq!(classic_spot(&[], DVec3::ZERO), [[0.0; 4]; 4]);
+        assert_eq!(classic_spot(&[other, off, enhanced], DVec3::ZERO), [[0.0; 4]; 4]);
+        assert_eq!(classic_spot(&[other, off, enhanced, player], DVec3::ZERO)[0][3], 100.0);
+    }
 }

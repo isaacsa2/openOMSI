@@ -3,13 +3,14 @@ import { useStore, set, remembered, remember, toast } from '../store.js';
 import { t, hhmm, longDate, language } from '../i18n.js';
 import { Icon } from '../icons.js';
 import { Button, Notice, useConfirm } from '../ui.js';
-import { choose, curMap, curBus, curLine, curTour, pickedTrip, start, loadSituations, weatherName, mapName, noServerBus, askJoined, transportRefusal } from '../data.js';
+import { choose, curMap, curBus, curLine, curTour, pickedTrip, start, loadSituations, weatherName, mapName, noServerBus, askJoined, transportRefusal, serverFleetSelection, canPreviewBus } from '../data.js';
 import { call } from '../api.js';
 import { BusPreview } from '../preview.js';
 import { BusList, BusOptions, withoutMaker } from './bus-list.js';
 import { DayStep } from './drive-day.js';
 import { DutyStep, DutyStage } from './drive-duty.js';
 import { depotRun, tripAt, hms, entryName } from './drive.js';
+import { NameDialog } from './depot.js';
 
 const STEPS = [['bus', 'Bus'], ['day', 'Day & weather'], ['duty', 'Map & duty']];
 
@@ -49,7 +50,7 @@ export function BusStage() {
   const v = curBus();
   if (!v) return html`<div class="stage-empty"><${Icon} name="bus" size=${40} /></div>`;
   return html`<div class="bus-stage">
-    <${BusPreview} class="stage" look=${{ bus: v.file, paint: c.paint, map: c.map, weather: c.weather, time: c.time, date: c.date }} />
+    ${!canPreviewBus(v, c.paint) ? html`<div class="stage-empty"><${Icon} name="bus" size=${40} /><span>${t('Server bus: preview is available after verified download')}</span></div>` : html`<${BusPreview} class="stage" look=${{ bus: v.file, paint: c.paint, map: c.map, weather: c.weather, time: c.time, date: c.date }} />`}
     <div class="stage-caption">
       <b>${withoutMaker(v.name, v.manufacturer)}</b>
       <span>${[v.manufacturer, c.paint || v.default_paint].filter(Boolean).join(' | ')}</span>
@@ -65,6 +66,7 @@ export function StartBar({ step, go }) {
   const line = curLine();
   const tour = curTour();
   const [busy, setBusy] = useState(false);
+  const [ask, dialog] = useConfirm();
   // a start while a game runs asks for a second click within 6 s (its window may be behind
   // this one), as the game's own launcher did
   const [armed, setArmed] = useState(0);
@@ -88,8 +90,23 @@ export function StartBar({ step, go }) {
     }
     setArmed(0);
     setBusy(true);
-    await start(extra);
-    setBusy(false);
+    try {
+      if (c.lan_mode === 'join') {
+        // A previously saved server response may lack the new fleet metadata.
+        // Re-query before deciding whether an authenticated download is needed.
+        await askJoined({ refresh: true });
+      }
+      if (serverFleetSelection()) {
+        const approved = await ask({
+          title: t('Download server vehicle'),
+          text: t('The selected bus or repaint may need files from this server. Matching local files are reused; other files are checked and cached for this session without replacing your installed mods. Continue?'),
+          yes: t('Download and join'),
+        });
+        if (!approved) return;
+        extra = { ...extra, __fleetApproved: true };
+      }
+      await start(extra);
+    } finally { setBusy(false); }
   };
   const entry = m && c.entry >= 0 ? m.entry_points[c.entry] : null;
   const where = joined && c.lan_map ? mapName(c.lan_map.replace(/\\/g, '/')) : m ? m.friendly || m.name : '';
@@ -111,22 +128,21 @@ export function StartBar({ step, go }) {
       ${v?.missing_packs?.length > 0 && html`<span class="ellipsis" style="color:var(--warn)" title=${v.missing_packs.join(', ')}>${t('Parts of this bus come from packs that are not installed: {packs}', { packs: v.missing_packs.join(', ') })}</span>`}
     </div>
     <div class="bar-actions">
-      ${joined && html`<span class="tag accent"><${Icon} name="users" size=${14} />${t('Joining {server}', { server: c.lan_server?.name || c.lan_addr })}</span>
-        <${Button} kind="ghost" label="Leave" onClick=${() => choose({ lan_mode: 'off' })} />`}
       ${running > 0 && html`<a class="small" onClick=${() => set({ page: 'games' })}>${t('{n} game(s) running', { n: running })}</a>`}
       <${Continue} go=${launch} busy=${busy} />
       ${next < STEPS.length && html`<${Button} big onClick=${() => go(STEPS[next][0])}>${t('Next:')} ${t(STEPS[next][1])}<${Icon} name="right" /></${Button}>`}
       <${Button} kind="primary" big icon="play" disabled=${!ready || busy} onClick=${() => launch()}>
-        ${busy ? t('Starting…') : another ? t('Start another game') : joined ? t('Join and drive') : c.free ? t('Start driving') : t('Start the duty')}
+        ${busy ? t('Starting…') : another ? t('Start another game') : joined ? t('Join and drive') : c.lan_mode === 'host' ? t('Host and drive') : c.free ? t('Start driving') : t('Start the duty')}
       </${Button}>
     </div>
-  </div>`;
+  </div>${dialog}`;
 }
 
 function Continue({ go, busy }) {
   const s = useStore();
   const [open, setOpen] = useState(false);
   const [ask, dialog] = useConfirm();
+  const [naming, setNaming] = useState(null);
   const box = useRef();
   useEffect(() => {
     loadSituations();
@@ -148,15 +164,27 @@ function Continue({ go, busy }) {
     }
     loadSituations();
   };
+  const rename = async (to) => {
+    const x = naming;
+    setNaming(null);
+    try {
+      if (!(await call('rename_situation', { map: s.choice.map, file: x.file, name: to }))) toast(t('Nothing found'), 'error');
+    } catch (err) {
+      toast(t(err.message), 'error');
+    }
+    loadSituations();
+  };
   return html`<div class="menu-box" ref=${box}>
     <${Button} big icon="history" label="Continue" onClick=${() => setOpen(!open)} />
     ${open && html`<div class="menu up">
       ${s.situations.map((x) => html`<div class="menu-item" role="button" tabindex="0" aria-disabled=${busy} onClick=${() => !busy && (setOpen(false), go({ situation: x.file }))} onKeyDown=${(e) => e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && !busy && (e.preventDefault(), setOpen(false), go({ situation: x.file }))}>
         <${Icon} name="play" size=${16} />
         <span class="grow"><b class="ellipsis">${t(x.name)}</b><span class="muted small">${new Date(x.saved * 1000).toLocaleString(language())}</span></span>
+        ${x.slot && html`<${Button} kind="ghost" small icon="edit" title="Rename the save" disabled=${busy} onClick=${(e) => (e.stopPropagation(), setNaming(x))} />`}
         <${Button} kind="ghost" small icon="trash" title="Delete" onClick=${(e) => remove(e, x)} />
       </div>`)}
     </div>`}
     ${dialog}
+    ${naming && html`<${NameDialog} title="Rename the save" label="Name" placeholder="" value=${naming.name} onSave=${rename} onClose=${() => setNaming(null)} />`}
   </div>`;
 }

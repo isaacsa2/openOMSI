@@ -95,6 +95,9 @@ pub struct VehicleHost {
     pub fired_trigger_vars: Vec<(String, Vec<f32>)>,
     /// `(T.F.name)` triggers of this frame: (trigger, sound file relative to the sound folder).
     pub fired_file_triggers: Vec<(String, String)>,
+    /// How many `(T.F.name)` triggers fired since the vehicle was made (never cleared): a
+    /// key's press is seen to have played a recording, whenever its frame's list is taken.
+    pub file_triggers_fired: u64,
     pub messages: Vec<String>,
     /// The latest `$msg` and the play time (`SimClock::run_time`) it was last said at: OMSI
     /// writes the latest on the screen, and the game shows the player's bus's as a note
@@ -114,9 +117,9 @@ pub struct VehicleHost {
     pub hof: Option<Arc<Hof>>,
     /// The map's ticket pack for `GetTicketName/Value`.
     pub tickets: Option<Arc<omsi_content::tickets::TicketPack>>,
-    /// Coins the driver handed out with `GiveChangeCoin` (currency coin indices), taken by
-    /// the passenger system.
-    pub change_coins: Vec<usize>,
+    /// Coins the driver handed out with `GiveChangeCoin` (currency coin index, the value the
+    /// cash desk's key names for it or 0), taken by the passenger system.
+    pub change_coins: Vec<(usize, f32)>,
     /// The script's `number` string variable (the fleet number): `NrSpecRandom` is
     /// specific to it.
     pub number_var: Option<u32>,
@@ -258,6 +261,37 @@ pub fn ambient_weather() -> Option<(f32, f32)> {
 }
 
 impl VehicleHost {
+    pub fn trigger_mark(&self) -> (usize, usize, usize, usize) {
+        (
+            self.fired_triggers.len(),
+            self.fired_trigger_vars.len(),
+            self.network_sound_triggers.len(),
+            self.fired_file_triggers.len(),
+        )
+    }
+
+    pub fn drop_triggers_since(
+        &mut self,
+        mark: (usize, usize, usize, usize),
+        mut drop_if: impl FnMut(&str) -> bool,
+    ) {
+        fn filter_tail<T>(
+            vec: &mut Vec<T>,
+            start: usize,
+            mut name: impl FnMut(&T) -> &str,
+            mut drop_if: impl FnMut(&str) -> bool,
+        ) {
+            if start < vec.len() {
+                let tail = vec.split_off(start);
+                vec.extend(tail.into_iter().filter(|item| !drop_if(name(item))));
+            }
+        }
+        filter_tail(&mut self.fired_triggers, mark.0, |s| s, &mut drop_if);
+        filter_tail(&mut self.fired_trigger_vars, mark.1, |(s, _)| s, &mut drop_if);
+        filter_tail(&mut self.network_sound_triggers, mark.2, |(s, _, _)| s, &mut drop_if);
+        filter_tail(&mut self.fired_file_triggers, mark.3, |(s, _)| s, &mut drop_if);
+    }
+
     /// The latest `$msg` of the scripts when it was said no more than `secs` seconds of play
     /// ago: a script repeating it keeps it fresh.
     pub fn fresh_message(&self, secs: f64) -> Option<&str> {
@@ -542,6 +576,7 @@ impl Host for VehicleHost {
         }
         self.record_network_sound(name, Some(file));
         self.fired_file_triggers.push((name.to_string(), file.to_string()));
+        self.file_triggers_fired += 1;
     }
     fn sound_trigger(&mut self, name: &str, _id: NameId) {
         if self.remote_sound_triggers { return; }
@@ -947,6 +982,25 @@ mod tests {
         vm.run_trigger(&p, "collision", &mut st, &mut host);
         assert_eq!(st.get(p.var("collision_energy").unwrap()), 135.5);
         assert_eq!(st.get(p.var("collision_energy_eng").unwrap()), 115.5);
+    }
+
+    #[test]
+    fn drop_triggers_since_filters_only_new_matching_triggers() {
+        let mut h = VehicleHost::default();
+        h.capture_sound_triggers = true;
+        h.snapshot_triggers.insert("ev_lights_blinker_sw_off".into());
+        h.sound_trigger_vars("ev_lights_blinker_sw_off", 0, &[1.0]);
+        let mark = h.trigger_mark();
+        h.sound_trigger_vars("ev_lights_blinker_sw_off", 1, &[0.0]);
+        h.sound_trigger_vars("ev_lights_blinker_off", 2, &[0.0]);
+        h.sound_trigger_file("ev_blinker_aus", "click.wav");
+        h.sound_trigger_file("ev_door", "door.wav");
+        h.drop_triggers_since(mark, |n| n == "ev_lights_blinker_sw_off" || n == "ev_blinker_aus");
+        assert_eq!(h.fired_triggers, ["ev_lights_blinker_sw_off", "ev_lights_blinker_off"]);
+        assert_eq!(h.fired_trigger_vars, vec![("ev_lights_blinker_sw_off".into(), vec![1.0])]);
+        let network: Vec<&str> = h.network_sound_triggers.iter().map(|t| t.0.as_str()).collect();
+        assert_eq!(network, ["ev_lights_blinker_sw_off", "ev_lights_blinker_off", "ev_door"]);
+        assert_eq!(h.fired_file_triggers, vec![("ev_door".into(), "door.wav".into())]);
     }
 }
 

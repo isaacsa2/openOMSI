@@ -114,6 +114,10 @@ pub struct Pax {
     /// opens a door.
     pub door_since: Option<f64>,
     pub shunned: Option<BusId>,
+    /// Prevent immediate re-boarding of the vehicle just left.
+    pub transfer_from: Option<BusId>,
+    /// Bound connections for the lifetime of this passenger.
+    pub transfer_count: u8,
     /// Walking to a door from outside (+0x5d0): keep 0.5 m off the bus side
     /// (`clamp_x`, +0x5cc) unless the door is open (+0x5d1) and they are level with it;
     /// a door on the left (+0x5d2).
@@ -147,6 +151,7 @@ pub struct Pax {
     pub paid: f32,
     pub bad_change: bool,
     pub sub: u8,
+    pub taking_ticket: Option<usize>,
     /// A plugin's say in the ticket (`ticket_hook`), boxed: most passengers have none, and a
     /// `Pax` is cloned several times a frame.
     pub plugin: Option<Box<super::ticket_hook::PluginTicket>>,
@@ -220,6 +225,8 @@ impl Pax {
             short: false,
             door_since: None,
             shunned: None,
+            transfer_from: None,
+            transfer_count: 0,
             clamp: false,
             clamp_open: false,
             clamp_left: false,
@@ -240,6 +247,7 @@ impl Pax {
             paid: 0.0,
             bad_change: false,
             sub: 0,
+            taking_ticket: None,
             plugin: None,
             ticket_hold: None,
             door: None,
@@ -542,9 +550,8 @@ pub struct StopPlan {
 pub enum Takes {
     /// Those whose line record lists its terminus, as in Omsi.exe: a timetable bus.
     Terminus,
-    /// The player's bus on a duty: those as well whom its trip takes where they are going,
-    /// however the bus's depot file spells the terminus. `next` is the stop of the trip the
-    /// duty is due at, `done` that the trip has reached its last stop.
+    /// Duty fallback unless the stop identifies the sign as another service.
+    /// `next` is the stop due at; `done` means the trip reached its last stop.
     Duty { trip: Arc<DutyTrip>, next: usize, done: bool },
     /// Nobody waiting: another player's bus (their game boards it), a bus the player left
     /// standing (its riders get off as ever).
@@ -641,7 +648,8 @@ pub fn at_stop(id: i64, stop: &PaxStop, terminus: Option<&str>, takes: &Takes) -
         Takes::Nobody => AtStop::Passes,
         // the trip's last stop is its terminus, whatever the depot file calls it
         Takes::Duty { trip, done: true, .. }
-            if trip.stops.iter().rev().find(|s| s.2).is_some_and(|(k, n, _)| *k == id || stop.is_named(n)) =>
+            if !sign_is_other_service(stop, trip, t)
+                && trip.stops.iter().rev().find(|s| s.2).is_some_and(|(k, n, _)| *k == id || stop.is_named(n)) =>
         {
             AtStop::Empties
         }
@@ -658,6 +666,28 @@ fn without_route(terminus: &str) -> Option<&str> {
     let (first, rest) = terminus.trim().split_once(char::is_whitespace)?;
     let route = first.chars().all(|c| c.is_ascii_alphanumeric()) && first.chars().any(|c| c.is_ascii_digit());
     Some(rest.trim()).filter(|r| route && !r.is_empty())
+}
+
+/// Only known, disjoint stop records contradict the duty; unknown spellings still work.
+fn sign_is_other_service(stop: &PaxStop, trip: &DutyTrip, terminus: &str) -> bool {
+    if terminus.trim() == trip.terminus.trim()
+        || without_route(terminus).is_some_and(|t| t == trip.terminus.trim()) {
+        return false;
+    }
+    let mut known = false;
+    for (dest, termini) in &stop.lines {
+        if !termini.contains(terminus.trim())
+            && !without_route(terminus).is_some_and(|t| termini.contains(t)) {
+            continue;
+        }
+        // A shared destination or terminus is ambiguous, not proof of another service.
+        if termini.contains(trip.terminus.trim())
+            || trip.stops.iter().any(|(_, name, calls)| *calls && name.trim() == dest.trim()) {
+            return false;
+        }
+        known = true;
+    }
+    known
 }
 
 /// Why somebody waiting takes a bus (`fit`); the better first.
@@ -681,17 +711,14 @@ pub fn best_bus(buses: impl Iterator<Item = (BusId, Fit, f64)>) -> Option<(BusId
 /// Whether a bus showing `terminus` and taking `takes` is the bus of somebody waiting at stop
 /// `id` for `dest`, whose line record there lists `termini`; why.
 ///
-/// Omsi.exe compares the names alone: the destination the bus's depot file gives it with
-/// the timetable's termini. A depot file that spells them another way (another case, a
-/// shortened name, the terminus of another variant of the line, a file made for another
-/// map) left the people at every stop of a duty waiting for another bus. The duty knows
-/// the trip: whoever it takes where they are going gets on.
+/// Keep the duty fallback for HOF spelling differences unless the stop's records
+/// positively identify the sign as another service.
 pub fn fit(id: i64, stop: &PaxStop, dest: Option<&str>, termini: &HashSet<String>, terminus: &str, takes: &Takes) -> Option<Fit> {
     if termini.contains(terminus.trim()) || without_route(terminus).is_some_and(|t| termini.contains(t)) {
         return Some(Fit::Terminus);
     }
     let Takes::Duty { trip, next, done: false } = takes else { return None };
-    if !trip.public {
+    if !trip.public || sign_is_other_service(stop, trip, terminus) {
         return None;
     }
     if termini.contains(&trip.terminus) {

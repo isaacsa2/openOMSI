@@ -187,6 +187,23 @@ impl GpuCache {
         self.take_texture_slot(renderer, scene, id)
     }
 
+    pub(super) fn add_script_slot(&mut self, renderer: &Renderer, scene: &mut Scene, model: &omsi_model::Model, index: usize) -> TextureId {
+        let (w, h) = model.script_textures[index];
+        let (w, h) = (w.max(1) as u32, h.max(1) as u32);
+        if model.script_texture_drawn_by_game(index) {
+            self.add_screen(renderer, scene, w, h)
+        } else {
+            self.add_blank(renderer, scene, w, h)
+        }
+    }
+
+    pub(super) fn add_screen(&mut self, renderer: &Renderer, scene: &mut Scene, width: u32, height: u32) -> TextureId {
+        let id = renderer.add_render_texture(scene, width, height);
+        let id = self.take_texture_slot(renderer, scene, id);
+        renderer.clear_texture(scene, id, wgpu::Color::BLACK);
+        id
+    }
+
     pub(super) fn add_blank(&mut self, renderer: &Renderer, scene: &mut Scene, width: u32, height: u32) -> TextureId {
         let id = renderer.add_blank_texture(scene, width, height, false);
         self.take_texture_slot(renderer, scene, id)
@@ -290,7 +307,7 @@ impl GpuCache {
                             // cards with little memory ran out while the game was loading)
                             Arc::new(omsi_texture::gpu::halved_for_now(i))
                         } else {
-                            Arc::new(i)
+                            Arc::new(omsi_texture::gpu::halved_plain(&i).unwrap_or(i))
                         }
                     }
                     Err(e) => {
@@ -306,15 +323,7 @@ impl GpuCache {
         attach_pbr(renderer, scene, &path, id);
         self.textures.insert(
             path.clone(),
-            TexEntry {
-                id,
-                alpha: img.has_alpha,
-                users: 1,
-                texels: img.width as u64 * img.height as u64,
-                bytes: renderer.texture_size_bytes(scene, id),
-                format: img.format,
-                dropped: 0,
-            },
+            TexEntry::uploaded(id, &img, scene),
         );
         Some((id, path))
     }
@@ -453,15 +462,7 @@ impl GpuCache {
         let id = self.add_data(renderer, scene, &data);
         self.textures.insert(
             key.clone(),
-            TexEntry {
-                id,
-                alpha: true,
-                users: 1,
-                texels: data.width as u64 * data.height as u64,
-                bytes: renderer.texture_size_bytes(scene, id),
-                format: data.format,
-                dropped: 0,
-            },
+            TexEntry { alpha: true, ..TexEntry::uploaded(id, &data, scene) },
         );
         Some((id, key))
     }

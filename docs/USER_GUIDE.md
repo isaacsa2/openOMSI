@@ -158,8 +158,10 @@ the cursor smoothly (a short easing, no steps). With *Smooth mouse steering* off
 Driving) the wheel and the pedals are where the cursor says at once, as in OMSI. While the mouse
 steers the cursor is held, so the wheel reaches its full lock past the window's edges and a
 cross shows where it steers; with *Hold the cursor while the mouse steers* off the system's
-crosshair stays free (it follows the hand without the frame's delay, and a graphics tablet's
-pen works with it) and the window's edges are the lock, as in OMSI.
+crosshair is shown (it follows the hand without the frame's delay, and a graphics tablet's
+pen works with it), kept inside the window while the mouse steers, and the window's edges are
+the lock, as in OMSI (on Windows and Linux: macOS does not let a game keep the cursor inside
+its window).
 
 Three switches there change the steering keys (all off by default): *Steering linearity* turns
 the wheel at OMSI's own steady pace (the curvature grows by the same amount every millisecond
@@ -270,12 +272,15 @@ from the cab with R and T. Details, the formats and the checks: [TROLLEYBUS.md](
 
 ## The launcher
 
-For troubleshooting, **Settings > General > Disable plugins** starts the next game
-without Lua plugins (including vehicle and scenery plugins) or legacy OMSI plugins.
-It is off by default and saved between launches. Plugin features will be unavailable;
-normal bus scripts still run. Switch it off and start another game to restore plugins.
-The game's command-line equivalent is `--no-plugins`; `OMSI_NO_PLUGINS=1` also keeps
-plugins disabled even when the launcher option is off.
+For stability, **Settings > General > Disable plugins** is **on by default** for new
+launcher installations. The next game starts without Lua plugins (including vehicle
+and scenery plugins) or legacy OMSI plugins. Normal OMSI bus scripts still run;
+plugin-dependent vehicle features may be unavailable. This preference is saved
+between launches: existing settings files, including older files with no `disable_plugins` key, keep their previous plugin behavior. Explicit `disable_plugins=0` or `1` is preserved.
+To use a trusted plugin, switch **Disable plugins** off and start a new session.
+The game's standalone command-line equivalent is `--no-plugins` (direct CLI runs
+still require this flag); `OMSI_NO_PLUGINS=1` forces plugins off even when the
+launcher preference allows them.
 
 The launcher is a program of its own beside the game, `openomsi-launcher-app` (a Tauri window,
 `launcher/`, see its README): `openomsi` started without arguments opens it, and where it is
@@ -478,7 +483,7 @@ the bus waits at a stop) and `head_idle_pace` (0.5..2: how fast that sway moves,
 pace it is designed at), `collision_objects` (walls, poles and bridges stop the bus; off is OMSI's `no_collision`
 option and is taken from OMSI's options when openOMSI starts the first time), `graphics_api`
 (`auto`, `vulkan`, `dx12` on Windows, `gl`, `angle` on Windows: which graphics interface the
-game asks first - with `auto` on Windows DirectX 12, then Vulkan, then OpenGL, then ANGLE;
+game asks first - with `auto` on Windows DirectX 12, then Vulkan, then OpenGL, then ANGLE, except with a discrete AMD Radeon, where `auto` asks Vulkan first, as it is faster there; after a device lost on Vulkan, `auto` keeps to DirectX 12 on that machine until the next version of the game, or until `~/.openomsi/vulkan-lost` is deleted;
 on Linux and Android Vulkan, then OpenGL; a Mac, iPhone and iPad always use Metal; see
 *Graphics API* below), `ctrl_off` (game controllers switched off on the Controls page, by
 name, separated by `|`) and `language` (the language of the interface - `ENG`, `DEU`, `FRA`,
@@ -488,6 +493,14 @@ English). The file also carries a `version`.
 With `collision_vehicles` enabled, impacts against AI traffic are delivered to the struck
 vehicle's collision scripts and deform a localized part of its body mesh where the model
 has editable body geometry.
+
+**NVIDIA DLSS and AMD FSR 3** (Settings → Graphics → Upscaling, `upscaler=dlss` or `fsr3`, with `upscale_quality=native`, `quality`, `balanced`, `performance` or `ultra_performance`; Windows, DirectX 12 or Vulkan; DLSS only with an NVIDIA RTX card, FSR 3 with any): the picture is drawn smaller and brought up to the window with the help of the last frames, in place of the anti-aliasing and the render scale, from the next start (not with a headset or a triple screen). They are offered only when the vendor's DLLs are beside `openomsi.exe`. The Windows x64 package includes AMD's FidelityFX DLLs. NVIDIA's are not included: on an RTX card the launcher offers to download them from NVIDIA once you accept NVIDIA's licences. See [the licensing review](UPSCALER_THIRD_PARTY_LICENSING.md) and [NVIDIA DLL license scope](NVIDIA_DLL_LICENSE_SCOPE.md). Where an upscaler cannot start, `game.log` says why and the picture is drawn as without it.
+
+**Apple MetalFX** (Settings → Graphics → Upscaling, `upscaler=metalfx`, with the same `upscale_quality` as above; a Mac with Apple silicon on macOS 13 or newer): Apple's own temporal upscaler, in place of the anti-aliasing and the render scale, from the next start (not with a triple screen). It is part of macOS: nothing to install, and nothing of it ships with the game. MetalFX scales up as far as the Mac's graphics chip lets it, twice a side on most: Ultra performance is then drawn at that size, and `game.log` says so. Glass and the rain on the windows are told to it as a mask on macOS 14.4 and newer; older versions run without the mask. Where it cannot start (an Intel Mac, macOS 11 or 12), the choice is not offered or `game.log` says why, and the picture is drawn as without it.
+
+**Frame generation** (Settings → Graphics → Frame generation, `frame_generation=metalfx`; a Mac with Apple silicon on macOS 26 or newer, with Apple MetalFX upscaling on): between every two frames the game draws, the window shows one that Apple's MetalFX frame interpolator makes from them, so 45 drawn frames a second are shown as 90. Motion looks smoother; the controls answer a little later, as each drawn frame waits half a frame time behind its generated one, and they answer no faster than the drawn frames come. Following Apple's advice of at least 30 drawn frames a second, it is judged as SSAO and the shadows are: once it has been making frames for 15 seconds (the first seconds after loading are slow anyway), when two frame rate readings in a row (5 seconds each) find fewer than 30 frames a second drawn with it, the game turns it off for this drive and says so ("The graphics card cannot keep up: frame generation off for this drive"). Generated frames cost the graphics chip time of their own, about 5 ms per million pixels of the window on an M2 (25 ms at 2940x1846), so at the Mac's full resolution it can show fewer frames than without it. Switched off and on in the menu, it is tried again. With V-sync on, the game draws half the display's refresh rate and the generated frames fill the other half. It is switched in the game's menu without a restart. The HUD, the menus and the pause screen are not interpolated: they stay as the last drawn frame has them; menus and the loading screen get no generated frames at all. With the frame rate shown, the corner reads e.g. `90 fps (45 + FG)`: the frames on screen and the drawn ones. Screenshots show drawn frames only. Where it cannot start, `game.log` says why (`frame generation is off: ...`) and the game runs on without it.
+
+**mX Graphics (Experimental)** (Settings → Graphics → Display, `mx_graphics`; a Mac only, off by default): the game is drawn on Metal by [mX](https://github.com/openOMSI-org/mX), openOMSI's own graphics library, through wgpu's interface instead of by wgpu's own backends, from the next start (macOS 13 or newer); `game.log` says `graphics: mX Graphics (experimental) on <chip>`. The picture is meant to be the same as with wgpu. It is not a promise of more frames: the shaders do not use mX's bindless textures yet, the frame takes less processor time and the same graphics-chip time, so a game held back by the graphics chip runs about as fast as before. Apple MetalFX upscaling works with it; ray tracing and frame generation stay off. Where mX finds no graphics chip it can draw on, or cannot open one, the game goes on with wgpu as without the setting, and the log says why. `OMSI_MX=on` or `OMSI_MX=off` overrides the setting for one run, also on Windows (Direct3D 12) and Linux (Vulkan), where mX has not drawn the game on a real graphics card yet and the setting is not offered; there DLSS, FSR 3 and VR do not run with it.
 
 **Graphics API** (Settings → Graphics → Display, `graphics_api`; not on a Mac): the interface named is asked first and
 the others follow, so a machine without it still starts. *ANGLE (DirectX 11)* (Windows) runs
@@ -550,7 +563,7 @@ less of the GPU's time (on an M4 at 1080p about 0.8 ms of a frame). The shade of
 moment, with a camera's middle-tone contrast; street lamps are bright points with a little
 glare in clear air and wide halos in mist and rain.
 
-Every light that lights the street casts a shadow (Enhanced; Graphics: *Light has shadows*, `light_shadows=off|street|all`, *Street lamps and vehicles* by default): the twenty street
+Every light that lights the street casts a shadow (Enhanced; Graphics: *Light has shadows*, `light_shadows=off|street|all`, *Off* by default): the twenty street
 lamps, floodlights and platform lights lighting the view most each have a shadow map that looks
 down from their head, the headlamps of the player's bus and of the cars in front of the camera
 one that looks along the road, and the lamps of the player's own saloon sixteen more, drawn in
@@ -597,13 +610,17 @@ apart.
 
 The quality presets (*Quality preset*: Low, Medium, High, Extra, Max, Ultra) set the graphics mode
 as well as the options: Low is Vanilla, Medium Vanilla+ (what the game starts with), High and above
-Enhanced - High with the street lamps' shadows, the clouds' and the glow, Extra with the street light
+Enhanced - High enabling the street lamps' shadows, Extra adding cloud shadows and light glow along with the street light
 and the reflections in full, Max with every light's shadows, the mirrors drawn as the picture and
 shadow maps of 4096, Ultra with Real-Time Ray Tracing on top of all of it. It shares Enhanced's tone curve, with the light a shade warmer and a light
 vignette.
 `OMSI_NO_RT=1` opens no ray queries, `OMSI_NO_RT_GRADE=1` leaves its grade out,
 `OMSI_RT_REFL_HALF=1` traces the reflections at half size, `OMSI_DEBUG_RT=n` (see
 `crates/omsi-render/src/rt.rs`) shows its buffers.
+
+*Road glare* (`road_glare=0..2`, default 1) scales the highlights of the sun, the headlights and the street lamps on roads and ground in Enhanced, wet roads included, without changing diffuse daylight. *Traffic headlight brightness* (`traffic_headlights=0..2`, default 1) changes white headlamp glows and projected road beams on other vehicles in Vanilla, Vanilla+ and Enhanced, not the player's lamps or the street lamps. Both controls apply while driving.
+
+Built-up snow on roads and roofs (`road_snow=0|1`) is **off by default**; enabling it in Graphics adds gradual snow accumulation and tyre tracks. With it off, the weather's conventional OMSI 2 road snow remains available. Existing saved preferences are preserved.
 
 Vanilla, Vanilla+ and Enhanced reflect buses, buildings and scenery in wet road puddles
 when `reflections` is above 0, each with its own lighting; Enhanced also shades shallow rain
@@ -669,8 +686,9 @@ planned time and whether the bus is early or late, in the interface's language
 default: drag it anywhere and size it at its corner; `nav_widget`), *Navigator size*
 (`nav_size`), *Classic 2D navigator* (`nav_classic_2d`, off by default) for a lighter
 top-down street map without detailed terrain and buildings, *3D buildings on the map*
-(`nav_3d`, on by default) and *Route arrows (as in
-OMSI 2)* over the road (`nav_arrows`, off by default). A click on the navigator (or
+(`nav_3d`, on by default), *Dynamic route arrows* over the road (`nav_dynamic_arrows`)
+and *Map-placed route arrows* (`nav_map_arrows`). Both are off by default.
+Older settings files use the previous route-arrows value for both. A click on the navigator (or
 **Shift+M**) opens the city map: a large window over the game
 with the whole map from above - every road with its street name (read from the map's
 street name signs), the trip's route by traffic with arrows, its stops with their times,

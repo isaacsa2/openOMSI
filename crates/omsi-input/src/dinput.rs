@@ -88,6 +88,7 @@ pub struct Device {
     pub hardware_id: Option<(u16, u16)>,
     dev: IDirectInputDevice8W,
     path: Option<String>,
+    xinput_path: bool,
     retry_at: Option<Instant>,
     /// The slots the device has (an axis it lacks is not in the list).
     has_axis: [bool; 8],
@@ -232,6 +233,15 @@ impl Device {
     pub fn ff_capable(&self) -> bool {
         self.ff_capable
     }
+
+    /// True when Windows DirectInput opened the `&IG_` XInput HID twin of a gamepad.
+    pub fn is_xinput_path(&self) -> bool {
+        self.xinput_path
+    }
+}
+
+pub(crate) fn is_xinput_hid_path(path: &str) -> bool {
+    path.as_bytes().windows(4).any(|w| w.eq_ignore_ascii_case(b"&ig_"))
 }
 
 /// The devices, and the thread that finds them.
@@ -559,8 +569,11 @@ fn format_objects(objects: &[InputObject]) -> (Vec<DIOBJECTDATAFORMAT>, [bool; 8
             }
             has_axis[slot] = true;
             let offset = (slot * 4) as u32;
-            if object.flags & DIDOI_FFACTUATOR != 0 {
-                ff_axis.get_or_insert(offset);
+            // (the forces go to the first slot with a motor, X before Y, whatever order the
+            // driver lists them in: a MOZA R5 lists its Y before its X, both with a motor,
+            // and its forces went to the pedals' axis instead of the wheel's)
+            if object.flags & DIDOI_FFACTUATOR != 0 && ff_axis.is_none_or(|a| offset < a) {
+                ff_axis = Some(offset);
             }
             (offset, DIDOI_ASPECTPOSITION)
         } else if object.ty & DIDFT_POV != 0 && pov < 4 {
@@ -1081,6 +1094,7 @@ impl DirectInput {
                 guid: *guid,
                 hardware_id,
                 dev,
+                xinput_path: path.as_deref().is_some_and(is_xinput_hid_path),
                 path,
                 retry_at: None,
                 has_axis,

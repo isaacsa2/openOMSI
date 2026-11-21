@@ -5,7 +5,9 @@ use crate::*;
 
 impl Renderer {
     pub fn new_scene(&self) -> Scene {
+        static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Scene {
+            serial: SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             meshes: Vec::new(),
             textures: Vec::new(),
             glass_slot: None,
@@ -18,6 +20,7 @@ impl Renderer {
             interior_free: Vec::new(),
             coronas: Vec::new(),
             model_buf: None,
+            model_epoch: 0,
             params_buf: None,
             light_buf: None,
             grid_buf: None,
@@ -118,7 +121,7 @@ impl Renderer {
         let draw_order = scene.next_instance_order;
         scene.next_instance_order += 1;
         let key = crate::frame_plan::origin_key(origin);
-        let slot_levels = scene.object_run.levels(key, draw_order, mesh, transform, &scene.meshes[mesh].flats, slots);
+        let (slot_levels, slot_depth_caps) = scene.object_run.levels_with_caps(key, draw_order, mesh, transform, &scene.meshes[mesh].flats, slots);
         scene.instances.push(Instance {
             draw_order,
             slot_levels,
@@ -155,6 +158,7 @@ impl Renderer {
             shadow_owner: None,
             roof: None,
             roof_snow: None,
+            slot_depth_caps,
         });
         if scene.bounds_known.get(mesh).copied().unwrap_or(false) {
             scene.bounds_users.push(scene.instances.len() - 1);
@@ -180,7 +184,7 @@ impl Renderer {
         let draw_order = scene.next_instance_order;
         scene.next_instance_order += 1;
         let key = crate::frame_plan::origin_key(origin);
-        let slot_levels = scene.object_run.levels(key, draw_order, mesh, transform, &scene.meshes[mesh].flats, slots);
+        let (slot_levels, slot_depth_caps) = scene.object_run.levels_with_caps(key, draw_order, mesh, transform, &scene.meshes[mesh].flats, slots);
         scene.instances.push(Instance {
             draw_order,
             slot_levels,
@@ -217,6 +221,7 @@ impl Renderer {
             shadow_owner: None,
             roof: None,
             roof_snow: None,
+            slot_depth_caps,
         });
         if scene.bounds_known.get(mesh).copied().unwrap_or(false) {
             scene.bounds_users.push(scene.instances.len() - 1);

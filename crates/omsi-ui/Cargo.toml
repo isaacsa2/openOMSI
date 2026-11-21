@@ -9,10 +9,11 @@ description = "Interface drawing shared by the game's navigator and the launcher
 omsi-cfg = { path = "../omsi-cfg" }
 wgpu.workspace = true
 bytemuck.workspace = true
+half = "2"
 glam.workspace = true
 log.workspace = true
 ab_glyph.workspace = true
-resvg = { version = "0.48", default-features = false }
+resvg = { version = "0.49", default-features = false }
 hashbrown.workspace = true
 pollster.workspace = true
 # (the widget kit's key codes and cursor shapes)

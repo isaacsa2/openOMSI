@@ -19,11 +19,11 @@ impl Category {
     pub fn of(id: &str) -> Option<Self> {
         Some(match id {
             "resume" | "quit" => return None,
-            "tobus" | "map" | "duty" | "skipstop" | "endduty" => Self::Driving,
+            "tobus" | "map" | "streets" | "duty" | "skipstop" | "endduty" => Self::Driving,
             "vehicle" | "world" => Self::World,
             "save" | "saveslot" | "load" => Self::Saves,
             "shot" | "photo" => Self::Capture,
-            "players" | "copycode" | "admin" => Self::Online,
+            "multiplayer" | "players" | "copycode" | "admin" => Self::Online,
             "plugin" => Self::Plugins,
             _ => Self::Settings,
         })
@@ -115,6 +115,7 @@ mod tests {
     fn pause_navigation_groups_every_existing_action() {
         for (id, category) in [
             ("map", Category::Driving),
+            ("streets", Category::Driving),
             ("duty", Category::Driving),
             ("skipstop", Category::Driving),
             ("endduty", Category::Driving),
@@ -128,6 +129,7 @@ mod tests {
             ("options", Category::Settings),
             ("controls", Category::Settings),
             ("camera", Category::Settings),
+            ("multiplayer", Category::Online),
             ("players", Category::Online),
             ("copycode", Category::Online),
             ("admin", Category::Online),

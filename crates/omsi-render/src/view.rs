@@ -18,7 +18,17 @@ pub struct Camera {
     pub far: f32,
 }
 
+pub const DEPTH_FAR: f32 = 25_000.0;
+
 impl Camera {
+    pub fn depth_far(&self) -> f32 {
+        if self.far >= 450.0 {
+            self.far.max(DEPTH_FAR)
+        } else {
+            self.far
+        }
+    }
+
     pub fn forward(&self) -> Vec3 {
         let (sy, cy) = self.yaw.to_radians().sin_cos();
         let (sp, cp) = self.pitch.to_radians().sin_cos();
@@ -47,13 +57,22 @@ impl Camera {
     /// View-projection relative to a render origin (the camera itself when `origin` is its
     /// position), so that GPU maths stays in small numbers.
     pub fn view_proj(&self, aspect: f32, origin: DVec3) -> Mat4 {
-        let view = Mat4::look_to_rh((self.position - origin).as_vec3(), self.forward(), self.up());
+        let view = Mat4::look_to_rh(
+            (self.position - origin).as_vec3(),
+            self.forward(),
+            self.up(),
+        );
         // Reversed Z (near and far swapped): the depth buffer then spends its float
         // precision where the scene is far away instead of where it is close, which is what
         // stops distant roads, kerbs and painted ground from flickering against each other
         // - with a plain 0..1 depth the resolution at a kilometre is a good quarter of a
         // metre, less than the gap between a road surface and the ground under it.
-        let proj = Mat4::perspective_rh(self.fov_deg.to_radians(), aspect, self.far, self.near);
+        let proj = Mat4::perspective_rh(
+            self.fov_deg.to_radians(),
+            aspect,
+            self.depth_far(),
+            self.near,
+        );
         proj * view
     }
 
@@ -165,6 +184,10 @@ pub struct Lighting {
     /// light they scatter is 1 - e^-depth): windscreen, side windows, rear window, and how
     /// far the defroster has cleared the windscreen (0..1; enhanced path).
     pub condensation: [f32; 4],
+    /// The pitch and roll of `inside` as sin, cos, sin, cos (its `body_rotation`'s): the
+    /// condensation is laid on its panes in the bus's own frame, so it stays on the glass on
+    /// a hill (#3958). Level: `[0, 1, 0, 1]`.
+    pub pane_tilt: [f32; 4],
     pub fog_base: Option<f64>,
     pub envir_tint: [Vec3; 3],
     /// How bright an LED panel's dots burn (`MaterialExtra::led`; the settings' 16 levels
@@ -187,6 +210,8 @@ pub struct Lighting {
     /// How much brighter the night is shown, in exposure steps after sunset (the settings' 0 .. 3).
     pub night_brightness: f32,
     pub reflection_strength: f32,
+    /// Enhanced: direct road and ground sunlight glare, 1 = original appearance.
+    pub road_glare: f32,
     /// The wet roads' reflections (`puddles`): 0 none, 1 low (a quarter of the rays, within
     /// 40 m, no capture of the player's vehicle), 2 high (as they were). Read every frame.
     pub puddles: u8,
@@ -273,6 +298,7 @@ impl Default for Lighting {
             snowfall: 0.0,
             wind: Vec3::ZERO,
             condensation: [0.0; 4],
+            pane_tilt: [0.0, 1.0, 0.0, 1.0],
             lamp_shadows: false,
             wetness: 0.0,
             snow: 0.0,
@@ -295,6 +321,7 @@ impl Default for Lighting {
             envir_tint: [Vec3::ONE; 3],
             night_brightness: 0.0,
             reflection_strength: 1.0,
+            road_glare: 1.0,
             puddles: 2,
             led_glow: 1.5,
             led_mips: 1.3,
@@ -314,5 +341,28 @@ impl Default for Lighting {
             storm: 0.0,
             animation_time: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod depth_far_tests {
+    use super::*;
+
+    #[test]
+    fn a_backdrop_20_km_away_is_inside_the_depth_range() {
+        let cam = Camera {
+            position: DVec3::ZERO,
+            yaw: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
+            fov_deg: 60.0,
+            near: 0.1,
+            far: 6000.0,
+        };
+        let p = cam
+            .view_proj(16.0 / 9.0, DVec3::ZERO)
+            .project_point3(cam.forward() * 20_000.0);
+        assert!(p.z > 0.0 && p.z < 1.0, "{p:?}");
+        assert_eq!(cam.far, 6000.0);
     }
 }

@@ -19,20 +19,44 @@ impl App {
                     self.integrations.discord =
                         crate::discord::Discord::start(&self.settings.discord_app_id);
                 }
+                let show = self.settings.discord_show;
+                let max = if show.players && self.integrations.discord.is_some() {
+                    self.discord_server_max()
+                } else {
+                    0
+                };
                 if let Some(d) = self.integrations.discord.as_ref() {
                     let bus = self.player.as_ref().map(|p| {
                         let definition = &p.vehicle.ty.def;
-                        let short = omsi_launcher_lib::vehicle_type_label(&definition.type_name, &definition.path);
-                        let full = omsi_launcher_lib::display_bus_name(&format!("{} {short}", definition.manufacturer));
+                        let short = omsi_launcher_lib::vehicle_type_label(
+                            &definition.type_name,
+                            &definition.path,
+                        );
+                        let full = omsi_launcher_lib::display_bus_name(&format!(
+                            "{} {short}",
+                            definition.manufacturer
+                        ));
                         (short, full)
                     });
-                    let duty = self.session.duty.as_ref().map(|d| (d.line.as_str(), d.tour.as_str()));
-                    d.set(crate::discord::Presence::for_game(
-                        self.world.as_ref().map(|w| w.global.name.as_str()),
-                        bus.as_ref().map(|(short, full)| (short.as_str(), full.as_str())),
-                        duty,
-                        self.net.lan.is_some(),
-                    ));
+                    let duty = self.session.duty.as_ref();
+                    let next_stop = duty.zip(self.player.as_ref()).and_then(|(d, p)| {
+                        let stop = d.trips.get(d.trip_index)?.stops.get(d.next_stop)?;
+                        Some((stop.name.as_str(), p.vehicle.host.tt_delay as f32))
+                    });
+                    let game = crate::discord::Game {
+                        map: self.world.as_ref().map(|w| w.global.name.as_str()),
+                        bus: bus
+                            .as_ref()
+                            .map(|(short, full)| (short.as_str(), full.as_str())),
+                        duty: duty.map(|d| (d.line.as_str(), d.tour.as_str())),
+                        next_stop,
+                        players: self
+                            .net
+                            .lan
+                            .as_ref()
+                            .map(|lan| (lan.session, crate::player_list::count(self), max)),
+                    };
+                    d.set(crate::discord::Presence::for_game(&game, show));
                 }
             }
         }
@@ -42,8 +66,13 @@ impl App {
         if let Some(steam) = self.integrations.steam.as_ref() {
             steam.client.run_callbacks();
         }
+        self.frame_remote(dt);
         // the plugins' frame, with the bus's scripts done
-        let mut plugins = self.integrations.plugins.take().unwrap_or_else(|| crate::plugins::load(self.args.no_plugins));
+        // (their main chunk already knows the interface themes: `ui.themes`, `ui.theme`)
+        let mut plugins = self.integrations.plugins.take().unwrap_or_else(|| {
+            omsi_plugin::ui::themes_for_load(theme_infos(), &self.settings.ui_theme_pack);
+            crate::plugins::load(self.args.no_plugins)
+        });
         self.sync_vehicle_scripts(&mut plugins);
         if !self.paused && !self.args.no_plugins && !omsi_cfg::flags::OMSI_NO_PLUGINS.is_set() {
             crate::plugin_io::object::drive(self, &mut plugins, dt);
@@ -54,6 +83,16 @@ impl App {
         // the mouse on the plugins' script textures since their frame, and which those are now
         plugins.pointer = std::mem::take(&mut self.integrations.plugin_pointer.pending);
         self.integrations.plugin_pointer.pages = plugins.pointer_textures();
+        if !plugins.is_empty() {
+            // the interface themes there are, and the one in use (`ui.themes`, `ui.theme`)
+            let mut ui = plugins.ui.borrow_mut();
+            if ui.themes().is_empty() {
+                ui.set_themes(theme_infos(), &self.settings.ui_theme_pack);
+            } else if ui.theme() != self.settings.ui_theme_pack {
+                let list = ui.themes().to_vec();
+                ui.set_themes(list, &self.settings.ui_theme_pack);
+            }
+        }
         if !plugins.is_empty() && !self.paused {
             let keys = std::mem::take(&mut self.integrations.plugin_keys);
             let events = std::mem::take(&mut self.integrations.plugin_events);
@@ -75,7 +114,11 @@ impl App {
             // plugin's line)
             self.integrations.plugin_command = true;
             for c in commands {
-                if let Some(k) = self.game_menu_items().iter().position(|m| m.0 == c && m.0 != "plugin") {
+                if let Some(k) = self
+                    .game_menu_items()
+                    .iter()
+                    .position(|m| m.0 == c && m.0 != "plugin")
+                {
                     let was = self.menus.game_menu;
                     self.menus.menu_prev_pause = self.paused;
                     self.menu_choose(event_loop, k);
@@ -101,9 +144,23 @@ impl App {
         }
         // the passengers report their tickets only while a plugin hears of them
         let hear_tickets = plugins.hear_tickets();
+        // a plugin switched the interface theme (`ui.set_theme`): the player's setting, as if
+        // chosen in Options › Interface
+        let theme_ask = plugins.ui.borrow_mut().take_theme_ask();
         self.integrations.plugins = Some(plugins);
+        if let Some(id) = theme_ask.filter(|id| *id != self.settings.ui_theme_pack) {
+            log::info!("plugins: the interface theme \"{id}\" asked for");
+            let value = if id.is_empty() {
+                crate::themes::OWN.to_string()
+            } else {
+                id
+            };
+            crate::game_lists::store_with(self, |v| v["ui_theme_pack"] = serde_json::json!(value));
+        }
         // OMSI_WATCH_VARS=a,b: every change of those variables of the player's bus
-        if let (Some(p), Some(list)) = (self.player.as_ref(), omsi_cfg::flags::OMSI_WATCH_VARS.var()) {
+        if let (Some(p), Some(list)) =
+            (self.player.as_ref(), omsi_cfg::flags::OMSI_WATCH_VARS.var())
+        {
             thread_local!(static LAST: std::cell::RefCell<std::collections::HashMap<String, f32>> = Default::default());
             LAST.with(|last| {
                 let mut last = last.borrow_mut();
@@ -131,15 +188,58 @@ impl App {
             h.ticket_asks_heard(&dropped);
         }
         if let (Some(h), Some(p)) = (self.session.humans.as_mut(), self.player.as_ref()) {
-            let hurt = steps::people_in_career(&mut self.session.career, h, p, self.settings.collision_pedestrians);
+            let hurt = steps::people_in_career(
+                &mut self.session.career,
+                h,
+                p,
+                self.settings.collision_pedestrians,
+            );
             for (name, price) in h.take_sales() {
-                let args = vec![omsi_plugin::InfoValue::Text(name.trim().to_string()), crate::plugins::num_f32(price)];
-                crate::plugins::queue_event(&mut self.integrations.plugin_events, "ticket_sold", args);
+                let args = vec![
+                    omsi_plugin::InfoValue::Text(name.trim().to_string()),
+                    crate::plugins::num_f32(price),
+                ];
+                crate::plugins::queue_event(
+                    &mut self.integrations.plugin_events,
+                    "ticket_sold",
+                    args,
+                );
             }
             if hurt > 0 {
                 self.service_msg = Some(("Pedestrian knocked down!".into(), 6.0));
-                crate::plugins::queue_event(&mut self.integrations.plugin_events, "pedestrian", vec![omsi_plugin::InfoValue::Num(hurt as f64)]);
+                crate::plugins::queue_event(
+                    &mut self.integrations.plugin_events,
+                    "pedestrian",
+                    vec![omsi_plugin::InfoValue::Num(hurt as f64)],
+                );
             }
         }
     }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn discord_server_max(&mut self) -> usize {
+        let Some(lan) = self.net.lan.as_ref() else {
+            return 0;
+        };
+        if lan.role == omsi_net::Role::Host {
+            return 64;
+        }
+        let Some(target) = self.args.lan_join.clone() else {
+            return 0;
+        };
+        self.integrations.discord_max.get(&target, |t| {
+            omsi_net::ws::query(t, false).ok().map(|i| i.max_players)
+        })
+    }
+}
+
+/// The game's interface themes as the plugins see them (`ui.themes`).
+fn theme_infos() -> Vec<omsi_plugin::ui::ThemeInfo> {
+    crate::themes::choices()
+        .iter()
+        .map(|(id, name)| omsi_plugin::ui::ThemeInfo {
+            id: id.clone(),
+            name: name.clone(),
+        })
+        .collect()
 }

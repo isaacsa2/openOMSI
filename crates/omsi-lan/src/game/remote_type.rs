@@ -18,6 +18,14 @@ pub(super) struct RemoteType {
     pub(super) reads: Vec<std::path::PathBuf>,
 }
 
+/// The players' buses are read and made before a server's parked ones (`tick_receive` takes
+/// them in that order), and one parked bus is made, or let go to be made again, a frame: a
+/// game that comes back to a yard has them read already, and two dozen made in one frame
+/// stopped it. (Let go without its turn, every box that waited saw the reader free.)
+pub(super) fn its_turn(game: &LanGame, id: u32) -> bool {
+    !omsi_net::is_parked(id) || !game.drawn.events.iter().any(|e| matches!(e, RemoteEvent::Made(m) if omsi_net::is_parked(*m)))
+}
+
 /// The type a remote player drives - as that player has it. While it is on its way here as
 /// that bus (or still being read off the frame: `remote_load`) a neutral box of its size
 /// stands in for it (`mods::placeholder`); once it is not to be had as itself (given up, not
@@ -39,7 +47,7 @@ pub(super) fn remote_type(args: &LanConfig, pose: &Pose, player: Option<&omsi_si
         // no fingerprint, an older one: the bus of that path here, as before.)
         let path = if by_content {
             use crate::mods::vehicles::Wanted;
-            match crate::mods::vehicles::want(&args.root, pose.id, &pose.content, &pose.bus, &pose.paint) {
+            match crate::mods::vehicles::want(&args.root, pose.id, &pose.content, &pose.bus, &pose.paint, args.allow_server_fleet) {
                 Wanted::Local(p) | Wanted::Mounted(p) => Ok(p),
                 Wanted::Pending(..) => Err("being made sure of by its content".to_string()),
                 Wanted::Failed(e) => Err(e.to_string()),
@@ -72,6 +80,8 @@ pub(super) fn remote_type(args: &LanConfig, pose: &Pose, player: Option<&omsi_si
     };
     // not to be had as itself (for now): another bus, as before there were boxes
     let hopeless = !by_content || read_failed.is_some() || hopeless_by_now;
+    // A substitute is explicitly marked fallback: it never claims the remote
+    // fingerprint and never receives that bus's variable/animation tables.
     if hopeless && reading.is_none() {
         match fallback_type(args, pose, player) {
             Fallback::Ready(ty, which) => {

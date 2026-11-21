@@ -45,10 +45,16 @@ pub(crate) fn fsr1_source_for(format: wgpu::TextureFormat, raw_input: bool) -> S
     let source = if format.is_srgb() {
         source.to_string()
     } else {
-        source.replace("const SRGB_TARGET: bool = true;", "const SRGB_TARGET: bool = false;")
+        source.replace(
+            "const SRGB_TARGET: bool = true;",
+            "const SRGB_TARGET: bool = false;",
+        )
     };
     if raw_input && format.is_srgb() {
-        source.replace("const RAW_INPUT: bool = false;", "const RAW_INPUT: bool = true;")
+        source.replace(
+            "const RAW_INPUT: bool = false;",
+            "const RAW_INPUT: bool = true;",
+        )
     } else {
         source
     }
@@ -66,9 +72,16 @@ mod tests {
     fn fsr1_shader_parses_and_validates() {
         // No GPU or OMSI installation required. Run even though FSR is off by default.
         // Both variants: an sRGB window (gamma 2.0 in and out) and one that is not.
-        for format in [wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::TextureFormat::Rgba8Unorm] {
+        for format in [
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ] {
             let source = super::fsr1_source_for(format, false);
-            assert_eq!(source.contains("const SRGB_TARGET: bool = true;"), format.is_srgb(), "{format:?}");
+            assert_eq!(
+                source.contains("const SRGB_TARGET: bool = true;"),
+                format.is_srgb(),
+                "{format:?}"
+            );
             let module = naga::front::wgsl::parse_str(&source).expect("FSR1 WGSL must parse");
             naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),
@@ -81,7 +94,42 @@ mod tests {
 
     /// FNV-1a, 64 bits: enough to tell one text from another, and no dependency for it.
     fn fnv1a(text: &str) -> u64 {
-        text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
+        text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)
+        })
+    }
+
+    /// Regression: road glare has its own lane, not the ground-prepass switch.
+    /// Runs without a GPU and protects the Enhanced+ and MSAA/SSAO combinations.
+    #[test]
+    fn road_glare_uses_dedicated_lod_lane() {
+        let shader = super::ENHANCED;
+        let setup = include_str!("passes/setup.rs");
+        assert!(
+            shader.contains("let from_ground = camera.lod.y > 0.5"),
+            "lod.y must remain the ground-prepass flag"
+        );
+        assert!(
+            shader.contains("spec = spec * camera.lod.z;"),
+            "road glare must use lod.z, never lod.y"
+        );
+        assert!(
+            !shader.contains("spec = spec * camera.lod.y;"),
+            "multiplying by the ground flag corrupts road glare"
+        );
+        assert!(
+            setup.contains(
+                "lod: [self.fsr_mip_bias(f), 0.0, lighting.road_glare.clamp(0.0, 2.0), 0.0]"
+            ),
+            "camera uniform must initialize the ground-pass flag to zero and glare in z"
+        );
+        let render = include_str!("render.rs");
+        assert!(
+            render.contains(
+                "(std::mem::offset_of!(CameraUniform, lod) + 4) as u64, bytemuck::bytes_of(&flag)"
+            ),
+            "the ground pass must set lod.y alone and keep the glare in lod.z"
+        );
     }
 
     /// The assembled modules are byte for byte the single files they were cut from (sizes
@@ -98,14 +146,23 @@ mod tests {
     /// occlusion, the bounced light and the lightning's light, and the sun's share through the clouds' shadow field, and the cube maps of lamps that shine every way, and the wet roads' and the water's traced reflection), and the textures read with FSR 1's mip bias, `camera.lod`,
     /// and a script's screen never taken for a pane (#2927), and the lamp tiles' taps in loops of fixed bounds,
     /// and the colour/mask-only headset entry point, and a self-lit blended layer's alpha giving
-    /// Omsi.exe's encoded mix, and the headlight as Omsi.exe's Direct3D spot, lit at the vertices,
-    /// and the traced sample read once for FXC.
+    /// Omsi.exe's encoded mix, and the vertex-lit Direct3D headlight excluding its own vehicle,
+    /// and the traced sample read once for FXC, the road glare in its own uniform lane,
+    /// and the detail grain's octaves left out where faded, and the instance's parameters
+    /// handed to the fragments flat (#1488), no lamp glint on a face seen from behind, no sun glint on a face seen from behind (#3359), and an unswitched night map's gain capped (#3362),
+    /// and the panes' condensation laid in the bus's tilted frame (#3958).
     /// (with Unix line ends: a Windows checkout may turn the parts' into CRLF, as it did the
     /// single files', and the 0.2.31 release's Windows test failed on that alone)
     #[test]
     fn assembled_shaders_are_the_old_files() {
-        let (scene, enhanced) = (super::SCENE.replace("\r\n", "\n"), super::ENHANCED.replace("\r\n", "\n"));
-        assert_eq!((scene.len(), fnv1a(&scene)), (137_326, 0x8065_9ce3_ae11_d332));
-        assert_eq!((enhanced.len(), fnv1a(&enhanced)), (98_529, 0x93f8_5f93_8c18_2003));
+        let (scene, enhanced) = (
+            super::SCENE.replace("\r\n", "\n"),
+            super::ENHANCED.replace("\r\n", "\n"),
+        );
+        assert_eq!((scene.len(), fnv1a(&scene)), (141700, 3010610926547160211));
+        assert_eq!(
+            (enhanced.len(), fnv1a(&enhanced)),
+            (99901, 5146436175157644013)
+        );
     }
 }

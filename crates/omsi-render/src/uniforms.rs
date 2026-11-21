@@ -74,12 +74,15 @@ pub(crate) struct CameraUniform {
     /// x: the textures' mip bias - negative (log2 of the scale) while FSR 1 scales the picture
     /// up, as AMD advises for it: its textures as detailed as the window's size wants, not
     /// the smaller picture's (letters, gauges and signs came out soft); 0 otherwise.
+    /// y: ground-prepass flag (set only while that pass is active).
+    /// z: Enhanced road sunlight glare strength, default 1.
     pub(crate) lod: [f32; 4],
     /// The classic picture's headlight, Omsi.exe's one Direct3D spot light (the player's
     /// `[spotlight]`, see the scene shader's `classic_spot`): [0] xyz where its light leaves
     /// from (render-origin relative), w its declared range (0: none); [1] xyz its direction,
     /// w the cosine of half its outer cone; [2] rgb its colour, w the cosine of half its inner
-    /// cone; [3] x how far behind [0] along the vehicle's axis the spotlight itself lies.
+    /// cone; [3] xyz the declared spotlight's position (render-origin relative), used for
+    /// its cone and attenuation; [0] remains at the vehicle's face for occlusion.
     /// (Every shader's copy of this struct carries it, read or not - see the test
     /// `shaders_validate_and_match_the_uniforms`.)
     pub(crate) spot: [[f32; 4]; 4],
@@ -153,6 +156,8 @@ pub(crate) struct EnhancedUniform {
     /// height of the plane the field is taken on, w the share of the sun the main pass has
     /// already taken off for the clouds over the camera
     pub(crate) cloud_f2: [f32; 4],
+    /// `Lighting::pane_tilt`: sin and cos of the `inside` bus's pitch, then of its roll
+    pub(crate) pane_tilt: [f32; 4],
 }
 
 #[repr(C)]
@@ -177,4 +182,16 @@ pub(crate) struct SsaoUniform {
     /// and in x whether that picture can be read (see `bounce_history`).
     pub(crate) reproj: [[f32; 4]; 4],
     pub(crate) history: [f32; 4],
+}
+
+/// Temporal upscaling's motion vectors: `Motion` in `temporal/motion.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct MotionUniform {
+    pub(crate) vp: [[f32; 4]; 4],
+    pub(crate) vp_prev: [[f32; 4]; 4],
+    pub(crate) vp_prev_here: [[f32; 4]; 4],
+    pub(crate) vp_inv: [[f32; 4]; 4],
+    pub(crate) params: [f32; 4],
+    pub(crate) origin_delta: [f32; 4],
 }

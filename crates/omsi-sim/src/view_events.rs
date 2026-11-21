@@ -117,12 +117,13 @@ pub struct PartFrame {
 }
 
 /// How one mesh of a vehicle is drawn: its transform relative to the vehicle's position,
-/// whether it shows (its `[visible]` variable and the views it is drawn in), and its
+/// whether it shows (its `[visible]` variable; its `[viewpoint]` says from where), and its
 /// per-material-slot values (see `MeshProps`).
 #[derive(Clone, Copy, Debug)]
 pub struct MeshFrame {
     pub local: glam::Mat4,
     pub visible: bool,
+    pub viewpoint: i32,
     pub interior: f32,
     alpha: Span,
     light: Span,
@@ -165,11 +166,10 @@ impl FrameSnapshot {
     fn add_part<'a>(&mut self, position: glam::DVec3, ty: &Arc<VehicleType>, rotation: glam::Mat4, meshes: impl Iterator<Item = (glam::Mat4, &'a crate::vehicle::MeshProps)>) {
         let start = self.meshes.len() as u32;
         for (i, (local, p)) in meshes.enumerate() {
-            // (a mesh drawn only from some views: an AI car is seen from outside)
-            let vp = ty.meshes.get(i).map(|m| ty.model.meshes[m.def_index].viewpoint).unwrap_or(0);
             let frame = MeshFrame {
                 local,
-                visible: p.visible && (vp == 0 || vp & 4 != 0),
+                visible: p.visible,
+                viewpoint: ty.meshes.get(i).map(|m| ty.model.meshes[m.def_index].viewpoint).unwrap_or(0),
                 interior: p.interior,
                 alpha: Span::push(&mut self.alpha, &p.slot_alpha),
                 light: Span::push(&mut self.light, &p.slot_light),
@@ -238,6 +238,8 @@ pub struct PeopleFrame {
     pub buses: Arc<Vec<crate::people::cabin::BusNow>>,
     /// Everybody, in the simulation's order.
     pub people: Vec<PersonFrame>,
+    /// Reused cache: capacity is checked only for targeted buses.
+    pub capacity_cache: Vec<(crate::people::BusId, bool)>,
 }
 
 /// One person of a [`PeopleFrame`].
@@ -265,6 +267,13 @@ pub struct PersonFrame {
     pub facts: crate::people::PoseFacts,
     /// The state's name (`OMSI_TRACE_PAX`).
     pub state: &'static str,
+    /// Optional visual target of an approaching compatible bus.
+    pub hail_target: Option<glam::DVec3>,
+    pub hail_moving: bool,
+    pub hail_bus: Option<crate::people::BusId>,
+    pub hail_full: bool,
+    pub hail_signal_enabled: bool,
+    pub hail_reaction_enabled: bool,
     /// `OMSI_CHECK_TPOSE`: the person's label and state, and a passenger's details.
     pub debug: Option<[String; 2]>,
 }
@@ -276,9 +285,49 @@ impl crate::people::PeopleSim {
         let debug = omsi_cfg::flags::OMSI_CHECK_TPOSE.is_set();
         out.time = self.time;
         out.eye = self.eye;
-        out.buses = self.last_buses.clone();
+        out.buses.clone_from(&self.last_buses);
         out.people.clear();
-        out.people.extend(self.people.iter().map(|p| PersonFrame {
+        out.capacity_cache.clear();
+        let capacity_cache = &mut out.capacity_cache;
+        // Keep the snapshot allocation-free apart from its reusable people buffer.
+        // People beyond the view's 300 m limit need no per-frame bus lookup.
+        out.people.extend(self.people.iter().enumerate().map(|(i, p)| {
+            let hail = if (self.visual_hailing || self.visual_full_bus_reaction)
+                && self.eye.is_none_or(|eye| {
+                    (p.position - eye.pos).length_squared() <= 300.0 * 300.0
+                })
+            {
+                self.visual_hail_bus(i, &self.last_buses)
+                    .and_then(|(bus_id, moving, pos)| {
+                        let bus = self.last_buses.iter().find(|b| b.id == bus_id)?;
+                        let full = if let Some((_, value)) = capacity_cache.iter().find(|(id, _)| *id == bus_id) {
+                            *value
+                        } else {
+                            // [passpos] covers seats and standing places; scripts may disable either.
+                            let capacity = bus.cabin.seats.iter().enumerate()
+                                .filter(|(j, _)| !bus.places_off.get(*j).copied().unwrap_or(false))
+                                .count();
+                            let reserved = self.seats.get(&bus_id).map_or(0, |places| {
+                                places.iter().enumerate()
+                                    .filter(|(j, taken)| **taken
+                                        && !bus.places_off.get(*j).copied().unwrap_or(false))
+                                    .count()
+                            });
+                            // Fall back to the aboard-person scan only for a bus that is
+                            // actually targeted and not proven full by its reservations.
+                            let occupied = capacity > 0 && (reserved >= capacity ||
+                                self.people.iter().filter(|person| matches!(person.place,
+                                    crate::people::Place::Bus(id, _) if id == bus_id))
+                                    .take(capacity).count() >= capacity);
+                            capacity_cache.push((bus_id, occupied));
+                            occupied
+                        };
+                        Some((bus_id, pos, moving, full))
+                    })
+            } else {
+                None
+            };
+            PersonFrame {
             id: p.id,
             ty: p.ty.clone(),
             position: p.position,
@@ -293,6 +342,12 @@ impl crate::people::PeopleSim {
             hidden: self.avatar_hidden.get(&p.id).copied(),
             facts: p.pose_facts(),
             state: p.state.name(),
+            hail_target: hail.map(|(_, pos, _, _)| pos),
+            hail_moving: hail.is_some_and(|(_, _, moving, _)| moving),
+            hail_bus: hail.map(|(bus, _, _, _)| bus),
+            hail_full: hail.is_some_and(|(_, _, _, full)| full),
+            hail_signal_enabled: self.visual_hailing,
+            hail_reaction_enabled: self.visual_full_bus_reaction,
             debug: debug.then(|| {
                 let pax = match &p.state {
                     crate::people::State::Pax(x) => format!("pax_state {} speed {:.2} seat_h {:.2} room {:.2} st {}", x.pax_state, x.speed, x.seat_h, x.room, x.st),
@@ -300,6 +355,7 @@ impl crate::people::PeopleSim {
                 };
                 [format!("{} {}", p.label(), p.state_name()), pax]
             }),
+            }
         }));
     }
 }

@@ -70,10 +70,16 @@ pub enum Got {
     Failed(String),
 }
 
-/// Is the bus `path` in `paint` being read now (on its thread; not waiting for its turn)?
-pub fn being_read(path: &Path, paint: &str) -> bool {
+/// Has a box that stands for the bus `path` in `paint` anything to be made again for: its
+/// bus read (or not readable), or its turn to be read come? Every bus done made every box
+/// that waited be made again - two dozen buses coming at once were three hundred boxes.
+pub fn due(path: &Path, paint: &str) -> bool {
     let key = (path.to_path_buf(), paint.to_ascii_lowercase());
-    matches!(BUSES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key)), Some(State::Reading))
+    match BUSES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key)) {
+        Some(State::Reading) => false,
+        Some(_) => true,
+        None => READING.load(Ordering::Acquire) < AT_ONCE,
+    }
 }
 
 /// The count of buses that became ready (see `READY`).
@@ -137,6 +143,13 @@ fn read(root: &Path, path: &Path, paint: &str) -> State {
     };
     let t1 = Instant::now();
     let scheme = if paint.is_empty() { None } else { ty.paint_schemes.iter().position(|s| s.name.eq_ignore_ascii_case(paint)) };
+    if !paint.is_empty() && scheme.is_none() {
+        let available: Vec<&str> = ty.paint_schemes.iter().take(8).map(|s| s.name.as_str()).collect();
+        log::warn!(
+            "LAN: requested repaint {:?} is missing from {} ({} schemes, first available: {:?}); using default paint, check mod fingerprint and download status",
+            paint, path.display(), ty.paint_schemes.len(), available
+        );
+    }
     let prefetcher = PREFETCHER.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if let Some(p) = prefetcher {
         // (a picture that would stop the reader leaves it to the frame's upload, as before)
@@ -167,6 +180,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(generation() > before, "the box is told the bus is done");
+        assert!(due(&path, ""), "and its own bus is the one done");
         assert!(matches!(get(&root, &path, ""), Got::Failed(_)), "a bus that cannot be read says why");
     }
 }

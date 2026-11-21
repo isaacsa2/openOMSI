@@ -77,9 +77,7 @@ impl VehicleInstance {
         self.set_engine_ev(Ev::StreetCond, self.host.street_cond);
         // what is coupled to this vehicle (the train scripts light their ends by it: a head
         // lamp only where nothing is coupled, the tail lamps at the last car)
-        self.set_engine_ev(Ev::TrainFrontCoupling, 0.0);
-        self.set_engine_ev(Ev::TrainBackCoupling, if self.trailers.is_empty() { 0.0 } else { 1.0 });
-        self.set_engine_ev(Ev::TrainMeReverse, 0.0);
+        self.set_coupling_evs();
         // and for the tyres' grip
         let mu = road_grip(self.host.street_cond, self.host.temperature);
         if let Some(rb) = self.rigid.as_mut() {
@@ -232,6 +230,7 @@ impl VehicleInstance {
         for &(write, read) in &self.v_cables {
             self.state.vars[read as usize] = self.state.vars[write as usize];
         }
+        super::car_run::read_back_bus(self);
     }
 
     /// Run the scripts' frame once with no time passing (no physics, no clock): what a
@@ -284,6 +283,12 @@ impl VehicleInstance {
             };
             h.map_or(0.0, |h| (w.z - h) as f32)
         }))
+    }
+
+    fn set_coupling_evs(&mut self) {
+        self.set_engine_ev(Ev::TrainFrontCoupling, 0.0);
+        self.set_engine_ev(Ev::TrainBackCoupling, if self.trailers.is_empty() { 0.0 } else { 1.0 });
+        self.set_engine_ev(Ev::TrainMeReverse, 0.0);
     }
 
     /// One frame of an AI-controlled vehicle: the pose is set by the traffic system
@@ -367,10 +372,10 @@ impl VehicleInstance {
                 let r = ws.radius.max(0.05);
                 ws.rotation_deg =
                     (ws.rotation_deg + (ds * travel / r).to_degrees()).rem_euclid(360.0);
+                ws.turned += ds * travel / r;
                 ws.rpm = ai.speed * travel / (std::f32::consts::TAU * r) * 60.0;
-                let (rotation, rpm, suspension) =
-                    (ws.rotation_deg.to_radians(), ws.rpm, ws.suspension);
-                self.put(w[0], rotation);
+                let (rpm, suspension) = (ws.rpm, ws.suspension);
+                self.put_turn(w[0], ai_idx, si);
                 self.put(w[1], rpm);
                 self.put(w[2], steer);
                 // the travel `AiBody` works out on its springs, about the static sag of an AI
@@ -409,6 +414,7 @@ impl VehicleInstance {
                 _ => 0.0,
             },
         };
+        self.set_coupling_evs();
         for (ev, v) in [
             (Ev::Ai, 1.0),
             (Ev::AiBlinkerL, matches!(ai.blinker, 1 | 3) as i32 as f32),
@@ -505,6 +511,7 @@ impl VehicleInstance {
         let mut trailers = std::mem::take(&mut self.trailers);
         super::car_run::set_couplings(&mut trailers);
         super::car_run::start_bus(self);
+        super::car_run::start_back_bus(self, &mut trailers);
         let mut lead: Option<(DVec3, Mat4, f64)> = None;
         let mut turn = self.turning();
         for t in &mut trailers {
@@ -538,6 +545,7 @@ impl VehicleInstance {
         let mut trailers = std::mem::take(&mut self.trailers);
         super::car_run::set_couplings(&mut trailers);
         super::car_run::start_bus(self);
+        super::car_run::start_back_bus(self, &mut trailers);
         let mut lead: Option<(DVec3, Mat4, f64)> = None;
         let mut turn = self.turning();
         if self.ty.def.is_rail() {

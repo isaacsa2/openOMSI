@@ -26,11 +26,11 @@ fn view(rail: &[MenuLine]) -> PauseView<'_> {
         rail,
         rail_sel: Some(0),
         disabled: &[],
-        rail_open: None,
         list: None,
         kbd: false,
         keys: true,
         summary: Summary { bus: "Test vehicle".into(), driver: "Driver".into() },
+        online: Default::default(),
     }
 }
 
@@ -59,6 +59,24 @@ fn pause_navigation_category_click_is_not_a_game_action() {
     let row = categories.iter().position(|c| *c == Category::Saves).unwrap();
     click(&mut sh, &view(&rail), Vec2::new(60.0, 202.0 + row as f32 * 60.0));
     assert_eq!(sh.actions, [Action::PauseCategory(Category::Saves)]);
+}
+
+#[test]
+fn pause_navigation_online_page_uses_tabs_instead_of_category_cards() {
+    let rail = [
+        ("resume", "Resume".into(), None),
+        ("players", "Players...".into(), None),
+        ("world", "World options...".into(), None),
+        ("admin", "Administration...".into(), None),
+        ("quit", "End the session".into(), None),
+    ];
+    let v = view(&rail);
+    let mut sh = Shell::new(); sh.pause_hidden = false; sh.pause_category = Category::Online;
+    sh.begin(1440.0, 900.0, 1.0, 1.0 / 60.0);
+    draw(&mut sh, &v);
+    assert!(sh.ui.drawn.contains_key(&omsi_ui::kit::id_of("pause-online-tab-players")));
+    assert!(!sh.ui.drawn.contains_key(&omsi_ui::kit::id_of("pause-card-1-players")));
+    sh.finish();
 }
 
 #[test]
@@ -97,7 +115,7 @@ fn pause_navigation_category_icons_exist_in_the_shared_icon_set() {
 #[ignore = "Requires a graphics adapter and OPENOMSI_PAUSE_PREVIEW output directory"]
 fn pause_navigation_write_preview() {
     omsi_ui::i18n::set_lookup(|lang, text| crate::_rust_i18n_try_translate(lang, text).map(|value| value.into_owned()));
-    omsi_ui::i18n::set_language("zh-tw");
+    omsi_ui::i18n::set_language("en");
     let out = std::path::PathBuf::from(std::env::var_os("OPENOMSI_PAUSE_PREVIEW").expect("set OPENOMSI_PAUSE_PREVIEW"));
     std::fs::create_dir_all(&out).unwrap();
     let instance = wgpu::Instance::default();
@@ -115,6 +133,7 @@ fn pause_navigation_write_preview() {
     ] {
         rail.insert(rail.len() - 1, (id, label.into(), None));
     }
+    rail.insert(1, ("multiplayer", "Multiplayer...".into(), None));
     for (name, category, w, h, selected) in [
         ("pause-home", Category::Home, 1440, 900, None),
         ("pause-home-focus", Category::Home, 1440, 900, Some(2)),
@@ -169,7 +188,7 @@ fn pause_navigation_flat_cards_keep_keyboard_focus_visible() {
         sh.begin(1440.0, 900.0, 1.0, 1.0 / 60.0);
         assert!(sh.ui.flat);
         action_card(&mut sh.ui, &v, 2, Rect::new(350.0, 184.0, 480.0, 120.0), selected, false);
-        counts.push(sh.ui.p().verts.iter().filter(|vertex| vertex.color == ACCENT.0).count());
+        counts.push(sh.ui.p().verts.iter().filter(|vertex| vertex.color == th().accent.0).count());
     }
     assert_eq!(counts[0], 0);
     assert!(counts[1] > 0, "Keyboard focus must survive the flat theme");
@@ -184,7 +203,7 @@ fn pause_navigation_quit_keeps_keyboard_focus_visible() {
     let mut sh = Shell::new(); sh.pause_hidden = false;
     sh.begin(1440.0, 900.0, 1.0, 1.0 / 60.0);
     session_action(&mut sh, &v, "quit", Rect::new(16.0, 768.0, 204.0, 54.0), ButtonKind::Danger);
-    assert!(sh.ui.p().verts.iter().any(|vertex| vertex.color == ACCENT.0));
+    assert!(sh.ui.p().verts.iter().any(|vertex| vertex.color == th().accent.0));
 }
 
 #[test]
@@ -203,9 +222,8 @@ fn pause_navigation_open_list_preserves_origin_category() {
             let mut sh = Shell::new(); sh.pause_hidden = false;
             sh.pause_category = origin;
             let mut v = view(&rail);
-            v.rail_open = Some(target);
             v.list = Some(ListView {
-                kind: MenuKind::Options, head: None, tabs: None,
+                kind: MenuKind::Options, head: None, badge: None, tabs: None,
                 items: vec![("back", "Back")], sel: 0, preview: None,
                 pane_first: None, dropdown: None, key: target.into(),
             });
@@ -213,7 +231,6 @@ fn pause_navigation_open_list_preserves_origin_category() {
             draw(&mut sh, &v);
             assert_eq!(sh.pause_category, origin, "opening {target}");
             v.list = None;
-            v.rail_open = None;
             draw(&mut sh, &v);
             assert_eq!(sh.pause_category, origin, "returning from {target}");
         }
@@ -297,28 +314,30 @@ fn pause_navigation_uses_runtime_theme_palette() {
     dark.finish();
 
     let mut light = Shell::new();
-    light.ui.set_theme(true);
-    light.begin(1440.0, 900.0, 1.0, 1.0 / 60.0);
-    draw(&mut light, &v);
-    light.finish();
+    omsi_ui::theme::with_palette(Palette::LIGHT, || {
+        light.begin(1440.0, 900.0, 1.0, 1.0 / 60.0);
+        draw(&mut light, &v);
+        light.finish();
+    });
 
-    assert!(dark.drawn.as_ref().unwrap().verts.iter().any(|v| v.color == DARK.SIDEBAR.0));
-    assert!(light.drawn.as_ref().unwrap().verts.iter().any(|v| v.color == LIGHT.SIDEBAR.0));
+    assert!(dark.drawn.as_ref().unwrap().verts.iter().any(|v| v.color == Palette::OPENOMSI.sidebar.0));
+    assert!(light.drawn.as_ref().unwrap().verts.iter().any(|v| v.color == Palette::LIGHT.sidebar.0));
 }
 
 #[test]
 fn quick_actions_editor_uses_runtime_theme_palette() {
     let rail = menu();
-    for (light_theme, surface) in [(false, DARK.SURFACE), (true, LIGHT.SURFACE)] {
+    for (light_theme, surface) in [(false, Palette::OPENOMSI.surface), (true, Palette::LIGHT.surface)] {
         let mut sh = Shell::new();
-        sh.ui.set_theme(light_theme);
-        sh.begin(1440.0, 900.0, 1.0, 1.0 / 60.0);
-        super::super::quick_actions_ui::editor(
-            &mut sh,
-            &view(&rail),
-            Rect::new(300.0, 120.0, 800.0, 650.0),
-        );
-        sh.finish();
+        omsi_ui::theme::with_palette(omsi_ui::theme::palette(light_theme), || {
+            sh.begin(1440.0, 900.0, 1.0, 1.0 / 60.0);
+            super::super::quick_actions_ui::editor(
+                &mut sh,
+                &view(&rail),
+                Rect::new(300.0, 120.0, 800.0, 650.0),
+            );
+            sh.finish();
+        });
 
         assert!(
             sh.drawn

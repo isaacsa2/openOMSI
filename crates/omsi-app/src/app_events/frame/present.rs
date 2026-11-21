@@ -46,6 +46,20 @@ impl App {
     ) {
         let mut finish = false;
         let mut reconfigure = false;
+        crate::themes::sync(&self.settings.ui_theme_pack, self.settings.is_light_theme());
+        if let (Some(s), Some(r)) = (self.gfx.surface.as_mut(), self.renderer.as_mut()) {
+            s.set_glass(r, omsi_ui::theme::th().glass.is_some());
+            // (off for this drive once the frame rate check found it too slow, `frame_time`;
+            // switched off and on in the menu, it is tried again)
+            let asked = self.settings.frame_generation();
+            if !asked {
+                self.perf.generation_too_slow = 0;
+            }
+            let generation = s.set_frame_generation(r, asked && self.perf.generation_too_slow < GENERATION_SLOW_READINGS);
+            r.set_frame_generation(generation);
+            let making = r.frames_generated().is_some_and(|n| n > 0);
+            self.perf.generation_since = if making { self.perf.generation_since.or_else(|| Some(Instant::now())) } else { None };
+        }
         let shot = self.perf.shot.take();
         if let Some(s) = self.gfx.surface.as_ref() {
             let (w, h) = (s.config.width, s.config.height);
@@ -119,7 +133,8 @@ impl App {
         // a player's screenshot is the world without the interface over it, as OMSI's
         // (#1265); the input script's pictures keep it for the visual tests
         let hud = (!include_touch).then(|| std::mem::take(&mut scene.overlays));
-        let picture = developed.map(Ok).unwrap_or_else(|| r.render_to_image(
+        let upscaled = (!include_touch).then(|| r.temporal_picture(s.config.width, s.config.height)).flatten();
+        let picture = developed.map(Ok).or(upscaled).unwrap_or_else(|| r.render_to_image(
             scene,
             s.config.width,
             s.config.height,
@@ -269,6 +284,7 @@ impl App {
         // the photo's pictures were taken, the photo had become ready meanwhile, the scene was
         // left out and the panel had no photo in it - the window flashed black)
         let photo = self.photo.is_some() && self.shell.opaque;
+        let clean = self.clean_screen_shown();
         if !photo {
             self.frame_mirrors(raw_dt, lighting);
         }
@@ -327,7 +343,7 @@ impl App {
             let rig = self.settings.triple.zoomed(
                 s.config.width,
                 s.config.height,
-                self.cam.view_zoom.get(&self.view).copied().unwrap_or(1.0),
+                self.cam.view_zoom.get(&self.view).copied().unwrap_or(1.0) * self.cam.zoom_hold.factor,
             );
             r.render_triple(
                 scene,
@@ -339,7 +355,7 @@ impl App {
                 &rig,
             );
         } else if !mirrored {
-            r.render(
+            r.render_window(
                 scene,
                 &view,
                 s.config.width,
@@ -348,10 +364,23 @@ impl App {
                 lighting,
             );
         }
+        // a glass theme's pause menu: the picture under it, as the scene left it, blurred on the
+        // graphics card for its panels (where the window's picture can be copied)
+        match omsi_ui::theme::th().glass.filter(|_| self.menus.game_menu.is_some() && !photo && !mirrored) {
+            Some(glass) if self.shell.glass_due(self.paused) => {
+                if let Some(picture) = frame.as_ref().and_then(|f| s.picture(f)) {
+                    self.shell.capture_backdrop(r, &picture, glass.blur * self.shell.scale);
+                }
+            }
+            Some(_) => {}
+            None => self.shell.glass_closed(),
+        }
         // the pause menu and the photo mode's panel
         self.shell.render(r, &view, s.config.width, s.config.height);
         // the on-screen controls over the picture (a phone)
-        self.input.touch.render(r, &view, s.config.width, s.config.height);
+        if !clean {
+            self.input.touch.render(r, &view, s.config.width, s.config.height);
+        }
         self.perf.profile.add(crate::profile_keys::ProfKey::Render, __t.elapsed().as_secs_f64());
         if omsi_cfg::flags::OMSI_PROFILE_GPU.is_set() {
             // wait for the GPU here, so that its time shows as a stage of its own
@@ -543,10 +572,10 @@ impl App {
         // a display's pace instead of spinning a core a thousand times a
         // second. What it uploaded (traffic instances, streamed tiles,
         // people, the navigator) waits in wgpu's staging buffers until the
-        // next submit, so submit nothing to let them go: without it a hidden
+        // next submit, so submit the deferred commands alone to let them go: without it a hidden
         // window on Ahlheim grew by 100 MB a second (5.6 GB after 55 s).
         let __t = Instant::now();
-        r.queue.submit(std::iter::empty::<wgpu::CommandBuffer>());
+        r.queue.submit(r.take_deferred_commands());
         let _ = r.device.poll(wgpu::PollType::Poll);
         self.perf.profile.add(crate::profile_keys::ProfKey::Present, __t.elapsed().as_secs_f64());
         if let Some(rest) =
@@ -665,6 +694,8 @@ impl App {
                 .map(|p| format!(" - {:.0} km/h", p.vehicle.physics.velocity_kmh()))
                 .unwrap_or_default();
             self.perf.fps = self.perf.frames as f32;
+            let made = self.renderer.as_ref().and_then(|r| r.frames_generated());
+            self.perf.generated = (made.unwrap_or(0), made.map_or(0.0, |m| m.saturating_sub(self.perf.generated.0) as f32));
             let title = format!(
                 "openOMSI - {} fps{speed} - {:.0},{:.0},{:.0} yaw {:.0}",
                 self.perf.frames,

@@ -11,20 +11,15 @@ fn shadow_caster_pos(e: u32, wp: vec4<f32>) -> vec4<f32> {
 }
 
 @vertex
-fn vs_shadow(in: VsIn) -> VsOut {
+fn vs_shadow(in: VsIn) -> ShadowOut {
     let e = draw_list[in.inst];
     let m = model_matrix(e);
     let wp = shadow_caster_pos(e, m * vec4<f32>(in.pos, 1.0) + vec4<f32>(tree_sway(in.pos, m), 0.0));
-    var out: VsOut;
+    var out: ShadowOut;
     out.clip = camera.light_view_proj * wp;
-    out.world = wp.xyz;
-    out.normal = in.normal;
-    out.spec_sun = vec3<f32>(0.0);
-    out.spec_sky = vec3<f32>(0.0);
     let pr = inst_params[e * 2u];
     out.uv = in.uv + pr.zw;
     out.params = pr;
-    out.params2 = inst_params[e * 2u + 1u];
     if (pr.y < 0.5) {
         out.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
     }
@@ -32,20 +27,15 @@ fn vs_shadow(in: VsIn) -> VsOut {
 }
 
 @vertex
-fn vs_shadow_close(in: VsIn) -> VsOut {
+fn vs_shadow_close(in: VsIn) -> ShadowOut {
     let e = draw_list[in.inst];
     let m = model_matrix(e);
     let wp = shadow_caster_pos(e, m * vec4<f32>(in.pos, 1.0) + vec4<f32>(tree_sway(in.pos, m), 0.0));
-    var out: VsOut;
+    var out: ShadowOut;
     out.clip = camera.light_view_proj_close * wp;
-    out.world = wp.xyz;
-    out.normal = in.normal;
-    out.spec_sun = vec3<f32>(0.0);
-    out.spec_sky = vec3<f32>(0.0);
     let pr = inst_params[e * 2u];
     out.uv = in.uv + pr.zw;
     out.params = pr;
-    out.params2 = inst_params[e * 2u + 1u];
     if (pr.y < 0.5) {
         out.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
     }
@@ -53,20 +43,15 @@ fn vs_shadow_close(in: VsIn) -> VsOut {
 }
 
 @vertex
-fn vs_shadow_far(in: VsIn) -> VsOut {
+fn vs_shadow_far(in: VsIn) -> ShadowOut {
     let e = draw_list[in.inst];
     let m = model_matrix(e);
     let wp = shadow_caster_pos(e, m * vec4<f32>(in.pos, 1.0) + vec4<f32>(tree_sway(in.pos, m), 0.0));
-    var out: VsOut;
+    var out: ShadowOut;
     out.clip = camera.light_view_proj_far * wp;
-    out.world = wp.xyz;
-    out.normal = in.normal;
-    out.spec_sun = vec3<f32>(0.0);
-    out.spec_sky = vec3<f32>(0.0);
     let pr = inst_params[e * 2u];
     out.uv = in.uv + pr.zw;
     out.params = pr;
-    out.params2 = inst_params[e * 2u + 1u];
     if (pr.y < 0.5) {
         out.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
     }
@@ -79,22 +64,17 @@ fn vs_shadow_far(in: VsIn) -> VsOut {
 const LAMP_ENTRY_BITS: u32 = 26u;
 
 @vertex
-fn vs_shadow_lamp(in: VsIn) -> VsOut {
+fn vs_shadow_lamp(in: VsIn) -> ShadowOut {
     let raw = draw_list[in.inst];
     let e = raw & ((1u << LAMP_ENTRY_BITS) - 1u);
     let k = raw >> LAMP_ENTRY_BITS;
     let m = model_matrix(e);
     let wp = m * vec4<f32>(in.pos, 1.0) + vec4<f32>(tree_sway(in.pos, m), 0.0);
-    var out: VsOut;
+    var out: ShadowOut;
     out.clip = camera.lamp_view_proj[k] * wp;
-    out.world = wp.xyz;
-    out.normal = in.normal;
-    out.spec_sun = vec3<f32>(0.0);
-    out.spec_sky = vec3<f32>(0.0);
     let pr = inst_params[e * 2u];
     out.uv = in.uv + pr.zw;
     out.params = pr;
-    out.params2 = inst_params[e * 2u + 1u];
     if (pr.y < 0.5) {
         out.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
     }
@@ -102,7 +82,7 @@ fn vs_shadow_lamp(in: VsIn) -> VsOut {
 }
 
 @fragment
-fn fs_shadow(in: FsIn) {
+fn fs_shadow(in: ShadowIn) {
 }
 
 // Reflection rays need the window surface as well as the opaque interior behind it.
@@ -127,8 +107,8 @@ fn fs_puddle_glass_depth(in: FsIn) {
 
 // (the shadow and rain maps, drawn at their own size: their textures' mips as they are)
 @fragment
-fn fs_shadow_test(in: FsIn) {
-    cutout_coverage(in.uv, in.params, 0.0);
+fn fs_shadow_test(in: ShadowIn) {
+    cutout_coverage(in.uv, in.params, 0.0, 1.0);
 }
 
 // the depth-only passes' (`vs_depth`) fragment shaders: plain, cut out, a transmap's
@@ -142,7 +122,7 @@ fn fs_depth(in: DepthIn) {
 // where the colour then discarded, and the sky showed through)
 @fragment
 fn fs_depth_test(in: DepthIn) {
-    cutout_coverage(in.uv, in.params, camera.lod.x);
+    cutout_coverage(in.uv, in.params, camera.lod.x, tree_card_fade(in.world));
 }
 
 // (a transmap's opaque part, see `transmap_coverage`)
@@ -150,6 +130,15 @@ fn fs_depth_test(in: DepthIn) {
 fn fs_depth_transmap(in: DepthIn) {
     transmap_coverage(in.uv, in.params, camera.lod.x);
 }
+
+//MS @group(3) @binding(0) var t_pane_depth: texture_depth_multisampled_2d;
+
+//MS @fragment
+//MS fn fs_depth_masked(in: DepthIn, @builtin(sample_index) sample: u32) {
+//MS     if (in.clip.z <= textureLoad(t_pane_depth, vec2<i32>(in.clip.xy), i32(sample))) {
+//MS         discard;
+//MS     }
+//MS }
 
 // The multisampled prefill's cut-outs (foliage): their depth only where the colour pass
 // is sure to cover every sample - the alpha-to-coverage of an alpha of 1 (`shade_enhanced`:
@@ -166,7 +155,7 @@ fn fs_depth_cover(in: DepthIn) {
         discard;
     }
     let duv = tex_address(in.uv);
-    let a = diffuse_border(textureSampleBias(t_diffuse, s_diffuse, duv, camera.lod.x), duv).a;
+    let a = diffuse_border(textureSampleBias(t_diffuse, s_diffuse, duv, camera.lod.x), duv).a * tree_card_fade(in.world);
     let aa = max(fwidth(a) * 0.5, 1.0 / 255.0);
     if (a < ALPHA_REF + aa + 4.0 / 255.0) {
         discard;
@@ -175,7 +164,7 @@ fn fs_depth_cover(in: DepthIn) {
 
 // A cut-out's texel: kept where its alpha reaches the cutoff (`bias`: the mip bias its
 // pass reads the textures with, the colour pass's for the picture's depth).
-fn cutout_coverage(uv: vec2<f32>, params: vec4<f32>, bias: f32) {
+fn cutout_coverage(uv: vec2<f32>, params: vec4<f32>, bias: f32, fade: f32) {
     var duv = tex_address(uv);
     if (material.extra.x > 0.5) {
         duv = uv * material.extra.z;
@@ -193,7 +182,7 @@ fn cutout_coverage(uv: vec2<f32>, params: vec4<f32>, bias: f32) {
         let tm = sample_transmap_bias(tex_address(uv - params.zw), bias);
         a = select(1.0, tm.a, material.params.w > 0.5);
     }
-    if (a < ALPHA_REF) {
+    if (a * fade < ALPHA_REF) {
         discard;
     }
 }

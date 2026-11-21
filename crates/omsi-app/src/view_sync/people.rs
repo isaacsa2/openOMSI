@@ -79,6 +79,54 @@ pub(crate) struct PeopleView {
     pub(crate) ticket_blocks: Option<crate::money::TicketBlocks>,
 }
 
+/// Local visual-only treatment for a compatible bus, separate from actual boarding.
+/// A full bus ends the arm request but may keep the gaze for a short time.
+fn apply_optional_bus_visual(
+    p: &PersonFrame,
+    st: &mut PersonView,
+    ty: &HumanType,
+    bones: &mut [glam::Affine3A; omsi_sim::human::SLOTS],
+    enhanced: bool,
+    camera: DVec3,
+    dt: f32,
+) {
+    if p.hail_target.is_some() || st.hail_strength > 0.001 || st.full_look_strength > 0.001 {
+        let eligible = enhanced && !p.puppet && p.hidden.is_none()
+            && matches!(p.place, Place::Ground)
+            && p.hail_moving && p.hail_target.is_some()
+            && (p.position - camera).length_squared() < 300.0 * 300.0;
+        let (signal_requested, full_requested) = omsi_sim::human::visual_hail_action(
+            p.hail_signal_enabled, p.hail_reaction_enabled, p.hail_full);
+        // Keep this gate across temporary target loss; only actual room
+        // in the same bus permits a new full-bus acknowledgement.
+        let allowed = p.hail_bus.is_some_and(|id| st.full_gate.allow(
+            id, p.hail_full, eligible && full_requested, dt));
+        let signalling = eligible && signal_requested;
+        let reacting = eligible && full_requested && allowed;
+        st.hail_strength += ((signalling as u8 as f32) - st.hail_strength)
+            .clamp(-dt * 2.8, dt * 2.8);
+        st.full_look_strength += ((reacting as u8 as f32) - st.full_look_strength)
+            .clamp(-dt * 2.8, dt * 2.8);
+        if !enhanced {
+            st.hail_strength = 0.0;
+            st.full_look_strength = 0.0;
+        }
+        let wave = st.hail_wrist.advance(st.hail_strength > 0.001, dt, p.id);
+        let looking = st.hail_strength.max(st.full_look_strength);
+        if looking > 0.001 && enhanced && !p.puppet {
+            let target = p.hail_target.and_then(|bus|
+                omsi_sim::human::hail_look_target(p.position, p.heading, bus));
+            let torso = omsi_sim::human::slot_of(omsi_sim::human::BONE_MAIN).unwrap();
+            let waiting_forward = bones[torso].transform_vector3(Vec3::Y);
+            st.hail_look.advance(&ty.rig, bones, target, looking, dt);
+            if st.hail_strength > 0.001 {
+                omsi_sim::human::accessory_hail_arm(
+                    &ty.rig, bones, 1, waiting_forward, st.hail_strength, wave);
+            }
+        }
+    }
+}
+
 impl PeopleView {
     pub(crate) fn new() -> PeopleView {
         PeopleView {
@@ -302,6 +350,10 @@ impl PeopleView {
             let inst = renderer.add_instance(scene, id, position, Mat4::IDENTITY, mats);
             meshes.push((id, inst));
         }
+        let radius = person_radius(ty);
+        for &(_, inst) in &meshes {
+            renderer.set_object_culling(scene, inst, radius, ty.model.detail_factor, ty.model.no_distance_check);
+        }
         meshes
     }
 }
@@ -354,7 +406,7 @@ impl Humans {
         }
         if let Some(pack) = self.sim.tickets.as_ref().map(|t| &t.path) {
             // (compared in place: both paths were copied for it every frame)
-            let fresh = view.ticket_blocks.as_ref().is_none_or(|b| b.made_for.0 != bus.ty.def.path || b.made_for.1 != *pack);
+            let fresh = view.ticket_blocks.as_ref().is_none_or(|b| { b.made_for.0 != bus.ty.def.path || b.made_for.1 != *pack });
             if fresh {
                 // (the blocks of the bus driven before go: they stayed in the air where it was)
                 drop_ticket_blocks(view, renderer, scene);
@@ -365,7 +417,25 @@ impl Humans {
         } else {
             drop_ticket_blocks(view, renderer, scene);
         }
-        if let Some(b) = view.ticket_blocks.as_ref() {
+
+        // The same sale-money point used by passenger payments.
+        let sale_point = self.sim.player_cabin.as_ref().and_then(|c| c.money_var.clone());
+        if let Some(b) = view.ticket_blocks.as_mut() {
+            if let Some((point, var, parent)) = sale_point.as_ref() {
+                while let Some(n) = b.take_ticket_request() {
+                    // Use the same random placement algorithm as coins.
+                    let r = self.sim.money.as_mut().map(|m| [
+                        m.rand_f(),
+                        m.rand_f(),
+                        m.rand_f(),
+                    ]).unwrap_or([0.5, 0.5, 0.0]);
+
+                    b.place_ticket(n, renderer, scene, *point, *var, parent.as_deref(), r);
+                }
+            }
+            while let Some(instance) = b.take_ticket_removal_request() {
+                b.remove_ticket_instance(instance, renderer, scene);
+            }
             b.sync(renderer, scene, bus);
         }
     }
@@ -414,6 +484,7 @@ impl PeopleView {
 #[derive(Default)]
 pub(crate) struct PersonView {
     pub(crate) meshes: Vec<(MeshId, usize)>,
+    clip_t: f32,
     /// Skinned positions and normals, per mesh.
     skins: Vec<(Vec<Vec3>, Vec<Vec3>)>,
     /// The bones the skins were made with, and whether this frame's pose changed them
@@ -439,6 +510,13 @@ pub(crate) struct PersonView {
     pub(super) ankles: [Vec3; 2],
     /// The earlier IK/foot-planted animation, allocated only for the enhanced poses.
     pub(super) procedural: Option<omsi_sim::human::Pose>,
+    /// Local-only cosmetic gesture; never changes bus stops or tasks.
+    hail_strength: f32,
+    /// Full-bus acknowledgement independent of the raised-arm hailing.
+    full_look_strength: f32,
+    full_gate: omsi_sim::human::FullBusHail<BusId>,
+    hail_wrist: omsi_sim::human::HailWrist,
+    hail_look: omsi_sim::human::HailLook,
     /// A jump of the person's place within a bus (onto the seat, as Omsi.exe puts them
     /// there) drawn as a glide instead: what is left of it in the bus's frame, the same in
     /// the world for the drawing, and the place last frame (the bus, where).
@@ -592,11 +670,12 @@ impl PeopleView {
             let ty = st.avatar.clone().unwrap_or_else(|| p.ty.clone());
             let dt = st.since_posed_secs.max(sdt).min(0.25);
             // Preserve the OMSI-original pose unless the enhanced A/B mode is requested.
-            let bones = if enhanced && !p.puppet {
+            let mut bones = if enhanced && !p.puppet {
                 animation::bones(p, &ty, st, dt, world, &buses)
             } else {
                 omsi_sim::human::slots_from_omsi(&p.anim.bones(&ty.omsi))
             };
+            apply_optional_bus_visual(p, st, &ty, &mut bones, enhanced, camera, dt);
             // an avatar's face near the eye: blinks, looks, expressions, the lips
             // (from the camera the picture is drawn from: a face is seen from there)
             let near = ty.face.is_some() && (p.position - camera).length() < avatars::FACE_DISTANCE;
@@ -804,4 +883,8 @@ mod seat_back_tests {
         assert_eq!(seat_back_shift(&body(-1.0), hip, 0.15), 0.12);
         assert_eq!(seat_back_shift(&[], hip, 0.15), 0.0);
     }
+}
+
+fn person_radius(ty: &HumanType) -> f32 {
+    ty.meshes.iter().flat_map(|m| &m.data.positions).map(|p| p.length()).fold(0.0f32, f32::max)
 }

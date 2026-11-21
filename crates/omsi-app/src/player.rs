@@ -9,6 +9,7 @@ mod gears;
 mod ibis;
 mod mouse;
 mod picking;
+mod rp_speed_limit;
 
 pub(crate) use cameras::*;
 pub(crate) use doors::*;
@@ -38,6 +39,12 @@ fn indicator_toggle_action(state: &mut u8, lever: Option<u8>, want: u8) -> &'sta
 fn kept_indicator(cancel: bool, before: Option<f32>, after: Option<f32>) -> Option<f32> {
     let (before, after) = (before?.round(), after?.round());
     (!cancel && (before == 1.0 || before == 2.0) && after == 0.0).then_some(before)
+}
+
+fn is_blinker_cancel_trigger(name: &str) -> bool {
+    let n = name.trim().to_ascii_lowercase();
+    let n = n.strip_prefix("ev_").unwrap_or(&n);
+    n.strip_prefix("lights_").unwrap_or(n) == "blinker_swoff"
 }
 
 /// Whether the view follows the steering (the setting on): only from the driver's seat as the
@@ -158,6 +165,7 @@ pub(crate) struct Player {
     /// Set while the camera looks at the bus from outside (F3): a switch behind a wall or a
     /// window of the bus is out of reach there, and is neither named, clicked nor turned.
     pub(crate) occlude_controls: bool,
+    pub(crate) drawn_outside: bool,
     /// The press on `pressed_mesh`: whether the script has a trigger for the click itself,
     /// and how far the mouse has been dragged since (px).
     pub(crate) press_info: (bool, f32),
@@ -274,7 +282,7 @@ pub(crate) struct Player {
     pub(crate) trolley_view: Option<Box<omsi_scene::trolley_view::TrolleyView>>,
     /// The sparks of a rail vehicle's pantograph (see `omsi_scene::arc_fx`).
     pub(crate) panto_fx: omsi_scene::arc_fx::ArcFx,
-    pub(crate) trolley_sound: crate::trolley_sound::TrolleySound,
+    pub(crate) trolley_sound: omsi_audio::trolley::TrolleySound,
     /// The stop announcements the game presses the IBIS on for (see `auto_announce`).
     pub(crate) announce: crate::auto_announce::AutoAnnounce,
 }
@@ -781,6 +789,9 @@ impl Player {
         let bound = self.bound_actions();
         let s = omsi_sim::startup::StartUp::new(&self.vehicle, &bound);
         let shutting_down = s.shutting_down();
+        if !shutting_down {
+            self.vehicle.trolley_put_on(true);
+        }
         self.startup = Some(s);
         self.startup_at = Some(std::time::Instant::now());
         if shutting_down {
@@ -1032,9 +1043,20 @@ impl Player {
         }
         self.auto_clutch_bite(a.throttle.unwrap_or(0.0).max(self.axes.throttle));
         self.tick_auto_shift(dt, a.throttle.unwrap_or(0.0).max(self.axes.throttle), a.brake.unwrap_or(0.0).max(self.axes.brake));
+        let throttle = a.throttle.unwrap_or(self.axes.throttle).max(self.axes.throttle);
+        let brake = a.brake.unwrap_or(self.axes.brake).max(self.axes.brake);
+        let (throttle, brake) = rp_speed_limit::controls(
+            f64::from(self.vehicle.physics.velocity_kmh()),
+            omsi_lan::commands::speed_limit_kmh(),
+            throttle,
+            brake,
+        );
+        if a.steering.is_some_and(|s| s.abs() > 0.02) {
+            self.axes.steering = 0.0;
+        }
         self.vehicle.set_controls(omsi_sim::Controls {
-            throttle: a.throttle.unwrap_or(self.axes.throttle).max(self.axes.throttle),
-            brake: a.brake.unwrap_or(self.axes.brake).max(self.axes.brake),
+            throttle,
+            brake,
             clutch: a.clutch.unwrap_or(self.axes.clutch).max(self.axes.clutch),
             // (a wheel at rest does not hold against the keys)
             steering: match a.steering {
@@ -1042,10 +1064,11 @@ impl Player {
                 _ => self.axes.steering,
             },
         });
-        let lever = self.vehicle.var("lights_sw_blinker");
+        let (lever, mark) = (self.vehicle.var("lights_sw_blinker"), self.vehicle.host.trigger_mark());
         self.vehicle.update(dt);
         if let Some(keep) = kept_indicator(self.blinker_cancel, lever, self.vehicle.var("lights_sw_blinker")) {
             self.vehicle.set_var("lights_sw_blinker", keep);
+            self.vehicle.host.drop_triggers_since(mark, is_blinker_cancel_trigger);
         }
         // OMSI_SUSP_TRACE_WINDOW=<csv>: each wheel's travel every frame of a window run
         // (the offscreen run has OMSI_SUSP_TRACE)
@@ -1249,6 +1272,19 @@ mod kept_indicator_tests {
         assert_eq!(kept_indicator(false, Some(1.0), Some(2.0)), None);
         assert_eq!(kept_indicator(false, Some(0.0), Some(0.0)), None);
         assert_eq!(kept_indicator(false, None, Some(0.0)), None);
+    }
+
+    #[test]
+    fn only_known_lever_snap_triggers_are_suppressed() {
+        for t in ["ev_lights_blinker_swoff", "EV_LIGHTS_BLINKER_SWOFF", "lights_blinker_swoff"] {
+            assert!(super::is_blinker_cancel_trigger(t), "{t}");
+        }
+        for k in ["ev_lights_blinker_off", "ev_lights_blinker_on", "ev_lights_blinker_swon"] {
+            assert!(!super::is_blinker_cancel_trigger(k), "{k}");
+        }
+        for k in ["ev_lights_blinker_sw_on", "ev_warnblinker_schalter", "ev_blinker_relais_aus"] {
+            assert!(!super::is_blinker_cancel_trigger(k), "{k}");
+        }
     }
 }
 

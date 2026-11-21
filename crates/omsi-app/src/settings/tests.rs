@@ -21,7 +21,35 @@ fn fsr1_menu_settings_round_trip_into_renderer() {
 
     // A corrupt or future setting must not enable experimental shaders.
     assert_eq!(Settings::from_text("upscaler=anything_else\\n").upscaler, "default");
+    let temporal = Settings::from_text("upscaler=FSR3\nupscale_quality=ultra_performance\n");
+    assert_eq!((temporal.upscaler.as_str(), temporal.upscale_quality.as_str()), ("fsr3", "ultra_performance"));
+    let mut lost = Settings::from_text("upscaler=dlss\n");
+    lost.apply_safe_gpu(1);
+    assert_eq!(lost.upscaler, "default");
+    let mut mac = Settings::from_text("upscaler=MetalFX\n");
+    assert_eq!(mac.upscaler, "metalfx");
+    mac.apply_safe_gpu(1);
+    assert_eq!(mac.upscaler, "default");
     assert_eq!(Settings::from_text("fsr_sharpness=nan\\n").fsr_sharpness, 0.8);
+}
+
+/// Frame generation is read, written and turned off with the safer graphics; it runs only with
+/// the upscaler it takes its depth and motion from.
+#[test]
+fn frame_generation_round_trips_and_needs_its_upscaler() {
+    assert_eq!(Settings::default().frame_generation, "off");
+    let mut s = Settings::from_text("upscaler=metalfx\nframe_generation=MetalFX\n");
+    assert_eq!(s.frame_generation, "metalfx");
+    assert!(s.to_text().contains("frame_generation=metalfx\n"));
+    assert_eq!(Settings::from_text("frame_generation=dlss4x\n").frame_generation, "dlss4x", "a Windows choice is kept");
+    assert!(!Settings::from_text("upscaler=metalfx\nframe_generation=dlss4x\n").frame_generation(), "and not run on a Mac");
+    assert_eq!(Settings::from_text("frame_generation=warp\n").frame_generation, "off");
+    assert!(s.frame_generation(), "on with MetalFX upscaling chosen");
+    s.upscaler = "fsr1".into();
+    assert!(!s.frame_generation(), "not without MetalFX upscaling");
+    s.upscaler = "metalfx".into();
+    s.apply_safe_gpu(1);
+    assert_eq!(s.frame_generation, "off");
 }
 
 #[test]
@@ -209,6 +237,25 @@ fn triple_settings_round_trip_and_reject_nonfinite_geometry() {
 use super::*;
 
 #[test]
+fn route_arrow_settings_keep_legacy_defaults_and_round_trip_independently() {
+    for (text, expected) in [
+        ("", (false, false)),
+        ("nav_arrows=1\n", (true, true)),
+        ("nav_dynamic_arrows=0\nnav_arrows=1\n", (false, true)),
+        ("nav_arrows=1\nnav_map_arrows=0\n", (true, false)),
+    ] {
+        let game = Settings::from_text(text);
+        assert_eq!((game.nav_dynamic_arrows, game.nav_map_arrows), expected);
+        assert_eq!(Settings::from_text(&game.to_text()), game);
+
+        let launcher = omsi_launcher_lib::settings_from_text(Some(text));
+        let saved = omsi_launcher_lib::settings_to_text(&launcher, Some(text));
+        let game = Settings::from_text(&saved);
+        assert_eq!((game.nav_dynamic_arrows, game.nav_map_arrows), expected);
+    }
+}
+
+#[test]
 fn old_files_board_automatically() {
     // the launcher's old default, written without a version
     assert_eq!(Settings::from_text("msaa=1\nboarding=pay\n").boarding, "auto");
@@ -294,11 +341,11 @@ fn enhanced_options_and_ray_tracing() {
     let text = on.to_text();
     assert!(text.contains("graphics=enhanced\n") && text.contains("ray_tracing=1\n") && text.contains("light_shadows=all\n"), "{text}");
     assert_eq!(Settings::from_text(&text), on);
-    // without Enhanced it traces nothing, and the defaults keep the street lamps' shadows
+    // without Enhanced it traces nothing; expensive light shadows are off by default
     let plain = Settings::from_text("graphics=vanilla_plus\nray_tracing=1\n");
     assert!(!plain.ray_tracing() && !plain.render_options().ray_tracing && plain.mode() == "vanilla_plus");
     let d = Settings::default().render_options();
-    assert_eq!((d.light_shadows, d.cloud_shadows, d.light_glow, d.ray_tracing), (1, false, false, false));
+    assert_eq!((d.light_shadows, d.cloud_shadows, d.light_glow, d.ray_tracing), (0, false, false, false));
     assert_eq!(["off", "street", "all", "every", "x", "0"].map(|v| Settings::from_text(&format!("light_shadows={v}\n")).light_shadows), ["off", "street", "all", "all", "street", "off"]);
     // a file of the days of Enhanced+ is written back as Enhanced with ray tracing
     let old = Settings::from_text("graphics=enhanced_plus\n");
@@ -381,10 +428,22 @@ fn interface_size_is_read_within_its_range() {
 }
 
 #[test]
-fn discord_settings_round_trip_and_default_enabled() {
-    assert!(Settings::default().discord_status);
-    let settings = Settings { discord_status: false, discord_app_id: "123456".into(), ..Default::default() };
+fn discord_settings_round_trip_and_default_off() {
+    // (Discord's status tells friends the map, bus, line and multiplayer: only when asked)
+    assert!(!Settings::default().discord_status);
+    let settings = Settings { discord_status: true, discord_app_id: "123456".into(), ..Default::default() };
     assert_eq!(Settings::from_text(&settings.to_text()), settings);
+    assert_eq!(Settings::default().discord_show, crate::discord::Show::default());
+    let hidden = crate::discord::Show { map: false, bus: true, line: false, stop: false, players: true, buttons: false };
+    let settings = Settings { discord_show: hidden, ..Default::default() };
+    assert_eq!(Settings::from_text(&settings.to_text()).discord_show, hidden);
+}
+
+#[test]
+fn remote_cockpit_round_trips_and_is_off_by_default() {
+    assert!(!Settings::default().remote_cockpit);
+    let s = Settings { remote_cockpit: true, remote_cockpit_port: 9000, ..Default::default() };
+    assert_eq!(Settings::from_text(&s.to_text()), s);
 }
 
 #[test]
@@ -559,4 +618,89 @@ fn cab_wheel_rotation_defaults_to_the_bus_and_is_clamped() {
     let mut ui = omsi_launcher_lib::settings_from_text(None);
     ui["cab_wheel_rotation"] = serde_json::json!(1080);
     assert_eq!(Settings::from_text(&omsi_launcher_lib::settings_to_text(&ui, None)).cab_wheel_rotation, 1080);
+}
+
+#[test]
+fn passenger_hailing_disabled_for_new_and_legacy_settings() {
+    assert!(!Settings::default().passenger_hailing);
+    assert!(!Settings::phone().passenger_hailing);
+    assert!(!Settings::desktop().passenger_hailing);
+    assert!(!Settings::from_text("version=1\n").passenger_hailing);
+    assert!(Settings::from_text("passenger_hailing=1\n").passenger_hailing);
+    assert!(!Settings::from_text("passenger_hailing=0\n").passenger_hailing);
+}
+
+#[test]
+fn passenger_hailing_survives_both_settings_writers() {
+    let key = "passenger_hailing";
+    for phone in [false, true] {
+        assert_eq!(omsi_launcher_lib::settings_from_text_on(None, phone)[key], false);
+        for on in [false, true, false] {
+            let mut settings = Settings::default();
+            settings.passenger_hailing = on;
+            let native = settings.to_text();
+            let launcher = omsi_launcher_lib::settings_from_text_on(Some(&native), phone);
+            assert_eq!(launcher[key], on);
+            let text = omsi_launcher_lib::settings_to_text(&launcher, Some(&native));
+            assert_eq!(Settings::from_text(&text).passenger_hailing, on);
+            assert_eq!(text.lines().filter(|line| line.starts_with(&format!("{key}="))).count(), 1);
+        }
+    }
+}
+
+#[test]
+fn full_bus_reaction_defaults_off_for_desktop_phone_and_old_settings() {
+    assert!(!Settings::desktop().passenger_full_bus_reaction);
+    assert!(!Settings::phone().passenger_full_bus_reaction);
+    assert!(!Settings::from_text("version=1\n").passenger_full_bus_reaction);
+    assert!(Settings::from_text("passenger_full_bus_reaction=1\n").passenger_full_bus_reaction);
+    assert!(!Settings::from_text("passenger_full_bus_reaction=0\n").passenger_full_bus_reaction);
+    assert!(!Settings::desktop().pax_short_rides_stand);
+    assert!(Settings::from_text("pax_short_rides_stand=1\n").pax_short_rides_stand);
+    let mut on = Settings::desktop();
+    on.pax_short_rides_stand = true;
+    assert!(Settings::from_text(&on.to_text()).pax_short_rides_stand);
+}
+#[test]
+fn full_bus_reaction_round_trips_through_both_settings_writers() {
+    let key = "passenger_full_bus_reaction";
+    for phone in [false, true] {
+        for enabled in [false, true, false] {
+            let mut settings = Settings::default();
+            settings.passenger_full_bus_reaction = enabled;
+            let text = settings.to_text();
+            let mut ui = omsi_launcher_lib::settings_from_text_on(Some(&text), phone);
+            assert_eq!(ui[key], enabled);
+            ui[key] = serde_json::json!(enabled);
+            let serialized = omsi_launcher_lib::settings_to_text(&ui, Some(&text));
+            assert_eq!(Settings::from_text(&serialized).passenger_full_bus_reaction, enabled);
+            assert_eq!(serialized.lines().filter(|line| line.starts_with("passenger_full_bus_reaction=")).count(), 1);
+        }
+    }
+}
+
+#[test]
+fn graphics_brightness_defaults_clamp_and_roundtrip() {
+    let defaults = Settings::from_text("");
+    assert_eq!((defaults.road_glare, defaults.traffic_headlights), (1.0, 1.0));
+    let value = Settings::from_text("graphics=enhanced\nroad_glare=0.25\ntraffic_headlights=1.75\n");
+    assert_eq!((value.road_glare, value.traffic_headlights), (0.25, 1.75));
+    let clamped = Settings::from_text("road_glare=-5\ntraffic_headlights=999\n");
+    assert_eq!((clamped.road_glare, clamped.traffic_headlights), (0.0, 2.0));
+    let invalid = Settings::from_text("road_glare=NaN\ntraffic_headlights=inf\n");
+    assert_eq!((invalid.road_glare, invalid.traffic_headlights), (1.0, 1.0));
+    let mut ui = omsi_launcher_lib::settings_from_text(None);
+    ui["road_glare"] = serde_json::json!(0.3);
+    ui["traffic_headlights"] = serde_json::json!(1.6);
+    let game = Settings::from_text(&omsi_launcher_lib::settings_to_text(&ui, None));
+    assert!((game.road_glare - 0.3).abs() < 0.0001);
+    assert!((game.traffic_headlights - 1.6).abs() < 0.0001);
+}
+
+#[test]
+fn the_note_kinds_go_round_the_file() {
+    let mut s = Settings::desktop();
+    (s.notes_driving, s.notes_script, s.notes_trip, s.notes_tickets) = (false, true, false, true);
+    let back = Settings::from_text(&s.to_text());
+    assert_eq!((back.notes_driving, back.notes_script, back.notes_trip, back.notes_tickets), (false, true, false, true));
 }

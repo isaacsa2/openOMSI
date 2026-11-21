@@ -56,8 +56,10 @@ pub extern "C" fn openomsi_ios_main() {
             log::warn!("caught by the renderer: {info}");
             return;
         }
-        let text = format!("the game stopped on an error (build {BUILD}): {info}\n{}", std::backtrace::Backtrace::force_capture());
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let text = format!("the game stopped on an error (build {BUILD}): {info}\n{backtrace}");
         log::error!("{text}");
+        omsi_platform::diagnostics::panicked(omsi_platform::diagnostics::panic_report(info, &backtrace));
         for f in &crash_files {
             let _ = std::fs::write(f, &text);
         }
@@ -137,14 +139,16 @@ impl log::Log for TeeLogger {
         if !self.enabled(r.metadata()) {
             return;
         }
-        use std::io::Write;
-        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-        // (the desktop's env_logger layout: the launcher's `crash_of` reads it)
-        let line = format!("[{secs:.3} {:<5} {}] {}", r.level(), r.target(), r.args());
-        eprintln!("{line}");
-        if let Some(f) = self.file.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-            let _ = writeln!(f, "{line}");
-        }
+        crate::logmask::with_record(r, |r| {
+            use std::io::Write;
+            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            // (the desktop's env_logger layout: the launcher's `crash_of` reads it)
+            let line = format!("[{secs:.3} {:<5} {}] {}", r.level(), r.target(), r.args());
+            eprintln!("{line}");
+            if let Some(f) = self.file.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                let _ = writeln!(f, "{line}");
+            }
+        });
     }
 
     fn flush(&self) {

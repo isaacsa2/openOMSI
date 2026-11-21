@@ -51,6 +51,7 @@ use omsi_career::career;
 use omsi_input::describe;
 pub(crate) use omsi_scene::editor;
 mod duty_book;
+mod first_graphics;
 mod game_lists;
 mod game_panels;
 mod game_controller_menu;
@@ -100,6 +101,8 @@ mod photo;
 mod depot_bus;
 mod devtools;
 mod telemetry;
+mod themes;
+mod remote;
 use omsi_scene::threads;
 use omsi_scene::tiles;
 mod traffic;
@@ -110,6 +113,7 @@ mod ui;
 // the game itself, split by what each part does
 mod app;
 mod applog;
+mod logmask;
 mod app_events;
 mod bus_service;
 mod camera_util;
@@ -134,7 +138,6 @@ mod on_foot;
 mod trolley_hands;
 mod trolley_mouse;
 pub(crate) mod trolley_net;
-mod trolley_sound;
 mod optimiser;
 use omsi_scene::route_arrows;
 mod server;
@@ -158,7 +161,7 @@ mod weather_tomorrow;
 use omsi_weather::{weather_cycle, weather_model};
 mod world_load;
 
-// the interface's translations (locales/app.yml; the English text is the key)
+// the interface's translations (locales/app.yml and app.<language>.yml; the English text is the key)
 rust_i18n::i18n!("locales");
 // (the tables are read when this crate compiles: this makes cargo compile it again when they
 // change - the macro alone left the old texts in the program)
@@ -247,7 +250,8 @@ pub fn run() -> Result<()> {
         let rest: Vec<String> = std::env::args().skip(2).collect();
         return check::run(&rest, crate::startup::find_root);
     }
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // (the players' internet addresses cut to their network, see `logmask`)
+    logmask::init();
     // a panic goes into the log (which the launcher keeps per session) with where it
     // happened and a backtrace, not only to a terminal that may not be there
     let default_hook = std::panic::take_hook();
@@ -256,10 +260,9 @@ pub fn run() -> Result<()> {
             log::warn!("caught by the renderer: {info}");
             return;
         }
-        log::error!(
-            "the game stopped on an error (build {BUILD}): {info}\n{}",
-            std::backtrace::Backtrace::force_capture()
-        );
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        log::error!("the game stopped on an error (build {BUILD}): {info}\n{backtrace}");
+        omsi_platform::diagnostics::panicked(omsi_platform::diagnostics::panic_report(info, &backtrace));
         default_hook(info);
     }));
     log::info!(
@@ -294,6 +297,11 @@ pub fn run() -> Result<()> {
         }
         return open_app_launcher(fatal_message);
     }
+    // Launcher helpers and the launcher itself must not count as a running game.
+    let _cache_activity = omsi_cfg::cache_activity::game(&omsi_launcher_lib::data_dir())?
+        .only_cleanup_when(|| !omsi_launcher_lib::instances::list().iter().any(|game| {
+            game.running && game.pid != std::process::id()
+        }));
     let Some(app) = make_app(args, server_cfg)? else { return Ok(()) };
     // a game session's start goes into the start guard's journal (a version whose sessions
     // keep failing before their first frames is healed at the launcher's next start)
@@ -457,6 +465,8 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         log::info!("sim thread: {}", if sim_thread { "the AI traffic, the people and the scenery scripts step beside the picture" } else { "off: every step on the main thread" });
     }
     let _lan_status = lan::StatusFileGuard;
+    // (a resumed bus loads its saved sheet by full path before any sheet is made this run)
+    omsi_scene::schedule_paper::trust_cache_dir();
     // OMSI's tutorials: the lesson's own situation
     if let Some(n) = args.tutorial.filter(|n| (1..=4).contains(n)) {
         args.situation = Some(tutorial::SITUATIONS[n - 1].to_string());
@@ -486,6 +496,9 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     if args.export_glb.is_none() && args.lan_join.is_none() {
         place_on_duty(&mut args);
     }
+    if server_cfg.is_none() && args.export_glb.is_none() {
+        omsi_platform::diagnostics::game_started();
+    }
     let settings = settings::Settings::load();
     applog::log_system(&settings);
     if args.drive_keys.eq_ignore_ascii_case("simple")
@@ -496,15 +509,23 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     args.session_settings = startup::SessionSettings::for_session(&settings, &args);
     // the LAN session (offscreen too, so that one game's view of another can be rendered);
     // a joining player's world is the host's (taken over again when the window loads it)
+    let settings_text = std::fs::read_to_string(omsi_launcher_lib::data_dir().join("settings.cfg")).ok();
+    omsi_lan::bans::allow_hardware_id(omsi_launcher_lib::settings_from_text(settings_text.as_deref()).get("hardware_id").and_then(|v| v.as_bool()).unwrap_or(true));
     let mut lan = if args.export_glb.is_none() {
         lan::start(&args.lan_config(), &lan::AppLanHost { args: &args, world: None })
     } else {
         None
     };
+    // Match the actual session admission limit to the dedicated server configuration.
+    if let (Some(cfg), Some(l)) = (server_cfg.as_ref(), lan.as_mut()) {
+        l.set_peer_limit(cfg.max_players);
+    }
     // a dedicated server without its session has nobody to serve: why, and the end (it went
     // on running alone, unreachable, with a warning among the log's lines)
-    if let (Some(cfg), None) = (server_cfg.as_ref(), lan.as_ref()) {
-        eprintln!("server: cannot open the session on UDP port {} (the line above says why): another server or program uses it, or the system refuses it. Stop the other one, or choose another `port` in {}", cfg.port, args.server.as_deref().map(|p| p.display().to_string()).unwrap_or_else(|| "server.cfg".into()));
+    if server_cfg.is_some() && lan.is_none() {
+        // Do not pass the password-bearing server configuration to diagnostics.
+        // The failed bind above already reports the candidate port and socket error.
+        eprintln!("server: cannot open the session (the line above says why): another server or program uses the UDP/TCP port, or the system refuses it. Stop the other one, or choose another `port` in the server configuration.");
         std::process::exit(3);
     }
     // turned away at the door (banned, full, another version): no game to play there
@@ -515,14 +536,19 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     // the host's mods: served by the host, fetched by a joining player before its world is
     // made (see `lan_mods`)
     lan_mods::remove_stale();
+    let mut mods_server = None;
     if let Some(l) = lan.as_mut() {
         let mut c = args.lan_config();
-        lan::share_mods(&mut c, l);
+        mods_server = lan::share_mods(&mut c, l);
+        if let Some(why) = c.mod_fetch_error.take() {
+            return Err(anyhow::anyhow!("The selected server bus could not be verified or downloaded: {why}"));
+        }
         lan::take_host_map(&mut c, l);
         args.take_lan_config(&c);
     }
     if let (Some(cfg), Some(l)) = (server_cfg.as_ref(), lan.as_ref()) {
-        lan::open_public_gateway(l, server::info_of(cfg), cfg.web_port, cfg.tunnel);
+        lan::open_public_gateway(l, server::info_of(cfg, &args.root), cfg.web_port, cfg.tunnel);
+        server::announce_fleet(cfg, &args.root);
         lan::publish_vehicles(args.root.clone(), cfg.vehicles.clone());
         server::start_public_list(cfg);
         if cfg.tunnel {
@@ -571,6 +597,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
     }
     let mut app = assemble_app(args, settings);
     app.net.lan = lan;
+    app.net.mods_server = mods_server;
     app.net.remotes = lan_game;
     // mouse steering as the player left it (the wheel eases to the cursor for a second)
     if app.settings.mouse_steering {
@@ -604,7 +631,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
     } else {
         crate::steam::Steam::start()
     };
-    let instance = graphics_instance();
+    let instance = game_graphics_instance(settings.mx_graphics);
     let vr_nav_profiles = crate::vr_navigator::Profiles::load(crate::vr_navigator::profiles_path().as_deref());
     let ui = ui::Ui::new();
     let rain = rain::Rain::new();
@@ -639,6 +666,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             mirror_hud: Default::default(),
             window_hidden: false,
             route_arrows: Default::default(),
+            plugin_cables: Default::default(),
             hidden_frames: 0,
             stand_in: None,
             sim_view: Default::default(),
@@ -687,6 +715,8 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             autosave_t: 0.0,
             pumping: None,
             career: Default::default(),
+            depot_base: Default::default(),
+            depot_prev: None,
             journey: None,
             wetness: 0.0,
             cloud_drift: [0.0; 4],
@@ -700,7 +730,9 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
         },
         menus: MenuState {
             list_dirty: false,
+            graphics_before: None,
             page_titles: Default::default(),
+            online_weather: Default::default(),
             chooser: None,
             editor: None,
             vehicle_list: Vec::new(),
@@ -720,6 +752,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             pane_scroll_drag: None,
             pane_scroll: None,
             teleport_pick: false,
+            map_place_from: None,
             game_panels: Default::default(),
             tutorial: None,
             wheel_acc: 0.0,
@@ -734,6 +767,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             menu_prev_pause: false,
             info_bar,
             timetable: false,
+            clean_screen: false,
             hud_resize: None,
             notices: Vec::new(),
             note_watch: Default::default(),
@@ -743,8 +777,11 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             menu_edit_number: false,
             menu_edit_ident: false,
             menu_edit_search: false,
+            streets_seen: 0,
             menu_search: String::new(),
             swap_pending: false,
+            swapped_in: None,
+            parked_transfer: None,
             pending_placement: None,
             menu_drag: None,
             menu_kbd: true,
@@ -759,13 +796,16 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             head_idle_hold: Default::default(),
             ego: false,
             flashlight: false,
+            flashlight_aim: None,
             in_cab: false,
+            heard_inside: false,
             look: (0.0, 0.0),
             look_smooth: (0.0, 0.0),
             view_looks: Default::default(),
             look_view: String::new(),
             cam_blend: Default::default(),
             view_zoom: Default::default(),
+            zoom_hold: Default::default(),
             cam_zooms: Default::default(),
             orbit: ORBIT_DEFAULT,
         },
@@ -774,6 +814,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
         sound: SoundState {
             radio,
             milezero: Default::default(),
+            switch_sound: Default::default(),
             audio: None,
             ambience: None,
             soundscape: None,
@@ -799,6 +840,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             pad_look: [false; 4],
             pad_repeat: Vec::new(),
             pad_voice_radio: false,
+            pad_zoom_hold: false,
             pad_voice_nearby: false,
             arrow_glance: false,
             headtrack: None,
@@ -816,6 +858,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             cruise: None,
             look_lock: None,
             cursor_hidden: None,
+            cursor_stale: false,
             last_ctl_steer: None,
             mouse_pedals: (0.0, 0.0),
             mouse_kmh: 0.0,
@@ -847,7 +890,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             plugin_command: false,
             plugin_panels: Default::default(),
             discord: None,
-            discord_t: 0.0,
+            discord_t: 0.0, discord_max: Default::default(),
             #[cfg(steam)]
             steam,
             update_watch,
@@ -855,6 +898,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             plugins: None,
             vehicle_scripts_of: None,
             object_scripts: Default::default(),
+            remote: Default::default(),
         },
         net: NetState::default(),
         service_msg: clock_note.map(|m| (m, 10.0)),
