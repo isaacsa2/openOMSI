@@ -1,0 +1,59 @@
+name: Proton converter preview (PR 220)
+
+on:
+  push:
+    branches:
+      - preview/next-test-build
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/omsi-proton/**"
+      - "crates/omsi-cfg/**"
+      - "crates/omsi-map/**"
+      - "crates/omsi-o3d/**"
+      - "crates/omsi-launcher-core/**"
+      - ".github/workflows/proton-converter-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-converter-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libgtk-3-dev libxkbcommon-dev libwayland-dev libssl-dev libwebkit2gtk-4.1-dev clang lld
+      - name: Test map and vehicle conversion
+        run: cargo test --locked -p omsi-proton --lib
+      - name: Test Mods installer integration
+        run: cargo test --locked -p omsi-launcher-core install::proton::tests --lib
+
+  windows-converter-tools:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the standalone map and vehicle converter CLIs
+        run: cargo build --release --locked -p omsi-proton --example import_map --example import_vehicle --example inspect_vehicle
+      - name: Package portable Windows converter tools
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force proton-converter-windows | Out-Null
+          Copy-Item target/release/examples/import_map.exe proton-converter-windows/
+          Copy-Item target/release/examples/import_vehicle.exe proton-converter-windows/
+          Copy-Item target/release/examples/inspect_vehicle.exe proton-converter-windows/
+          Copy-Item docs/PROTON_RECOVERY.md proton-converter-windows/README.md
+          if (Test-Path LICENSE) { Copy-Item LICENSE proton-converter-windows/ }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proton-converter-windows-preview
+          path: proton-converter-windows/
+          if-no-files-found: error
+          retention-days: 14
