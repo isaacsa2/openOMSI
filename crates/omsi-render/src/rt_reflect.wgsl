@@ -198,7 +198,7 @@ fn mesh_light(pt: vec3<f32>, d: vec3<f32>, h: Hit, texel: vec4<f32>) -> vec3<f32
     // the air along the way: from the eye to the surface and on to the hit
     let dist = length(o - p.eye.xyz) + h.t;
     let ext = exp(-(enh.fog.x + enh.fog.w) * dist);
-    l = l * ext + enh.fog_color.rgb * enh.exposure.x * (1.0 - ext);
+    l = l * ext + weather_fog_radiance() * enh.exposure.x * (1.0 - ext);
     return finite(l);
 }
 
