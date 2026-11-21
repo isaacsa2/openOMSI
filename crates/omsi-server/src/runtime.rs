@@ -565,6 +565,11 @@ fn report_native_ground_load(
         reported_boarded,
         reported_alighted,
     );
+    for (player_id, aboard, boarded, alighted) in sim.player_passenger_counts() {
+        log::info!(
+            "native player bus #{player_id}: {aboard} aboard, {boarded} observed boardings and {alighted} observed alightings (player-reported)",
+        );
+    }
     let profile = profiler.report();
     log::info!(
         "native load: TPS {:.1}/{:.0}, {} active CPU tiles, {} AI cars, {} AI buses, {} pedestrians ({} walking, {} waiting, {} aboard); ground heap est.: {:.1} MiB terrain, {:.1} MiB raster, {:.1} MiB wheel; tick p95 {:.1} ms p99 {:.1} ms (profiling {})",
