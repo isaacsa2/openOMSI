@@ -46,6 +46,10 @@ fn car_meta(v: &VehicleInstance) -> Meta {
     }
 }
 
+fn traffic_viewer_position(pose: &omsi_net::Pose) -> Option<[f64; 3]> {
+    crate::interest::client_position(pose).map(|position| position.to_array())
+}
+
 impl HeadlessTrafficSync {
     /// Write authoritative AI rows, including paint, destination, movement
     /// and stable IDs. TrafficTable handles delayed ID reuse after despawn.
@@ -119,15 +123,16 @@ impl HeadlessTrafficSync {
         if lan.role != Role::Host || !dt.is_finite() || dt <= 0.0 {
             return 0;
         }
+        // The on-foot spectator is a genuine traffic viewer too. The host's
+        // population and world streaming already follow Walker coordinates;
+        // excluding them here hid all AI/timetable buses until they spawned
+        // a vehicle. Reuse the same validated coordinate policy.
         let viewers: Vec<_> = lan
             .peers()
-            .filter(|peer| peer.has_pose && peer.has_info && peer.pose.has_vehicle())
-            .filter(|peer| {
-                [peer.pose.x, peer.pose.y, peer.pose.z]
-                    .iter()
-                    .all(|coordinate| coordinate.is_finite() && coordinate.abs() < 1.0e8)
+            .filter(|peer| peer.has_pose && peer.has_info)
+            .filter_map(|peer| {
+                traffic_viewer_position(&peer.pose).map(|position| (peer.pose.id, position))
             })
-            .map(|peer| (peer.pose.id, [peer.pose.x, peer.pose.y, peer.pose.z]))
             .collect();
         let bytes = lan.traffic_publish(&self.table, &viewers, dt, TRAFFIC_BYTES_PER_SECOND);
         self.sent_bytes += bytes as u64;
@@ -140,6 +145,23 @@ mod tests {
     use super::*;
     use omsi_sim::ai_traffic::setup::RandomTypes;
     use omsi_sim::traffic::Network;
+
+    #[test]
+    fn walking_spectators_receive_scheduled_traffic_without_a_bus() {
+        let pose = omsi_net::Pose {
+            walker: Some(omsi_net::Walker {
+                x: 4_000.0,
+                y: 20.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(!pose.has_vehicle());
+        let at = traffic_viewer_position(&pose).expect("walker position");
+        assert_eq!(at[0], 4_000.0);
+        assert_eq!(at[1], 20.0);
+        assert!(traffic_viewer_position(&omsi_net::Pose::default()).is_none());
+    }
 
     #[test]
     fn empty_host_does_not_invent_ai_cars_or_traffic_rows() {
