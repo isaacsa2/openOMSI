@@ -25,6 +25,21 @@ fn location(f: &OnFoot, h: &Humans) -> (DVec3, Option<BusId>) {
 }
 
 impl App {
+    fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
+        let owner = match self.foot_bus() {
+            Some(BusId::Ai(id)) => crate::humans::remote_bus_player(id),
+            _ => None,
+        };
+        let Some(lan) = self.net.lan.as_mut() else { return };
+        let Some(owner) = owner.filter(|id| *id != lan.my_id) else { return };
+        let command = match action {
+            omsi_lan::coop_permissions::CabinAction::Door(index) => format!("coop-door {index}"),
+            omsi_lan::coop_permissions::CabinAction::Window(index) => format!("coop-window {index}"),
+        };
+        lan.command(owner, &command);
+        self.service_msg = Some(("Cab control requested (bus owner must allow co-op)".into(), 3.0));
+    }
+
     pub(crate) fn request_passenger_door(&mut self) {
         let target = self
             .session
