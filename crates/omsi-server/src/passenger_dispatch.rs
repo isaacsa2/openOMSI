@@ -11,6 +11,7 @@
 
 use glam::DVec3;
 use omsi_net::{LanSession, Pose};
+use omsi_sim::people::{HandedPerson, PeopleSim};
 use std::collections::{HashMap, HashSet};
 
 const SAME_STOP_RADIUS: f64 = 60.0;
@@ -132,6 +133,9 @@ struct Visit {
 pub(crate) struct PassengerDispatch {
     drivers: HashMap<u32, Driver>,
     visits: HashMap<StopService, Visit>,
+    /// Original server-owned people, pending the client's explicit physical
+    /// boarding confirmation or cancellation. A GRANT alone is not boarding.
+    escrow: HashMap<u32, HashMap<u32, HandedPerson>>,
 }
 
 impl PassengerDispatch {
@@ -295,6 +299,66 @@ impl PassengerDispatch {
             }
         }
         chosen
+    }
+
+    /// Retain original, server-owned waiting people after GRANT. The client
+    /// can return only its own IDs, never someone else's passengers.
+    pub(crate) fn escrow_granted(&mut self, player: u32, granted: Vec<HandedPerson>) {
+        let holding = self.escrow.entry(player).or_default();
+        for saved in granted {
+            holding.insert(saved.person.id, saved);
+        }
+    }
+
+    /// The client has confirmed crossing into its vehicle. Discard only
+    /// escrow entries actually owned by this peer; duplicates are idempotent.
+    pub(crate) fn confirm_boarded(&mut self, player: u32, ids: &[u32]) {
+        let Some(holding) = self.escrow.get_mut(&player) else {
+            return;
+        };
+        for id in ids {
+            holding.remove(id);
+        }
+        if holding.is_empty() {
+            self.escrow.remove(&player);
+        }
+    }
+
+    /// A client cancelled a GRANT while its person was still outside the bus.
+    /// Return them to their original stop once only, keeping stable IDs.
+    /// Failure to restore (e.g. streamed-out stop) is not acknowledged and
+    /// retains the escrow so the client can retry later.
+    pub(crate) fn return_unboarded(
+        &mut self,
+        player: u32,
+        ids: &[u32],
+        people: &mut PeopleSim,
+    ) -> Vec<u32> {
+        let mut acknowledged = Vec::new();
+        for id in ids {
+            let saved = self
+                .escrow
+                .get_mut(&player)
+                .and_then(|holding| holding.remove(id));
+            match saved {
+                Some(saved) => {
+                    // Do not throw away the original person if their stop was
+                    // removed by streaming or a Chrono map swap.
+                    if !people.stops.contains_key(&saved.stop.unwrap_or(i64::MIN)) {
+                        self.escrow.entry(player).or_default().insert(*id, saved);
+                        continue;
+                    }
+                    if people.restore_unboarded(saved) {
+                        acknowledged.push(*id);
+                    }
+                }
+                None => acknowledged.push(*id), // repeated UDP return
+            }
+        }
+        if self.escrow.get(&player).is_some_and(HashMap::is_empty) {
+            self.escrow.remove(&player);
+        }
+        acknowledged
     }
 
     /// Record GRANT, not an actual boarding. Occupancy changes only when the
