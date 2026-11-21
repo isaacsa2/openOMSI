@@ -65,6 +65,7 @@ use omsi_input::keys;
 // (LAN play: the session is omsi-lan's `game`, see `lan_play`; the shared world's mirror
 // stays here: it drives the app's `Traffic`, `Humans` and their view directly)
 mod lan_play;
+mod coop;
 use lan_play as lan;
 mod lan_world;
 use omsi_scene::lights;
