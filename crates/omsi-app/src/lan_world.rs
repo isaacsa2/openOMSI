@@ -109,6 +109,63 @@ struct View {
 pub(crate) use omsi_lan::mirror::PlayClock;
 use omsi_lan::mirror::{Track, fnv, lerp_angle, local_file, net_activity, quant, sim_activity};
 
+/// Keep the last host-authoritative road height when a packet arrives late.
+/// The traffic table extrapolates X/Y and heading for smooth remote driving,
+/// but its inferred vertical velocity is not a road/bridge collision query.
+/// Never snap to the client's own terrain: its tiles or mods may differ.
+fn mirror_vehicle_position(
+    pose: &omsi_net::traffic_table::Pose,
+    last_host_z: Option<f64>,
+    kind: omsi_net::traffic_table::Kind,
+) -> DVec3 {
+    let z = if pose.extrapolated && kind != omsi_net::traffic_table::Kind::Rail {
+        last_host_z.filter(|z| z.is_finite()).unwrap_or(pose.pos[2])
+    } else {
+        pose.pos[2]
+    };
+    DVec3::new(pose.pos[0], pose.pos[1], z)
+}
+
+#[cfg(test)]
+mod mirror_vehicle_height_tests {
+    use super::mirror_vehicle_position;
+    use omsi_net::traffic_table::{Kind, Pose};
+
+    fn pose(z: f64, extrapolated: bool) -> Pose {
+        Pose {
+            pos: [10.0, 20.0, z],
+            heading: 40.0,
+            pitch: 0.0,
+            bank: 0.0,
+            speed: 15.0,
+            steer: 0.0,
+            blinker: 0,
+            brake: false,
+            lights: false,
+            at_station: 0,
+            extrapolated,
+            teleported: false,
+        }
+    }
+
+    #[test]
+    fn road_cars_hold_authoritative_height_during_network_gaps() {
+        for kind in [Kind::Car, Kind::Bus, Kind::Truck, Kind::Motorcycle] {
+            let low = mirror_vehicle_position(&pose(7.6, true), Some(10.0), kind);
+            let high = mirror_vehicle_position(&pose(12.4, true), Some(10.0), kind);
+            assert_eq!((low.x, low.y, low.z), (10.0, 20.0, 10.0));
+            assert_eq!(high.z, 10.0);
+        }
+    }
+
+    #[test]
+    fn interpolated_heights_and_rail_motion_are_unchanged() {
+        assert_eq!(mirror_vehicle_position(&pose(8.5, false), Some(10.0), Kind::Car).z, 8.5);
+        assert_eq!(mirror_vehicle_position(&pose(8.5, true), Some(10.0), Kind::Rail).z, 8.5);
+        assert_eq!(mirror_vehicle_position(&pose(8.5, true), None, Kind::Car).z, 8.5);
+    }
+}
+
 /// A client's copy of the host's world.
 #[derive(Default)]
 struct Mirror {
@@ -920,7 +977,11 @@ impl Mirror {
         for (i, id, c) in &work {
             let car = &mut t.cars[*i];
             let before = car.vehicle.position;
-            let now_p = DVec3::new(c.pos[0], c.pos[1], c.pos[2]);
+            let (last_z, kind) = TrafficId::from_raw(*id)
+                .and_then(|tid| table.get(tid))
+                .map(|row| (row.latest().map(|last| last.position()[2]), row.kind))
+                .unwrap_or((None, omsi_net::traffic_table::Kind::Car));
+            let now_p = mirror_vehicle_position(c, last_z, kind);
             let moved = (now_p - before).truncate().length() as f32;
             let odo = m.odometer.entry(*id).or_insert(0.0);
             if moved < 30.0 {
