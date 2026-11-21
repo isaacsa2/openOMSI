@@ -26,6 +26,20 @@ fn main() -> Result<()> {
     let _ = log::set_logger(&LOGGER);
     log::set_max_level(log::LevelFilter::Info);
     let mut args = std::env::args().skip(1);
+    let build = option_env!("OPENOMSI_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    if let Some(flag) = args.next() {
+        if flag == "--version" && args.next().is_none() {
+            println!("{build}");
+            return Ok(());
+        }
+        if flag == "--self-test" && args.next().is_none() {
+            let exe = std::env::current_exe().context("locating headless executable")?;
+            anyhow::ensure!(exe.is_file(), "headless executable is not readable");
+            println!("headless {build}: self-test passed");
+            return Ok(());
+        }
+        args = std::env::args().skip(1);
+    }
     let Some(root) = args.next() else {
         bail!(
             "Usage: omsi-server <OMSI2-root> <server.cfg> (--experimental-free-roam | --experimental-simulation) [--ticks N]"
