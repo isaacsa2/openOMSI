@@ -86,6 +86,9 @@ enum Builtin {
     Stop,
     Reload,
     Restart,
+    UpdateCheck,
+    UpdateDownload,
+    UpdateStatus,
     TimingStart,
     TimingStop,
     TimingReset,
@@ -101,6 +104,9 @@ fn builtin(command: &str) -> Option<Builtin> {
         "stop" => Some(Builtin::Stop),
         "reload" => Some(Builtin::Reload),
         "restart" => Some(Builtin::Restart),
+        "update" | "update check" => Some(Builtin::UpdateCheck),
+        "update download" => Some(Builtin::UpdateDownload),
+        "update status" => Some(Builtin::UpdateStatus),
         "timings on" | "timings start" | "spark start" | "profile start" => {
             Some(Builtin::TimingStart)
         }
@@ -123,8 +129,9 @@ pub fn run_builtin(
 ) -> bool {
     match builtin(command) {
         Some(Builtin::Help) => {
-            log::info!("server console commands: help, list, status, tps, reload, restart, stop");
+            log::info!("server console commands: help, list, status, tps, reload, restart, update, stop");
             log::info!("timings on|off|report|reset (also: spark start|stop|report|reset)");
+            log::info!("update [check|status|download]: official headless ZIP, SHA-256 verified; install only after stopping the process");
             log::info!(
                 "administration: say <message>, kick <id> [reason], ban <id> [reason], unban <ban-id>, hwban <id> <session|all> [duration] [reason]"
             );
@@ -224,6 +231,9 @@ pub fn run_builtin(
                 "server console: in-session simulation restart requested (LAN identity retained)"
             );
         }
+        Some(Builtin::UpdateCheck) => crate::updates::start(false),
+        Some(Builtin::UpdateDownload) => crate::updates::start(true),
+        Some(Builtin::UpdateStatus) => crate::updates::report(),
         Some(Builtin::Stop) => {
             STOP.store(true, Ordering::SeqCst);
             log::info!("server console: graceful shutdown requested");
@@ -262,6 +272,11 @@ mod tests {
         assert_eq!(builtin("stop"), Some(Builtin::Stop));
         assert_eq!(builtin("reload"), Some(Builtin::Reload));
         assert_eq!(builtin("restart"), Some(Builtin::Restart));
+        assert_eq!(builtin("update"), Some(Builtin::UpdateCheck));
+        assert_eq!(builtin("update check"), Some(Builtin::UpdateCheck));
+        assert_eq!(builtin("update download"), Some(Builtin::UpdateDownload));
+        assert_eq!(builtin("update status"), Some(Builtin::UpdateStatus));
+        assert_eq!(builtin("update apply"), None);
         assert_eq!(builtin("restart now"), None);
         assert_eq!(normalize(" /reload "), Some("reload"));
         assert_eq!(builtin("reload now"), None);
