@@ -7,7 +7,6 @@ impl App {
     /// vehicle for each of them.
     pub(crate) fn tick_lan(&mut self, dt: f32) {
         let lan_tick_started = std::time::Instant::now();
-        self.coop_tick();
         if self.net.lan.is_none() {
             omsi_lan::commands::set_speed_limit_kmh(0);
             self.net.speed_limit_welcome = None;
@@ -151,10 +150,6 @@ impl App {
     /// (`omsi_lan::commands::Command`), carried out here.
     pub(crate) fn lan_command(&mut self, from: u32, text: &str) {
         use omsi_lan::commands::Command;
-        if text.starts_with("coop-control ") || text.starts_with("coop-role ") {
-            self.coop_command(from, text);
-            return;
-        }
         if let Some(request) = text.strip_prefix("pax_request ") {
             self.receive_passenger_door_request(from, request);
             return;
