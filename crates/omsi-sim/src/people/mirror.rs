@@ -144,9 +144,30 @@ impl PeopleSim {
     /// a stop, or aboard a timetable bus - not the riders of our own bus, which the others
     /// see from outside only.
     pub fn lan_people(&self, near: DVec3, radius: f64) -> Vec<LanPerson> {
+        self.lan_people_selected(near, radius, 0..self.people.len())
+    }
+
+    /// A caller with an XY spatial broad-phase can pass candidate indices.
+    /// The same exact 3D check, identity and original list order apply.
+    /// Legacy graphical LAN still calls lan_people without a spatial index.
+    pub fn lan_people_subset(
+        &self,
+        near: DVec3,
+        radius: f64,
+        indices: &[usize],
+    ) -> Vec<LanPerson> {
+        self.lan_people_selected(near, radius, indices.iter().copied())
+    }
+
+    fn lan_people_selected(
+        &self,
+        near: DVec3,
+        radius: f64,
+        indices: impl Iterator<Item = usize>,
+    ) -> Vec<LanPerson> {
         let r2 = radius * radius;
-        self.people
-            .iter()
+        indices
+            .filter_map(|i| self.people.get(i))
             .filter(|p| p.puppet.is_none() && !p.remote)
             .filter(|p| (p.position - near).length_squared() < r2)
             .filter_map(|p| {
