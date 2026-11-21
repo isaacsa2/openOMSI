@@ -3,8 +3,10 @@
 use super::*;
 
 // (moved to `app_impl` with the methods they serve; kept reachable at their old path)
-pub(crate) use crate::app_impl::{cab_look_yaw, chase_orbit_step, ease_look, gate_gear_var, look_key_is, look_key_of, on_server, reset_blend, swap_view_look};
-
+pub(crate) use crate::app_impl::{
+    cab_look_yaw, chase_orbit_step, ease_look, gate_gear_var, look_key_is, look_key_of, on_server,
+    reset_blend, swap_view_look,
+};
 
 // (the game's own action names live with the controllers: `omsi-input`)
 pub(crate) use omsi_input::actions::is_game_action;
@@ -12,11 +14,22 @@ pub(crate) use omsi_input::actions::is_game_action;
 /// How far (m) a click reaches a scenery object with a `[mouseevent]`.
 pub(crate) const SCENERY_OBJECT_REACH: f32 = 50.0;
 
+#[rustfmt::skip]
 impl App {
-    pub(crate) fn passenger_request_key(&self, code: KeyCode, shift: bool, ctrl: bool, alt: bool) -> bool {
+    pub(crate) fn passenger_request_key(
+        &self,
+        code: KeyCode,
+        shift: bool,
+        ctrl: bool,
+        alt: bool,
+    ) -> bool {
         let modifier = omsi_content::input::chord(shift, ctrl, alt) & !keys::own_modifier_bit(code);
-        keys::dik_code(code).is_some_and(|scan| self.input.game_keys.iter().any(|binding|
-            binding.action == "pax_door_request" && binding_is_key(binding, code, scan, modifier)))
+        keys::dik_code(code).is_some_and(|scan| {
+            self.input.game_keys.iter().any(|binding| {
+                binding.action == "pax_door_request"
+                    && binding_is_key(binding, code, scan, modifier)
+            })
+        })
     }
 
     /// A key of the window, or of an `OMSI_INPUT` script.
@@ -1302,6 +1315,11 @@ impl InputState {
     /// steering) is still free for it: neither bound by the player to something of their
     /// own nor `action` bound to another key in keyboard.cfg.
     pub(crate) fn key_left_free(&self, code: KeyCode, action: &str) -> bool {
-        key_left_free(keys::dik_code(code), action, &self.own_keys, &self.game_keys)
+        key_left_free(
+            keys::dik_code(code),
+            action,
+            &self.own_keys,
+            &self.game_keys,
+        )
     }
 }

@@ -1,7 +1,9 @@
 //! The mouse: the cursor, the buttons, dragging switches, the pages on scenery objects.
 
 use super::*;
+use omsi_input::mouse_math::{drag_heading, look_deg_per_px, part_in_reach};
 
+#[rustfmt::skip]
 impl App {
     /// The cursor moved to (x, y) in physical pixels - from the window or an `OMSI_INPUT` script.
     /// The cursor moved, and the switch under it is named at once (touch input and
@@ -822,21 +824,23 @@ const HTML_OBJECT_REACH: f32 = 4.0;
 impl App {
     /// A finger dragged over the photo (physical pixels): the photo camera turns.
     pub(crate) fn photo_look_touch(&mut self, dx: f32, dy: f32) {
-        let scale = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0).max(0.1);
-        let k = self.photo.as_ref().map(|ph| look_deg_per_px(ph.cam.fov_deg)).unwrap_or(0.0) * self.settings.look_sens * 1.6;
+        let scale = self
+            .window
+            .as_ref()
+            .map(|w| w.scale_factor() as f32)
+            .unwrap_or(1.0)
+            .max(0.1);
+        let k = self
+            .photo
+            .as_ref()
+            .map(|ph| look_deg_per_px(ph.cam.fov_deg))
+            .unwrap_or(0.0)
+            * self.settings.look_sens
+            * 1.6;
         if let Some(ph) = self.photo.as_mut() {
             ph.look(dx / scale * k, dy / scale * k);
         }
     }
-}
-
-fn look_deg_per_px(fov_deg: f32) -> f32 {
-    fov_deg / 78.75
-}
-
-fn drag_heading(press: [f32; 2], release: [f32; 2], from: glam::DVec2, to: Option<glam::DVec2>) -> Option<f64> {
-    let d = to.filter(|_| (release[0] - press[0]).hypot(release[1] - press[1]) > 12.0)? - from;
-    Some(d.x.atan2(d.y).to_degrees())
 }
 
 #[cfg(test)]
@@ -847,15 +851,6 @@ mod look_tests;
 
 /// A part of a vehicle (its origin, heading in degrees and `[boundingbox]`) is in reach of
 /// a person standing at `eye`: within 3 m of the box's half length round its centre.
-fn part_in_reach(eye: glam::DVec3, at: glam::DVec3, heading: f64, bb: Option<[f32; 6]>) -> bool {
-    let bb = bb.unwrap_or([2.5, 12.0, 3.0, 0.0, 0.0, 1.5]);
-    let h = heading.to_radians();
-    let (fwd, right) = (glam::DVec2::new(h.sin(), h.cos()), glam::DVec2::new(h.cos(), -h.sin()));
-    let centre = at + (right * bb[3] as f64 + fwd * bb[4] as f64).extend(bb[5] as f64);
-    let reach = (bb[0].max(bb[1]) as f64) * 0.5 + 3.0;
-    (eye - centre).length() < reach
-}
-
 #[cfg(test)]
 mod reach_tests;
 
@@ -888,42 +883,4 @@ impl App {
 }
 
 #[cfg(all(test, windows))]
-mod vr_drag_tests {
-    use super::*;
-    use clap::Parser;
-
-    fn app() -> App {
-        crate::assemble_app(crate::Args::parse_from(["openomsi"]), Default::default())
-    }
-
-    #[test]
-    fn headset_mouse_moves_reach_the_held_control() {
-        let mut app = app();
-        app.input.cursor = (400.0, 300.0);
-        app.input.dragging = true;
-        app.xr.vr_cursor_physical = Some((100.0, 100.0));
-        app.on_vr_cursor_moved(102.0, 97.0);
-        assert_eq!(app.input.cursor, (402.0, 297.0));
-        assert_eq!(app.input.drag_delta, (2.0, -3.0));
-        // Multiple moves before the frame are accumulated, never replaced.
-        app.on_vr_cursor_moved(103.0, 98.0);
-        assert_eq!(app.input.drag_delta, (3.0, -2.0));
-    }
-
-    #[test]
-    fn cursor_warp_does_not_turn_the_control_or_move_the_virtual_pointer() {
-        let mut app = app();
-        app.input.cursor = (400.0, 300.0);
-        app.input.dragging = true;
-        app.xr.vr_cursor_physical = Some((990.0, 700.0));
-        app.xr.vr_cursor_warp_pending = Some((500.0, 400.0));
-        app.on_vr_cursor_moved(500.0, 400.0);
-        assert_eq!(app.input.cursor, (400.0, 300.0));
-        assert_eq!(app.input.drag_delta, (0.0, 0.0));
-        app.on_vr_cursor_moved(503.0, 398.0);
-        assert_eq!(app.input.drag_delta, (3.0, -2.0));
-        app.input.dragging = false;
-        app.on_vr_cursor_moved(506.0, 399.0);
-        assert_eq!(app.input.drag_delta, (3.0, -2.0));
-    }
-}
+mod vr_drag_tests;

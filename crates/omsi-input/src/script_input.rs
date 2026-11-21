@@ -44,12 +44,7 @@ pub fn flies_free_camera(code: KeyCode) -> bool {
 /// modifiers `m`: its own scan code or, for a Shift, Ctrl or Alt key, OMSI's code for either
 /// side ("Alt (both)"), and a modifier key's binding written with its own bit counts too
 /// (OMSI's files have "Shift (both)" with the Shift flag; #2003, #2392).
-pub fn binding_is_key(
-    b: &omsi_content::KeyBinding,
-    code: KeyCode,
-    scan: i32,
-    m: i32,
-) -> bool {
+pub fn binding_is_key(b: &omsi_content::KeyBinding, code: KeyCode, scan: i32, m: i32) -> bool {
     let ob = keys::own_modifier_bit(code);
     (b.scan_code == scan || keys::both_code(code) == Some(b.scan_code))
         && (b.matches(m) || ob != 0 && b.matches(m | ob))

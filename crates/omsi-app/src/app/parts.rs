@@ -55,7 +55,8 @@ pub(crate) struct WeatherPart<'p> {
     pub(crate) cloud_drift: &'p mut [f64; 4],
     pub(crate) weather_blend: &'p mut Option<crate::weather_cycle::Blend>,
     pub(crate) weather_cycle: &'p mut Option<crate::weather_cycle::Cycle>,
-    pub(crate) metar_rx: &'p mut Option<std::sync::mpsc::Receiver<Option<omsi_content::weather::Weather>>>,
+    pub(crate) metar_rx:
+        &'p mut Option<std::sync::mpsc::Receiver<Option<omsi_content::weather::Weather>>>,
     pub(crate) metar_once: &'p mut bool,
     pub(crate) metar_next: &'p mut f64,
     pub(crate) tomorrow: &'p mut crate::weather_tomorrow::Tomorrow,
@@ -164,6 +165,7 @@ pub(crate) struct Parts<'p> {
     pub(crate) perf: PerfPart<'p>,
 }
 
+#[rustfmt::skip]
 impl App {
     /// The `App` taken apart by group (see the module's notes).
     pub(crate) fn parts(&mut self) -> Parts<'_> {
@@ -228,22 +230,54 @@ macro_rules! part_ty {
 
 /// The group of a part's name (`stage_ctx!`).
 macro_rules! part_group {
-    (input) => { $crate::frame_stages::Group::Input };
-    (menus) => { $crate::frame_stages::Group::Menus };
-    (clock) => { $crate::frame_stages::Group::Clock };
-    (weather) => { $crate::frame_stages::Group::Weather };
-    (world) => { $crate::frame_stages::Group::World };
-    (traffic) => { $crate::frame_stages::Group::Traffic };
-    (player) => { $crate::frame_stages::Group::Player };
-    (people) => { $crate::frame_stages::Group::People };
-    (duty) => { $crate::frame_stages::Group::Duty };
-    (net) => { $crate::frame_stages::Group::Net };
-    (integrations) => { $crate::frame_stages::Group::Integrations };
-    (sound) => { $crate::frame_stages::Group::Sound };
-    (view) => { $crate::frame_stages::Group::View };
-    (ui) => { $crate::frame_stages::Group::Ui };
-    (gfx) => { $crate::frame_stages::Group::Gfx };
-    (perf) => { $crate::frame_stages::Group::Perf };
+    (input) => {
+        $crate::frame_stages::Group::Input
+    };
+    (menus) => {
+        $crate::frame_stages::Group::Menus
+    };
+    (clock) => {
+        $crate::frame_stages::Group::Clock
+    };
+    (weather) => {
+        $crate::frame_stages::Group::Weather
+    };
+    (world) => {
+        $crate::frame_stages::Group::World
+    };
+    (traffic) => {
+        $crate::frame_stages::Group::Traffic
+    };
+    (player) => {
+        $crate::frame_stages::Group::Player
+    };
+    (people) => {
+        $crate::frame_stages::Group::People
+    };
+    (duty) => {
+        $crate::frame_stages::Group::Duty
+    };
+    (net) => {
+        $crate::frame_stages::Group::Net
+    };
+    (integrations) => {
+        $crate::frame_stages::Group::Integrations
+    };
+    (sound) => {
+        $crate::frame_stages::Group::Sound
+    };
+    (view) => {
+        $crate::frame_stages::Group::View
+    };
+    (ui) => {
+        $crate::frame_stages::Group::Ui
+    };
+    (gfx) => {
+        $crate::frame_stages::Group::Gfx
+    };
+    (perf) => {
+        $crate::frame_stages::Group::Perf
+    };
 }
 
 /// A stage's context: the groups it reads (shared borrows) and writes (mutable borrows) of
@@ -292,15 +326,7 @@ macro_rules! narrow {
 pub(crate) use {narrow, part_group, part_ty, stage_ctx};
 
 /// Every group has its part (a group without one could not be handed to a stage).
+
 #[cfg(test)]
-#[test]
-fn every_group_has_a_part() {
-    use crate::frame_stages::Group::*;
-    let all = [Input, Menus, Clock, Weather, World, Traffic, Player, People, Duty, Net, Integrations, Sound, View, Ui, Gfx, Perf];
-    stage_ctx!(Everything {
-        reads: [],
-        writes: [input, menus, clock, weather, world, traffic, player, people, duty, net, integrations, sound, view, ui, gfx, perf]
-    });
-    assert_eq!(Everything::WRITES, all);
-    assert!(Everything::READS.is_empty());
-}
+#[path = "parts_tests.rs"]
+mod parts_tests;
