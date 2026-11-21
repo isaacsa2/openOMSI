@@ -50,6 +50,17 @@ fn a_cancelled_grant_returns_only_from_its_authenticated_owner() {
 }
 
 #[test]
+fn an_unrelated_udp_socket_cannot_acknowledge_a_passenger_return() {
+    let (_host, mut client) = connected_pair();
+    let rogue = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    rogue
+        .send_to(b"PAXACK|100", client.local_addr().unwrap())
+        .unwrap();
+    client.tick(0.01, &Pose::default());
+    assert!(client.take_pax_acks().is_empty());
+}
+
+#[test]
 fn physical_boarding_uses_a_distinct_confirmation_from_grant() {
     let (mut host, client) = connected_pair();
     client.confirm_boarded(&[100]);
