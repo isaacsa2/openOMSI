@@ -3,7 +3,9 @@
 //! relative to the content roots, and the activities on the wire and in the simulation.
 
 use omsi_net::traffic_table::Kind;
-use omsi_net::world::Activity as NetActivity;
+use omsi_net::world::{self as nw, Activity as NetActivity, PersonPlace, PersonState};
+use omsi_sim::people::MirrorPose;
+use glam::{DVec2, DVec3, Vec3};
 use omsi_sim::human::Activity;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -54,6 +56,116 @@ pub fn vehicle_position(
         }
     }
     position
+}
+
+/// What decides whether a person's pose is sent again (see `quant`).
+pub fn person_q(p: &PersonState) -> [i64; 4] {
+    let q = match p.place {
+        PersonPlace::Foot {
+            x, y, z, heading, ..
+        } => quant(x, y, z, heading as f64),
+        PersonPlace::Aboard {
+            bus,
+            x,
+            y,
+            z,
+            heading,
+            ..
+        } => quant(
+            x as f64,
+            y as f64,
+            z as f64,
+            heading as f64 + (bus & 0xFFFF) as f64 * 1000.0,
+        ),
+    };
+    let act = match p.activity {
+        NetActivity::Stand => 0,
+        NetActivity::Walk => 1,
+        NetActivity::Sit => 2,
+        NetActivity::Run => 3,
+    };
+    [q[0], q[1], q[2], q[3] ^ (act << 40)]
+}
+
+
+/// Where a person is at `k` between two of the host's poses.
+pub fn person_pose(a: &PersonState, b: &PersonState, k: f64) -> MirrorPose {
+    match (a.place, b.place) {
+        (
+            PersonPlace::Foot {
+                x: ax,
+                y: ay,
+                z: az,
+                heading: ah,
+                ..
+            },
+            PersonPlace::Foot {
+                x,
+                y,
+                z,
+                heading,
+                speed,
+                waiting,
+            },
+        ) => {
+            let jump = DVec2::new(x - ax, y - ay).length() > 8.0;
+            let k = if jump {
+                1.0
+            } else if speed < 0.05 {
+                k.min(1.0)
+            } else {
+                k
+            };
+            let pos = DVec3::new(
+                ax + (x - ax) * k,
+                ay + (y - ay) * k,
+                az + (z - az) * k.min(1.0),
+            );
+            let h = lerp_angle(ah as f64, heading as f64, k.min(1.0));
+            let dir = DVec2::new(x - ax, y - ay);
+            let vel = if speed > 0.05 && dir.length() > 1.0e-3 {
+                dir.normalize() * speed as f64
+            } else {
+                DVec2::ZERO
+            };
+            MirrorPose {
+                pos,
+                heading: h,
+                vel,
+                activity: sim_activity(b.activity),
+                aboard: None,
+                waiting: waiting.map(|(s, k)| (s, k as usize)),
+            }
+        }
+        (
+            _,
+            PersonPlace::Aboard {
+                bus,
+                x,
+                y,
+                z,
+                heading,
+                seat,
+            },
+        ) => MirrorPose {
+            pos: DVec3::ZERO,
+            heading: 0.0,
+            vel: DVec2::ZERO,
+            activity: sim_activity(b.activity),
+            aboard: Some((
+                if bus & nw::PLAYER_BUS != 0 {
+                    omsi_sim::people::remote_bus_id(bus & nw::MAX_ID)
+                } else {
+                    bus as u64
+                },
+                Vec3::new(x, y, z),
+                heading as f64,
+                seat.map(|s| s as usize),
+            )),
+            waiting: None,
+        },
+        (_, PersonPlace::Foot { .. }) => person_pose(b, b, 1.0),
+    }
 }
 
 /// How long a client guesses on past the last frame of something moving (ms).
