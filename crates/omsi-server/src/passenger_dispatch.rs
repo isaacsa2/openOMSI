@@ -373,6 +373,7 @@ mod tests {
     fn existing_pose_fields_identify_service_and_reported_occupancy() {
         let pose = Pose {
             bus: "Vehicles/Bus.bus".into(),
+            flags: omsi_net::FLAG_VEHICLE,
             tour: "233/circular-1".into(),
             destination: "  Terminal   Norte ".into(),
             passengers: 18,
