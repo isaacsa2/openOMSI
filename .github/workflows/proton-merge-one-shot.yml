@@ -1,0 +1,34 @@
+name: One-shot Proton upstream sync
+
+on:
+  push:
+    branches:
+      - preview/next-test-build
+
+permissions:
+  contents: write
+
+jobs:
+  merge-main:
+    if: github.repository == 'isaacsa2/openOMSI' && contains(github.event.head_commit.message, '[proton-merge:run]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Merge latest fork main (report unresolved files without taking sides)
+        run: |
+          git fetch origin main
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if ! git merge --no-edit origin/main; then
+            echo '::error::Merge conflicts need source-aware resolution; no merge will be pushed.'
+            echo 'CONFLICTED FILES:'
+            git diff --name-only --diff-filter=U
+            echo 'MERGE STATUS:'
+            git status --short
+            exit 1
+          fi
+          git push origin HEAD:preview/next-test-build
