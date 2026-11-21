@@ -151,6 +151,17 @@ pub(crate) fn update_host_interest_with_dispatch(
     // The existing Pose.passengers count is the player's onboard report.
     // Do not infer that everyone receiving GRANT actually crossed the door.
     dispatch.observe(lan);
+    // A confirmed boarding discards its original waiting-person snapshot.
+    // A cancelled GRANT returns that same person to its old stop instead.
+    // Both messages are authenticated by the LAN session's peer checks.
+    for (player, ids) in lan.take_pax_boarded() {
+        dispatch.confirm_boarded(player, &ids);
+        lan.acknowledge_returns(player, &ids);
+    }
+    for (player, ids) in lan.take_pax_returns() {
+        let restored = dispatch.return_unboarded(player, &ids, people);
+        lan.acknowledge_returns(player, &restored);
+    }
     // Keep the authoritative claim decision on the same physics tick as
     // PeopleSim::hand_over. Never trust a caller-supplied passenger ID alone.
     let claims = lan.take_claims();
@@ -207,7 +218,9 @@ pub(crate) fn update_host_interest_with_dispatch(
             &stop_counts,
             &stop_positions,
         );
-        let granted = people.hand_over(player, &coordinated);
+        let saved = people.hand_over_saved(player, &coordinated);
+        let granted: Vec<u32> = saved.iter().map(|held| held.person.id).collect();
+        dispatch.escrow_granted(player, saved);
         dispatch.granted(player, &granted, &waiting);
         for id in &granted {
             // Multiple peers may claim in one network tick. A transferred
