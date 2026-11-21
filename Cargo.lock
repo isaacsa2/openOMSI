@@ -4534,6 +4534,8 @@ dependencies = [
  "omsi-sim",
  "omsi-vehicle",
  "omsi-world",
+ "serde_json",
+ "sha2",
  "ureq",
 ]
 
