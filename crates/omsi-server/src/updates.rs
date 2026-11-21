@@ -206,6 +206,13 @@ fn stage(candidate: &Candidate) -> Result<PathBuf> {
         fs::write(dir.join(format!("{}.sha256", candidate.filename)),
             format!("{}  {}\n", candidate.sha256, candidate.filename))
             .context("writing verified checksum sidecar")?;
+        let marker = dir.join("ready.txt");
+        let temporary = dir.join("ready.txt.tmp");
+        fs::write(
+            &temporary,
+            format!("{}\n{}\n{}\n", candidate.filename, candidate.sha256, candidate.version),
+        ).context("writing staged update marker")?;
+        fs::rename(&temporary, &marker).context("publishing verified staged update")?;
         Ok(())
     })();
     if result.is_err() {
