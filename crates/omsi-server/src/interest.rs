@@ -5,6 +5,7 @@
 //! host may process boarding claims; the transport acknowledges each claim
 //! using the existing network protocol and ownership rules.
 
+use crate::passenger_dispatch::PassengerDispatch;
 use glam::DVec3;
 use omsi_net::{LanSession, Pose, Role};
 use omsi_sim::ai_traffic::TrafficSim;
@@ -97,6 +98,18 @@ pub fn update_host_interest(
     traffic: &mut TrafficSim,
     people: &mut PeopleSim,
 ) -> InterestUpdate {
+    let mut dispatch = PassengerDispatch::default();
+    update_host_interest_with_dispatch(lan, traffic, people, &mut dispatch)
+}
+
+/// Persistent passenger ledger belongs to the native CpuSimulation, not to
+/// the transport or a single ephemeral CLAIM datagram.
+pub(crate) fn update_host_interest_with_dispatch(
+    lan: &mut LanSession,
+    traffic: &mut TrafficSim,
+    people: &mut PeopleSim,
+    dispatch: &mut PassengerDispatch,
+) -> InterestUpdate {
     if lan.role != Role::Host {
         return InterestUpdate::default();
     }
@@ -135,6 +148,9 @@ pub fn update_host_interest(
         people.lan_centers.push(position);
     }
 
+    // The existing Pose.passengers count is the player's onboard report.
+    // Do not infer that everyone receiving GRANT actually crossed the door.
+    dispatch.observe(lan);
     // Keep the authoritative claim decision on the same physics tick as
     // PeopleSim::hand_over. Never trust a caller-supplied passenger ID alone.
     let claims = lan.take_claims();
@@ -149,6 +165,25 @@ pub fn update_host_interest(
         .collect();
     let passenger_positions: HashMap<u32, DVec3> =
         people.people.iter().map(|p| (p.id, p.position)).collect();
+    // Only genuinely waiting people with a known physical platform belong
+    // to the fair-share pool. Other people stay subject to hand_over checks.
+    let mut waiting = HashMap::new();
+    let mut stop_counts: HashMap<i64, usize> = HashMap::new();
+    for (index, person) in people.people.iter().enumerate() {
+        if let Some(pax) = people.pax(index) {
+            if pax.task == omsi_sim::people::pax::Task::WaitingForBus {
+                if let Some(stop) = pax.stop {
+                    waiting.insert(person.id, stop);
+                    *stop_counts.entry(stop).or_default() += 1;
+                }
+            }
+        }
+    }
+    let stop_positions: HashMap<i64, DVec3> = people
+        .stops
+        .iter()
+        .map(|(&id, stop)| (id, stop.pos))
+        .collect();
     for (player, requested) in claims {
         summary.boarding_claims += requested.len();
         let eligible: Vec<u32> = if let Some(&bus) = buses.get(&player) {
@@ -165,7 +200,22 @@ pub fn update_host_interest(
         } else {
             Vec::new()
         };
-        let granted = people.hand_over(player, &eligible);
+        let coordinated = dispatch.choose(
+            player,
+            &eligible,
+            &waiting,
+            &stop_counts,
+            &stop_positions,
+        );
+        let granted = people.hand_over(player, &coordinated);
+        dispatch.granted(player, &granted, &waiting);
+        for id in &granted {
+            if let Some(stop) = waiting.get(id) {
+                if let Some(count) = stop_counts.get_mut(stop) {
+                    *count = count.saturating_sub(1);
+                }
+            }
+        }
         let granted_set: HashSet<u32> = granted.iter().copied().collect();
         let denied: Vec<u32> = requested
             .iter()
