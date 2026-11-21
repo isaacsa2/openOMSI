@@ -612,6 +612,31 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
 
 /// The game's App for `args` and `settings`, every part of it as it starts (the window comes
 /// later).
+fn initial_view_state() -> ViewState {
+    ViewState {
+        starting: None,
+        speed: 30.0,
+        f1_reset: None,
+        view_yaw: 0.0,
+        view_fov: None,
+        head_idle_hold: Default::default(),
+        ego: false,
+        flashlight: false,
+        flashlight_aim: None,
+        in_cab: false,
+        heard_inside: false,
+        look: (0.0, 0.0),
+        look_smooth: (0.0, 0.0),
+        view_looks: Default::default(),
+        look_view: String::new(),
+        cam_blend: Default::default(),
+        view_zoom: Default::default(),
+        zoom_hold: Default::default(),
+        cam_zooms: Default::default(),
+        orbit: ORBIT_DEFAULT,
+    }
+}
+
 fn assemble_app(args: Args, settings: settings::Settings) -> App {
     let view = args.view.clone();
     let args_root_for_keys = args.root.clone();
@@ -787,28 +812,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             menu_kbd: true,
         },
         world: None,
-        cam: ViewState {
-            starting: None,
-            speed: 30.0,
-            f1_reset: None,
-            view_yaw: 0.0,
-            view_fov: None,
-            head_idle_hold: Default::default(),
-            ego: false,
-            flashlight: false,
-            flashlight_aim: None,
-            in_cab: false,
-            heard_inside: false,
-            look: (0.0, 0.0),
-            look_smooth: (0.0, 0.0),
-            view_looks: Default::default(),
-            look_view: String::new(),
-            cam_blend: Default::default(),
-            view_zoom: Default::default(),
-            zoom_hold: Default::default(),
-            cam_zooms: Default::default(),
-            orbit: ORBIT_DEFAULT,
-        },
+        cam: initial_view_state(),
         ui,
         perf: PerfState::new(input_script, fps_t),
         sound: SoundState {

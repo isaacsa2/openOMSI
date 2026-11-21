@@ -171,6 +171,7 @@ impl App {
             args, gfx, window, renderer, xr, scene, camera, player, session, menus, world, cam, ui,
             perf, sound, clock, started, view, input, last, paused, integrations, net, service_msg,
             settings, exiting, shell, photo, photo_settings, devtools, pipeline, fixed_tick,
+            ..
         } = self;
         let SessionState {
             placed, world_day, traffic, schedule, timetable_book, humans, duty, duty_places, rain,

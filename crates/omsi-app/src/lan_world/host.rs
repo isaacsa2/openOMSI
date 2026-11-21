@@ -177,7 +177,7 @@ impl LanWorld {
                     };
                     let near = match last.v.place {
                         PersonPlace::Foot { x, y, .. } => {
-                            (DVec2::new(x, y) - at.truncate()).length() < PERSON_RADIUS
+                            (glam::DVec2::new(x, y) - at.truncate()).length() < PERSON_RADIUS
                         }
                         PersonPlace::Aboard { .. } => bus_near,
                     };
