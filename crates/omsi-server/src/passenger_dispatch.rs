@@ -18,7 +18,8 @@ const SAME_STOP_RADIUS: f64 = 60.0;
 const SAME_STOP_VERTICAL: f64 = 10.0;
 const MAX_WAITING_PER_TICK: usize = 64;
 const MAX_ESCROW_PER_PLAYER: usize = 96;
-// Bounded recovery while the original stop is temporarily outside streamed tiles.
+// Cap outstanding recovery *before* granting people. Never discard a
+// previously granted rider while its stop is temporarily streamed out.
 const MAX_ORPHANED_RETURNS: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -218,17 +219,18 @@ impl PassengerDispatch {
             if people.restore_unboarded(saved) {
                 restored += 1;
             } else {
-                log::warn!("native coop: cannot restore disconnected rider at its stop");
+                // A restore can only fail for a duplicate ID or absent stop.
+                // Do not silently lose a passenger transferred by a client.
+                log::warn!("native coop: disconnected rider could not be restored (duplicate or unloaded stop)");
             }
         }
         if restored > 0 {
             log::info!("native coop: restored {restored} unboarded people after disconnect");
         }
         if waiting.len() > MAX_ORPHANED_RETURNS {
-            let excess = waiting.len() - MAX_ORPHANED_RETURNS;
-            waiting.drain(..excess);
             log::warn!(
-                "native coop: {excess} stale riders exceeded the bounded return queue; unloaded stops could not be restored"
+                "native coop: {} retained returns exceed recovery budget; refusing new GRANTs until stops reload",
+                waiting.len()
             );
         }
         self.orphaned_returns = waiting;
@@ -315,8 +317,12 @@ impl PassengerDispatch {
             return Vec::new();
         }
         let service = owner.service.clone();
-        let allowance =
-            MAX_ESCROW_PER_PLAYER.saturating_sub(self.escrow.get(&player).map_or(0, HashMap::len));
+        // Back-pressure rather than permanent loss: a reconnect storm can
+        // leave people waiting for unloaded stops. Do not allocate additional
+        // server-owned people while that recovery debt is at its hard limit.
+        let allowance = MAX_ESCROW_PER_PLAYER
+            .saturating_sub(self.escrow.get(&player).map_or(0, HashMap::len))
+            .min(MAX_ORPHANED_RETURNS.saturating_sub(self.orphaned_returns.len()));
         if allowance == 0 {
             return Vec::new();
         }
@@ -488,7 +494,11 @@ impl PassengerDispatch {
                         self.escrow.entry(player).or_default().insert(*id, entry);
                         continue;
                     }
-                    if people.restore_unboarded(entry.person) {
+                    if people.people.iter().any(|person| person.id == *id)
+                        || people.restore_unboarded(entry.person)
+                    {
+                        // Duplicate returns are idempotent. A real restore
+                        // is now committed before its ACK is sent.
                         acknowledged.push(*id);
                     }
                 }
