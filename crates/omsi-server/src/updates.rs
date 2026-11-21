@@ -244,7 +244,11 @@ fn stage(candidate: &Candidate) -> Result<PathBuf> {
         }
         output.sync_all().context("flushing downloaded archive")?;
         ensure!(downloaded == candidate.size, "incomplete archive");
-        let got = format!("{:x}", hasher.finalize());
+        let got: String = hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         ensure!(
             got == candidate.sha256,
             "SHA-256 does not match GitHub release digest"
