@@ -27,8 +27,8 @@ This is an **experimental test branch**, not a production release. It combines t
 
 ## Experimental conductor cabin controls and stable passenger visibility
 
-- [ ] On the owner's bus, Ctrl+Alt+K explicitly enables cabin control; it is disabled by default and revoked after leaving/reconnecting to LAN. Ctrl+Alt+K disables it again.
-- [ ] With two authenticated clients, a rider physically inside the *other* player's bus operates grouped doors using Ctrl+Alt+1..9 while fully stopped. Doors do not operate above 0.5 km/h, from outside the bus, from another bus, or when disabled.
+- [ ] On the owner's bus, Ctrl+Alt+K selects/revokes the **sole authenticated player currently aboard** as interim assistant, not every passenger. If two or more players are aboard, no assistant is selected. Permissions are off by default and revoked on the owner's disconnection/reconnect.
+- [ ] With two authenticated clients, only the selected assistant inside the owner's bus can request grouped doors via the **temporary** Ctrl+Alt+1..9 shortcut while stopped. All other passengers must be rejected; normal passenger stop-bell actions remain allowed. Physical switch clicking and selecting among multiple riders are pending.
 - [ ] Test Ctrl+Alt+W (first eligible window) and Ctrl+Alt+Shift+1..9 (indexed windows) on different bus models. Only recognized model mouse-event triggers should execute. Models requiring dragging must remain documented as unsupported rather than receiving unsafe arbitrary script controls.
 - [ ] Verify no passenger can trigger the engine, driving controls, parking brake, private scripts, or unauthorized fare transactions. This test covers **cabin delegation only**, not ticket-selling or exclusive conductor assignment.
 - [ ] In a busy district with over 96 pedestrians within the observer's interest radius, verify the closest people remain visible when internal population order changes, with no repeated GONE/spawn flicker for stationary people. Legitimate distance-based GONE is still required.
@@ -61,6 +61,6 @@ This is an **experimental test branch**, not a production release. It combines t
 
 ## Known limits and decision
 
-- Co-op **driver handover** and **conductor fare role** remain authorization scaffolding, not playable. Opt-in **cabin door/window controls** are experimental; they need real-client acceptance and only support model-defined click triggers.
+- Co-op **driver handover**, mutual role swap, physical mouse/drag controls and **conductor fare role** remain authorization scaffolding, not playable. Interim cabin permissions are limited to **one selected onboard player**, not every passenger, and still need real-client acceptance.
 - Native authority over player-bus physics/scripts, full passenger capacity, modded bus boarding, rollback-safe streaming, and mixed-version client compatibility still need independent sign-off.
 - Complete real-client and security acceptance before proposing merge to the fork or official main; screenshots only when they materially clarify a visual regression.
