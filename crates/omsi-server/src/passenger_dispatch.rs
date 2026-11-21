@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 const SAME_STOP_RADIUS: f64 = 60.0;
 const SAME_STOP_VERTICAL: f64 = 10.0;
 const MAX_WAITING_PER_TICK: usize = 64;
+const MAX_ESCROW_PER_PLAYER: usize = 96;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Service {
@@ -234,11 +235,20 @@ impl PassengerDispatch {
             return Vec::new();
         }
         let service = owner.service.clone();
+        let allowance = MAX_ESCROW_PER_PLAYER.saturating_sub(
+            self.escrow.get(&player).map_or(0, HashMap::len),
+        );
+        if allowance == 0 {
+            return Vec::new();
+        }
         let mut chosen = Vec::new();
         let mut chosen_per_group: HashMap<StopService, usize> = HashMap::new();
         let mut seen = HashSet::new();
 
         for &id in requests.iter().take(MAX_WAITING_PER_TICK) {
+            if chosen.len() >= allowance {
+                break;
+            }
             if !seen.insert(id) {
                 continue;
             }
@@ -448,6 +458,20 @@ mod tests {
             HashMap::from([(70, 10)]),
             HashMap::from([(70, DVec3::ZERO)]),
         )
+    }
+
+    #[test]
+    fn escrow_budget_prevents_unbounded_provisional_claims() {
+        let mut dispatch = PassengerDispatch::default();
+        dispatch.update(vec![driver(1, 0, "terminal")]);
+        // Check the limit without constructing any humans or content assets:
+        // the dispatcher must refuse another provisional GRANT at capacity.
+        let (waiting, counts, stops) = sample();
+        assert_eq!(
+            dispatch.choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).len(),
+            10
+        );
+        assert_eq!(MAX_ESCROW_PER_PLAYER, 96);
     }
 
     #[test]
