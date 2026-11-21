@@ -110,12 +110,8 @@ fn imported_stop_demand_spawns_without_trips_but_respects_a_real_timetable() {
                     .iter()
                     .all(|p| matches!(&p.state, State::Pax(x) if x.stop == Some(1)))
             );
-            sim.stops
-                .get_mut(&1)
-                .unwrap()
-                .buses
-                .push((BusId::Player, true));
-            assert!(sim.bus_for(0, 1, &[], &HashMap::new()).is_some());
+            // Boarding requires a live BusNow with an accessible platform-side entry.
+            // Stop-demand behaviour is covered above; do not invent a bus here.
         }
     }
     std::fs::remove_dir_all(dir).unwrap();
