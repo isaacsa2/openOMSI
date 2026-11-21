@@ -55,7 +55,7 @@ pub fn left_boarding_stop(bus: Option<(glam::DVec3, f64)>, stop: Option<glam::DV
 /// a dropped UDP acknowledgement must not lose a rider.
 pub fn resend_until_ack(
     lan: &mut omsi_net::LanSession,
-    pending: &mut std::collections::HashMap<u32, Option<std::time::Instant>>,
+    pending: &mut hashbrown::HashMap<u32, Option<std::time::Instant>>,
     now: std::time::Instant,
     boarded: bool,
 ) {
@@ -97,6 +97,19 @@ mod tests {
         assert!(inside(&bus, [0.8, -5.5, 1.0]));
         assert!(!inside(&bus, [5.0, 0.0, 1.0]));
         assert!(!inside(&bus, [0.0, 200.0, 1.0]));
+    }
+
+    #[test]
+    fn boarding_retries_accept_the_client_hashbrown_pending_ledger() {
+        // Compile-time regression for the exact HashMap implementation used
+        // by omsi-app::lan_world, which differs from std::collections::HashMap.
+        fn accepts_client_ledger(
+            _: &mut hashbrown::HashMap<u32, Option<std::time::Instant>>,
+        ) {
+        }
+        let mut pending = hashbrown::HashMap::new();
+        pending.insert(7, None);
+        accepts_client_ledger(&mut pending);
     }
 
     #[test]
