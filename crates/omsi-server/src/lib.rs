@@ -38,5 +38,6 @@ pub mod tick;
 pub mod timetable;
 pub mod traffic;
 pub mod transport;
+pub mod updates;
 pub mod weather;
 pub mod world;
