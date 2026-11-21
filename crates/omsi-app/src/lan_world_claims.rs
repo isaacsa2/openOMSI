@@ -87,7 +87,7 @@ impl Mirror {
         let due = |last: &Option<Instant>| {
             last.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_secs(1))
         };
-        let returning: Vec<u32> = m
+        let returning: Vec<u32> = self
             .return_pending
             .iter()
             .filter(|(_, at)| due(at))
@@ -99,7 +99,7 @@ impl Mirror {
                 self.return_pending.insert(id, Some(now));
             }
         }
-        let boarded: Vec<u32> = m
+        let boarded: Vec<u32> = self
             .boarded_pending
             .iter()
             .filter(|(_, at)| due(at))
