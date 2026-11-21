@@ -1,9 +1,7 @@
 # Optional co-op roles: driver handover and conductor (preparation)
 
-Status: **experimental conductor cab controls in PR #405; driver handover and
-fare transactions are not gameplay-ready**. Conductor actions are OFF until the
-bus owner explicitly grants another player the role. Nothing is enabled by
-joining a server or loading the map.
+Status: **authorization policy only, not gameplay-ready**. No UI, handshake, or
+network command invokes these permissions yet; both roles remain OFF.
 
 ## Source reference and credit
 
@@ -62,25 +60,6 @@ the role. Old clients must ignore an unknown opt-in extension, not be dropped.
 - Ticket money, fare and current passenger remain authoritative with the
   owning simulation. Sending a UI click must not invent revenue.
 
-## Experimental conductor cab controls in this branch
-
-- With a passenger actually aboard the owner's bus, the owner opens that
-  player's entry in the player list and chooses **Let this passenger work doors
-  and windows (conductor)**; the same entry revokes the grant. Only one guest
-  is granted at a time, for the current LAN session and connection.
-- The invited guest opens the owner's player entry and chooses a model-declared
-  **Conductor: door N** or **Conductor: window ...** control. These are existing
-  door groups/window triggers of that bus, not free-form scripting commands.
-- Every operation is executed by the bus owner's client. The session provides
-  the authenticated sender; the owner checks the guest's connection, current
-  on-board state, active grant, sequence number and model trigger. Engine,
-  steering, brakes and arbitrary variable writes remain forbidden.
-- No vehicle content, map, live physics state or scripts are transferred.
-- Fare sales and change-giving remain unavailable from this role until a
-  distinct, server/owner-authoritative transaction protocol is ready.
-- This functionality is experimental and needs a real two-client in-game test
-  on multiple door/window script models before calling it ready.
-
 ## Next integration stages
 
 1. **Driver:** introduce a small versioned LAN capability and authenticated
@@ -103,5 +82,4 @@ not change game state: `may_handover_driver` and `FareGrant::authorize`.
 Unit tests cover disabled defaults, driver stop/consent/content prerequisites,
 and conductor role scope, passenger identity, desk ID and replay protection.
 
-**The optional conductor's door/window actions are experimental; this is not a
-complete driver swap, fare desk or ticketing implementation.**
+**This is a preparatory change, not a complete driver swap or ticketing implementation.**
