@@ -570,11 +570,13 @@ fn report_native_ground_load(
     // different bridge decks, and a model's origin need not lie on the road.
     if omsi_cfg::flags::OMSI_DEBUG_TRAFFIC.is_set() {
         let mut below = Vec::new();
+        let mut below_total = 0usize;
         let mut without_ground = 0usize;
         for car in &sim.traffic.cars {
             let p = car.vehicle.position;
             match world.drawn_ground(p.x, p.y, p.z + 3.0) {
                 Some(z) if z - p.z > 1.0 => {
+                    below_total += 1;
                     if below.len() < 5 {
                         below.push(format!(
                             "id={} at ({:.1},{:.1},{:.2}), drawn ground {:.2}, difference +{:.2} m",
@@ -586,10 +588,10 @@ fn report_native_ground_load(
                 _ => {}
             }
         }
-        if !below.is_empty() || without_ground > 0 {
+        if below_total > 0 || without_ground > 0 {
             log::warn!(
                 "native AI ground check (diagnostic only): {} sample(s) with surface above the vehicle origin; {} without drawable ground; examples: {}",
-                below.len(),
+                below_total,
                 without_ground,
                 below.join("; ")
             );
