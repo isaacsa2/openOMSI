@@ -66,6 +66,15 @@ pub fn may_operate_cabin(roles: CoopRoles, req: CabinRequest, action: CabinActio
 }
 
 /// Commands are routed through the authenticated LAN session, not chat text.
+impl CabinAction {
+    pub fn command(self) -> String {
+        match self {
+            Self::Door(index) => format!("coop-door {index}"),
+            Self::Window(index) => format!("coop-window {index}"),
+        }
+    }
+}
+
 pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
     let mut words = text.split_whitespace();
     let kind = words.next()?;
@@ -95,6 +104,30 @@ pub fn cabin_window_trigger(name: &str) -> bool {
         && !n.ends_with("_off")
         && !n.ends_with("_drag")
         && !["engine", "motor", "steer", "brake", "door"].iter().any(|word| n.contains(word))
+}
+
+/// Translate a real model click to the existing restricted cabin wire actions.
+/// The event must belong to one of this vehicle's mouse-event meshes; never run
+/// arbitrary script triggers supplied by network peers.
+pub fn cabin_action_for_model(ty: &omsi_sim::VehicleType, event: &str) -> Option<CabinAction> {
+    if !ty.model.meshes.iter().any(|mesh| mesh.mouse_event.as_deref() == Some(event)) {
+        return None;
+    }
+    if let Some(index) = omsi_sim::door_keys::door_keys(ty).iter().position(|group| {
+        group.iter().any(|name| name.split('|').any(|trigger| trigger == event))
+    }) {
+        return (index < 9).then_some(CabinAction::Door(index));
+    }
+    if !cabin_window_trigger(event) { return None; }
+    let mut windows: Vec<&str> = ty.model.meshes.iter()
+        .filter_map(|mesh| mesh.mouse_event.as_deref())
+        .filter(|name| cabin_window_trigger(name))
+        .collect();
+    windows.sort_unstable();
+    windows.dedup();
+    windows.iter().position(|name| *name == event)
+        .filter(|index| *index < 9)
+        .map(CabinAction::Window)
 }
 
 /// Ticket operations are narrower than generic in-cab triggers. Normal passenger

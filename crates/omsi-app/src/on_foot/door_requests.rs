@@ -26,18 +26,29 @@ fn location(f: &OnFoot, h: &Humans) -> (DVec3, Option<BusId>) {
 
 impl App {
     pub(super) fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
-        let owner = match self.foot_bus() {
-            Some(BusId::Ai(id)) => crate::humans::remote_bus_player(id),
-            _ => None,
-        };
+        let Some(BusId::Ai(id)) = self.foot_bus() else { return };
+        let Some(owner) = crate::humans::remote_bus_player(id) else { return };
         let Some(lan) = self.net.lan.as_mut() else { return };
-        let Some(owner) = owner.filter(|id| *id != lan.my_id) else { return };
-        let command = match action {
-            omsi_lan::coop_permissions::CabinAction::Door(index) => format!("coop-door {index}"),
-            omsi_lan::coop_permissions::CabinAction::Window(index) => format!("coop-window {index}"),
-        };
-        lan.command(owner, &command);
-        self.service_msg = Some(("Cab control requested (bus owner must allow co-op)".into(), 3.0));
+        if owner == lan.my_id { return; }
+        lan.command(owner, &action.command());
+    }
+
+    /// Only a real mouse-event hit in another player's bus is sent to the owner.
+    /// The owning client still validates a designated assistant and its distance.
+    pub(crate) fn click_remote_cabin(&mut self, pressed: bool) {
+        if !pressed { return; }
+        let Some(BusId::Ai(id)) = self.foot_bus() else { return };
+        let Some(owner) = crate::humans::remote_bus_player(id) else { return };
+        let ray = self.camera.as_ref().zip(self.gfx.surface.as_ref())
+            .map(|(camera, surface)| self.cockpit_cursor_ray(camera, (surface.config.width, surface.config.height)));
+        let Some((origin, direction, spread)) = ray else { return };
+        let Some(remote) = self.net.remotes.remotes.get(&owner) else { return };
+        let vehicle = remote.vehicle();
+        let Some((mesh, _)) = crate::player::pick_in(vehicle, origin, direction, spread, crate::player::Reach(3.2), false) else { return };
+        let Some(event) = vehicle.ty.model.meshes.get(vehicle.ty.meshes[mesh].def_index).and_then(|m| m.mouse_event.as_deref()) else { return };
+        if let Some(action) = omsi_lan::coop_permissions::cabin_action_for_model(&vehicle.ty, event) {
+            self.request_coop_cabin(action);
+        }
     }
 
     pub(crate) fn request_passenger_door(&mut self) {

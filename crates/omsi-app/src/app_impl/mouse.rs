@@ -568,9 +568,10 @@ impl App {
             // a click anywhere else leaves the line and goes on to the game
             self.net.remotes.chat.blur();
         }
-        // in another player's bus: a passenger, whose clicks work nothing of it (they
-        // went to the driver's game, which worked its switches for them)
+        // On another player's bus, only model-defined cabin controls are
+        // forwarded; the owner authorizes the explicitly appointed assistant.
         if self.view == "foot" && self.net.inside_remote.is_some() {
+            self.click_remote_cabin(pressed);
             return;
         }
         // a page (`[htmltexture]`) on a scenery object: pressed and released like the bus's own
