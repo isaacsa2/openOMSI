@@ -27,6 +27,12 @@ jobs:
             echo '::error::Merge conflicts need source-aware resolution; no merge will be pushed.'
             echo 'CONFLICTED FILES:'
             git diff --name-only --diff-filter=U
+            for conflicted in crates/omsi-launcher-core/src/lib.rs crates/omsi-sim/src/people.rs; do
+              if grep -q '^<<<<<<< ' "$conflicted"; then
+                echo "CONFLICT HUNKS in $conflicted:"
+                awk '/^<<<<<<< / { printing=1; n=0 } printing {print NR ":" $0; n++} /^>>>>>>> / {printing=0} n>160 {printing=0}' "$conflicted"
+              fi
+            done
             echo 'MERGE STATUS:'
             git status --short
             exit 1
