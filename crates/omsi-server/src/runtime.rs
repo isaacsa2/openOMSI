@@ -158,14 +158,9 @@ pub fn allow_free_roam(cfg: &ServerCfg) -> Result<()> {
         !cfg.real_time && !cfg.metar_sync,
         "experimental relay requires real_time=0 and metar_sync=0"
     );
-    ensure!(
-        !cfg.voice.enabled && !cfg.voice.radio,
-        "experimental relay requires voice=0 and voice_radio=0"
-    );
-    ensure!(
-        !cfg.allow_player_teleport,
-        "experimental relay requires allow_player_teleport=0"
-    );
+    // Voice/radio is transported as validated, rate-limited opaque LAN packets;
+    // the native host already applies server.cfg's policy without audio devices.
+    // Self-teleport requests use the same authenticated per-player gate as LAN.
     ensure!(
         cfg.date.is_some(),
         "experimental relay requires an explicit server.cfg date"
@@ -640,6 +635,10 @@ fn service_native_admin_tick(
     simulated: bool,
 ) {
     let positions = peer_positions(net);
+    // Parked-bus administration needs actual ground/road height, not a
+    // permanently empty callback. Snapshot the CPU world (Arc-only) before
+    // borrowing the simulation mutably for administrative world actions.
+    let world = sim.world.snapshot();
     let hub = omsi_lan::admin::hub().map(|h| &**h);
     crate::commands::service_commands(
         net.session_mut(),
@@ -649,7 +648,12 @@ fn service_native_admin_tick(
         &|id| positions.get(&id).copied(),
         rules,
         hub,
-        &|_, _, _| None,
+        &|x, y, near| {
+            world
+                .stand_height(x, y, near)
+                .or_else(|| world.stand_height(x, y, near + 4.0))
+                .or_else(|| world.ground_height(x, y))
+        },
         FIXED_DT,
     );
     apply_native_admin_actions(
@@ -1275,10 +1279,12 @@ mod tests {
         cfg.public_server = false;
         cfg.tunnel = false;
         cfg.voice.enabled = true;
-        assert!(allow_free_roam(&cfg).is_err());
+        cfg.voice.radio = true;
+        assert!(allow_free_roam(&cfg).is_ok());
         cfg.voice.enabled = false;
+        cfg.voice.radio = false;
         cfg.allow_player_teleport = true;
-        assert!(allow_free_roam(&cfg).is_err());
+        assert!(allow_free_roam(&cfg).is_ok());
         cfg.allow_player_teleport = false;
         cfg.vehicles.push("Vehicles/Test/Bus.bus".into());
         assert!(allow_free_roam(&cfg).is_ok());
