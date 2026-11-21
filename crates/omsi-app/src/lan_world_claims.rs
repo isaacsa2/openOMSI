@@ -25,6 +25,9 @@ impl Mirror {
         let mut cancelled = Vec::new();
         for (&id, &(stop, received)) in &self.granted_waiting {
             let Some(person) = h.people.iter().find(|p| p.id == id) else {
+                // Removed during a bus switch or failed local simulation:
+                // no physical boarding was ever confirmed for this ID.
+                self.return_pending.insert(id, None);
                 finished.push(id);
                 continue;
             };
