@@ -2,11 +2,11 @@
 //! as they came (`Track`), the moment they are drawn at (`PlayClock`), the files named
 //! relative to the content roots, and the activities on the wire and in the simulation.
 
+use glam::{DVec2, DVec3, Vec3};
 use omsi_net::traffic_table::Kind;
 use omsi_net::world::{self as nw, Activity as NetActivity, PersonPlace, PersonState};
-use omsi_sim::people::MirrorPose;
-use glam::{DVec2, DVec3, Vec3};
 use omsi_sim::human::Activity;
+use omsi_sim::people::MirrorPose;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -86,7 +86,6 @@ pub fn person_q(p: &PersonState) -> [i64; 4] {
     };
     [q[0], q[1], q[2], q[3] ^ (act << 40)]
 }
-
 
 /// Where a person is at `k` between two of the host's poses.
 pub fn person_pose(a: &PersonState, b: &PersonState, k: f64) -> MirrorPose {
@@ -186,7 +185,9 @@ pub struct Track<T> {
 impl<T: Copy> Track<T> {
     /// An older UDP GONE must not erase a person restored by a newer snapshot.
     pub fn remove_is_current(&self, host_ms: f64) -> bool {
-        self.samples.last().is_none_or(|sample| sample.ms <= host_ms)
+        self.samples
+            .last()
+            .is_none_or(|sample| sample.ms <= host_ms)
     }
 
     pub fn push(&mut self, ms: f64, v: T) {

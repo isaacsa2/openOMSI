@@ -43,9 +43,13 @@ pub fn may_work(
 pub fn sole_aboard(lan: &omsi_net::LanSession, bus: &omsi_sim::VehicleInstance) -> Option<u32> {
     let footprint = crate::spawn::footprint_of(bus, crate::spawn::BUS_BOX);
     let mut aboard = lan.peers().filter(|peer| {
-        peer.has_info && peer.has_pose && peer.pose.walker
-            .and_then(|walker| walker.aboard)
-            .is_some_and(|a| a.owner == lan.my_id && inside(&footprint, a.local))
+        peer.has_info
+            && peer.has_pose
+            && peer
+                .pose
+                .walker
+                .and_then(|walker| walker.aboard)
+                .is_some_and(|a| a.owner == lan.my_id && inside(&footprint, a.local))
     });
     let candidate = aboard.next()?.pose.id;
     (candidate != 0 && aboard.next().is_none()).then_some(candidate)
@@ -69,7 +73,10 @@ pub fn may_work_cabin(
         .and_then(|walker| walker.aboard)
         .filter(|aboard| aboard.owner == lan.my_id);
     let inside_bus = aboard.is_some_and(|aboard| {
-        inside(&crate::spawn::footprint_of(bus, crate::spawn::BUS_BOX), aboard.local)
+        inside(
+            &crate::spawn::footprint_of(bus, crate::spawn::BUS_BOX),
+            aboard.local,
+        )
     });
     let assigned = matches_assistant(assistant, from);
     let req = CabinRequest {
@@ -78,7 +85,14 @@ pub fn may_work_cabin(
         passenger_inside_bus: inside_bus,
         speed_kmh: bus.physics.speed * 3.6,
     };
-    may_operate_cabin(CoopRoles { conductor: assigned, ..Default::default() }, req, action)
+    may_operate_cabin(
+        CoopRoles {
+            conductor: assigned,
+            ..Default::default()
+        },
+        req,
+        action,
+    )
 }
 
 /// Whether a pending boarding grant should be returned after the owner's bus
@@ -188,8 +202,7 @@ impl ClaimQueue {
     pub fn is_awaiting(&self, id: u32) -> bool {
         self.pending.contains(&id)
             || self.awaiting_answer.get(&id).is_some_and(|since| {
-                std::time::Instant::now().saturating_duration_since(*since)
-                    < Self::ANSWER_WINDOW
+                std::time::Instant::now().saturating_duration_since(*since) < Self::ANSWER_WINDOW
             })
     }
 

@@ -10,7 +10,10 @@ fn predictable(ctl: &TrafficLightController, light: usize) -> Option<u32> {
     if ctl.held || !ctl.stops.is_empty() {
         return None;
     }
-    if !matches!(TrafficLightController::aspect(ctl.state(light)), Aspect::Red) {
+    if !matches!(
+        TrafficLightController::aspect(ctl.state(light)),
+        Aspect::Red
+    ) {
         return None;
     }
     let wait = ctl.time_until_go(light)?;
@@ -32,9 +35,10 @@ pub(crate) fn green_in(traffic: &TrafficSim, bus: DVec3, heading: f64) -> Option
     }
     // On a branch the driver's selected turn is unknown. Every outgoing lane
     // must lead to the same controlled light, or this display stays hidden.
-    let mut targets = lane.next.iter().filter_map(|next| {
-        traffic.net.lanes.get(*next).map(|l| l.traffic_light)
-    });
+    let mut targets = lane
+        .next
+        .iter()
+        .filter_map(|next| traffic.net.lanes.get(*next).map(|l| l.traffic_light));
     let signal = targets.next()??;
     if targets.any(|other| other != Some(signal)) {
         return None;
@@ -59,7 +63,12 @@ mod tests {
     #[test]
     fn demand_actuated_lights_do_not_guess_a_countdown() {
         let mut light = TrafficLightController::new(vec![vec![(0, 10.0), (6, 15.0)]], 25.0);
-        light.stops.push(LightStop { light: 0, time: 5.0, if_request: false, jump_to: None });
+        light.stops.push(LightStop {
+            light: 0,
+            time: 5.0,
+            if_request: false,
+            jump_to: None,
+        });
         assert_eq!(predictable(&light, 0), None);
         light.stops.clear();
         light.held = true;

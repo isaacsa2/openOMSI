@@ -230,10 +230,11 @@ impl HeadlessPeopleSync {
                 .filter_map(|person| state_of(person, table).map(|state| (person, state)))
                 .collect();
             eligible.sort_unstable_by(|(a, sa), (b, sb)| {
-                let score = |p: &LanPerson| {
-                    visibility_distance(near, p.pos, view.sent.contains_key(&p.id))
-                };
-                score(a).total_cmp(&score(b)).then_with(|| sa.id.cmp(&sb.id))
+                let score =
+                    |p: &LanPerson| visibility_distance(near, p.pos, view.sent.contains_key(&p.id));
+                score(a)
+                    .total_cmp(&score(b))
+                    .then_with(|| sa.id.cmp(&sb.id))
             });
             let mut visible: Vec<_> = eligible
                 .into_iter()
@@ -350,8 +351,10 @@ mod tests {
         assert_eq!(people[0].0, 0);
         assert!(people.iter().take(96).all(|p| p.0 < 96));
         assert_eq!(people.iter().take(96).count(), MAX_PEOPLE_PER_CLIENT);
-        assert!(visibility_distance(near, DVec3::new(20.0, 0.0, 0.0), true)
-            < visibility_distance(near, DVec3::new(18.0, 0.0, 0.0), false));
+        assert!(
+            visibility_distance(near, DVec3::new(20.0, 0.0, 0.0), true)
+                < visibility_distance(near, DVec3::new(18.0, 0.0, 0.0), false)
+        );
     }
 
     #[test]

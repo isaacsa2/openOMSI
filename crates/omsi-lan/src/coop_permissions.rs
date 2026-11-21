@@ -103,29 +103,45 @@ pub fn cabin_window_trigger(name: &str) -> bool {
         && (n.contains("window") || n.contains("fenster"))
         && !n.ends_with("_off")
         && !n.ends_with("_drag")
-        && !["engine", "motor", "steer", "brake", "door"].iter().any(|word| n.contains(word))
+        && !["engine", "motor", "steer", "brake", "door"]
+            .iter()
+            .any(|word| n.contains(word))
 }
 
 /// Translate a real model click to the existing restricted cabin wire actions.
 /// The event must belong to one of this vehicle's mouse-event meshes; never run
 /// arbitrary script triggers supplied by network peers.
 pub fn cabin_action_for_model(ty: &omsi_sim::VehicleType, event: &str) -> Option<CabinAction> {
-    if !ty.model.meshes.iter().any(|mesh| mesh.mouse_event.as_deref() == Some(event)) {
+    if !ty
+        .model
+        .meshes
+        .iter()
+        .any(|mesh| mesh.mouse_event.as_deref() == Some(event))
+    {
         return None;
     }
     if let Some(index) = omsi_sim::door_keys::door_keys(ty).iter().position(|group| {
-        group.iter().any(|name| name.split('|').any(|trigger| trigger == event))
+        group
+            .iter()
+            .any(|name| name.split('|').any(|trigger| trigger == event))
     }) {
         return (index < 9).then_some(CabinAction::Door(index));
     }
-    if !cabin_window_trigger(event) { return None; }
-    let mut windows: Vec<&str> = ty.model.meshes.iter()
+    if !cabin_window_trigger(event) {
+        return None;
+    }
+    let mut windows: Vec<&str> = ty
+        .model
+        .meshes
+        .iter()
         .filter_map(|mesh| mesh.mouse_event.as_deref())
         .filter(|name| cabin_window_trigger(name))
         .collect();
     windows.sort_unstable();
     windows.dedup();
-    windows.iter().position(|name| *name == event)
+    windows
+        .iter()
+        .position(|name| *name == event)
         .filter(|index| *index < 9)
         .map(CabinAction::Window)
 }
@@ -271,27 +287,75 @@ mod tests {
 
     #[test]
     fn cabin_controls_require_owner_opt_in_and_real_presence() {
-        let roles = CoopRoles { conductor: true, ..Default::default() };
+        let roles = CoopRoles {
+            conductor: true,
+            ..Default::default()
+        };
         let valid = CabinRequest {
             same_session: true,
             owner_consented: true,
             passenger_inside_bus: true,
             speed_kmh: 0.0,
         };
-        assert!(!may_operate_cabin(CoopRoles::default(), valid, CabinAction::Door(0)));
+        assert!(!may_operate_cabin(
+            CoopRoles::default(),
+            valid,
+            CabinAction::Door(0)
+        ));
         assert!(may_operate_cabin(roles, valid, CabinAction::Door(0)));
-        assert!(!may_operate_cabin(roles, CabinRequest { owner_consented: false, ..valid }, CabinAction::Door(0)));
-        assert!(!may_operate_cabin(roles, CabinRequest { passenger_inside_bus: false, ..valid }, CabinAction::Window(0)));
-        assert!(!may_operate_cabin(roles, CabinRequest { speed_kmh: 30.0, ..valid }, CabinAction::Door(0)));
-        assert!(may_operate_cabin(roles, CabinRequest { speed_kmh: 30.0, ..valid }, CabinAction::Window(0)));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                owner_consented: false,
+                ..valid
+            },
+            CabinAction::Door(0)
+        ));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                passenger_inside_bus: false,
+                ..valid
+            },
+            CabinAction::Window(0)
+        ));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                speed_kmh: 30.0,
+                ..valid
+            },
+            CabinAction::Door(0)
+        ));
+        assert!(may_operate_cabin(
+            roles,
+            CabinRequest {
+                speed_kmh: 30.0,
+                ..valid
+            },
+            CabinAction::Window(0)
+        ));
         assert!(!may_operate_cabin(roles, valid, CabinAction::Window(9)));
     }
 
     #[test]
     fn cabin_commands_cannot_be_used_to_inject_engine_or_steering_triggers() {
-        assert_eq!(parse_cabin_action("coop-door 2"), Some(CabinAction::Door(2)));
-        assert_eq!(parse_cabin_action("coop-window 0"), Some(CabinAction::Window(0)));
-        for invalid in ["coop-door 9", "coop-door -1", "coop-door 0 engine_start", "trigger engine_start", "coop-window 100", "coop-open 0"] {
+        assert_eq!(
+            parse_cabin_action("coop-door 2"),
+            Some(CabinAction::Door(2))
+        );
+        assert_eq!(
+            parse_cabin_action("coop-window 0"),
+            Some(CabinAction::Window(0))
+        );
+        for invalid in [
+            "coop-door 9",
+            "coop-door -1",
+            "coop-door 0 engine_start",
+            "trigger engine_start",
+            "coop-window 100",
+            "coop-open 0",
+        ] {
             assert!(parse_cabin_action(invalid).is_none());
         }
         assert!(cabin_window_trigger("cp_fenster_rechts"));
