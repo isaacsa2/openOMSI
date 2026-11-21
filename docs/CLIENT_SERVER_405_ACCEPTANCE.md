@@ -28,8 +28,8 @@ This is an **experimental test branch**, not a production release. It combines t
 ## Experimental conductor cabin controls and stable passenger visibility
 
 - [ ] On the owner's bus, Ctrl+Alt+K selects/revokes the **sole authenticated player currently aboard** as interim assistant, not every passenger. If two or more players are aboard, no assistant is selected. Permissions are off by default and revoked on the owner's disconnection/reconnect.
-- [ ] With two authenticated clients, only the selected assistant inside the owner's bus can request grouped doors via the **temporary** Ctrl+Alt+1..9 shortcut while stopped. All other passengers must be rejected; normal passenger stop-bell actions remain allowed. Physical switch clicking and selecting among multiple riders are pending.
-- [ ] Test Ctrl+Alt+W (first eligible window) and Ctrl+Alt+Shift+1..9 (indexed windows) on different bus models. Only recognized model mouse-event triggers should execute. Models requiring dragging must remain documented as unsupported rather than receiving unsafe arbitrary script controls.
+- [ ] With two authenticated clients, only the appointed assistant can click actual `[mouseevent]` meshes of the **remote bus** and request its model-defined doors while stopped. Numeric control shortcuts were removed. Other passengers must be rejected; their normal stop-bell actions remain usable. Test camera ray reach and remote mesh ownership.
+- [ ] Click real window switches on multiple bus models. Only recognized mouse-event triggers should execute; held controls, release events and drag windows remain **unsupported** until proper pressed/released and gesture semantics are authenticated and tested. Verify mismatched or missing triggers fail closed.
 - [ ] Verify no passenger can trigger the engine, driving controls, parking brake, private scripts, or unauthorized fare transactions. This test covers **cabin delegation only**, not ticket-selling or exclusive conductor assignment.
 - [ ] In a busy district with over 96 pedestrians within the observer's interest radius, verify the closest people remain visible when internal population order changes, with no repeated GONE/spawn flicker for stationary people. Legitimate distance-based GONE is still required.
 - [ ] Reorder and duplicate network WORLD packets so an older pedestrian GONE arrives after a newer position. Verify it is ignored on both native and relayed-client mirrors.
@@ -42,14 +42,14 @@ This is an **experimental test branch**, not a production release. It combines t
 - [ ] Confirm `metar_sync=1` reports a non-blocking, host-authoritative METAR that is refreshed and broadcast to every client. During a service outage retain the last valid weather; do not freeze the simulation tick or silently replace weather with clear skies.
 - [ ] On a LAN **client**, World > Weather and Time show the host's current read-only conditions and clock. Visual precipitation, sky, wet roads and temperature should track the same weather state after the network update. Only the host/admin may edit session weather.
 - [ ] Test both features OFF, each ON independently, and both ON; reconnect a late client and verify new snapshots without protocol changes.
-- [ ] The **remote physical co-op cabin UI**, exclusive assistant assignment, mutual driver handover, and GPS traffic-light countdown are separate unfinished acceptance items. No passenger privilege should be granted merely by boarding.
+- [ ] Remote physical *click* routing and single-assistant ID checks are integrated but still require live testing; explicit two-party acceptance, mouse press/release/drag, mutual driver handover and a remote-server GPS countdown remain unfinished. No passenger privilege is granted merely by boarding.
 
 ## Exclusive co-op and GPS functionality required for completion
 
-- [ ] Replace the temporary index/shortcut control path with actual ray/picking of existing `[mouseevent]` switches in the remote bus, including press, release and drag gestures; whitelist appropriate switch roles.
+- [ ] Confirm the new ray/picking path matches real `[mouseevent]` bus switches and only emits the restricted door/window commands, with no arbitrary script execution. Press/release pairs and drag controls are **not yet implemented**.
 - [ ] An authenticated driver explicitly appoints **exactly one consenting assistant/conductor** to the bus. Ordinary passengers retain only normal passenger actions (e.g. a stop request); no cabin access just for being inside. Revoke on exit, switch, reconnect, disconnect and timeout.
 - [ ] Allow driver and assistant to exchange roles only when stopped, with a two-party confirmation, single vehicle-authority epoch/token and recovery on connection loss; no private vehicle/mod transfer.
-- [ ] Show a countdown on the GPS only when a real signal phase schedule or reliable server state is available; avoid fabricated time-to-green or extra per-frame work.
+- [ ] Verify the new GPS 'Green in Ns' indicator using local `TrafficSim` for a deterministic red signal on a single unambiguous lane, and that it stays absent for actuated signals, divergent junctions and missing light state. Extend the dedicated server's authoritative light phases to joined clients safely before claiming full multiplayer support.
 
 ## GPU/memory and native load evidence
 
@@ -61,6 +61,6 @@ This is an **experimental test branch**, not a production release. It combines t
 
 ## Known limits and decision
 
-- Co-op **driver handover**, mutual role swap, physical mouse/drag controls and **conductor fare role** remain authorization scaffolding, not playable. Interim cabin permissions are limited to **one selected onboard player**, not every passenger, and still need real-client acceptance.
+- Co-op **driver handover**, mutual role swap, remote mouse **release/drag** semantics and **conductor fare role** remain scaffolding, not playable. Physical button clicks and interim cabin authorization are present but need real-client acceptance and explicit two-party consent.
 - Native authority over player-bus physics/scripts, full passenger capacity, modded bus boarding, rollback-safe streaming, and mixed-version client compatibility still need independent sign-off.
 - Complete real-client and security acceptance before proposing merge to the fork or official main; screenshots only when they materially clarify a visual regression.
