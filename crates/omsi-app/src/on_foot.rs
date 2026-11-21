@@ -856,6 +856,18 @@ impl App {
             }
             // the free camera's keys are its own
             _ if self.session.on_foot.as_ref().map(|f| f.cam == FootCam::Free).unwrap_or(false) => false,
+            // A rider can ask the owner to work a real door or window control.
+            _ if ctrl && alt && !shift && !self.chord_bound(code, shift, ctrl, alt)
+                && (crate::player::digit_of(code).is_some() || code == KeyCode::KeyW) => {
+                if pressed && !repeat {
+                    let action = match crate::player::digit_of(code) {
+                        Some(number) => omsi_lan::coop_permissions::CabinAction::Door(number - 1),
+                        None => omsi_lan::coop_permissions::CabinAction::Window(0),
+                    };
+                    self.request_coop_cabin(action);
+                }
+                true
+            }
             KeyCode::KeyG => {
                 if get_up_chord(&self.input.game_keys, ctrl, shift) {
                     return false;
@@ -908,6 +920,21 @@ impl App {
             f.yaw = (f.yaw + dx).rem_euclid(360.0);
             f.pitch = (f.pitch - dy).clamp(-80.0, 80.0);
         }
+    }
+
+    fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
+        let owner = match self.foot_bus() {
+            Some(BusId::Ai(id)) => crate::humans::remote_bus_player(id),
+            _ => None,
+        };
+        let Some(lan) = self.net.lan.as_mut() else { return };
+        let Some(owner) = owner.filter(|id| *id != lan.my_id) else { return };
+        let command = match action {
+            omsi_lan::coop_permissions::CabinAction::Door(index) => format!("coop-door {index}"),
+            omsi_lan::coop_permissions::CabinAction::Window(index) => format!("coop-window {index}"),
+        };
+        lan.command(owner, &command);
+        self.service_msg = Some(("Cab control requested (bus owner must allow co-op)".into(), 3.0));
     }
 
     /// The bus the player on foot is in (standing or sitting), if any.
