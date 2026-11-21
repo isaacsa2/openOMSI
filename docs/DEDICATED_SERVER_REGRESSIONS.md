@@ -295,6 +295,31 @@ Without `--experimental-free-roam`, the native binary deliberately
 Users must not treat a successful relay connection as proof of vehicle,
 map, timetable, or passenger authority.
 
+## Player-bus occupancy and same-line passenger division
+
+The LAN `STATE` wire format already includes an 8-bit player-reported
+`Pose.passengers` count (0–255). The headless runtime now retains a
+per-connection, per-vehicle ledger of current occupancy and positive/negative
+state deltas, separately from the host's AI and walking population. These
+deltas are **observed**, not authoritative passenger events: missing
+intermediate updates or a replaced vehicle can prevent exact counting.
+`GRANT` means only that a waiting person was transferred to the client.
+
+For overlapping player `CLAIM` at the same stop, the host now groups nearby
+stationary boarding buses only if their displayed line, destination and
+heading agree. It divides server-owned waiting-person grants according to
+the buses' initial occupancies and their existing granted shares. The
+claim handler updates pending person IDs immediately within a LAN tick so
+two drivers cannot receive the same person, and clears reservations after
+departure, vehicle change or disconnection. Tests cover equal and unequal
+onboard loads, different/opposite services and distinct grants.
+
+**Still blocking:** a truthful duty/route graph, destination-aware rider
+choice, bus-specific capacity, reconciliation after a GRANT never boards
+and physical boarding/alighting continuity on two graphical clients.
+Client-reported displays and occupancy alone cannot certify these.
+
+
 ## Additional native CPU correctness and load checks
 
 **Terrain and AI wheel contact.** The CPU AI ground-height fallback now
