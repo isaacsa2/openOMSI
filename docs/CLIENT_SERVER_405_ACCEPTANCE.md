@@ -35,6 +35,22 @@ This is an **experimental test branch**, not a production release. It combines t
 - [ ] Reorder and duplicate network WORLD packets so an older pedestrian GONE arrives after a newer position. Verify it is ignored on both native and relayed-client mirrors.
 - [ ] Check a busy same-line passenger stop using two separate buses: GRANT, physical BOARD/RETURN, escrow, and on-board figures should not disappear or transfer between buses without a real event.
 
+## Real-time clock, METAR and multiplayer Weather UI (2026-11-21)
+
+- [ ] Use a **full process restart**, not `/reload`, to change `real_time`, `metar_sync` or `metar_station` on the native server. These are restart-only settings; `/reload` must preserve existing settings and explicitly reject them. With `metar_sync=1`, specify a four-letter `metar_station`; do not guess the nearest airport in headless mode.
+- [ ] Confirm `real_time=1` matches the server machine's local date/time, including crossing midnight and an operator clock offset, without independent client clocks overriding the session.
+- [ ] Confirm `metar_sync=1` reports a non-blocking, host-authoritative METAR that is refreshed and broadcast to every client. During a service outage retain the last valid weather; do not freeze the simulation tick or silently replace weather with clear skies.
+- [ ] On a LAN **client**, World > Weather and Time show the host's current read-only conditions and clock. Visual precipitation, sky, wet roads and temperature should track the same weather state after the network update. Only the host/admin may edit session weather.
+- [ ] Test both features OFF, each ON independently, and both ON; reconnect a late client and verify new snapshots without protocol changes.
+- [ ] The **remote physical co-op cabin UI**, exclusive assistant assignment, mutual driver handover, and GPS traffic-light countdown are separate unfinished acceptance items. No passenger privilege should be granted merely by boarding.
+
+## Exclusive co-op and GPS functionality required for completion
+
+- [ ] Replace the temporary index/shortcut control path with actual ray/picking of existing `[mouseevent]` switches in the remote bus, including press, release and drag gestures; whitelist appropriate switch roles.
+- [ ] An authenticated driver explicitly appoints **exactly one consenting assistant/conductor** to the bus. Ordinary passengers retain only normal passenger actions (e.g. a stop request); no cabin access just for being inside. Revoke on exit, switch, reconnect, disconnect and timeout.
+- [ ] Allow driver and assistant to exchange roles only when stopped, with a two-party confirmation, single vehicle-authority epoch/token and recovery on connection loss; no private vehicle/mod transfer.
+- [ ] Show a countdown on the GPS only when a real signal phase schedule or reliable server state is available; avoid fabricated time-to-green or extra per-frame work.
+
 ## GPU/memory and native load evidence
 
 - Drive a large map for an extended session, change views/settings, return to unloaded areas and repeat on a low-VRAM GPU. Measure missing textures, mip restoration, load time, VRAM/RAM, peak frame times and unusual repeated uploads.

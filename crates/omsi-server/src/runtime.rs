@@ -1026,8 +1026,7 @@ fn run(
     let mut population = CpuTrafficPopulation::default();
     let mut chrono_refresh = ChronoRefresh::new(map.map_dir.clone(), date_num);
     let mut stream_global = map.global.clone();
-    // Simulation streams new tiles additively: lane IDs and route references
-    // already held by AI cars, scheduled vehicles and pedestrians stay valid.
+    // Keep already referenced lane and route identities stable during tile streaming.
     let mut streamer = Some(if simulated {
         StreamWorker::start_populated(map, keys.clone())
             .context("starting populated CPU tile stream worker")?

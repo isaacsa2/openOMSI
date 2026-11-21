@@ -26,11 +26,7 @@ pub fn sync_clock(
 }
 
 /// Real-time correction is done by the headless host, not by each client.
-pub fn correct_real_time(
-    calendar: &mut NativeCalendar,
-    clock: f64,
-    admin: &mut ServerAdmin,
-) {
+pub fn correct_real_time(calendar: &mut NativeCalendar, clock: f64, admin: &mut ServerAdmin) {
     let current = calendar.at(clock + admin.shift).clone();
     if let Some(real) = omsi_career::real_time::clock_now(&current) {
         let drift = omsi_career::real_time::gap(&current, &real);
