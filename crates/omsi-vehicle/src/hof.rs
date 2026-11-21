@@ -500,6 +500,14 @@ fn place_words(s: &str) -> Vec<String> {
 /// when none is called exactly as the map wants put a bus on Hamburg's Linie 20 with the
 /// Grundorf depot of its folder - no line and no destination its IBIS knew (#896).
 pub fn closest_name(names: &[&str], hints: &[&str]) -> Option<usize> {
+    // Exact depot names beat higher-scoring partial word matches.
+    if let Some(index) = names.iter().position(|name| {
+        hints.iter().any(|hint| {
+            !hint.trim().is_empty() && name.trim().eq_ignore_ascii_case(hint.trim())
+        })
+    }) {
+        return Some(index);
+    }
     let wanted: Vec<String> = hints.iter().flat_map(|h| place_words(h)).collect();
     let mut best: Option<(usize, usize)> = None;
     for (i, n) in names.iter().enumerate() {
@@ -746,6 +754,16 @@ mod tests {
             Some(1)
         );
         assert_eq!(closest_name(&["Linie 20"], &["Linie 7"]), None);
+    }
+
+    #[test]
+    fn exact_depot_names_beat_fuzzy_matches_across_all_hints() {
+        let names = ["Berlin Spandau 2019 Special", "Spandau", "Hamburg Linie 20"];
+        assert_eq!(closest_name(&names, &["Spandau"]), Some(1));
+        assert_eq!(closest_name(&names, &[" spandau "]), Some(1));
+        assert_eq!(closest_name(&names, &["Hamburg Linie 20"]), Some(2));
+        assert_eq!(closest_name(&names, &["Berlin-Spandau"]), Some(0));
+        assert_eq!(closest_name(&names, &["Unknown"]), None);
     }
 
     #[test]
