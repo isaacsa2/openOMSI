@@ -228,6 +228,60 @@ initial free-roam mode still requires `traffic=0`,
 `passengers=0`, and `timetable=0`; it cannot turn itself into the
 simulation mode through `/reload`.
 
+## Update the headless executable from an official release
+
+The native server has its own **local-console-only** updater; the graphical
+launcher updater downloads the different game archive, so never use that
+installer for a dedicated host. The update check and download run on a
+worker thread, not the simulation tick.
+
+```text
+/update
+/update status
+/update download
+```
+
+- `/update` (or `/update check`) only checks the latest **stable**
+  [official openOMSI release](https://github.com/openOMSI-org/openOMSI/releases).
+- `/update status` shows the result of the last check or download.
+- `/update download` stages only the matching
+  `headless-test-windows-x64.zip` or `headless-test-linux-*.zip` in
+  `.headless-updates/` next to the running `omsi-server` binary. A GitHub
+  release SHA-256 digest and the exact download URL are **required**: the
+  command refuses unsigned/unmatched packages. It does **not** modify the
+  running executable, session, map, server configuration or installed mods.
+
+To activate a verified download **after stopping the server**:
+
+**Windows** (PowerShell in the extracted headless server directory):
+
+```powershell
+.\apply-update.ps1
+```
+
+If local script execution is blocked, use a PowerShell window started with
+the script explicitly: `powershell -NoProfile -ExecutionPolicy Bypass -File .\apply-update.ps1`.
+**Linux** (terminal in the extracted headless server directory):
+
+```sh
+./apply-update.sh
+```
+
+Both scripts recheck the downloaded ZIP's SHA-256, extract **only** the
+headless executable, check the embedded release version, run `--self-test`,
+back up the previous binary (`.previous`) and roll back if replacement
+or the new self-test fails. **Neither script runs while the server is
+active.** Start the server again with its original launch script after
+installation; a full process restart necessarily disconnects clients,
+unlike `/restart`, which only rebuilds the CPU world.
+
+The backup is deliberately retained. Before another upgrade, move that
+backup to a separate location (or delete it after the new version proves
+stable). This update path is for published stable builds, not PR test
+artifacts or local Cargo builds; never silently replace a running branch
+build with an older official release. No remote Discord, HTTP or LAN
+update command is exposed. `OMSI_NO_UPDATE` disables checking.
+
 ## Restart the CPU world without dropping the tunnel
 
 After editing the **local** configuration, use `/restart` (or `restart`) in
