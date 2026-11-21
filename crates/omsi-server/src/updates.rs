@@ -176,6 +176,10 @@ fn agent() -> ureq::Agent {
 
 fn check_and_stage(download: bool) -> Result<()> {
     ensure!(
+        option_env!("OPENOMSI_VERSION").is_some(),
+        "development server build: update using git and cargo, not an official release ZIP"
+    );
+    ensure!(
         std::env::var_os("OMSI_NO_UPDATE").is_none(),
         "updates disabled by OMSI_NO_UPDATE"
     );
