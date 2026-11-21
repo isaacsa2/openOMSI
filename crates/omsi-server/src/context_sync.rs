@@ -87,6 +87,9 @@ impl HeadlessContextSync {
             .collect();
         let active: HashSet<_> = viewers.iter().map(|(id, _)| *id).collect();
         self.peers.retain(|id, _| active.contains(id));
+        if viewers.is_empty() {
+            return 0;
+        }
         // Build once for the snapshot, not once per player. Keep each
         // player's exact original radius and car-list priority, including
         // MAX_CARS_PER_PEER, so LAN payloads and client behavior do not change.
