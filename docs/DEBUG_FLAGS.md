@@ -395,6 +395,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SURFACE_BIAS` | num | -24 | use | render | Depth bias of road surfaces. |
 | `OMSI_SURFACE_FLUSH` | num | 0.12 | once | sim | Height in metres under which a surface counts as flush with the road. |
 | `OMSI_TEXTURE_MEMORY` | num | settings | use | app | Texture budget in MB. |
+| `OMSI_TEXTURE_RAM_CACHE_MB` | num | 128 desktop / 0 mobile | once | scene | Keep at most this many MiB of compressed static texture sources in system RAM (0 disables; capped at 512). |
 | `OMSI_TONE_CONTRAST` | text | 1 | once | render | day[,night]: tone mapping contrast. |
 | `OMSI_VIDEO_MEMORY` | num | settings | use | app | What the game may hold on the graphics card all together (textures, meshes, render targets), in MB. |
 | `OMSI_WIDE_AO` | text | - | use | render | reach,strength,gain,max: the street-scale occlusion of the sky and the bounced light (m, 0..1, 0..1, radiance). |

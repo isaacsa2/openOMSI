@@ -79,6 +79,7 @@ pub struct Flag {
     value: OnceLock<Option<OsString>>,
 }
 
+#[rustfmt::skip]
 impl Flag {
     const fn new(name: &'static str, ty: Ty, kind: Kind, read: Read, default: &'static str, doc: &'static str) -> Flag {
         Flag { name, ty, kind, read, default, doc, value: OnceLock::new() }
@@ -115,6 +116,7 @@ impl Flag {
     }
 }
 
+#[rustfmt::skip]
 impl std::fmt::Debug for Flag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Flag").field("name", &self.name).field("ty", &self.ty).field("kind", &self.kind).finish()
@@ -122,6 +124,7 @@ impl std::fmt::Debug for Flag {
 }
 
 /// The registered flag of this name.
+#[rustfmt::skip]
 pub fn find(name: &str) -> Option<&'static Flag> {
     ALL.binary_search_by(|f| f.name.cmp(name)).ok().map(|i| ALL[i])
 }
@@ -495,6 +498,7 @@ flags! {
     OMSI_TEST_WINE_DIR: Text, Test, Test, "-", "Plugin demo test: folder holding omsi-plugin-host.exe for Wine.";
     OMSI_TEXTURE_MEMORY: Num, Tuning, Use, "settings", "Texture budget in MB.";
     OMSI_TEXTURE_RAIN: Bool, Switch, Use, "off", "OMSI 2's own texture rain on the glass instead of the drops.";
+    OMSI_TEXTURE_RAM_CACHE_MB: Num, Tuning, Once, "128 desktop / 0 mobile", "Keep at most this many MiB of compressed static texture sources in system RAM (0 disables; capped at 512).";
     OMSI_TOBII_DLL: Text, Setup, Use, "-", "The Tobii Stream Engine DLL to load instead of the Tobii Experience's.";
     OMSI_TOBII_RAW: Text, Test, Test, "-", "Tests: a file for the Tobii tracker's raw poses (record_the_tracker_here).";
     OMSI_TOBII_SECS: Num, Test, Test, "8", "Tests: how long the Tobii tracker is recorded.";
@@ -536,6 +540,7 @@ flags! {
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};

@@ -68,6 +68,7 @@ pub mod report;
 pub mod scratch;
 pub mod tick;
 pub mod walk;
+pub mod ambient_talk;
 // The passengers, as Omsi.exe runs them.
 pub mod pax;
 pub mod pax_driver;

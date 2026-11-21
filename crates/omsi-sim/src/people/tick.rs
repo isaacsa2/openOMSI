@@ -69,15 +69,120 @@ impl PeopleSim {
         self.tick_stats.2 = self.tick_stats.2.max(ms);
     }
 
-    /// Build road-vehicle and parked-vehicle collision candidates for people
-    /// without coupling the crowd step to the renderer or to a host camera.
-    fn prepare_pedestrian_obstacles(
+    /// The simulation step: what everybody decides and does this frame. It does not draw;
+    /// the people it makes or takes away are shown by omsi-app's view after it.
+    #[allow(unused_assignments)]
+    pub fn tick_inner(
         &mut self,
+        dt: f32,
         world: &dyn World,
+        bus: Option<&PlayerBusView>,
         traffic: Option<&TrafficSim>,
-        buses: &[BusNow],
-        bus_ix: &HashMap<BusId, usize>,
-    ) {
+    ) -> bool {
+        // tick_done consumes the previous step's timings; start each step fresh.
+        // Otherwise this vector grows indefinitely and profiling re-sums old ticks.
+        self.tick_stages.clear();
+        let mut mark = std::time::Instant::now();
+        macro_rules! stage {
+            ($name:expr) => {{
+                let now = std::time::Instant::now();
+                self.tick_stages
+                    .push(($name, (now - mark).as_secs_f64() * 1000.0));
+                mark = now;
+            }};
+        }
+        self.use_map_humans(world);
+        self.time += dt as f64;
+        let net = traffic.map(|t| &t.net);
+        if let Some(b) = bus {
+            self.center = b.position;
+        } else if let Some(e) = self.eye {
+            self.center = e.pos;
+        }
+        let generation = world.tiles_generation();
+        if generation != self.tiles_seen {
+            self.tiles_seen = generation;
+            self.tiles_changed(world);
+        }
+        stage!("tiles");
+        self.refresh_pedestrian_network(net);
+        stage!("pedestrian network");
+        let defer = std::mem::take(&mut self.defer_populate);
+        if let Some(n) = net {
+            self.stroll_timer -= dt;
+            if self.stroll_timer <= 0.0 && !defer {
+                self.stroll_timer = 1.0;
+                // No local camera exists on a headless host; use actual peer centers.
+                if !self.players_only {
+                    let c = self.center;
+                    self.populate_with(world, Some(n), c);
+                }
+                if !self.mirror {
+                    if !self.players_only {
+                        self.populate_on_foot(world, n, 1.0);
+                    }
+                    self.populate_lan_centers(world, n);
+                }
+            }
+        }
+        stage!("populate");
+        let mut buses = self.gather_buses(world, bus, traffic);
+        for b in &buses {
+            if b.entry_open.iter().chain(b.exit_open.iter()).any(|o| *o) {
+                self.last_door_open.insert(b.id, self.time);
+            }
+        }
+        // how the floor of each bus accelerates (for the drawing of its riders)
+        if dt > 1e-4 {
+            let mut motion = HashMap::new();
+            for bn in buses.iter_mut() {
+                let accel = match self.bus_motion.get(&bn.id) {
+                    Some(&(v0, h0, a0)) => {
+                        let yaw_rate = crowd::angle_diff(h0, bn.heading).to_radians() / dt as f64;
+                        let raw = DVec2::new(bn.speed * yaw_rate, (bn.speed - v0) / dt as f64)
+                            .clamp(DVec2::splat(-6.0), DVec2::splat(6.0));
+                        a0 + (raw - a0) * (1.0 - (-(dt as f64) / 0.2).exp())
+                    }
+                    None => DVec2::ZERO,
+                };
+                bn.accel = accel;
+                motion.insert(bn.id, (bn.speed, bn.heading, accel));
+            }
+            self.bus_motion = motion;
+        }
+        let buses = Arc::new(buses);
+        self.last_buses = buses.clone();
+        let buses: &[BusNow] = &buses;
+        let bus_ix: HashMap<BusId, usize> =
+            buses.iter().enumerate().map(|(i, b)| (b.id, i)).collect();
+        // the stops: which buses stand at them (sub_61f93c), who waits there (sub_61bf94)
+        let at_stops = self.register_buses(buses, dt);
+        self.claim_waiting();
+        self.ride_comfort(dt, bus, buses, &bus_ix, world);
+        if !self.avatar_only {
+            self.stops_tick(dt, world);
+            if let Some(n) = net {
+                self.runners_tick(world, n, &buses, &bus_ix);
+            }
+        }
+        stage!("stops");
+        // the passengers (sub_6ffc7c)
+        let mut taken_ticket = false;
+        let mut remove: Vec<usize> = Vec::new();
+        self.pax_frame(
+            dt,
+            world,
+            buses,
+            &bus_ix,
+            &at_stops,
+            bus,
+            &mut taken_ticket,
+            &mut remove,
+        );
+        stage!("passengers");
+        // the pedestrians: a crowd on the pavements (the cars around every player: the people
+        // around the other LAN players wait for them at the kerb too)
+        // (the lists of this part are kept from frame to frame, see `scratch`)
         let mut cars = std::mem::take(&mut self.scratch.cars);
         cars.clear();
         let mut blocks = std::mem::take(&mut self.scratch.blocks);
@@ -155,208 +260,6 @@ impl PeopleSim {
         // ones of its cell, not all of them)
         self.scratch.blocks = blocks;
         self.scratch.file_blocks();
-        self.scratch.cars = cars;
-    }
-
-    fn avoid_stationary_vehicle_blocks(&mut self, dt: f32, wants: &mut [Want], gone: &[bool]) {
-        // a standing vehicle in the way: wait, then go round it
-        for i in 0..self.people.len() {
-            let p = &self.people[i];
-            if gone[i] || p.puppet.is_some() || p.remote || !matches!(p.state, State::Strolling(_))
-            {
-                continue;
-            }
-            let want = wants[i].vel;
-            let speed = want.length();
-            if speed < 0.2 {
-                self.people[i].car_wait = 0.0;
-                continue;
-            }
-            let ahead = p.position.truncate() + want / speed * 0.9;
-            let blocks = &self.scratch.blocks;
-            let stands_in_way = |b: &Block| {
-                b.vel.length() < 0.5 && b.near(ahead, BODY_OUTSIDE + 0.15) && {
-                    let (q, inside) = b.closest(ahead);
-                    inside || (ahead - q).length() < BODY_OUTSIDE + 0.15
-                }
-            };
-            let in_way = self
-                .scratch
-                .blocks_at(ahead)
-                .iter()
-                .any(|&k| stands_in_way(&blocks[k as usize]));
-            debug_assert_eq!(
-                in_way,
-                blocks.iter().any(stands_in_way),
-                "the vehicle grid missed one in the way"
-            );
-            if !in_way {
-                self.people[i].car_wait = 0.0;
-                continue;
-            }
-            self.people[i].car_wait += dt;
-            if self.people[i].car_wait > 8.0 {
-                self.people[i].detour = self.people[i].detour.max(4.0);
-                self.people[i].car_wait = 0.0;
-            } else if self.people[i].detour <= 0.0 {
-                wants[i].vel = DVec2::ZERO;
-            }
-        }
-    }
-
-    /// The simulation step: what everybody decides and does this frame. It does not draw;
-    /// the people it makes or takes away are shown by omsi-app's view after it.
-    #[allow(unused_assignments)]
-    pub fn tick_inner(
-        &mut self,
-        dt: f32,
-        world: &dyn World,
-        bus: Option<&PlayerBusView>,
-        traffic: Option<&TrafficSim>,
-    ) -> bool {
-        // tick_done consumes the previous step's timings; start each step fresh.
-        // Otherwise this vector grows indefinitely and profiling re-sums old ticks.
-        self.tick_stages.clear();
-        let mut mark = std::time::Instant::now();
-        macro_rules! stage {
-            ($name:expr) => {{
-                let now = std::time::Instant::now();
-                self.tick_stages
-                    .push(($name, (now - mark).as_secs_f64() * 1000.0));
-                mark = now;
-            }};
-        }
-        self.use_map_humans(world);
-        self.time += dt as f64;
-        let net = traffic.map(|t| &t.net);
-        if let Some(b) = bus {
-            self.center = b.position;
-        } else if let Some(e) = self.eye {
-            self.center = e.pos;
-        }
-        let generation = world.tiles_generation();
-        if generation != self.tiles_seen {
-            self.tiles_seen = generation;
-            self.tiles_changed(world);
-        }
-        stage!("tiles");
-        // tiles brought lanes: their pavements join the network, and stops without one look again
-        if let (Some(pn), Some(n)) = (self.ped.as_mut(), net) {
-            if pn.built < n.lanes.len() {
-                let added = pn.extend(n);
-                if added > 0 {
-                    let ids: Vec<(i64, DVec3)> = self
-                        .stops
-                        .iter()
-                        .filter(|(_, s)| s.lane.is_none())
-                        .map(|(k, s)| (*k, s.pos))
-                        .collect();
-                    for (id, pos) in ids {
-                        let lane = self
-                            .ped
-                            .as_ref()
-                            .and_then(|pn| pn.nearest(n, pos, 12.0))
-                            .map(|(l, s, _)| (l, s));
-                        self.stops.get_mut(&id).unwrap().lane = lane;
-                    }
-                }
-            }
-        }
-        if self.ped.is_none() {
-            if let Some(n) = net {
-                self.ped = Some(PedNet::build(n));
-                let ids: Vec<(i64, DVec3)> = self.stops.iter().map(|(k, s)| (*k, s.pos)).collect();
-                for (id, pos) in ids {
-                    let lane = self
-                        .ped
-                        .as_ref()
-                        .and_then(|pn| pn.nearest(n, pos, 12.0))
-                        .map(|(l, s, _)| (l, s));
-                    self.stops.get_mut(&id).unwrap().lane = lane;
-                }
-            }
-        }
-        stage!("pedestrian network");
-        let defer = std::mem::take(&mut self.defer_populate);
-        if let Some(n) = net {
-            self.stroll_timer -= dt;
-            if self.stroll_timer <= 0.0 && !defer {
-                self.stroll_timer = 1.0;
-                // A headless server has no host player or camera. Preparing
-                // stops around its zero-position wastes work and can reserve
-                // metadata for a place no connected player will visit.
-                if !self.players_only {
-                    let c = self.center;
-                    self.populate_with(world, Some(n), c);
-                }
-                if !self.mirror {
-                    if !self.players_only {
-                        self.populate_on_foot(world, n, 1.0);
-                    }
-                    self.populate_lan_centers(world, n);
-                }
-            }
-        }
-        stage!("populate");
-        let mut buses = self.gather_buses(world, bus, traffic);
-        for b in &buses {
-            if b.entry_open.iter().chain(b.exit_open.iter()).any(|o| *o) {
-                self.last_door_open.insert(b.id, self.time);
-            }
-        }
-        // how the floor of each bus accelerates (for the drawing of its riders)
-        if dt > 1e-4 {
-            let mut motion = HashMap::new();
-            for bn in buses.iter_mut() {
-                let accel = match self.bus_motion.get(&bn.id) {
-                    Some(&(v0, h0, a0)) => {
-                        let yaw_rate = crowd::angle_diff(h0, bn.heading).to_radians() / dt as f64;
-                        let raw = DVec2::new(bn.speed * yaw_rate, (bn.speed - v0) / dt as f64)
-                            .clamp(DVec2::splat(-6.0), DVec2::splat(6.0));
-                        a0 + (raw - a0) * (1.0 - (-(dt as f64) / 0.2).exp())
-                    }
-                    None => DVec2::ZERO,
-                };
-                bn.accel = accel;
-                motion.insert(bn.id, (bn.speed, bn.heading, accel));
-            }
-            self.bus_motion = motion;
-        }
-        let buses = Arc::new(buses);
-        self.last_buses = buses.clone();
-        let buses: &[BusNow] = &buses;
-        let bus_ix: HashMap<BusId, usize> =
-            buses.iter().enumerate().map(|(i, b)| (b.id, i)).collect();
-        // the stops: which buses stand at them (sub_61f93c), who waits there (sub_61bf94)
-        let at_stops = self.register_buses(buses, dt);
-        self.claim_waiting();
-        self.ride_comfort(dt, bus, buses, &bus_ix, world);
-        if !self.avatar_only {
-            self.stops_tick(dt, world);
-            if let Some(n) = net {
-                self.runners_tick(world, n, &buses, &bus_ix);
-            }
-        }
-        stage!("stops");
-        // the passengers (sub_6ffc7c)
-        let mut taken_ticket = false;
-        let mut remove: Vec<usize> = Vec::new();
-        self.pax_frame(
-            dt,
-            world,
-            buses,
-            &bus_ix,
-            &at_stops,
-            bus,
-            &mut taken_ticket,
-            &mut remove,
-        );
-        stage!("passengers");
-        // the pedestrians: a crowd on the pavements (the cars around every player: the people
-        // around the other LAN players wait for them at the kerb too)
-        // (the lists of this part are kept from frame to frame, see `scratch`)
-        self.prepare_pedestrian_obstacles(world, traffic, buses, &bus_ix);
-        let mut cars = std::mem::take(&mut self.scratch.cars);
         let mut wants = std::mem::take(&mut self.scratch.wants);
         wants.clear();
         for i in 0..self.people.len() {
@@ -382,7 +285,7 @@ impl PeopleSim {
                 *g = true;
             }
         }
-        self.avoid_stationary_vehicle_blocks(dt, &mut wants, &gone);
+        self.avoid_standing_vehicles(dt, &gone, &mut wants);
         // the crowd of the pavements (passengers outside stand in it as they are)
         let mut walkers = std::mem::take(&mut self.scratch.walkers);
         walkers.clear();
@@ -469,6 +372,94 @@ impl PeopleSim {
         taken_ticket
     }
 
+    /// Extend the pavement graph as tiles arrive, then attach orphaned stops.
+    fn refresh_pedestrian_network(&mut self, net: Option<&Network>) {
+        // tiles brought lanes: their pavements join the network, and stops without one look again
+        if let (Some(pn), Some(n)) = (self.ped.as_mut(), net) {
+            if pn.built < n.lanes.len() {
+                let added = pn.extend(n);
+                if added > 0 {
+                    let ids: Vec<(i64, DVec3)> = self
+                        .stops
+                        .iter()
+                        .filter(|(_, s)| s.lane.is_none())
+                        .map(|(k, s)| (*k, s.pos))
+                        .collect();
+                    for (id, pos) in ids {
+                        let lane = self
+                            .ped
+                            .as_ref()
+                            .and_then(|pn| pn.nearest(n, pos, 12.0))
+                            .map(|(l, s, _)| (l, s));
+                        self.stops.get_mut(&id).unwrap().lane = lane;
+                    }
+                }
+            }
+        }
+        if self.ped.is_none() {
+            if let Some(n) = net {
+                self.ped = Some(PedNet::build(n));
+                let ids: Vec<(i64, DVec3)> = self.stops.iter().map(|(k, s)| (*k, s.pos)).collect();
+                for (id, pos) in ids {
+                    let lane = self
+                        .ped
+                        .as_ref()
+                        .and_then(|pn| pn.nearest(n, pos, 12.0))
+                        .map(|(l, s, _)| (l, s));
+                    self.stops.get_mut(&id).unwrap().lane = lane;
+                }
+            }
+        }
+    }
+
+    /// Keep strolling pedestrians out of stationary vehicles and set a detour
+    /// after a bounded wait. The crowd solver handles movement afterwards.
+    fn avoid_standing_vehicles(&mut self, dt: f32, gone: &[bool], wants: &mut [Want]) {
+        // a standing vehicle in the way: wait, then go round it
+        for i in 0..self.people.len() {
+            let p = &self.people[i];
+            if gone[i] || p.puppet.is_some() || p.remote || !matches!(p.state, State::Strolling(_))
+            {
+                continue;
+            }
+            let want = wants[i].vel;
+            let speed = want.length();
+            if speed < 0.2 {
+                self.people[i].car_wait = 0.0;
+                continue;
+            }
+            let ahead = p.position.truncate() + want / speed * 0.9;
+            let blocks = &self.scratch.blocks;
+            let stands_in_way = |b: &Block| {
+                b.vel.length() < 0.5 && b.near(ahead, BODY_OUTSIDE + 0.15) && {
+                    let (q, inside) = b.closest(ahead);
+                    inside || (ahead - q).length() < BODY_OUTSIDE + 0.15
+                }
+            };
+            let in_way = self
+                .scratch
+                .blocks_at(ahead)
+                .iter()
+                .any(|&k| stands_in_way(&blocks[k as usize]));
+            debug_assert_eq!(
+                in_way,
+                blocks.iter().any(stands_in_way),
+                "the vehicle grid missed one in the way"
+            );
+            if !in_way {
+                self.people[i].car_wait = 0.0;
+                continue;
+            }
+            self.people[i].car_wait += dt;
+            if self.people[i].car_wait > 8.0 {
+                self.people[i].detour = self.people[i].detour.max(4.0);
+                self.people[i].car_wait = 0.0;
+            } else if self.people[i].detour <= 0.0 {
+                wants[i].vel = DVec2::ZERO;
+            }
+        }
+    }
+
     /// Everybody's animation this frame (sub_626ae8): the passengers from what their task
     /// says (`PAX_State`, speed, the room height, the seat, the hand and the head), the
     /// pedestrians from their walk.
@@ -532,6 +523,35 @@ impl PeopleSim {
                             dt_ms,
                         },
                         pack,
+                    )
+                }
+                _ if p.remote => {
+                    // LAN mirrors are State::Idle, but seated riders still need
+                    // the original OMSI seated skeleton, not its standing pose.
+                    let seat_height = p.mirrored_seat_height(buses);
+                    let v = p.vel.length() as f32;
+                    (
+                        AnimInput {
+                            kind: if seat_height.is_some() {
+                                2
+                            } else if p.activity == Activity::Walk {
+                                1
+                            } else {
+                                0
+                            },
+                            speed: v,
+                            moved: v * dt,
+                            room_height: if matches!(p.place, Place::Bus(..)) {
+                                2.1
+                            } else {
+                                pax::OUTSIDE_ROOM
+                            },
+                            seat_height: seat_height.unwrap_or(0.0),
+                            smooth: true,
+                            dt_ms,
+                            ..Default::default()
+                        },
+                        None,
                     )
                 }
                 _ => {
