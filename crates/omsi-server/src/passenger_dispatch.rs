@@ -127,6 +127,11 @@ struct Visit {
     members: HashMap<u32, Member>,
 }
 
+struct EscrowEntry {
+    connection: u64,
+    person: HandedPerson,
+}
+
 /// Owns only player-reported occupancy and temporary stop allocations.
 /// The PeopleSim host remains authoritative for which person still waits.
 #[derive(Default)]
@@ -135,7 +140,7 @@ pub(crate) struct PassengerDispatch {
     visits: HashMap<StopService, Visit>,
     /// Original server-owned people, pending the client's explicit physical
     /// boarding confirmation or cancellation. A GRANT alone is not boarding.
-    escrow: HashMap<u32, HashMap<u32, HandedPerson>>,
+    escrow: HashMap<u32, HashMap<u32, EscrowEntry>>,
 }
 
 impl PassengerDispatch {
@@ -175,6 +180,17 @@ impl PassengerDispatch {
                 })
             });
             !visit.members.is_empty()
+        });
+        // A returning LAN player may receive the same numeric id with a
+        // different peer connection. Never transfer an old rider escrow to
+        // that new connection (or let it return someone else's old claim).
+        self.escrow.retain(|player, held| {
+            held.retain(|_, entry| {
+                self.drivers
+                    .get(player)
+                    .is_some_and(|driver| driver.connection == entry.connection)
+            });
+            !held.is_empty()
         });
     }
 
@@ -304,20 +320,28 @@ impl PassengerDispatch {
     /// Retain original, server-owned waiting people after GRANT. The client
     /// can return only its own IDs, never someone else's passengers.
     pub(crate) fn escrow_granted(&mut self, player: u32, granted: Vec<HandedPerson>) {
+        let Some(connection) = self.drivers.get(&player).map(|driver| driver.connection) else {
+            return;
+        };
         let holding = self.escrow.entry(player).or_default();
-        for saved in granted {
-            holding.insert(saved.person.id, saved);
+        for person in granted {
+            holding.insert(person.person.id, EscrowEntry { connection, person });
         }
     }
 
     /// The client has confirmed crossing into its vehicle. Discard only
     /// escrow entries actually owned by this peer; duplicates are idempotent.
     pub(crate) fn confirm_boarded(&mut self, player: u32, ids: &[u32]) {
+        let Some(connection) = self.drivers.get(&player).map(|driver| driver.connection) else {
+            return;
+        };
         let Some(holding) = self.escrow.get_mut(&player) else {
             return;
         };
         for id in ids {
-            holding.remove(id);
+            if holding.get(id).is_some_and(|entry| entry.connection == connection) {
+                holding.remove(id);
+            }
         }
         if holding.is_empty() {
             self.escrow.remove(&player);
@@ -335,22 +359,28 @@ impl PassengerDispatch {
         people: &mut PeopleSim,
     ) -> Vec<u32> {
         let mut acknowledged = Vec::new();
+        let connection = self.drivers.get(&player).map(|driver| driver.connection);
         for id in ids {
-            let saved = self
+            let entry = self
                 .escrow
                 .get_mut(&player)
                 .and_then(|holding| holding.remove(id));
-            match saved {
-                Some(saved) => {
+            match entry {
+                Some(entry) if Some(entry.connection) == connection => {
                     // Do not throw away the original person if their stop was
                     // removed by streaming or a Chrono map swap.
-                    if !people.stops.contains_key(&saved.stop.unwrap_or(i64::MIN)) {
-                        self.escrow.entry(player).or_default().insert(*id, saved);
+                    if !people.stops.contains_key(
+                        &entry.person.stop.unwrap_or(i64::MIN),
+                    ) {
+                        self.escrow.entry(player).or_default().insert(*id, entry);
                         continue;
                     }
-                    if people.restore_unboarded(saved) {
+                    if people.restore_unboarded(entry.person) {
                         acknowledged.push(*id);
                     }
+                }
+                Some(entry) => {
+                    self.escrow.entry(player).or_default().insert(*id, entry);
                 }
                 None => acknowledged.push(*id), // repeated UDP return
             }
