@@ -60,7 +60,7 @@ pub fn may_work_cabin(
     assistant: Option<u32>,
     action: crate::coop_permissions::CabinAction,
 ) -> bool {
-    use crate::coop_permissions::{CabinRequest, CoopRoles, may_operate_cabin};
+    use crate::coop_permissions::{CabinRequest, CoopRoles, matches_assistant, may_operate_cabin};
     let Some(bus) = bus else { return false };
     let aboard = lan
         .peers()
@@ -71,13 +71,14 @@ pub fn may_work_cabin(
     let inside_bus = aboard.is_some_and(|aboard| {
         inside(&crate::spawn::footprint_of(bus, crate::spawn::BUS_BOX), aboard.local)
     });
+    let assigned = matches_assistant(assistant, from);
     let req = CabinRequest {
         same_session: lan.connected || lan.role == omsi_net::Role::Host,
-        owner_consented: assistant == Some(from) && from != 0,
+        owner_consented: assigned,
         passenger_inside_bus: inside_bus,
         speed_kmh: bus.physics.speed * 3.6,
     };
-    may_operate_cabin(CoopRoles { conductor: assistant == Some(from), ..Default::default() }, req, action)
+    may_operate_cabin(CoopRoles { conductor: assigned, ..Default::default() }, req, action)
 }
 
 /// Whether a pending boarding grant should be returned after the owner's bus

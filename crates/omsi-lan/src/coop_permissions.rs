@@ -80,6 +80,12 @@ pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
     }
 }
 
+/// A selected assistant is the only peer allowed to use cabin controls.
+/// Id zero and an absent assignment always fail closed.
+pub fn matches_assistant(assigned: Option<u32>, sender: u32) -> bool {
+    sender != 0 && assigned == Some(sender)
+}
+
 /// Only explicit model window controls can be delegated. Never interpret a
 /// string from a remote peer as an arbitrary script/engine trigger.
 pub fn cabin_window_trigger(name: &str) -> bool {
@@ -265,10 +271,10 @@ mod tests {
     #[test]
     #[test]
     fn generic_cabin_consent_cannot_authorize_other_players() {
-        let designated = Some(7);
-        assert_eq!(designated, Some(7));
-        assert_ne!(designated, Some(8));
-        assert_ne!(designated, None);
+        assert!(matches_assistant(Some(7), 7));
+        assert!(!matches_assistant(Some(7), 8));
+        assert!(!matches_assistant(Some(7), 0));
+        assert!(!matches_assistant(None, 7));
     }
 
     fn ticket_grants_reject_replays_other_passengers_and_revoked_roles() {
