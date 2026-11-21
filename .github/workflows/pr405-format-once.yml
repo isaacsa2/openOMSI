@@ -29,12 +29,7 @@ jobs:
           # Files known to stay within their Rust budget after rustfmt.
           # The large app functions and GPS cards require structural extraction.
           files=(
-            crates/omsi-lan/src/coop_permissions.rs
-            crates/omsi-lan/src/mirror.rs
-            crates/omsi-lan/src/passenger.rs
-            crates/omsi-navigator/src/lib.rs
-            crates/omsi-navigator/src/signal_countdown.rs
-            crates/omsi-server/src/people_sync.rs
+            crates/omsi-navigator/src/panel/cards.rs
           )
           for path in "${files[@]}"; do
             test -f "$path"
