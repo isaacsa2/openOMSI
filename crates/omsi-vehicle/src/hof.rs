@@ -502,9 +502,9 @@ fn place_words(s: &str) -> Vec<String> {
 pub fn closest_name(names: &[&str], hints: &[&str]) -> Option<usize> {
     // Exact depot names beat higher-scoring partial word matches.
     if let Some(index) = names.iter().position(|name| {
-        hints.iter().any(|hint| {
-            !hint.trim().is_empty() && name.trim().eq_ignore_ascii_case(hint.trim())
-        })
+        hints
+            .iter()
+            .any(|hint| !hint.trim().is_empty() && name.trim().eq_ignore_ascii_case(hint.trim()))
     }) {
         return Some(index);
     }
