@@ -19,6 +19,12 @@ const MAX_WANTS_PER_CLIENT: usize = 64;
 const MAX_GONE_PER_FRAME: usize = 63;
 const MAX_RELAY_PER_CLIENT: usize = 48;
 
+/// Keep nearby people in the interest set while they walk slowly near the
+/// 96-person cut-off; farther people may still replace them when they approach.
+fn visibility_distance(near: DVec3, position: DVec3, already_sent: bool) -> f64 {
+    ((position - near).length() - if already_sent { 5.0 } else { 0.0 }).max(0.0)
+}
+
 #[derive(Default)]
 struct ClientPeople {
     sent: HashMap<u32, (PersonState, f32)>,
@@ -216,10 +222,22 @@ impl HeadlessPeopleSync {
             } else {
                 Vec::new()
             };
-            let mut visible: Vec<_> = nearby
+            // Select closest people first, with a small retention margin for
+            // already-drawn IDs. Iteration order of the population can change
+            // between ticks; taking the first 96 made real nearby people vanish.
+            let mut eligible: Vec<_> = nearby
                 .iter()
                 .filter_map(|person| state_of(person, table).map(|state| (person, state)))
-                .take(MAX_PEOPLE_PER_CLIENT - relayed.len())
+                .collect();
+            eligible.sort_unstable_by(|(a, sa), (b, sb)| {
+                let score = |p: &LanPerson| {
+                    visibility_distance(near, p.pos, view.sent.contains_key(&p.id))
+                };
+                score(a).total_cmp(&score(b)).then_with(|| sa.id.cmp(&sb.id))
+            });
+            let mut visible: Vec<_> = eligible
+                .into_iter()
+                .take(MAX_PEOPLE_PER_CLIENT.saturating_sub(relayed.len()))
                 .map(|(person, state)| {
                     if view.described.insert(state.id) {
                         lan.send_desc(
@@ -315,6 +333,25 @@ mod tests {
         assert!(view.frame(&[], 0.1).gone.is_empty());
         assert!(!view.described.contains(&12));
         assert_eq!(view.frame(&[person(12, 2.0)], 0.1).people.len(), 1);
+    }
+
+    #[test]
+    fn crowded_stop_retains_nearby_people_regardless_of_population_order() {
+        let near = DVec3::ZERO;
+        let mut people: Vec<(u32, DVec3, bool)> = (0..150)
+            .map(|id| (id, DVec3::new(30.0 + f64::from(id), 0.0, 0.0), id < 96))
+            .collect();
+        people.reverse(); // A population reorder must not change which 96 are visible.
+        people.sort_unstable_by(|a, b| {
+            visibility_distance(near, a.1, a.2)
+                .total_cmp(&visibility_distance(near, b.1, b.2))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        assert_eq!(people[0].0, 0);
+        assert!(people.iter().take(96).all(|p| p.0 < 96));
+        assert_eq!(people.iter().take(96).count(), MAX_PEOPLE_PER_CLIENT);
+        assert!(visibility_distance(near, DVec3::new(20.0, 0.0, 0.0), true)
+            < visibility_distance(near, DVec3::new(18.0, 0.0, 0.0), false));
     }
 
     #[test]
