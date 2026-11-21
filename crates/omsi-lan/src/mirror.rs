@@ -72,6 +72,11 @@ pub struct Track<T> {
 }
 
 impl<T: Copy> Track<T> {
+    /// An older UDP GONE must not erase a person restored by a newer snapshot.
+    pub fn remove_is_current(&self, host_ms: f64) -> bool {
+        self.samples.last().is_none_or(|sample| sample.ms <= host_ms)
+    }
+
     pub fn push(&mut self, ms: f64, v: T) {
         if self.samples.last().map(|s| ms <= s.ms).unwrap_or(false) {
             return;
@@ -306,6 +311,21 @@ mod tests {
         assert_eq!(vehicle_position(&pose, Some((Kind::Rail, 10.0)))[2], 7.6);
         assert_eq!(vehicle_position(&pose, Some((Kind::Other, 10.0)))[2], 7.6);
         assert_eq!(vehicle_position(&pose, None)[2], 7.6);
+    }
+
+    #[test]
+    fn stale_udp_gone_does_not_erase_a_newer_pedestrian() {
+        let mut track = Track {
+            samples: Vec::new(),
+            heard: Instant::now(),
+        };
+        track.push(1_000.0, 5u32);
+        track.push(1_200.0, 6);
+        assert!(!track.remove_is_current(1_100.0));
+        assert!(track.remove_is_current(1_200.0));
+        assert!(track.remove_is_current(1_300.0));
+        track.push(1_100.0, 9);
+        assert_eq!(track.samples.last().unwrap().v, 6);
     }
 
     #[test]
