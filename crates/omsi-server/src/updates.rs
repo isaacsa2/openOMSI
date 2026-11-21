@@ -200,6 +200,9 @@ fn stage(candidate: &Candidate) -> Result<PathBuf> {
         ensure!(downloaded == candidate.size, "incomplete archive");
         let got = format!("{:x}", hasher.finalize());
         ensure!(got == candidate.sha256, "SHA-256 does not match GitHub release digest");
+        if file.exists() {
+            fs::remove_file(&file).context("replacing an older staged archive")?;
+        }
         fs::rename(&partial, &file).context("finalizing verified update archive")?;
         // Sidecar is for an offline installer to recheck the exact ZIP bytes
         // after the server is fully stopped.
@@ -212,6 +215,9 @@ fn stage(candidate: &Candidate) -> Result<PathBuf> {
             &temporary,
             format!("{}\n{}\n{}\n", candidate.filename, candidate.sha256, candidate.version),
         ).context("writing staged update marker")?;
+        if marker.exists() {
+            fs::remove_file(&marker).context("replacing an older staged update marker")?;
+        }
         fs::rename(&temporary, &marker).context("publishing verified staged update")?;
         Ok(())
     })();
