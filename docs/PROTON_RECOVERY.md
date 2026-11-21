@@ -1,6 +1,6 @@
 # Proton Bus → native openOMSI formats (PR #220)
 
-Updated 15 November 2026. This is the revived experimental local Proton Bus converter, built on the current openOMSI fork main. The complete 13 October version is preserved in `archive/pr220-legacy-20261013`.
+Updated 21 November 2026. This is the revived experimental local Proton Bus converter, built on the current openOMSI fork main. The complete 13 October version is preserved in `archive/pr220-legacy-20261013`.
 
 ## Design
 
@@ -43,13 +43,44 @@ On GitHub Actions for the native-output branch:
 
 The original recovered OI codec tests passed in an earlier phase. The focused migration workflow itself completed successfully. This **does not prove full gameplay support**.
 
+## Status after the November 21 main sync
+
+- The feature branch is synchronized with fork `main` and has no commits behind it.
+- Linux `cargo check --locked -p omsi-proton -p omsi-launcher-core -p omsi-scene -p omsi-sim --all-targets` passed on the merged tree. This is a compilation check, not a runtime conversion test.
+- The unscheduled-passenger fixture no longer assumes a bus is boardable without a live `BusNow` and valid entry side.
+- Windows converter binaries, full CI and real-content in-game validation are still required before merge.
+
 ## Remaining before merge
 
 - [ ] Confirm the complete game builds and tests on all target platforms.
-- [ ] Resolve rustfmt complaints in four previously touched engine/world files without a broad unrelated reformat or size-budget regression.
+- [x] Resolve rustfmt complaints in the previously touched converter/scene/world files and regenerate the launcher lockfile.
 - [ ] Verify rendering, lighting, collision, vehicle physics, animation, native traffic, passengers and navigation in-game using legitimately provided test assets.
 - [ ] Run installation/uninstallation and corrupt-input regression checks across all supported archive/folder modes.
 - [ ] Finish UI translation, user instructions and platform release packaging when stable.
+
+## Using the converter locally (preview)
+
+The converter never bundles someone else's Proton Bus assets. Obtain a local source mod that you own or are authorized to convert. Its original main `.map.txt`, `.bus.txt` or `.ini` configuration must contain a single author-provided declaration:
+
+```ini
+[openomsi]
+allowConversion=1
+```
+
+Install a current Rust toolchain and run these commands from the repository root. Use a **new destination folder outside the source folder** for each conversion.
+
+```powershell
+# Proton Bus map (unpacked source folder containing exactly one *.map.txt)
+cargo run --release --locked -p omsi-proton --example import_map -- "C:\\ProtonSource\\City" "C:\\ProtonOutput\\City" "City"
+
+# Inspect a source vehicle without modifying it
+cargo run --release --locked -p omsi-proton --example inspect_vehicle -- "C:\\ProtonSource\\Bus\\vehicle.bus.txt"
+
+# Export a rigid vehicle to a new openOMSI Mods package
+cargo run --release --locked -p omsi-proton --example import_vehicle -- "C:\\ProtonSource\\Bus\\vehicle.bus.txt" "C:\\ProtonOutput\\Bus"
+```
+
+If you have the dedicated Windows CLI test builds, replace `cargo run --release --locked -p omsi-proton --example <name> --` with the matching `import_map.exe`, `inspect_vehicle.exe` or `import_vehicle.exe`. Map packages can also be selected in the Mods installer and must be installed with **Extract**, not InPlace. A generated package is intended for the openOMSI format readers; do not assume that every Proton vehicle subsystem, script or original OMSI 2 feature will work before inspecting conversion warnings and validating the result in-game.
 
 ## Author rights
 
