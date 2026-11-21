@@ -12,10 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-const OFFICIAL_RELEASE: &str =
-    "https://api.github.com/repos/openOMSI-org/openOMSI/releases/latest";
-const OFFICIAL_ASSETS: &str =
-    "https://github.com/openOMSI-org/openOMSI/releases/download/";
+const OFFICIAL_RELEASE: &str = "https://api.github.com/repos/openOMSI-org/openOMSI/releases/latest";
+const OFFICIAL_ASSETS: &str = "https://github.com/openOMSI-org/openOMSI/releases/download/";
 const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
 static BUSY: AtomicBool = AtomicBool::new(false);
 static STATUS: OnceLock<Mutex<String>> = OnceLock::new();
@@ -41,13 +39,20 @@ pub fn report() {
 /// /update is a read-only check. /update download stages a validated ZIP.
 /// No network work runs on the authoritative simulation tick.
 pub fn start(download: bool) {
-    if BUSY.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_err() {
+    if BUSY
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+        .is_err()
+    {
         report();
         return;
     }
     status(format!(
         "{} official stable headless release (running {})",
-        if download { "checking and staging" } else { "checking" },
+        if download {
+            "checking and staging"
+        } else {
+            "checking"
+        },
         current()
     ));
     let spawned = std::thread::Builder::new()
@@ -99,10 +104,20 @@ fn file_for(version: &str) -> Option<String> {
 }
 
 fn parse_release(release: &Value, version: &str) -> Result<Option<Candidate>> {
-    ensure!(release["draft"] != true, "the selected GitHub release is a draft");
-    ensure!(release["prerelease"] != true, "only stable releases are supported");
-    let tag = release["tag_name"].as_str().context("release missing tag_name")?;
-    let candidate = tag.strip_prefix('v').context("release tag must start with v")?;
+    ensure!(
+        release["draft"] != true,
+        "the selected GitHub release is a draft"
+    );
+    ensure!(
+        release["prerelease"] != true,
+        "only stable releases are supported"
+    );
+    let tag = release["tag_name"]
+        .as_str()
+        .context("release missing tag_name")?;
+    let candidate = tag
+        .strip_prefix('v')
+        .context("release tag must start with v")?;
     let Some(new) = number_version(candidate) else {
         bail!("invalid official release version");
     };
@@ -114,20 +129,34 @@ fn parse_release(release: &Value, version: &str) -> Result<Option<Candidate>> {
         return Ok(None);
     }
     let filename = file_for(candidate).context("no native headless release for this platform")?;
-    let assets = release["assets"].as_array().context("release assets missing")?;
-    let asset = assets.iter()
+    let assets = release["assets"]
+        .as_array()
+        .context("release assets missing")?;
+    let asset = assets
+        .iter()
         .find(|asset| asset["name"].as_str() == Some(filename.as_str()))
         .context("the release has no matching headless-test package")?;
-    let url = asset["browser_download_url"].as_str().context("asset URL missing")?;
+    let url = asset["browser_download_url"]
+        .as_str()
+        .context("asset URL missing")?;
     let expected_url = format!("{OFFICIAL_ASSETS}{tag}/{filename}");
-    ensure!(url == expected_url, "asset URL does not belong to the expected official release");
-    let sha256 = asset["digest"].as_str()
+    ensure!(
+        url == expected_url,
+        "asset URL does not belong to the expected official release"
+    );
+    let sha256 = asset["digest"]
+        .as_str()
         .and_then(|value| value.strip_prefix("sha256:"))
         .context("GitHub published no SHA-256 digest: refusing an unverified update")?;
-    ensure!(sha256.len() == 64 && sha256.bytes().all(|c| c.is_ascii_hexdigit()),
-        "invalid release SHA-256 digest");
+    ensure!(
+        sha256.len() == 64 && sha256.bytes().all(|c| c.is_ascii_hexdigit()),
+        "invalid release SHA-256 digest"
+    );
     let size = asset["size"].as_u64().context("archive size missing")?;
-    ensure!((1..=MAX_ARCHIVE_BYTES).contains(&size), "archive size exceeds safety limit");
+    ensure!(
+        (1..=MAX_ARCHIVE_BYTES).contains(&size),
+        "archive size exceeds safety limit"
+    );
     Ok(Some(Candidate {
         version: candidate.to_owned(),
         filename,
@@ -155,13 +184,21 @@ fn check_and_stage(download: bool) -> Result<()> {
         .set("Accept", "application/vnd.github+json")
         .call()
         .context("checking official GitHub release")?;
-    let body = response.into_string().context("reading official release metadata")?;
+    let body = response
+        .into_string()
+        .context("reading official release metadata")?;
     let json: Value = serde_json::from_str(&body).context("parsing official release metadata")?;
     let Some(candidate) = parse_release(&json, current())? else {
-        status(format!("already at the newest stable headless release ({})", current()));
+        status(format!(
+            "already at the newest stable headless release ({})",
+            current()
+        ));
         return Ok(());
     };
-    status(format!("official headless version {} available: {}", candidate.version, candidate.url));
+    status(format!(
+        "official headless version {} available: {}",
+        candidate.version, candidate.url
+    ));
     if download {
         let file = stage(&candidate)?;
         status(format!(
@@ -175,14 +212,19 @@ fn check_and_stage(download: bool) -> Result<()> {
 
 fn stage(candidate: &Candidate) -> Result<PathBuf> {
     let executable = std::env::current_exe().context("locating server binary")?;
-    let dir = executable.parent().context("server binary has no parent directory")?
+    let dir = executable
+        .parent()
+        .context("server binary has no parent directory")?
         .join(".headless-updates");
     fs::create_dir_all(&dir).context("creating private update staging directory")?;
     let file = dir.join(&candidate.filename);
     let partial = dir.join(format!("{}.part", candidate.filename));
     let mut downloaded = 0u64;
     let mut hasher = Sha256::new();
-    let stream = agent().get(&candidate.url).call().context("downloading headless ZIP")?;
+    let stream = agent()
+        .get(&candidate.url)
+        .call()
+        .context("downloading headless ZIP")?;
     let mut reader = stream.into_reader();
     let result = (|| -> Result<()> {
         let mut output = File::create(&partial).context("opening partial update file")?;
@@ -193,29 +235,41 @@ fn stage(candidate: &Candidate) -> Result<PathBuf> {
                 break;
             }
             downloaded += n as u64;
-            ensure!(downloaded <= candidate.size, "update archive exceeded advertised size");
+            ensure!(
+                downloaded <= candidate.size,
+                "update archive exceeded advertised size"
+            );
             hasher.update(&chunk[..n]);
             output.write_all(&chunk[..n]).context("writing update archive")?;
         }
         output.sync_all().context("flushing downloaded archive")?;
         ensure!(downloaded == candidate.size, "incomplete archive");
         let got = format!("{:x}", hasher.finalize());
-        ensure!(got == candidate.sha256, "SHA-256 does not match GitHub release digest");
+        ensure!(
+            got == candidate.sha256,
+            "SHA-256 does not match GitHub release digest"
+        );
         if file.exists() {
             fs::remove_file(&file).context("replacing an older staged archive")?;
         }
         fs::rename(&partial, &file).context("finalizing verified update archive")?;
         // Sidecar is for an offline installer to recheck the exact ZIP bytes
         // after the server is fully stopped.
-        fs::write(dir.join(format!("{}.sha256", candidate.filename)),
-            format!("{}  {}\n", candidate.sha256, candidate.filename))
-            .context("writing verified checksum sidecar")?;
+        fs::write(
+            dir.join(format!("{}.sha256", candidate.filename)),
+            format!("{}  {}\n", candidate.sha256, candidate.filename),
+        )
+        .context("writing verified checksum sidecar")?;
         let marker = dir.join("ready.txt");
         let temporary = dir.join("ready.txt.tmp");
         fs::write(
             &temporary,
-            format!("{}\n{}\n{}\n", candidate.filename, candidate.sha256, candidate.version),
-        ).context("writing staged update marker")?;
+            format!(
+                "{}\n{}\n{}\n",
+                candidate.filename, candidate.sha256, candidate.version
+            ),
+        )
+        .context("writing staged update marker")?;
         if marker.exists() {
             fs::remove_file(&marker).context("replacing an older staged update marker")?;
         }
