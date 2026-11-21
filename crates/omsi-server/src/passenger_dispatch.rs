@@ -208,6 +208,11 @@ impl PassengerDispatch {
         let Some(owner) = self.drivers.get(&player) else {
             return Vec::new();
         };
+        // Even without a usable stop ID, a moving bus must not pre-claim
+        // people and make them vanish before the next service arrives.
+        if !owner.stopped || !owner.doors_open {
+            return Vec::new();
+        }
         let service = owner.service.clone();
         let mut chosen = Vec::new();
         let mut chosen_per_group: HashMap<StopService, usize> = HashMap::new();
@@ -444,8 +449,9 @@ mod tests {
         departed.stopped = false;
         departed.doors_open = false;
         dispatch.update(vec![departed, second]);
-        // The still-waiting passengers have not been removed via hand_over.
-        assert!(dispatch.visits.is_empty());
+        // The skipped driver's reservation disappears, but the next
+        // bus's active visit is kept so its real boarding can proceed.
+        assert!(dispatch.visits.values().all(|visit| !visit.members.contains_key(&1)));
         assert_eq!(dispatch.choose(2, &all, &waiting, &counts, &stops), all);
     }
 
