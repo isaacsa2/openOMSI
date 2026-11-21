@@ -72,6 +72,32 @@ does not establish full boarding, ticketing or graphical-client parity.
 Never mark physics, scripts, or passenger parity complete from synthetic
 process tests alone.
 
+## Native headless release updater regression gates
+
+The dedicated server's `/update`, `/update status` and
+`/update download` are **local-console-only** operations. They use
+a worker thread for the official stable GitHub API and download only
+the platform's separate `headless-test` ZIP, never the graphical game
+or legacy `--server` package. Require the expected official asset
+address, announced size and SHA-256 digest; reject unsupported OS,
+missing digest, new releases that are not actually newer, PR builds
+and tampered metadata. A failed download deletes its temporary file
+without replacing `omsi-server`.
+
+The staged package is activated **offline**, with the host stopped, by
+`apply-update.ps1` (Windows) or `apply-update.sh` (Linux), which
+recheck SHA-256, run the new binary's `--version` and `--self-test`
+before replacing only that binary, keep a rollback backup and do not
+touch `server.cfg`, maps, uploaded buses or private user files.
+Unlike the in-session `/restart`, this requires a full process restart
+and reconnect. The update and test build artifacts remain isolated
+from the normal graphical and legacy server releases.
+
+**Required manual acceptance:** successful signed official ZIP,
+tampered SHA, incorrect platform, no archive, repeated check/download,
+while-server-running refusal, rollback after a broken extracted
+executable, and a real client reconnect to the updated host.
+
 ## Live configuration reload regression gates
 
 The renderer-free dedicated host accepts `/reload` from the **local
