@@ -211,6 +211,7 @@ fn near_texture_queues_restore_when_the_full_texture_would_not_fit() {
     let pending = hashbrown::HashSet::new();
     let mut gpu = GpuCache::default();
     gpu.textures.insert(path.clone(), entry);
+    let now = std::time::Instant::now();
     assert_eq!(
         queue_near_restores(
             &mut gpu,
@@ -218,10 +219,15 @@ fn near_texture_queues_restore_when_the_full_texture_would_not_fit() {
             &entries,
             150.0,
             (bytes * 4 + 4095, u64::MAX),
-            std::time::Instant::now(),
+            now,
         ),
         0,
         "a new allocation must fit before attempting even a partial restore",
+    );
+    assert_eq!(
+        gpu.textures[&path].retry_after,
+        Some(now + std::time::Duration::from_secs(2)),
+        "blocked textures must be rechecked when a small amount of VRAM returns",
     );
     assert_eq!(
         queue_near_restores(
@@ -230,10 +236,10 @@ fn near_texture_queues_restore_when_the_full_texture_would_not_fit() {
             &entries,
             150.0,
             (room, u64::MAX),
-            std::time::Instant::now(),
+            now + std::time::Duration::from_secs(3),
         ),
         1,
-        "a partial restore may be queued even when full detail would not fit",
+        "a partial restore may be queued when capacity returns after the retry interval",
     );
     assert_eq!(gpu.wants_restore, [path.clone()]);
     assert!(gpu.textures[&path].near_restore);
