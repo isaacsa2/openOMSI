@@ -87,6 +87,8 @@ pub struct ClaimQueue {
     pending: std::collections::BTreeSet<u32>,
     /// Claims already transmitted; hold them until the caller's own retry window.
     recently_sent: std::collections::BTreeMap<u32, std::time::Instant>,
+    /// Keep the visual waiting person while a delayed GRANT may still arrive.
+    awaiting_answer: std::collections::BTreeMap<u32, std::time::Instant>,
     last_sent: Option<std::time::Instant>,
 }
 
@@ -94,11 +96,13 @@ impl ClaimQueue {
     const INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
     const MAX_BATCH: usize = 64;
     const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(8);
+    const ANSWER_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
 
     /// Clear claims belonging to the previous host/session.
     pub fn clear(&mut self) {
         self.pending.clear();
         self.recently_sent.clear();
+        self.awaiting_answer.clear();
         self.last_sent = None;
     }
 
@@ -112,6 +116,8 @@ impl ClaimQueue {
         // lost UDP claims be retried after the normal stop retry timeout.
         self.recently_sent
             .retain(|_, sent| now.saturating_duration_since(*sent) < Self::RETRY_AFTER);
+        self.awaiting_answer
+            .retain(|_, sent| now.saturating_duration_since(*sent) < Self::ANSWER_WINDOW);
         self.pending.extend(
             requested
                 .into_iter()
@@ -128,9 +134,26 @@ impl ClaimQueue {
         for id in &due {
             self.pending.remove(id);
             self.recently_sent.insert(*id, now);
+            self.awaiting_answer.insert(*id, now);
         }
         self.last_sent = Some(now);
         due
+    }
+
+    /// A GONE for a just-claimed person may arrive before its UDP GRANT.
+    /// Hold the mirrored waiting person only until its bounded retry window.
+    pub fn is_awaiting(&self, id: u32) -> bool {
+        self.pending.contains(&id)
+            || self.awaiting_answer.get(&id).is_some_and(|since| {
+                std::time::Instant::now().saturating_duration_since(*since)
+                    < Self::ANSWER_WINDOW
+            })
+    }
+
+    pub fn mark_answered(&mut self, id: u32) {
+        self.pending.remove(&id);
+        self.recently_sent.remove(&id);
+        self.awaiting_answer.remove(&id);
     }
 
     pub fn send_due(
@@ -199,6 +222,9 @@ mod tests {
         );
         let retried = queue.take_due([50, 51], now + std::time::Duration::from_secs(9));
         assert_eq!(retried, vec![50, 51]);
+        assert!(queue.is_awaiting(50));
+        queue.mark_answered(50);
+        assert!(!queue.is_awaiting(50));
         queue.clear();
         assert!(
             queue
