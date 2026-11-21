@@ -88,7 +88,7 @@ cars through the acknowledged LAN traffic table and people through existing
 `WORLD` and `DESC` packets. Chrono-based road-bus departures and lines are
 experimental; not all consist, train and timetable edge cases are supported.
 
-This test mode permits configuring up to **320 ordinary AI cars**,
+This test mode permits configuring up to **512 ordinary AI cars**,
 **2,000 humans** and **12 scheduled road buses**, without renderer or audio.
 The example uses much lower values; these are configurable ceilings, not
 guaranteed simultaneous active counts or tested performance targets.
@@ -202,7 +202,7 @@ log; an unchanged file prints `no changes`.
 
 The only **hot-reloadable** keys in this experimental native host are:
 
-- `traffic`: random AI population target (up to 320 in CPU simulation).
+- `traffic`: random AI population target (up to 512 in CPU simulation).
   Reducing it removes excess unscheduled AI cars; scheduled road buses keep
   their existing trips.
 - `passenger_density`: demand factor 0–3, if passengers were enabled at boot.
@@ -388,7 +388,7 @@ they are separate explicit server-owner choices.
 ## TPS, tick latency and memory — practical load test
 
 A steady **59–60 TPS** reported by the live host is a useful baseline;
-it is not proof of capacity for 320 AI cars, 2,000 pedestrians, several
+it is not proof of capacity for 512 AI cars, 2,000 pedestrians, several
 players or a complex map. TPS measures completed ticks, whereas the
 profiler's p95/p99 reveals short stalls even when the average is 60.
 
@@ -400,7 +400,7 @@ profiler's p95/p99 reveals short stalls even when the average is 60.
    it reports measured TPS, active CPU tiles, AI/population counts and an
    **estimated terrain/raster/wheel heap**. This is not total process RAM:
    also record actual RSS and peak RSS externally on the host OS.
-4. Repeat at traffic targets of 0, 30, 160 and (only if stable) 320; compare
+4. Repeat at traffic targets of 0, 30, 160, 320 and (only if stable) 512; compare
    passenger demand with and without people. Observe p95/p99/max tick time
    and CPU usage. The 60 Hz tick budget is about **16.67 ms**.
 5. If the 512-tile accumulated limit is reached, the host will refuse new
