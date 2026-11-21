@@ -19,6 +19,7 @@ pub mod keys;
 pub mod launcher_pads;
 pub mod pedal;
 pub mod stock_keys;
+pub mod script_input;
 pub mod diagnostics;
 pub mod tobii;
 
