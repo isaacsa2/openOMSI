@@ -8,7 +8,7 @@ impl App {
     pub(crate) fn tick_lan(&mut self, dt: f32) {
         let lan_tick_started = std::time::Instant::now();
         if self.net.lan.is_none() {
-            self.coop_cab_enabled = false;
+            self.coop_cab_assistant = None;
             omsi_lan::commands::set_speed_limit_kmh(0);
             self.net.speed_limit_welcome = None;
             self.net.dedicated_teleport = None;
@@ -34,7 +34,7 @@ impl App {
         if lan.role == omsi_net::Role::Client {
             lan.set_parked_drawn(crate::on_foot::parked_drawn(self.settings.parked_buses_drawn, self.world.as_ref().map(|w| w.texture_budget_bytes()).unwrap_or(0)));
             if !lan.connected {
-                self.coop_cab_enabled = false;
+                self.coop_cab_assistant = None;
                 self.net.speed_limit_welcome = None;
                 self.net.dedicated_teleport = None;
                 omsi_lan::commands::set_speed_limit_kmh(0);
@@ -248,7 +248,7 @@ impl App {
                 lan,
                 from,
                 self.player.as_ref().map(|p| &p.vehicle),
-                self.coop_cab_enabled,
+                self.coop_cab_assistant,
                 action,
             )
         });

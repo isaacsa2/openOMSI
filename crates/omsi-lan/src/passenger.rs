@@ -38,13 +38,26 @@ pub fn may_work(
     aboard.is_some() && inside && passenger_trigger(ev)
 }
 
-/// The owner validates an authenticated on-board walker before applying
+/// Select an identifiable passenger only when exactly one authenticated player is
+/// aboard this bus. Multiple passengers require a separate explicit designation UI.
+pub fn sole_aboard(lan: &omsi_net::LanSession, bus: &omsi_sim::VehicleInstance) -> Option<u32> {
+    let footprint = crate::spawn::footprint_of(bus, crate::spawn::BUS_BOX);
+    let mut aboard = lan.peers().filter(|peer| {
+        peer.has_info && peer.has_pose && peer.pose.walker
+            .and_then(|walker| walker.aboard)
+            .is_some_and(|a| a.owner == lan.my_id && inside(&footprint, a.local))
+    });
+    let candidate = aboard.next()?.pose.id;
+    (candidate != 0 && aboard.next().is_none()).then_some(candidate)
+}
+
+/// The owner validates an authenticated designated assistant before applying
 /// cooperative cab actions. Passenger bell permissions remain unchanged.
 pub fn may_work_cabin(
     lan: &omsi_net::LanSession,
     from: u32,
     bus: Option<&omsi_sim::VehicleInstance>,
-    enabled: bool,
+    assistant: Option<u32>,
     action: crate::coop_permissions::CabinAction,
 ) -> bool {
     use crate::coop_permissions::{CabinRequest, CoopRoles, may_operate_cabin};
@@ -60,11 +73,11 @@ pub fn may_work_cabin(
     });
     let req = CabinRequest {
         same_session: lan.connected || lan.role == omsi_net::Role::Host,
-        owner_consented: enabled,
+        owner_consented: assistant == Some(from) && from != 0,
         passenger_inside_bus: inside_bus,
         speed_kmh: bus.physics.speed * 3.6,
     };
-    may_operate_cabin(CoopRoles { conductor: enabled, ..Default::default() }, req, action)
+    may_operate_cabin(CoopRoles { conductor: assistant == Some(from), ..Default::default() }, req, action)
 }
 
 /// Whether a pending boarding grant should be returned after the owner's bus

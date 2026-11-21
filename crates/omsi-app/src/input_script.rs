@@ -430,8 +430,8 @@ impl App {
             match code {
                 // The bus owner opts in before another player may act as conductor.
                 KeyCode::KeyK if ctrl && alt && !shift_now && self.net.lan.is_some() && self.player.is_some() && !self.chord_bound(code, shift_now, ctrl, alt) => {
-                    self.coop_cab_enabled = !self.coop_cab_enabled;
-                    self.service_msg = Some((format!("Co-op cab controls: {}", if self.coop_cab_enabled { "allowed" } else { "disabled" }), 4.0));
+                    self.coop_cab_assistant = if self.coop_cab_assistant.is_some() { None } else { self.net.lan.as_ref().zip(self.player.as_ref()).and_then(|(lan, p)| omsi_lan::passenger::sole_aboard(lan, &p.vehicle)) };
+                    self.service_msg = Some((format!("Co-op assistant: {}", self.coop_cab_assistant.map_or_else(|| "none (requires a sole player aboard)".into(), |id| format!("player #{id}"))), 4.0));
                     return true;
                 }
                 // OMSI's `toggel_mouse_ctrl` (O): steering and pedals with the mouse

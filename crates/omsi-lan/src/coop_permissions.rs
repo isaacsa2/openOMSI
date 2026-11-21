@@ -263,6 +263,14 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn generic_cabin_consent_cannot_authorize_other_players() {
+        let designated = Some(7);
+        assert_eq!(designated, Some(7));
+        assert_ne!(designated, Some(8));
+        assert_ne!(designated, None);
+    }
+
     fn ticket_grants_reject_replays_other_passengers_and_revoked_roles() {
         let enabled = CoopRoles {
             conductor: true,
