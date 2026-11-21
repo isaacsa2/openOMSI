@@ -297,6 +297,43 @@ impl PassengerDispatch {
         buses
     }
 
+    /// A GRANT can be lost over UDP after the host removed this waiting
+    /// person from its live population. The same connected bus may request
+    /// the same person again while still boarding at the original platform;
+    /// repeat the pending GRANT instead of incorrectly sending DENY.
+    /// Never hand the escrow to another client or a reconnected peer.
+    pub(crate) fn repeat_grants(
+        &self,
+        player: u32,
+        requested: &[u32],
+        stop_positions: &HashMap<i64, DVec3>,
+    ) -> Vec<u32> {
+        let Some(driver) = self.drivers.get(&player) else {
+            return Vec::new();
+        };
+        if !driver.stopped || !driver.doors_open {
+            return Vec::new();
+        }
+        let Some(holding) = self.escrow.get(&player) else {
+            return Vec::new();
+        };
+        let mut seen = HashSet::new();
+        requested
+            .iter()
+            .copied()
+            .take(MAX_WAITING_PER_TICK)
+            .filter(|id| seen.insert(*id))
+            .filter(|id| {
+                holding.get(id).is_some_and(|entry| {
+                    same_escrow_owner(Some(driver), entry.connection, &entry.bus)
+                        && entry.person.stop
+                            .and_then(|stop| stop_positions.get(&stop))
+                            .is_some_and(|position| driver.boarding_at(*position))
+                })
+            })
+            .collect()
+    }
+
     /// Filter a batch of eligible host passenger IDs before PeopleSim hands
     /// them over. `waiting` contains only people waiting at an identified
     /// stop. A person who has no stop still uses the legacy individual claim.
