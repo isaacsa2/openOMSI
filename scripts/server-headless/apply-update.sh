@@ -30,10 +30,17 @@ command -v unzip >/dev/null 2>&1 || { echo "unzip is required" >&2; exit 1; }
 command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit 1; }
 actual="$(sha256sum "$archive" | cut -d' ' -f1)"
 [ "$actual" = "$expected" ] || { echo "Update SHA-256 mismatch; refusing installation" >&2; exit 1; }
-test "$("$here/omsi-server" --version >/dev/null 2>&1; echo $?)" -eq 0 || {
-    echo "Stop any running server before updating (older versions might not support --version)." >&2
-    exit 1
-}
+# Linux permits renaming a running executable; refuse this explicitly,
+# rather than silently installing a new binary while the old server serves.
+if [ -d /proc ]; then
+    for process in /proc/[0-9]*/exe; do
+        running="$(readlink "$process" 2>/dev/null || true)"
+        if [ "$running" = "$here/omsi-server" ]; then
+            echo "Server is still running; type stop before applying the update." >&2
+            exit 1
+        fi
+    done
+fi
 candidate="$stage/omsi-server.next"
 backup="$here/omsi-server.previous"
 [ ! -e "$backup" ] || { echo "Backup $backup already exists; archive it before another update" >&2; exit 1; }
