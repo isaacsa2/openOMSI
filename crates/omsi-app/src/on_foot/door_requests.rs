@@ -1,5 +1,5 @@
 use super::*;
-use omsi_sim::people::DoorRequest;
+use omsi_lan::door_requests::parse_request;
 
 const REACH: f64 = 3.2;
 const SEND_EVERY: f32 = 0.2;
@@ -26,27 +26,68 @@ fn location(f: &OnFoot, h: &Humans) -> (DVec3, Option<BusId>) {
 
 impl App {
     pub(super) fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
-        let Some(BusId::Ai(id)) = self.foot_bus() else { return };
-        let Some(owner) = crate::humans::remote_bus_player(id) else { return };
-        let Some(lan) = self.net.lan.as_mut() else { return };
-        if owner == lan.my_id { return; }
+        let Some(BusId::Ai(id)) = self.foot_bus() else {
+            return;
+        };
+        let Some(owner) = crate::humans::remote_bus_player(id) else {
+            return;
+        };
+        let Some(lan) = self.net.lan.as_mut() else {
+            return;
+        };
+        if owner == lan.my_id {
+            return;
+        }
         lan.command(owner, &action.command());
     }
 
     /// Only a real mouse-event hit in another player's bus is sent to the owner.
     /// The owning client still validates a designated assistant and its distance.
     pub(crate) fn click_remote_cabin(&mut self, pressed: bool) {
-        if !pressed { return; }
-        let Some(BusId::Ai(id)) = self.foot_bus() else { return };
-        let Some(owner) = crate::humans::remote_bus_player(id) else { return };
-        let ray = self.camera.as_ref().zip(self.gfx.surface.as_ref())
-            .map(|(camera, surface)| self.cockpit_cursor_ray(camera, (surface.config.width, surface.config.height)));
-        let Some((origin, direction, spread)) = ray else { return };
-        let Some(remote) = self.net.remotes.remotes.get(&owner) else { return };
+        if !pressed {
+            return;
+        }
+        let Some(BusId::Ai(id)) = self.foot_bus() else {
+            return;
+        };
+        let Some(owner) = crate::humans::remote_bus_player(id) else {
+            return;
+        };
+        let ray = self
+            .camera
+            .as_ref()
+            .zip(self.gfx.surface.as_ref())
+            .map(|(camera, surface)| {
+                self.cockpit_cursor_ray(camera, (surface.config.width, surface.config.height))
+            });
+        let Some((origin, direction, spread)) = ray else {
+            return;
+        };
+        let Some(remote) = self.net.remotes.remotes.get(&owner) else {
+            return;
+        };
         let vehicle = remote.vehicle();
-        let Some((mesh, _)) = crate::player::pick_in(vehicle, origin, direction, spread, crate::player::Reach(3.2), false) else { return };
-        let Some(event) = vehicle.ty.model.meshes.get(vehicle.ty.meshes[mesh].def_index).and_then(|m| m.mouse_event.as_deref()) else { return };
-        if let Some(action) = omsi_lan::coop_permissions::cabin_action_for_model(&vehicle.ty, event) {
+        let Some((mesh, _)) = crate::player::pick_in(
+            vehicle,
+            origin,
+            direction,
+            spread,
+            crate::player::Reach(3.2),
+            false,
+        ) else {
+            return;
+        };
+        let Some(event) = vehicle
+            .ty
+            .model
+            .meshes
+            .get(vehicle.ty.meshes[mesh].def_index)
+            .and_then(|m| m.mouse_event.as_deref())
+        else {
+            return;
+        };
+        if let Some(action) = omsi_lan::coop_permissions::cabin_action_for_model(&vehicle.ty, event)
+        {
             self.request_coop_cabin(action);
         }
     }
@@ -66,7 +107,10 @@ impl App {
             });
         let Some(target) = target else {
             self.service_msg = Some((
-                omsi_ui::tr("Stand near a bus entry outside, or an exit inside, to request the door").into_owned(),
+                omsi_ui::tr(
+                    "Stand near a bus entry outside, or an exit inside, to request the door",
+                )
+                .into_owned(),
                 3.0,
             ));
             return;
@@ -76,8 +120,12 @@ impl App {
             f.door_request_send = 0.0;
         }
         self.service_msg = Some((
-            omsi_ui::tr(if target.exit { "Exit requested at door {}" } else { "Entry requested at door {}" })
-                .replacen("{}", &(target.index + 1).to_string(), 1),
+            omsi_ui::tr(if target.exit {
+                "Exit requested at door {}"
+            } else {
+                "Entry requested at door {}"
+            })
+            .replacen("{}", &(target.index + 1).to_string(), 1),
             3.0,
         ));
     }
@@ -186,62 +234,6 @@ impl App {
         if h.door_request_near(request, at, inside, REACH + 1.0) && !h.requested_door_open(request)
         {
             h.set_manual_door_request(from, request, LEASE);
-        }
-    }
-}
-
-fn parse_request(text: &str, host: bool) -> Option<DoorRequest> {
-    let mut words = text.split_whitespace();
-    let kind = words.next()?;
-    let id = words.next()?.parse::<u64>().ok()?;
-    let bus = match (kind, id) {
-        ("player", 0) => BusId::Player,
-        ("ai", id) if host && id > 0 && id <= omsi_net::world::MAX_ID as u64 => BusId::Ai(id),
-        _ => return None,
-    };
-    let exit = match words.next()? {
-        "entry" => false,
-        "exit" => true,
-        _ => return None,
-    };
-    let index = words.next()?.parse::<usize>().ok()?;
-    if index > u16::MAX as usize || words.next().is_some() {
-        return None;
-    }
-    Some(DoorRequest { bus, exit, index })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn commands_only_target_an_owners_player_bus_or_the_hosts_ai() {
-        assert_eq!(
-            parse_request("player 0 entry 2", false),
-            Some(DoorRequest {
-                bus: BusId::Player,
-                exit: false,
-                index: 2
-            })
-        );
-        assert_eq!(
-            parse_request("ai 7 exit 1", true),
-            Some(DoorRequest {
-                bus: BusId::Ai(7),
-                exit: true,
-                index: 1
-            })
-        );
-        assert!(parse_request("ai 7 exit 1", false).is_none());
-        for invalid in [
-            "player 3 exit 1",
-            "ai 0 entry 0",
-            "ai 1099511627776 entry 0",
-            "player 0 entry 65536",
-            "player 0 entry 0 extra",
-            "player 0 open 0",
-        ] {
-            assert!(parse_request(invalid, true).is_none());
         }
     }
 }

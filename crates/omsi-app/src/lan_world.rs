@@ -31,8 +31,7 @@ use hashbrown::{HashMap, HashSet};
 use omsi_lan::config::LanConfig;
 use omsi_net::traffic_table::{ClientTable, TrafficId};
 use omsi_net::world::{
-    self as nw, Desc, EntityRef, LightState, PersonPlace, PersonState,
-    WorldFrame,
+    self as nw, Desc, EntityRef, LightState, PersonPlace, PersonState, WorldFrame,
 };
 use omsi_net::{LanSession, Role};
 use omsi_render::{Renderer, Scene};
@@ -408,7 +407,11 @@ impl LanWorld {
                     .push(f.host_ms as f64, p);
             }
             for (_, pid) in f.gone {
-                if up.tracks.get(&pid).is_some_and(|t| t.remove_is_current(f.host_ms as f64)) {
+                if up
+                    .tracks
+                    .get(&pid)
+                    .is_some_and(|t| t.remove_is_current(f.host_ms as f64))
+                {
                     up.tracks.remove(&pid);
                 }
             }
@@ -530,9 +533,8 @@ impl LanWorld {
         }
         // people
         let forget = std::time::Duration::from_secs_f32(nw::FORGET_AFTER);
-        m.people.retain(|id, t| {
-            t.heard.elapsed() < forget || m.claim_queue.is_awaiting(*id)
-        });
+        m.people
+            .retain(|id, t| t.heard.elapsed() < forget || m.claim_queue.is_awaiting(*id));
         if let Some(h) = humans.as_deref_mut() {
             m.update_people(lan, h, view, world, renderer, scene, render_ms);
         }
