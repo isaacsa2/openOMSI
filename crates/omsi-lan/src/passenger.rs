@@ -85,16 +85,20 @@ pub fn resend_until_ack(
 #[derive(Default)]
 pub struct ClaimQueue {
     pending: std::collections::BTreeSet<u32>,
+    /// Claims already transmitted; hold them until the caller's own retry window.
+    recently_sent: std::collections::BTreeMap<u32, std::time::Instant>,
     last_sent: Option<std::time::Instant>,
 }
 
 impl ClaimQueue {
     const INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
     const MAX_BATCH: usize = 64;
+    const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(8);
 
     /// Clear claims belonging to the previous host/session.
     pub fn clear(&mut self) {
         self.pending.clear();
+        self.recently_sent.clear();
         self.last_sent = None;
     }
 
@@ -103,7 +107,16 @@ impl ClaimQueue {
         requested: impl IntoIterator<Item = u32>,
         now: std::time::Instant,
     ) -> Vec<u32> {
-        self.pending.extend(requested);
+        // A caller can rediscover the same stop on the next frame. Do not
+        // reinsert already sent IDs ahead of yet-unsent claims. Let genuinely
+        // lost UDP claims be retried after the normal stop retry timeout.
+        self.recently_sent
+            .retain(|_, sent| now.saturating_duration_since(*sent) < Self::RETRY_AFTER);
+        self.pending.extend(
+            requested
+                .into_iter()
+                .filter(|id| !self.recently_sent.contains_key(id)),
+        );
         if self.pending.is_empty()
             || self
                 .last_sent
@@ -114,6 +127,7 @@ impl ClaimQueue {
         let due: Vec<u32> = self.pending.iter().take(Self::MAX_BATCH).copied().collect();
         for id in &due {
             self.pending.remove(id);
+            self.recently_sent.insert(*id, now);
         }
         self.last_sent = Some(now);
         due
@@ -178,6 +192,11 @@ mod tests {
             now + std::time::Duration::from_millis(1_000),
         );
         assert_eq!(third, (128..150).collect::<Vec<_>>());
+        assert!(queue
+            .take_due([50, 51, 64], now + std::time::Duration::from_secs(2))
+            .is_empty());
+        let retried = queue.take_due([50, 51], now + std::time::Duration::from_secs(9));
+        assert_eq!(retried, vec![50, 51]);
         queue.clear();
         assert!(
             queue
