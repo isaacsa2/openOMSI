@@ -56,7 +56,10 @@ fn an_unrelated_udp_socket_cannot_acknowledge_a_passenger_return() {
     let (_host, mut client) = connected_pair();
     let rogue = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     rogue
-        .send_to(b"PAXACK|100", client.local_addr().unwrap())
+        .send_to(
+            b"PAXACK|100",
+            SocketAddr::from(([127, 0, 0, 1], client.local_addr().unwrap().port())),
+        )
         .unwrap();
     client.tick(0.01, &Pose::default());
     assert!(client.take_pax_acks().is_empty());

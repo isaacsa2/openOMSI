@@ -197,7 +197,10 @@ impl HeadlessPeopleSync {
         // observers. Build the broad-phase once and reuse it across players.
         // The people layer still performs the original exact 3D test.
         let person_index = SpatialIndex::from_positions(
-            people.people.iter().map(|person| person.position.truncate()),
+            people
+                .people
+                .iter()
+                .map(|person| person.position.truncate()),
         );
         let mut candidates = Vec::new();
         let mut bytes = 0;

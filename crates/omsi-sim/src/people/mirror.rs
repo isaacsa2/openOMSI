@@ -150,12 +150,7 @@ impl PeopleSim {
     /// A caller with an XY spatial broad-phase can pass candidate indices.
     /// The same exact 3D check, identity and original list order apply.
     /// Legacy graphical LAN still calls lan_people without a spatial index.
-    pub fn lan_people_subset(
-        &self,
-        near: DVec3,
-        radius: f64,
-        indices: &[usize],
-    ) -> Vec<LanPerson> {
+    pub fn lan_people_subset(&self, near: DVec3, radius: f64, indices: &[usize]) -> Vec<LanPerson> {
         self.lan_people_selected(near, radius, indices.iter().copied())
     }
 
@@ -270,7 +265,11 @@ impl PeopleSim {
                 .is_some_and(|taken| !*taken)
         });
         let spot = if let Some(index) = original_available {
-            if let Some(taken) = self.stops.get_mut(&stop).and_then(|s| s.taken.get_mut(index)) {
+            if let Some(taken) = self
+                .stops
+                .get_mut(&stop)
+                .and_then(|s| s.taken.get_mut(index))
+            {
                 *taken = true;
             }
             Some(index)

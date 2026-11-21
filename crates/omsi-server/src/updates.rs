@@ -244,7 +244,9 @@ fn stage(candidate: &Candidate) -> Result<PathBuf> {
                 "update archive exceeded advertised size"
             );
             hasher.update(&chunk[..n]);
-            output.write_all(&chunk[..n]).context("writing update archive")?;
+            output
+                .write_all(&chunk[..n])
+                .context("writing update archive")?;
         }
         output.sync_all().context("flushing downloaded archive")?;
         ensure!(downloaded == candidate.size, "incomplete archive");

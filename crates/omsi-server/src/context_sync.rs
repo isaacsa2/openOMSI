@@ -94,7 +94,10 @@ impl HeadlessContextSync {
         // player's exact original radius and car-list priority, including
         // MAX_CARS_PER_PEER, so LAN payloads and client behavior do not change.
         let nearby_cars = SpatialIndex::from_positions(
-            traffic.cars.iter().map(|car| car.vehicle.position.truncate()),
+            traffic
+                .cars
+                .iter()
+                .map(|car| car.vehicle.position.truncate()),
         );
         let mut candidates = Vec::new();
         let mut bytes = 0;

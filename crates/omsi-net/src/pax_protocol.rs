@@ -64,7 +64,10 @@ impl LanSession {
         if let (Role::Client, Some(h), true) = (self.role, self.host, self.connected) {
             for chunk in people.chunks(64) {
                 let ids: Vec<String> = chunk.iter().map(|i| i.to_string()).collect();
-                self.send(format!("CLAIM|{}|{}", self.my_id, ids.join(",")).as_bytes(), h);
+                self.send(
+                    format!("CLAIM|{}|{}", self.my_id, ids.join(",")).as_bytes(),
+                    h,
+                );
             }
         }
     }

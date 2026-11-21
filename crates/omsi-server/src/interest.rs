@@ -211,13 +211,8 @@ pub(crate) fn update_host_interest_with_dispatch(
         } else {
             Vec::new()
         };
-        let coordinated = dispatch.choose(
-            player,
-            &eligible,
-            &waiting,
-            &stop_counts,
-            &stop_positions,
-        );
+        let coordinated =
+            dispatch.choose(player, &eligible, &waiting, &stop_counts, &stop_positions);
         let saved = people.hand_over_saved(player, &coordinated);
         let granted: Vec<u32> = saved.iter().map(|held| held.person.id).collect();
         dispatch.escrow_granted(player, saved);

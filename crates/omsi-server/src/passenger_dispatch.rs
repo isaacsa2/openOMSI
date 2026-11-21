@@ -84,7 +84,10 @@ impl Driver {
             alighted: 0,
             stopped: pose.speed_kmh.is_finite() && pose.speed_kmh.abs() <= 5.0,
             doors_open: pose.doors.is_empty()
-                || pose.doors.iter().any(|door| door.is_finite() && *door > 0.1),
+                || pose
+                    .doors
+                    .iter()
+                    .any(|door| door.is_finite() && *door > 0.1),
         })
     }
 
@@ -235,9 +238,8 @@ impl PassengerDispatch {
             return Vec::new();
         }
         let service = owner.service.clone();
-        let allowance = MAX_ESCROW_PER_PLAYER.saturating_sub(
-            self.escrow.get(&player).map_or(0, HashMap::len),
-        );
+        let allowance =
+            MAX_ESCROW_PER_PLAYER.saturating_sub(self.escrow.get(&player).map_or(0, HashMap::len));
         if allowance == 0 {
             return Vec::new();
         }
@@ -349,7 +351,10 @@ impl PassengerDispatch {
             return;
         };
         for id in ids {
-            if holding.get(id).is_some_and(|entry| entry.connection == connection) {
+            if holding
+                .get(id)
+                .is_some_and(|entry| entry.connection == connection)
+            {
                 holding.remove(id);
             }
         }
@@ -379,9 +384,10 @@ impl PassengerDispatch {
                 Some(entry) if Some(entry.connection) == connection => {
                     // Do not throw away the original person if their stop was
                     // removed by streaming or a Chrono map swap.
-                    if !people.stops.contains_key(
-                        &entry.person.stop.unwrap_or(i64::MIN),
-                    ) {
+                    if !people
+                        .stops
+                        .contains_key(&entry.person.stop.unwrap_or(i64::MIN))
+                    {
                         self.escrow.entry(player).or_default().insert(*id, entry);
                         continue;
                     }
@@ -403,17 +409,14 @@ impl PassengerDispatch {
 
     /// Record GRANT, not an actual boarding. Occupancy changes only when the
     /// client's next Pose.passengers update arrives.
-    pub(crate) fn granted(
-        &mut self,
-        player: u32,
-        granted: &[u32],
-        waiting: &HashMap<u32, i64>,
-    ) {
+    pub(crate) fn granted(&mut self, player: u32, granted: &[u32], waiting: &HashMap<u32, i64>) {
         let Some(service) = self.drivers.get(&player).and_then(|d| d.service.clone()) else {
             return;
         };
         for id in granted {
-            let Some(&stop) = waiting.get(id) else { continue };
+            let Some(&stop) = waiting.get(id) else {
+                continue;
+            };
             let key = StopService {
                 stop,
                 service: service.clone(),
@@ -529,7 +532,11 @@ mod tests {
         dispatch.update(vec![first.clone(), next.clone()]);
         let (waiting, counts, stops) = sample();
         let all: Vec<_> = (1..=10).collect();
-        assert!(dispatch.choose(1, &all, &waiting, &counts, &stops).is_empty());
+        assert!(
+            dispatch
+                .choose(1, &all, &waiting, &counts, &stops)
+                .is_empty()
+        );
         // No GRANT occurred: the host's same ten waiting people remain.
         first.position = DVec3::new(100.0, 0.0, 0.0);
         next.stopped = true;
@@ -555,7 +562,12 @@ mod tests {
         dispatch.update(vec![departed, second]);
         // The skipped driver's reservation disappears, but the next
         // bus's active visit is kept so its real boarding can proceed.
-        assert!(dispatch.visits.values().all(|visit| !visit.members.contains_key(&1)));
+        assert!(
+            dispatch
+                .visits
+                .values()
+                .all(|visit| !visit.members.contains_key(&1))
+        );
         assert_eq!(dispatch.choose(2, &all, &waiting, &counts, &stops), all);
     }
 
@@ -568,7 +580,11 @@ mod tests {
         dispatch.update(vec![bypassing, serving]);
         let (waiting, counts, stops) = sample();
         let all: Vec<_> = (1..=10).collect();
-        assert!(dispatch.choose(1, &all, &waiting, &counts, &stops).is_empty());
+        assert!(
+            dispatch
+                .choose(1, &all, &waiting, &counts, &stops)
+                .is_empty()
+        );
         assert_eq!(dispatch.choose(2, &all, &waiting, &counts, &stops), all);
     }
 
@@ -577,11 +593,15 @@ mod tests {
         let mut dispatch = PassengerDispatch::default();
         dispatch.update(vec![driver(1, 10, "terminal"), driver(2, 0, "terminal")]);
         let (waiting, counts, stops) = sample();
-        assert!(dispatch
-            .choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops)
-            .is_empty());
+        assert!(
+            dispatch
+                .choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops)
+                .is_empty()
+        );
         assert_eq!(
-            dispatch.choose(2, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).len(),
+            dispatch
+                .choose(2, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops)
+                .len(),
             10
         );
     }
