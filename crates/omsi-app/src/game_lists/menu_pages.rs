@@ -455,6 +455,26 @@ pub(super) fn world_pages(app: &App) -> Vec<Page> {
             climate.clear();
         }
         tools.push(button("Object editor", "Open", "Place and move objects in the world.", "editor"));
+    } else {
+        // A LAN client cannot change the host's weather or clock, but must be
+        // able to inspect the same values used to render the world.
+        let (day, month) = app.clock.day_month();
+        let date = format!("{:04}-{month:02}-{day:02}", app.clock.year);
+        let time_of_day = app.clock.time.rem_euclid(86_400.0);
+        let time_label = format!("{:02}:{:02}", (time_of_day / 3600.0) as u32, (time_of_day as u32 / 60) % 60);
+        time.push((row("Server date", 'i', &date, "Set by the multiplayer host", None), "noop".to_string()));
+        time.push((row("Server time", 'i', &time_label, "Set by the multiplayer host", None), "noop".to_string()));
+        if let Some(w) = app.session.weather.as_ref() {
+            weather.push((row("Server weather", 'i', &w.name, "Weather synchronized from the host", None), "noop".to_string()));
+            weather.push((row("Visibility", 'i', &format!("{:.1} km", w.fog.0 / 1000.0), "Current visibility", None), "noop".to_string()));
+            let strength = if w.precip[0] < 0.5 { 0.0 } else { (w.precip[1] / 255.0).clamp(0.0, 1.0) };
+            weather.push((row("Precipitation", 'i', &format!("{:.0} %", strength * 100.0), "Current rain or snow intensity", None), "noop".to_string()));
+            climate.push((row("Temperature", 'i', &format!("{:.1} °C", w.temp.0), "From the server weather", None), "noop".to_string()));
+            climate.push((row("Wind speed", 'i', &format!("{:.1} m/s", w.wind.1), "From the server weather", None), "noop".to_string()));
+            climate.push((row("Wind direction", 'i', &format!("{:.0}°", w.wind.0.rem_euclid(360.0)), "From the server weather", None), "noop".to_string()));
+        } else {
+            weather.push((row("Server weather", 'i', "Waiting for weather", "Weather will appear when received from the host", None), "noop".to_string()));
+        }
     }
     let mut people: Vec<(String, String)> = Vec::new();
     people.extend(slider_row(app, "traffic", "Traffic", "How many vehicles drive around the map.", &|v| omsi_ui::tr("{n} vehicles").replace("{n}", &(v as i64).to_string())));
