@@ -114,7 +114,7 @@ pub struct Material {
     /// Keep the exact material parameters so a CTC texture swap can change only the diffuse
     /// map without losing map lighting, moisture, screen, or other renderer flags.
     pub(crate) uniform: MaterialUniform,
-    pub(crate) buf: wgpu::Buffer,
+    pub(crate) buf: UniformSlot,
     pub(crate) bind_group: wgpu::BindGroup,
     /// Materials that draw alike (same textures, sampler and values) share this number.
     pub(crate) look: u32,
@@ -530,13 +530,7 @@ impl Renderer {
         let (bind_group, buf) = match scene.bind_groups.get(&key) {
             Some((bg, b)) => (bg.clone(), b.clone()),
             None => {
-                let buf = buffer_init(
-                    &self.device,
-                    &self.queue,
-                    None,
-                    bytemuck::bytes_of(&uniform),
-                    wgpu::BufferUsages::UNIFORM,
-                );
+                let buf = self.uniform_slot(scene, &uniform);
                 let bind_group = self.material_bind_group(
                     &scene.textures,
                     MaterialMaps {
@@ -853,7 +847,7 @@ impl Renderer {
         let (bind_group, buf) = match scene.bind_groups.get(&key) {
             Some((bg, b)) => (bg.clone(), b.clone()),
             None => {
-                let buf = buffer_init(&self.device, &self.queue, None, bytemuck::bytes_of(&uniform), wgpu::BufferUsages::UNIFORM);
+                let buf = self.uniform_slot(scene, &uniform);
                 let bind_group = self.material_bind_group(
                     &scene.textures,
                     MaterialMaps {
@@ -907,7 +901,7 @@ impl Renderer {
         textures: &[GpuTexture],
         maps: MaterialMaps,
         address: TexAddressing,
-        buf: &wgpu::Buffer,
+        buf: &UniformSlot,
     ) -> wgpu::BindGroup {
         let view = |t: Option<TextureId>, or: &'_ GpuTexture| -> wgpu::TextureView {
             t.and_then(|t| textures.get(t))
@@ -945,7 +939,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: buf.as_entire_binding(),
+                    resource: buf.binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
