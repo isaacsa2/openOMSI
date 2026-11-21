@@ -13,15 +13,19 @@ use omsi_sim::{SimClock, VehicleHost, VehicleInstance};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Conservative default for servers without an explicit AI timetable budget.
 pub const MAX_EXPERIMENTAL_SCHEDULED: usize = 12;
+/// Bound explicitly configured native timetable fleets without silently
+/// overriding server.cfg values such as ai_max_scheduled=60.
+pub const MAX_CONFIGURED_SCHEDULED: usize = 64;
 
 /// The legacy server.cfg defines 0 as "no configured limit". A native
-/// experimental host still caps it at 12 for bounded CPU testing. Use this
-/// helper at bootstrap and hot reload so both paths interpret it identically.
+/// experimental host defaults to 12 for bounded CPU testing, but honours
+/// positive configured limits up to 64. Use the same helper on boot and reload.
 pub fn scheduled_budget(setting: Option<u32>) -> usize {
     setting
         .filter(|&count| count > 0)
-        .map(|count| (count as usize).min(MAX_EXPERIMENTAL_SCHEDULED))
+        .map(|count| (count as usize).min(MAX_CONFIGURED_SCHEDULED))
         .unwrap_or(MAX_EXPERIMENTAL_SCHEDULED)
 }
 
@@ -40,13 +44,13 @@ impl CpuTimetable {
             "native timetable: {} trips, {} lines, {} scheduled vehicles maximum",
             sim.data.trips.len(),
             sim.data.lines.len(),
-            limit.min(MAX_EXPERIMENTAL_SCHEDULED)
+            limit.min(MAX_CONFIGURED_SCHEDULED)
         );
         Self {
             sim,
             elapsed: 0.0,
             starting: true,
-            max: limit.min(MAX_EXPERIMENTAL_SCHEDULED),
+            max: limit.min(MAX_CONFIGURED_SCHEDULED),
         }
     }
 
@@ -55,7 +59,7 @@ impl CpuTimetable {
     /// Applies only to future departures. Existing buses may finish their trip
     /// rather than being despawned in front of clients on a config reload.
     pub fn set_limit(&mut self, max: usize) {
-        self.max = max.min(MAX_EXPERIMENTAL_SCHEDULED);
+        self.max = max.min(MAX_CONFIGURED_SCHEDULED);
     }
 
     pub fn tick(
@@ -251,6 +255,8 @@ mod budget_tests {
         assert_eq!(scheduled_budget(Some(0)), MAX_EXPERIMENTAL_SCHEDULED);
         assert_eq!(scheduled_budget(Some(5)), 5);
         assert_eq!(scheduled_budget(Some(12)), 12);
-        assert_eq!(scheduled_budget(Some(10_000)), MAX_EXPERIMENTAL_SCHEDULED);
+        assert_eq!(scheduled_budget(Some(60)), 60);
+        assert_eq!(scheduled_budget(Some(64)), MAX_CONFIGURED_SCHEDULED);
+        assert_eq!(scheduled_budget(Some(10_000)), MAX_CONFIGURED_SCHEDULED);
     }
 }
