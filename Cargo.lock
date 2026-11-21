@@ -4523,6 +4523,7 @@ dependencies = [
  "log",
  "omsi-admin",
  "omsi-cfg",
+ "omsi-career",
  "omsi-content",
  "omsi-geometry",
  "omsi-lan",
