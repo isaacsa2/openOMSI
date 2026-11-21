@@ -70,6 +70,7 @@ pub mod animation_sync;
 pub mod variable_schema;
 
 pub mod clock;
+pub mod coop_permissions;
 pub mod script_texture;
 
 pub mod freetex;
