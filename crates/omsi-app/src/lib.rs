@@ -902,6 +902,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
         },
         net: NetState::default(),
         service_msg: clock_note.map(|m| (m, 10.0)),
+        coop_cab_enabled: false,
         settings,
         exiting: false,
         shell: crate::shell::Shell::new(),
