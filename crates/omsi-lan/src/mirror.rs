@@ -286,11 +286,20 @@ mod tests {
             teleported: false,
         };
         for kind in [Kind::Car, Kind::Bus, Kind::Truck, Kind::Motorcycle] {
-            assert_eq!(vehicle_position(&pose, Some((kind, 10.0))), [30.0, 40.0, 10.0]);
+            assert_eq!(
+                vehicle_position(&pose, Some((kind, 10.0))),
+                [30.0, 40.0, 10.0]
+            );
         }
-        let high = Pose { pos: [30.0, 40.0, 12.4], ..pose };
+        let high = Pose {
+            pos: [30.0, 40.0, 12.4],
+            ..pose
+        };
         assert_eq!(vehicle_position(&high, Some((Kind::Car, 10.0)))[2], 10.0);
-        let between = Pose { extrapolated: false, ..pose };
+        let between = Pose {
+            extrapolated: false,
+            ..pose
+        };
         assert_eq!(vehicle_position(&between, Some((Kind::Car, 10.0)))[2], 7.6);
         assert_eq!(vehicle_position(&pose, Some((Kind::Rail, 10.0)))[2], 7.6);
         assert_eq!(vehicle_position(&pose, None)[2], 7.6);
