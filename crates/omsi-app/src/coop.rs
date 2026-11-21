@@ -138,7 +138,10 @@ impl App {
         let inside = peer.pose.walker.and_then(|w| w.aboard)
             .is_some_and(|aboard| aboard.owner == lan.my_id);
         let Some(player) = self.player.as_mut() else { return };
-        let door_count = omsi_sim::door_keys::door_keys(&player.vehicle.ty).len();
+        let door_count = omsi_sim::door_keys::door_keys(&player.vehicle.ty)
+            .iter()
+            .filter(|group| !(group.len() == 1 && group[0] == "bus_dooraft"))
+            .count();
         let window_known = matches!(action, CabControl::Window(name)
             if player.vehicle.ty.program.trigger(name).is_some() && passenger_window_trigger(name));
         let Some(grant) = self.net.conductor_grant.as_mut() else { return };
