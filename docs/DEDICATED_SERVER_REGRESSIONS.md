@@ -33,7 +33,7 @@ The native server keeps voice and unauthorized teleport disabled. Public
 listing, tunnel, map sharing and bus uploads are independent operator opt-ins:
 test each combination for reachability and authorization. Map/vehicle transfers
 must have explicit configuration consent and pass the authenticated LAN
-mod-service and private-content policy. The configurable maximum is 320
+mod-service and private-content policy. The configurable maximum is 512
 ordinary road cars, 2,000 humans and 12 separate scheduled road buses. These
 ceilings are not a benchmark or a guarantee of simultaneous active entities.
 
@@ -370,7 +370,7 @@ players, then review retained-route correctness after travelling and
 reconnecting. Free-roam's independent active tile window remains 192.
 
 **Performance.** The live host's previously reported steady 59–60 TPS is
-encouraging but is not a 320-car/2,000-person load benchmark. The console
+encouraging but is not a 512-car/2,000-person load benchmark. The console
 already supports `timings start`, `timings report` and `timings stop`
 with p95/p99 and max tick samples. An additional once-per-3600-tick
 `native load:` log reports observed AI/people counts and approximate
