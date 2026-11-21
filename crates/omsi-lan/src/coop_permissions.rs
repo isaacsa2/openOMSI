@@ -105,16 +105,31 @@ pub enum CabControl<'a> {
 /// compiled program; generic trigger prefixes are never arbitrary script access.
 pub fn passenger_window_trigger(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    let valid_prefix = ["window_", "bus_window", "fenster_", "bus_fenster", "fahrerfenster"];
+    let valid_prefix = [
+        "window_",
+        "bus_window",
+        "fenster_",
+        "bus_fenster",
+        "fahrerfenster",
+        "bus_fahrerfenster",
+        "cp_fahrerfenster",
+    ];
+    let forbidden = [
+        "motor",
+        "engine",
+        "steer",
+        "brake",
+        "gear",
+        "throttle",
+        "handbrake",
+    ];
     !name.is_empty()
         && name.len() <= 80
         && name.is_ascii()
         && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
         && valid_prefix.iter().any(|prefix| lower.starts_with(prefix))
         && !lower.ends_with("_off")
-        && !["motor", "engine", "steer", "brake", "gear", "throttle", "handbrake"]
-            .iter()
-            .any(|part| lower.contains(part))
+        && !forbidden.iter().any(|part| lower.contains(part))
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -137,7 +152,12 @@ pub struct CabRequest<'a> {
 }
 
 impl CabGrant {
-    pub fn authorize_cab(&mut self, request: CabRequest<'_>, known_window: bool, door_count: usize) -> bool {
+    pub fn authorize_cab(
+        &mut self,
+        request: CabRequest<'_>,
+        known_window: bool,
+        door_count: usize,
+    ) -> bool {
         let valid_control = match request.action {
             CabControl::Door(index) => (1..=door_count.min(8)).contains(&index),
             CabControl::Window(name) => known_window && passenger_window_trigger(name),
@@ -164,7 +184,12 @@ mod tests {
 
     #[test]
     fn cabin_controls_require_a_specific_grant_and_verified_bus_occupancy() {
-        let grant = CabGrant { actor: 7, connection: 80, session: 91, last_seq: 0 };
+        let grant = CabGrant {
+            actor: 7,
+            connection: 80,
+            session: 91,
+            last_seq: 0,
+        };
         let request = CabRequest {
             actor: 7,
             connection: 80,
@@ -174,26 +199,54 @@ mod tests {
             bus_present: true,
             action: CabControl::Door(1),
         };
-        let mut g = grant;
-        assert!(g.authorize_cab(request, false, 3));
-        assert!(!g.authorize_cab(request, false, 3), "replay");
-        assert!(!grant.clone().authorize_cab(CabRequest { actor: 8, ..request }, false, 3));
-        assert!(!grant.clone().authorize_cab(CabRequest { connection: 81, ..request }, false, 3));
-        assert!(!grant.clone().authorize_cab(CabRequest { inside_owners_bus: false, ..request }, false, 3));
-        assert!(!grant.clone().authorize_cab(CabRequest { session: 92, ..request }, false, 3));
-        assert!(!grant.clone().authorize_cab(CabRequest { action: CabControl::Door(9), ..request }, false, 3));
-        for name in ["window_driver", "bus_window_1", "fenster_2", "bus_fensterfahrer"] {
+        let mut accepted = grant;
+        assert!(accepted.authorize_cab(request, false, 3));
+        assert!(!accepted.authorize_cab(request, false, 3), "replay");
+        let rejected = |request| {
+            let mut current = grant;
+            !current.authorize_cab(request, false, 3)
+        };
+        assert!(rejected(CabRequest { actor: 8, ..request }));
+        assert!(rejected(CabRequest { connection: 81, ..request }));
+        assert!(rejected(CabRequest { session: 92, ..request }));
+        assert!(rejected(CabRequest {
+            inside_owners_bus: false,
+            ..request
+        }));
+        assert!(rejected(CabRequest {
+            action: CabControl::Door(9),
+            ..request
+        }));
+        for name in [
+            "window_driver",
+            "bus_window_1",
+            "fenster_2",
+            "bus_fensterfahrer",
+            "cp_fahrerfenster",
+        ] {
             assert!(passenger_window_trigger(name));
-            assert!(grant.clone().authorize_cab(CabRequest {
-                action: CabControl::Window(name), ..request
-            }, true, 3));
+            let mut current = grant;
+            assert!(current.authorize_cab(
+                CabRequest { action: CabControl::Window(name), ..request },
+                true,
+                3,
+            ));
         }
-        for name in ["engine_start", "bus_doorfront0", "window_handbrake", "window_driver_off", "window_0\\ntrigger drive"] {
+        for name in [
+            "engine_start",
+            "bus_doorfront0",
+            "window_handbrake",
+            "window_driver_off",
+            "window_0\\ntrigger drive",
+        ] {
             assert!(!passenger_window_trigger(name));
         }
-        assert!(!grant.clone().authorize_cab(CabRequest {
-            action: CabControl::Window("window_driver"), ..request
-        }, false, 3), "missing model trigger");
+        let mut current = grant;
+        assert!(!current.authorize_cab(
+            CabRequest { action: CabControl::Window("window_driver"), ..request },
+            false,
+            3,
+        ));
     }
 
     fn driver() -> DriverRequest {
