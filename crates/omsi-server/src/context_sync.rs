@@ -9,6 +9,7 @@ use glam::DVec3;
 use omsi_net::traffic_table::TrafficTable;
 use omsi_net::{LanSession, Role};
 use omsi_sim::ai_traffic::TrafficSim;
+use omsi_sim::spatial::SpatialIndex;
 use std::collections::{HashMap, HashSet};
 
 const CAR_RADIUS: f64 = 650.0;
