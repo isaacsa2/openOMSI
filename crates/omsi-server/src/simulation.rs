@@ -8,6 +8,7 @@
 //! signal programs, timetables and LAN snapshot transfer must be fully wired
 //! before a new host process can admit clients.
 
+use crate::passenger_dispatch::PassengerDispatch;
 use omsi_sim::ai_traffic::TrafficSim;
 use omsi_sim::people::PeopleSim;
 use omsi_sim::world_data::WorldCell;
@@ -20,6 +21,7 @@ pub struct CpuSimulation {
     pub world: Arc<WorldCell>,
     pub traffic: TrafficSim,
     pub people: PeopleSim,
+    passenger_dispatch: PassengerDispatch,
 }
 
 impl CpuSimulation {
@@ -29,7 +31,18 @@ impl CpuSimulation {
         &mut self,
         session: &mut omsi_net::LanSession,
     ) -> crate::interest::InterestUpdate {
-        crate::interest::update_host_interest(session, &mut self.traffic, &mut self.people)
+        crate::interest::update_host_interest_with_dispatch(
+            session,
+            &mut self.traffic,
+            &mut self.people,
+            &mut self.passenger_dispatch,
+        )
+    }
+
+    /// Current player-bus occupancy and observed boarding/alighting deltas.
+    /// These counts originate in the players' own vehicle Pose updates.
+    pub fn player_passenger_totals(&self) -> (usize, u64, u64, u64) {
+        self.passenger_dispatch.totals()
     }
 
     pub fn new(root: &Path, world: Arc<WorldCell>, traffic: TrafficSim, max_people: usize) -> Self {
@@ -37,6 +50,7 @@ impl CpuSimulation {
             world,
             traffic,
             people: PeopleSim::new(root, max_people),
+            passenger_dispatch: PassengerDispatch::default(),
         }
     }
 
