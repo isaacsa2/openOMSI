@@ -12,8 +12,8 @@
 pub mod admin;
 pub mod bans;
 pub mod commands;
-pub mod door_requests;
 pub mod config;
+pub mod door_requests;
 pub mod game;
 pub mod gateway;
 pub mod handover;
