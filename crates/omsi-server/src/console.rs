@@ -129,9 +129,13 @@ pub fn run_builtin(
 ) -> bool {
     match builtin(command) {
         Some(Builtin::Help) => {
-            log::info!("server console commands: help, list, status, tps, reload, restart, update, stop");
+            log::info!(
+                "server console commands: help, list, status, tps, reload, restart, update, stop"
+            );
             log::info!("timings on|off|report|reset (also: spark start|stop|report|reset)");
-            log::info!("update [check|status|download]: official headless ZIP, SHA-256 verified; install only after stopping the process");
+            log::info!(
+                "update [check|status|download]: official headless ZIP, SHA-256 verified; install only after stopping the process"
+            );
             log::info!(
                 "administration: say <message>, kick <id> [reason], ban <id> [reason], unban <ban-id>, hwban <id> <session|all> [duration] [reason]"
             );
