@@ -1358,6 +1358,7 @@ mod surface;
 pub use omsi_mapdraw as mapmesh;
 pub use omsi_mapdraw::style;
 mod panel;
+mod signal_countdown;
 mod screen;
 pub use screen::Screen;
 mod duty;
