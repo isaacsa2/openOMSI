@@ -8,15 +8,46 @@ use omsi_lan::coop_permissions::{CabControl, CabGrant, CabRequest, passenger_win
 impl App {
     /// A room switch or disconnect never keeps a conductor role.
     pub(crate) fn coop_tick(&mut self) {
-        let Some(lan) = self.net.lan.as_ref().filter(|lan| lan.connected || lan.role == omsi_net::Role::Host) else {
+        // Pushbutton _off belongs to a subsequent frame: calling it immediately
+        // after _on prevented scripts from observing the pressed state.
+        if let Some((until, names)) = self.net.conductor_release.take() {
+            if std::time::Instant::now() >= until {
+                if let Some(player) = self.player.as_mut() {
+                    player.door_key_off(&names);
+                }
+            } else {
+                self.net.conductor_release = Some((until, names));
+            }
+        }
+        let Some(lan) = self.net.lan.as_ref().filter(|lan| {
+            lan.connected || lan.role == omsi_net::Role::Host
+        }) else {
             self.net.conductor_grant = None;
             self.net.conductor_owner = None;
             self.net.conductor_seq = 0;
+            self.net.conductor_release = None;
             return;
         };
         let session = lan.session;
-        if self.net.conductor_grant.is_some_and(|g| g.session != session) {
+        let revoke = self.net.conductor_grant.filter(|g| {
+            g.session != session
+                || self.player.is_none()
+                || !lan.peers().any(|peer| {
+                    peer.has_info
+                        && peer.has_pose
+                        && peer.pose.id == g.actor
+                        && peer.conn == g.connection
+                        && peer.pose.walker.and_then(|walker| walker.aboard)
+                            .is_some_and(|aboard| aboard.owner == lan.my_id)
+                })
+        });
+        if let Some(grant) = revoke {
             self.net.conductor_grant = None;
+            if grant.session == session {
+                if let Some(lan) = self.net.lan.as_mut() {
+                    lan.command(grant.actor, "coop-role 0");
+                }
+            }
         }
         if self.net.conductor_owner.is_some_and(|(_, epoch)| epoch != session) {
             self.net.conductor_owner = None;
@@ -127,18 +158,22 @@ impl App {
             log::debug!("LAN: unauthorized conductor control from player {from}");
             return;
         }
-        match action {
-            CabControl::Door(index) => {
-                let fired = player.door_key(index);
-                player.door_key_off(&fired);
-            }
+        // Release a previous press before operating a different control.
+        if let Some((_, pressed)) = self.net.conductor_release.take() {
+            player.door_key_off(&pressed);
+        }
+        let fired = match action {
+            CabControl::Door(index) => player.door_key(index),
             CabControl::Window(name) => {
                 player.vehicle.trigger(name);
-                let off = format!("{name}_off");
-                if player.vehicle.ty.program.trigger(&off).is_some() {
-                    player.vehicle.trigger(&off);
-                }
+                vec![name.to_string()]
             }
+        };
+        if !fired.is_empty() {
+            self.net.conductor_release = Some((
+                std::time::Instant::now() + std::time::Duration::from_millis(100),
+                fired,
+            ));
         }
     }
 }
