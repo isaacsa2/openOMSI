@@ -36,6 +36,61 @@ pub fn may_handover_driver(roles: CoopRoles, request: DriverRequest) -> bool {
         && request.authority_token != 0
 }
 
+/// A narrow in-cabin request. It never transfers driving authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CabinAction {
+    Door(usize),
+    Window(usize),
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CabinRequest {
+    pub same_session: bool,
+    pub owner_consented: bool,
+    pub passenger_inside_bus: bool,
+    pub speed_kmh: f32,
+}
+
+/// A role can operate door buttons only while the bus is stationary. Windows
+/// are allowed while moving; neither grant includes engine, gearbox or steering.
+pub fn may_operate_cabin(roles: CoopRoles, req: CabinRequest, action: CabinAction) -> bool {
+    roles.conductor
+        && req.same_session
+        && req.owner_consented
+        && req.passenger_inside_bus
+        && req.speed_kmh.is_finite()
+        && match action {
+            CabinAction::Door(index) => index < 9 && req.speed_kmh.abs() <= 0.5,
+            CabinAction::Window(index) => index < 9,
+        }
+}
+
+/// Commands are routed through the authenticated LAN session, not chat text.
+pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
+    let mut words = text.split_whitespace();
+    let kind = words.next()?;
+    let index = words.next()?.parse::<usize>().ok()?;
+    if words.next().is_some() || index >= 9 {
+        return None;
+    }
+    match kind {
+        "coop-door" => Some(CabinAction::Door(index)),
+        "coop-window" => Some(CabinAction::Window(index)),
+        _ => None,
+    }
+}
+
+/// Only explicit model window controls can be delegated. Never interpret a
+/// string from a remote peer as an arbitrary script/engine trigger.
+pub fn cabin_window_trigger(name: &str) -> bool {
+    let n = name.trim().to_ascii_lowercase();
+    n.len() <= 96
+        && (n.contains("window") || n.contains("fenster"))
+        && !n.ends_with("_off")
+        && !n.ends_with("_drag")
+        && !["engine", "motor", "steer", "brake", "door"].iter().any(|word| n.contains(word))
+}
+
 /// Ticket operations are narrower than generic in-cab triggers. Normal passenger
 /// stop bells are outside this grant; engine, door and steering actions are never fares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,6 +228,38 @@ mod tests {
             desk: 11,
             seq: 1,
         }
+    }
+
+    #[test]
+    fn cabin_controls_require_owner_opt_in_and_real_presence() {
+        let roles = CoopRoles { conductor: true, ..Default::default() };
+        let valid = CabinRequest {
+            same_session: true,
+            owner_consented: true,
+            passenger_inside_bus: true,
+            speed_kmh: 0.0,
+        };
+        assert!(!may_operate_cabin(CoopRoles::default(), valid, CabinAction::Door(0)));
+        assert!(may_operate_cabin(roles, valid, CabinAction::Door(0)));
+        assert!(!may_operate_cabin(roles, CabinRequest { owner_consented: false, ..valid }, CabinAction::Door(0)));
+        assert!(!may_operate_cabin(roles, CabinRequest { passenger_inside_bus: false, ..valid }, CabinAction::Window(0)));
+        assert!(!may_operate_cabin(roles, CabinRequest { speed_kmh: 30.0, ..valid }, CabinAction::Door(0)));
+        assert!(may_operate_cabin(roles, CabinRequest { speed_kmh: 30.0, ..valid }, CabinAction::Window(0)));
+        assert!(!may_operate_cabin(roles, valid, CabinAction::Window(9)));
+    }
+
+    #[test]
+    fn cabin_commands_cannot_be_used_to_inject_engine_or_steering_triggers() {
+        assert_eq!(parse_cabin_action("coop-door 2"), Some(CabinAction::Door(2)));
+        assert_eq!(parse_cabin_action("coop-window 0"), Some(CabinAction::Window(0)));
+        for invalid in ["coop-door 9", "coop-door -1", "coop-door 0 engine_start", "trigger engine_start", "coop-window 100", "coop-open 0"] {
+            assert!(parse_cabin_action(invalid).is_none());
+        }
+        assert!(cabin_window_trigger("cp_fenster_rechts"));
+        assert!(cabin_window_trigger("bus_window_left"));
+        assert!(!cabin_window_trigger("window_engine_start"));
+        assert!(!cabin_window_trigger("window_slider_drag"));
+        assert!(!cabin_window_trigger("bus_doorfront0"));
     }
 
     #[test]
