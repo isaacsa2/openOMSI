@@ -17,7 +17,6 @@ omsi-sim = { path = "../omsi-sim" }
 omsi-vehicle = { path = "../omsi-vehicle" }
 winit.workspace = true
 glam.workspace = true
-hashbrown.workspace = true
 log.workspace = true
 serde_json.workspace = true
 gilrs = "0.11"

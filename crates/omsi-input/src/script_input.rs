@@ -83,7 +83,7 @@ pub fn key_left_free(
 /// the next ordinary key event). Remove those stale keys and return them so their
 /// normal release handlers run, including vehicle keys and Shift+number door buttons.
 pub fn release_inactive_modifiers(
-    keys: &mut hashbrown::HashSet<KeyCode>,
+    mut remove: impl FnMut(KeyCode) -> bool,
     modifiers: winit::keyboard::ModifiersState,
 ) -> Vec<KeyCode> {
     use winit::keyboard::ModifiersState as M;
@@ -96,7 +96,7 @@ pub fn release_inactive_modifiers(
     ] {
         if !modifiers.contains(flag) {
             for code in [left, right] {
-                if keys.remove(&code) {
+                if remove(code) {
                     released.push(code);
                 }
             }

@@ -1299,8 +1299,15 @@ pub(crate) fn dump_display_textures(vehicle: &omsi_sim::VehicleInstance, dir: &P
 
 pub(crate) use omsi_input::script_input::{
     binding_is_key, flies_free_camera, get_up_key, key_left_free, parse_input_script,
-    release_inactive_modifiers,
 };
+
+/// Release OS-consumed modifier keys without exposing the input crate to the app's set type.
+pub(crate) fn release_inactive_modifiers(
+    keys: &mut hashbrown::HashSet<KeyCode>,
+    modifiers: winit::keyboard::ModifiersState,
+) -> Vec<KeyCode> {
+    omsi_input::script_input::release_inactive_modifiers(|code| keys.remove(&code), modifiers)
+}
 
 #[cfg(test)]
 mod get_up_key_tests;
