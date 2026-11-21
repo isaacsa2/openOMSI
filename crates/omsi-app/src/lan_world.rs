@@ -144,9 +144,7 @@ struct Mirror {
     bytes_at: u64,
     granted: u32,
     denied: u32,
-    /// Locally owned GRANT people that have not crossed into our bus yet.
     granted_waiting: HashMap<u32, (i64, Instant)>,
-    /// UDP cancellation/boarding messages retried until host PAXACK.
     return_pending: HashMap<u32, Option<Instant>>,
     boarded_pending: HashMap<u32, Option<Instant>>,
 }
@@ -196,13 +194,6 @@ pub struct LanWorld {
     /// Host: bytes of the traffic table sent so far.
     traffic_bytes: u64,
 }
-
-
-
-
-
-
-
 
 /// The line a timetable bus shows and the depot terminus it is set to, `#<index>` (host;
 /// `#-1` for none, so that a client still knows it is a timetable bus).
@@ -1225,9 +1216,6 @@ impl Mirror {
                         }
                         log::info!("LAN: the host hands waiting passenger {id} over to our bus");
                     } else {
-                        // The host already gave up ownership but this client
-                        // could not materialize the person. Ask the native host
-                        // to restore it instead of silently losing it.
                         h.mirror_remove(id);
                         m.return_pending.insert(id, None);
                     }
