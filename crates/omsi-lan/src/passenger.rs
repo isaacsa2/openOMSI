@@ -38,6 +38,35 @@ pub fn may_work(
     aboard.is_some() && inside && passenger_trigger(ev)
 }
 
+/// The owner validates an authenticated on-board walker before applying
+/// cooperative cab actions. Passenger bell permissions remain unchanged.
+pub fn may_work_cabin(
+    lan: &omsi_net::LanSession,
+    from: u32,
+    bus: Option<&omsi_sim::VehicleInstance>,
+    enabled: bool,
+    action: crate::coop_permissions::CabinAction,
+) -> bool {
+    use crate::coop_permissions::{CabinRequest, CoopRoles, may_operate_cabin};
+    let Some(bus) = bus else { return false };
+    let aboard = lan
+        .peers()
+        .find(|peer| peer.pose.id == from && peer.has_info && peer.has_pose)
+        .and_then(|peer| peer.pose.walker)
+        .and_then(|walker| walker.aboard)
+        .filter(|aboard| aboard.owner == lan.my_id);
+    let inside_bus = aboard.is_some_and(|aboard| {
+        inside(&crate::spawn::footprint_of(bus, crate::spawn::BUS_BOX), aboard.local)
+    });
+    let req = CabinRequest {
+        same_session: lan.connected || lan.role == omsi_net::Role::Host,
+        owner_consented: enabled,
+        passenger_inside_bus: inside_bus,
+        speed_kmh: bus.physics.speed * 3.6,
+    };
+    may_operate_cabin(CoopRoles { conductor: enabled, ..Default::default() }, req, action)
+}
+
 /// Whether a pending boarding grant should be returned after the owner's bus
 /// leaves the stop. This is pure LAN policy, independent of game rendering.
 pub fn left_boarding_stop(bus: Option<(glam::DVec3, f64)>, stop: Option<glam::DVec3>) -> bool {
