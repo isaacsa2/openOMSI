@@ -192,9 +192,11 @@ mod tests {
             now + std::time::Duration::from_millis(1_000),
         );
         assert_eq!(third, (128..150).collect::<Vec<_>>());
-        assert!(queue
-            .take_due([50, 51, 64], now + std::time::Duration::from_secs(2))
-            .is_empty());
+        assert!(
+            queue
+                .take_due([50, 51, 64], now + std::time::Duration::from_secs(2))
+                .is_empty()
+        );
         let retried = queue.take_due([50, 51], now + std::time::Duration::from_secs(9));
         assert_eq!(retried, vec![50, 51]);
         queue.clear();
