@@ -57,6 +57,28 @@ impl LanSession {
         std::mem::take(&mut self.pax_acks)
     }
 
+    /// Ask the host for the people waiting at a stop who are about to board our bus
+    /// (client): it answers with `GRANT` for those it hands over (they leave its world and
+    /// become ours) and `DENY` for the others (they boarded another bus meanwhile).
+    pub fn claim(&self, people: &[u32]) {
+        if let (Role::Client, Some(h), true) = (self.role, self.host, self.connected) {
+            for chunk in people.chunks(64) {
+                let ids: Vec<String> = chunk.iter().map(|i| i.to_string()).collect();
+                self.send(format!("CLAIM|{}|{}", self.my_id, ids.join(",")).as_bytes(), h);
+            }
+        }
+    }
+
+    /// Answer a player's claim (host).
+    pub fn answer_claim(&self, id: u32, granted: &[u32], denied: &[u32]) {
+        let Some(to) = self.peer_addr(id) else { return };
+        for (word, list) in [("GRANT", granted), ("DENY", denied)] {
+            for chunk in list.chunks(64).filter(|c| !c.is_empty()) {
+                let ids: Vec<String> = chunk.iter().map(|i| i.to_string()).collect();
+                self.send(format!("{word}|{}", ids.join(",")).as_bytes(), to);
+            }
+        }
+    }
     pub(super) fn on_pax_message(&mut self, parts: &[&str], from: SocketAddr) {
         let Some(id) = field(parts, 1).parse::<u32>().ok() else {
             return;
