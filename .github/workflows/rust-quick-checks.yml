@@ -31,6 +31,9 @@ jobs:
         run: git fetch --no-tags --depth=1 origin "$BASE"
       - name: Formatting
         run: bash scripts/format-check.sh
+      - name: Show changed HOF rustfmt diff
+        if: always()
+        run: rustfmt --check -- crates/omsi-vehicle/src/hof.rs
       - name: File and function sizes
         if: always()
         run: bash scripts/size-budget.sh
