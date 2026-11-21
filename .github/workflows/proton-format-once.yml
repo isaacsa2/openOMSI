@@ -1,0 +1,30 @@
+name: One-shot map-index test formatting
+
+on:
+  push:
+    branches:
+      - preview/next-test-build
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.repository == 'isaacsa2/openOMSI' && contains(github.event.head_commit.message, '[proton-fmt:run]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format extracted map index tests and commit
+        run: |
+          rustfmt --edition 2024 crates/omsi-world/src/map_index/tests.rs
+          git add -- crates/omsi-world/src/map_index/tests.rs
+          if git diff --cached --quiet; then
+            echo 'Already formatted'
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'style(world): rustfmt extracted map index tests'
+          git push origin HEAD:preview/next-test-build
