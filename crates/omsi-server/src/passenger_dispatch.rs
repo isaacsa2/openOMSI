@@ -176,12 +176,18 @@ impl PassengerDispatch {
     fn reclaim_disconnected(&mut self, drivers: &[Driver], people: &mut PeopleSim) {
         self.recovery_tick = self.recovery_tick.wrapping_add(1);
         if !self.escrow.is_empty() {
-            let active: HashMap<u32, &Driver> =
-                drivers.iter().map(|driver| (driver.id, driver)).collect();
+            let active: HashMap<u32, &Driver> = drivers
+                .iter()
+                .map(|driver| (driver.id, driver))
+                .collect();
             let previous = std::mem::take(&mut self.escrow);
             for (player, entries) in previous {
                 for (id, entry) in entries {
-                    if same_escrow_owner(active.get(&player).copied(), entry.connection, &entry.bus) {
+                    if same_escrow_owner(
+                        active.get(&player).copied(),
+                        entry.connection,
+                        &entry.bus,
+                    ) {
                         self.escrow.entry(player).or_default().insert(id, entry);
                     } else {
                         // This person is not confirmed aboard. A reconnect with
@@ -268,7 +274,9 @@ impl PassengerDispatch {
             held.retain(|_, entry| {
                 self.drivers
                     .get(player)
-                    .is_some_and(|driver| same_escrow_owner(Some(driver), entry.connection, &entry.bus))
+                    .is_some_and(|driver| {
+                        same_escrow_owner(Some(driver), entry.connection, &entry.bus)
+                    })
             });
             !held.is_empty()
         });
@@ -622,11 +630,22 @@ mod tests {
         dispatch.update(vec![driver(1, 0, "terminal")]);
         let (waiting, counts, positions) = sample();
         let claim = [1];
-        assert!(dispatch.choose(1, &claim, &waiting, &counts, &HashMap::new()).is_empty());
-        assert!(dispatch.choose(1, &claim, &HashMap::new(), &counts, &positions).is_empty());
+        assert!(
+            dispatch
+                .choose(1, &claim, &waiting, &counts, &HashMap::new())
+                .is_empty()
+        );
+        assert!(
+            dispatch
+                .choose(1, &claim, &HashMap::new(), &counts, &positions)
+                .is_empty()
+        );
         // The same real waiting person is eligible when the map gives a
         // physical stop position and the bus is actually serving it.
-        assert_eq!(dispatch.choose(1, &claim, &waiting, &counts, &positions), claim);
+        assert_eq!(
+            dispatch.choose(1, &claim, &waiting, &counts, &positions),
+            claim
+        );
     }
 
     #[test]

@@ -72,4 +72,3 @@ impl Mirror {
         omsi_lan::passenger::resend_until_ack(lan, &mut self.boarded_pending, now, true);
     }
 }
-
