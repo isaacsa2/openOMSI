@@ -10,6 +10,7 @@ impl Renderer {
             serial: SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             meshes: Vec::new(),
             textures: Vec::new(),
+            script_sent: Default::default(),
             glass_slot: None,
             materials: Vec::new(),
             trolley_wire_drawn: Vec::new(),

@@ -203,6 +203,9 @@ pub struct Scene {
     pub serial: u64,
     pub meshes: Vec<GpuMesh>,
     pub textures: Vec<GpuTexture>,
+    /// What `Renderer::update_script_texture` last wrote into a script texture: the texture's
+    /// `gen` and a digest of the picture.
+    pub(crate) script_sent: std::collections::HashMap<TextureId, (u64, u64)>,
     /// Texture slot read by procedural rain films.
     pub(crate) glass_slot: Option<TextureId>,
     pub materials: Vec<Material>,

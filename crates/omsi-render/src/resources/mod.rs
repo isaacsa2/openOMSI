@@ -4,9 +4,11 @@
 mod free;
 mod materials;
 mod meshes;
+mod script_upload;
 mod textures;
 
 pub(crate) use free::*;
 pub use materials::*;
 pub use meshes::*;
+pub use script_upload::ScriptWrite;
 pub use textures::*;
