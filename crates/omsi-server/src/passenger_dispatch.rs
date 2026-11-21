@@ -221,7 +221,9 @@ impl PassengerDispatch {
             } else {
                 // A restore can only fail for a duplicate ID or absent stop.
                 // Do not silently lose a passenger transferred by a client.
-                log::warn!("native coop: disconnected rider could not be restored (duplicate or unloaded stop)");
+                log::warn!(
+                    "native coop: disconnected rider could not be restored (duplicate or unloaded stop)"
+                );
             }
         }
         if restored > 0 {
