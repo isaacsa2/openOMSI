@@ -25,6 +25,16 @@ This is an **experimental test branch**, not a production release. It combines t
 10. Explicitly disable private-content transfer (`accept_uploads = 0`, `share_maps = 0`, `allow_file_transfer = 0`, where supported). Confirm a second client cannot receive proprietary maps/vehicles/scripts via the test server. Test permission denial and reconnect.
 11. Test a player-hosted LAN session separately. Its protocol and graphical host behavior must not depend on the dedicated server's headless rendering path.
 
+## Experimental conductor cabin controls and stable passenger visibility
+
+- [ ] On the owner's bus, Ctrl+Alt+K explicitly enables cabin control; it is disabled by default and revoked after leaving/reconnecting to LAN. Ctrl+Alt+K disables it again.
+- [ ] With two authenticated clients, a rider physically inside the *other* player's bus operates grouped doors using Ctrl+Alt+1..9 while fully stopped. Doors do not operate above 0.5 km/h, from outside the bus, from another bus, or when disabled.
+- [ ] Test Ctrl+Alt+W (first eligible window) and Ctrl+Alt+Shift+1..9 (indexed windows) on different bus models. Only recognized model mouse-event triggers should execute. Models requiring dragging must remain documented as unsupported rather than receiving unsafe arbitrary script controls.
+- [ ] Verify no passenger can trigger the engine, driving controls, parking brake, private scripts, or unauthorized fare transactions. This test covers **cabin delegation only**, not ticket-selling or exclusive conductor assignment.
+- [ ] In a busy district with over 96 pedestrians within the observer's interest radius, verify the closest people remain visible when internal population order changes, with no repeated GONE/spawn flicker for stationary people. Legitimate distance-based GONE is still required.
+- [ ] Reorder and duplicate network WORLD packets so an older pedestrian GONE arrives after a newer position. Verify it is ignored on both native and relayed-client mirrors.
+- [ ] Check a busy same-line passenger stop using two separate buses: GRANT, physical BOARD/RETURN, escrow, and on-board figures should not disappear or transfer between buses without a real event.
+
 ## GPU/memory and native load evidence
 
 - Drive a large map for an extended session, change views/settings, return to unloaded areas and repeat on a low-VRAM GPU. Measure missing textures, mip restoration, load time, VRAM/RAM, peak frame times and unusual repeated uploads.
@@ -35,6 +45,6 @@ This is an **experimental test branch**, not a production release. It combines t
 
 ## Known limits and decision
 
-- Co-op **driver handover** and **conductor fare role** are authorization scaffolding only, not playable functionality. Do not present them as ready.
+- Co-op **driver handover** and **conductor fare role** remain authorization scaffolding, not playable. Opt-in **cabin door/window controls** are experimental; they need real-client acceptance and only support model-defined click triggers.
 - Native authority over player-bus physics/scripts, full passenger capacity, modded bus boarding, rollback-safe streaming, and mixed-version client compatibility still need independent sign-off.
 - Complete real-client and security acceptance before proposing merge to the fork or official main; screenshots only when they materially clarify a visual regression.
