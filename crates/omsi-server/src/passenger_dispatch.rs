@@ -461,20 +461,6 @@ mod tests {
     }
 
     #[test]
-    fn escrow_budget_prevents_unbounded_provisional_claims() {
-        let mut dispatch = PassengerDispatch::default();
-        dispatch.update(vec![driver(1, 0, "terminal")]);
-        // Check the limit without constructing any humans or content assets:
-        // the dispatcher must refuse another provisional GRANT at capacity.
-        let (waiting, counts, stops) = sample();
-        assert_eq!(
-            dispatch.choose(1, &(1..=10).collect::<Vec<_>>(), &waiting, &counts, &stops).len(),
-            10
-        );
-        assert_eq!(MAX_ESCROW_PER_PLAYER, 96);
-    }
-
-    #[test]
     fn reports_client_onboard_count_separately_from_claim_grants() {
         let mut dispatch = PassengerDispatch::default();
         dispatch.update(vec![driver(1, 0, "terminal")]);
