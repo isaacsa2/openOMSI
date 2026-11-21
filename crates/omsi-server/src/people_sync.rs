@@ -10,6 +10,7 @@ use omsi_net::traffic_table::TrafficTable;
 use omsi_net::world::{self, Activity, Desc, PersonPlace, PersonState, WorldFrame};
 use omsi_net::{LanSession, Role};
 use omsi_sim::people::{LanPerson, PeopleSim};
+use omsi_sim::spatial::SpatialIndex;
 use std::collections::{HashMap, HashSet};
 
 const PERSON_RADIUS: f64 = 260.0;
@@ -189,10 +190,18 @@ impl HeadlessPeopleSync {
             .collect();
         let live: HashSet<u32> = clients.iter().map(|(id, _)| *id).collect();
         self.clients.retain(|id, _| live.contains(id));
+        // The native host can have thousands of pedestrians and dozens of
+        // observers. Build the broad-phase once and reuse it across players.
+        // The people layer still performs the original exact 3D test.
+        let person_index = SpatialIndex::from_positions(
+            people.people.iter().map(|person| person.position.truncate()),
+        );
+        let mut candidates = Vec::new();
         let mut bytes = 0;
         for (id, near) in clients {
             let view = self.clients.entry(id).or_default();
-            let nearby = people.lan_people(near, PERSON_RADIUS);
+            person_index.within(near.truncate(), PERSON_RADIUS, &mut candidates);
+            let nearby = people.lan_people_subset(near, PERSON_RADIUS, &candidates);
             // Enforce the per-client bound BEFORE emitting descriptions.
             // Previously filter_map() sent DESC for every nearby pedestrian
             // and only then take(96) capped the WORLD snapshot.
