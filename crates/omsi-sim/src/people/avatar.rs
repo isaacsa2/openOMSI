@@ -62,7 +62,11 @@ fn clear_of_seats(from: glam::Vec2, to: glam::Vec2, solid: &[glam::Vec2]) -> Opt
             let (dn, d0) = ((xy - c).length(), (from - c).length());
             if dn < SEAT_CLEARANCE - 1e-4 && dn < d0 {
                 // out to the clearance, on the side the walker comes from
-                let away = if dn > 1e-4 { (xy - c) / dn } else { (from - c).normalize_or(glam::Vec2::X) };
+                let away = if dn > 1e-4 {
+                    (xy - c) / dn
+                } else {
+                    (from - c).normalize_or(glam::Vec2::X)
+                };
                 xy = c + away * SEAT_CLEARANCE;
                 pushed = true;
             }
@@ -72,7 +76,12 @@ fn clear_of_seats(from: glam::Vec2, to: glam::Vec2, solid: &[glam::Vec2]) -> Opt
         }
     }
     // (still too near one after sliding off the others: stay)
-    solid.iter().all(|&c| (xy - c).length() >= SEAT_CLEARANCE - 1e-3 || (xy - c).length() >= (from - c).length()).then_some(xy)
+    solid
+        .iter()
+        .all(|&c| {
+            (xy - c).length() >= SEAT_CLEARANCE - 1e-3 || (xy - c).length() >= (from - c).length()
+        })
+        .then_some(xy)
 }
 
 #[cfg(test)]
@@ -124,12 +133,26 @@ mod seat_clearance_tests {
 impl PeopleSim {
     /// Put avatar `key` where `cmd` says (made on its first call, of figure `kind`).
     pub fn avatar(&mut self, key: u32, world: &dyn World, cmd: AvatarCmd, kind: u64) {
-        let known = self.avatars.get(&key).copied().filter(|id| self.people.iter().any(|p| p.id == *id));
+        let known = self
+            .avatars
+            .get(&key)
+            .copied()
+            .filter(|id| self.people.iter().any(|p| p.id == *id));
         if known.is_none() {
             let state = State::Idle;
             let n = self.types.len().max(1) as u64;
-            let Some(i) = self.spawn_as(world, cmd.pos, cmd.heading, state, Some((kind % n) as usize)) else { return };
-            self.people[i].puppet = Some(Puppet { mode: PuppetMode::Avatar });
+            let Some(i) = self.spawn_as(
+                world,
+                cmd.pos,
+                cmd.heading,
+                state,
+                Some((kind % n) as usize),
+            ) else {
+                return;
+            };
+            self.people[i].puppet = Some(Puppet {
+                mode: PuppetMode::Avatar,
+            });
             self.avatars.insert(key, self.people[i].id);
         }
         // a seat taken is kept from the passengers; one left is theirs again
@@ -181,7 +204,14 @@ impl PeopleSim {
                 let s = bn.cabin.seats.get(k)?;
                 // sitting: the eyes over the hip, a little back
                 let r = s.rot.to_radians();
-                bn.world(s.pos + Vec3::new(-r.sin() * 0.05, -r.cos() * 0.05, (eye_h - rig.hip[0].z as f64) as f32 + 0.04))
+                bn.world(
+                    s.pos
+                        + Vec3::new(
+                            -r.sin() * 0.05,
+                            -r.cos() * 0.05,
+                            (eye_h - rig.hip[0].z as f64) as f32 + 0.04,
+                        ),
+                )
             }
             _ => p.position + DVec3::new(0.0, 0.0, eye_h),
         };
@@ -216,8 +246,14 @@ impl PeopleSim {
                 .seats
                 .iter()
                 .enumerate()
-                .filter(|(k, s)| s.seated && !taken.and_then(|t| t.get(*k)).copied().unwrap_or(false))
-                .min_by(|a, b| (bn.world(a.1.floor) - door).length().total_cmp(&(bn.world(b.1.floor) - door).length()))
+                .filter(|(k, s)| {
+                    s.seated && !taken.and_then(|t| t.get(*k)).copied().unwrap_or(false)
+                })
+                .min_by(|a, b| {
+                    (bn.world(a.1.floor) - door)
+                        .length()
+                        .total_cmp(&(bn.world(b.1.floor) - door).length())
+                })
                 .map(|(k, _)| k);
             let Some(seat) = seat else { continue };
             if best.map(|b| d < b.0).unwrap_or(true) {
@@ -232,7 +268,14 @@ impl PeopleSim {
         self.last_buses
             .iter()
             .find(|b| b.id == bus)
-            .map(|bn| bn.cabin.entries.iter().chain(bn.cabin.exits.iter()).map(|d| bn.world(d.outside)).collect())
+            .map(|bn| {
+                bn.cabin
+                    .entries
+                    .iter()
+                    .chain(bn.cabin.exits.iter())
+                    .map(|d| bn.world(d.outside))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -244,29 +287,63 @@ impl PeopleSim {
             return Some(d);
         }
         let cabin = self.cabin_for(v)?;
-        let seat = cabin.data.driver_positions.first().map(|d| Vec3::from(d.pos)).unwrap_or(Vec3::new(-0.8, 4.5, 1.0));
-        let door = cabin.entries.iter().chain(cabin.exits.iter()).min_by(|a, b| (a.outside - seat).truncate().length().total_cmp(&(b.outside - seat).truncate().length()))?;
+        let seat = cabin
+            .data
+            .driver_positions
+            .first()
+            .map(|d| Vec3::from(d.pos))
+            .unwrap_or(Vec3::new(-0.8, 4.5, 1.0));
+        let door = cabin
+            .entries
+            .iter()
+            .chain(cabin.exits.iter())
+            .min_by(|a, b| {
+                (a.outside - seat)
+                    .truncate()
+                    .length()
+                    .total_cmp(&(b.outside - seat).truncate().length())
+            })?;
         let trailers = part_frames(v, &cabin);
-        Some(train_point(v.position, &v.body_rotation(), &trailers, door.outside))
+        Some(train_point(
+            v.position,
+            &v.body_rotation(),
+            &trailers,
+            door.outside,
+        ))
     }
 
     /// A door of the driver's own beside the driver's seat (a van's or a coach's cab door:
     /// on the driver's side, level with the seat), in the world, outside.
     pub fn vehicle_cab_door(&mut self, v: &VehicleInstance) -> Option<DVec3> {
         let cabin = self.cabin_for(v)?;
-        let seat = cabin.data.driver_positions.first().map(|d| Vec3::from(d.pos))?;
+        let seat = cabin
+            .data
+            .driver_positions
+            .first()
+            .map(|d| Vec3::from(d.pos))?;
         let door = cabin
             .entries
             .iter()
             .chain(cabin.exits.iter())
             .filter(|d| d.outside.x * seat.x > 0.0 && (d.outside.y - seat.y).abs() < 1.5)
-            .min_by(|a, b| (a.outside - seat).truncate().length().total_cmp(&(b.outside - seat).truncate().length()))
+            .min_by(|a, b| {
+                (a.outside - seat)
+                    .truncate()
+                    .length()
+                    .total_cmp(&(b.outside - seat).truncate().length())
+            })
             .map(|d| d.outside);
         // a van or minibus (the W906: its cabin knows only the sliding door, the passengers'):
         // the driver's door beside the seat, which every such vehicle has
         let door = door.or_else(|| {
             let bb = v.ty.def.bounding_box?;
-            (bb[1] < 8.5 && seat.x.abs() > 0.2).then(|| Vec3::new(seat.x.signum() * (bb[0] * 0.5 + bb[3] * seat.x.signum() + 0.45), seat.y, 0.0))
+            (bb[1] < 8.5 && seat.x.abs() > 0.2).then(|| {
+                Vec3::new(
+                    seat.x.signum() * (bb[0] * 0.5 + bb[3] * seat.x.signum() + 0.45),
+                    seat.y,
+                    0.0,
+                )
+            })
         })?;
         let trailers = part_frames(v, &cabin);
         Some(train_point(v.position, &v.body_rotation(), &trailers, door))
@@ -274,7 +351,11 @@ impl PeopleSim {
 
     /// Put `ty` among the figures (once) and give its index: the player's own figure.
     pub fn type_index(&mut self, ty: Arc<HumanType>) -> usize {
-        if let Some(i) = self.types.iter().position(|t| Arc::ptr_eq(t, &ty) || t.def.path == ty.def.path) {
+        if let Some(i) = self
+            .types
+            .iter()
+            .position(|t| Arc::ptr_eq(t, &ty) || t.def.path == ty.def.path)
+        {
             return i;
         }
         self.types.push(ty);
@@ -283,10 +364,17 @@ impl PeopleSim {
 
     /// Where the doors of vehicle `v` are now (outside, in the world), entries first.
     pub fn vehicle_doors(&mut self, v: &VehicleInstance) -> Vec<DVec3> {
-        let Some(cabin) = self.cabin_for(v) else { return Vec::new() };
+        let Some(cabin) = self.cabin_for(v) else {
+            return Vec::new();
+        };
         let trailers = part_frames(v, &cabin);
         let rot = v.body_rotation();
-        cabin.entries.iter().chain(cabin.exits.iter()).map(|d| train_point(v.position, &rot, &trailers, d.outside)).collect()
+        cabin
+            .entries
+            .iter()
+            .chain(cabin.exits.iter())
+            .map(|d| train_point(v.position, &rot, &trailers, d.outside))
+            .collect()
     }
 
     /// A walker inside bus `bus` moving from cabin point `local` by `step` (bus frame,
@@ -302,16 +390,24 @@ impl PeopleSim {
         let want = glam::Vec2::new(local.x + step.x, local.y + step.y);
         let mut best: Option<(f32, glam::Vec2, f32)> = None;
         for &(a, b, _) in &bn.cabin.links {
-            let (Some(pa), Some(pb)) = (pts.get(a.max(0) as usize), pts.get(b.max(0) as usize)) else { continue };
+            let (Some(pa), Some(pb)) = (pts.get(a.max(0) as usize), pts.get(b.max(0) as usize))
+            else {
+                continue;
+            };
             let (a2, b2) = (pa.truncate(), pb.truncate());
             let ab = b2 - a2;
-            let t = if ab.length_squared() > 1e-6 { ((want - a2).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+            let t = if ab.length_squared() > 1e-6 {
+                ((want - a2).dot(ab) / ab.length_squared()).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             let q = a2 + ab * t;
             // (the height tells the decks of a double-decker apart, not the steps: counted
             // in full, a staircase rising from its first centimetre lost to the aisle beside
             // it and the corridor held the walker at the aisle - an invisible wall at the
             // foot of the stairs)
-            let d = (want - q).length() + ((local.z - (pa.z + (pb.z - pa.z) * t)).abs() - STEP_UP).max(0.0) * 2.0;
+            let d = (want - q).length()
+                + ((local.z - (pa.z + (pb.z - pa.z) * t)).abs() - STEP_UP).max(0.0) * 2.0;
             if best.map(|x| d < x.0).unwrap_or(true) {
                 best = Some((d, q, pa.z + (pb.z - pa.z) * t));
             }
@@ -325,14 +421,34 @@ impl PeopleSim {
             }
         }
         let (d, q, z) = best?;
-        let xy = if d > WIDTH { q + (want - q) / d * WIDTH } else { want };
+        let xy = if d > WIDTH {
+            q + (want - q) / d * WIDTH
+        } else {
+            want
+        };
         // not through the seats and the driver's place: no nearer to one than 0.38 m
         // (walking away from one that close is let be)
         // (on the walker's deck: the seats under a staircase, or the upper deck's over the
         // aisle below, stopped the walker where nothing stands)
         let from = local.truncate();
-        let solid: Vec<glam::Vec2> = bn.cabin.seats.iter().filter(|s| s.seated && (s.floor.z - local.z).abs() < 0.45).map(|s| s.pos.truncate()).chain(bn.cabin.data.driver_positions.iter().filter(|d| (d.pos[2] - (local.z + 0.4)).abs() < 1.0).map(|d| glam::Vec2::new(d.pos[0], d.pos[1]))).collect();
-        let Some(xy) = clear_of_seats(from, xy, &solid) else { return Some((local, bn.world(local))) };
+        let solid: Vec<glam::Vec2> = bn
+            .cabin
+            .seats
+            .iter()
+            .filter(|s| s.seated && (s.floor.z - local.z).abs() < 0.45)
+            .map(|s| s.pos.truncate())
+            .chain(
+                bn.cabin
+                    .data
+                    .driver_positions
+                    .iter()
+                    .filter(|d| (d.pos[2] - (local.z + 0.4)).abs() < 1.0)
+                    .map(|d| glam::Vec2::new(d.pos[0], d.pos[1])),
+            )
+            .collect();
+        let Some(xy) = clear_of_seats(from, xy, &solid) else {
+            return Some((local, bn.world(local)));
+        };
         let l = Vec3::new(xy.x, xy.y, z);
         Some((l, bn.world(l)))
     }
@@ -340,11 +456,30 @@ impl PeopleSim {
     /// The doors of bus `bus`: the threshold in the cabin, where one stands outside (world),
     /// which side of the bus (+1 right) and whether it is open now.
     pub fn cabin_doors(&self, bus: BusId) -> Vec<(Vec3, DVec3, f32, bool)> {
-        let Some(bn) = self.last_buses.iter().find(|b| b.id == bus) else { return Vec::new() };
-        let (eo, xo) = bn.walk_open.as_ref().map(|w| (&w.0, &w.1)).unwrap_or((&bn.entry_open, &bn.exit_open));
-        let entries = bn.cabin.entries.iter().enumerate().map(|(k, d)| (d, eo.get(k).copied().unwrap_or(false)));
-        let exits = bn.cabin.exits.iter().enumerate().map(|(k, d)| (d, xo.get(k).copied().unwrap_or(false)));
-        entries.chain(exits).map(|(d, open)| (d.inside, bn.world(d.outside), d.side, open)).collect()
+        let Some(bn) = self.last_buses.iter().find(|b| b.id == bus) else {
+            return Vec::new();
+        };
+        let (eo, xo) = bn
+            .walk_open
+            .as_ref()
+            .map(|w| (&w.0, &w.1))
+            .unwrap_or((&bn.entry_open, &bn.exit_open));
+        let entries = bn
+            .cabin
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(k, d)| (d, eo.get(k).copied().unwrap_or(false)));
+        let exits = bn
+            .cabin
+            .exits
+            .iter()
+            .enumerate()
+            .map(|(k, d)| (d, xo.get(k).copied().unwrap_or(false)));
+        entries
+            .chain(exits)
+            .map(|(d, open)| (d.inside, bn.world(d.outside), d.side, open))
+            .collect()
     }
 
     /// The buses of the last tick within `r` of `at`, the own first.
@@ -356,7 +491,12 @@ impl PeopleSim {
                 // The front origin can be more than 25 m from the last section of a
                 // biarticulated bus: the nearest of its sections and its doors as they stand,
                 // on curves too.
-                let doors = b.cabin.entries.iter().chain(&b.cabin.exits).map(|door| b.world(door.outside));
+                let doors = b
+                    .cabin
+                    .entries
+                    .iter()
+                    .chain(&b.cabin.exits)
+                    .map(|door| b.world(door.outside));
                 let distance = std::iter::once(b.pos)
                     .chain(b.trailers.iter().map(|part| part.pos))
                     .chain(doors)
@@ -366,7 +506,11 @@ impl PeopleSim {
             })
             .filter(|x| x.1 < r)
             .collect();
-        v.sort_by(|a, b| (a.0 != BusId::Player).cmp(&(b.0 != BusId::Player)).then(a.1.total_cmp(&b.1)));
+        v.sort_by(|a, b| {
+            (a.0 != BusId::Player)
+                .cmp(&(b.0 != BusId::Player))
+                .then(a.1.total_cmp(&b.1))
+        });
         v.into_iter().map(|x| x.0).collect()
     }
 
@@ -393,7 +537,13 @@ impl PeopleSim {
 
     /// Where seat `seat` of bus `bus` has its floor (cabin frame).
     pub fn seat_floor(&self, bus: BusId, seat: usize) -> Option<Vec3> {
-        self.last_buses.iter().find(|b| b.id == bus)?.cabin.seats.get(seat).map(|s| s.floor)
+        self.last_buses
+            .iter()
+            .find(|b| b.id == bus)?
+            .cabin
+            .seats
+            .get(seat)
+            .map(|s| s.floor)
     }
 
     /// The cabin path point nearest seat `seat` of bus `bus` (where one stands up to).
@@ -402,32 +552,60 @@ impl PeopleSim {
         let s = bn.cabin.seats.get(seat)?;
         // (on the seat's own deck: in a double-decker the nearest point in plan could be
         // the one straight above or below it)
-        let d = |a: &Vec3| (a.truncate() - s.floor.truncate()).length() + (a.z - s.floor.z).abs() * 3.0;
-        bn.cabin.graph.points.iter().copied().min_by(|a, b| d(a).total_cmp(&d(b)))
+        let d =
+            |a: &Vec3| (a.truncate() - s.floor.truncate()).length() + (a.z - s.floor.z).abs() * 3.0;
+        bn.cabin
+            .graph
+            .points
+            .iter()
+            .copied()
+            .min_by(|a, b| d(a).total_cmp(&d(b)))
     }
 
     /// Cabin point `local` of vehicle `v` in the world (before the buses' first tick).
     pub fn vehicle_cabin_world(&mut self, v: &VehicleInstance, local: Vec3) -> Option<DVec3> {
         let cabin = self.cabin_for(v)?;
         let trailers = part_frames(v, &cabin);
-        Some(train_point(v.position, &v.body_rotation(), &trailers, local))
+        Some(train_point(
+            v.position,
+            &v.body_rotation(),
+            &trailers,
+            local,
+        ))
     }
 
     /// Where the driver stands up in vehicle `v`'s cabin: the cabin's path point nearest the
     /// driver's seat (bus frame).
     pub fn driver_stand(&mut self, v: &VehicleInstance) -> Option<Vec3> {
         let cabin = self.cabin_for(v)?;
-        let seat = cabin.data.driver_positions.first().map(|d| Vec3::from(d.pos)).unwrap_or(Vec3::new(-0.8, 4.5, 1.0));
+        let seat = cabin
+            .data
+            .driver_positions
+            .first()
+            .map(|d| Vec3::from(d.pos))
+            .unwrap_or(Vec3::new(-0.8, 4.5, 1.0));
         // the driver's position is the hip, half a metre over the cab floor: a double
         // decker's upper deck lies straight over the cab and was as near in plan, and the
         // driver who got up stood in the roof over the windscreen
-        let d = |a: &Vec3| (a.truncate() - seat.truncate()).length() + (a.z - (seat.z - 0.5)).abs() * 3.0;
-        cabin.graph.points.iter().copied().min_by(|a, b| d(a).total_cmp(&d(b)))
+        let d = |a: &Vec3| {
+            (a.truncate() - seat.truncate()).length() + (a.z - (seat.z - 0.5)).abs() * 3.0
+        };
+        cabin
+            .graph
+            .points
+            .iter()
+            .copied()
+            .min_by(|a, b| d(a).total_cmp(&d(b)))
     }
 
     /// How many people are in (or boarding, riding, leaving) bus `bus`.
     pub fn people_in(&self, bus: BusId) -> usize {
-        self.people.iter().filter(|p| matches!(p.place, Place::Bus(b, _) if b == bus) || p.state.bus() == Some(bus)).count()
+        self.people
+            .iter()
+            .filter(|p| {
+                matches!(p.place, Place::Bus(b, _) if b == bus) || p.state.bus() == Some(bus)
+            })
+            .count()
     }
 
     /// Where bus `bus` stands (its origin), as of the last tick.
@@ -442,10 +620,26 @@ impl PeopleSim {
 
     /// The player's (or another player's) body on foot, animated as Omsi.exe animates its
     /// people: sitting on a seat (its hip on the `[passpos]`), walking or standing.
-    pub fn animate_avatar(&mut self, i: usize, dt: f32, world: &dyn World, buses: &[BusNow], bus_ix: &HashMap<BusId, usize>) {
+    pub fn animate_avatar(
+        &mut self,
+        i: usize,
+        dt: f32,
+        world: &dyn World,
+        buses: &[BusNow],
+        bus_ix: &HashMap<BusId, usize>,
+    ) {
         let id = self.people[i].id;
-        let Some(key) = self.avatars.iter().find(|(_, v)| **v == id).map(|(k, _)| *k) else { return };
-        let Some(cmd) = self.avatar_cmds.get(&key).copied() else { return };
+        let Some(key) = self
+            .avatars
+            .iter()
+            .find(|(_, v)| **v == id)
+            .map(|(k, _)| *k)
+        else {
+            return;
+        };
+        let Some(cmd) = self.avatar_cmds.get(&key).copied() else {
+            return;
+        };
         let dt_ms = dt * 1000.0;
         let seated = cmd.seat.and_then(|(b, k)| {
             let bn = bus_ix.get(&b).map(|x| &buses[*x])?;
@@ -458,7 +652,11 @@ impl PeopleSim {
             Some((b, s, bn)) => {
                 // on the seat, in its bus's frame (set_task(7): the feet the human's seat
                 // height under the seat point, facing the way the seat does)
-                let l = if s.seated { s.pos - Vec3::Z * seatheight } else { s.pos };
+                let l = if s.seated {
+                    s.pos - Vec3::Z * seatheight
+                } else {
+                    s.pos
+                };
                 p.place = Place::Bus(b, l);
                 p.lheading = s.rot as f64;
                 p.position = bn.world(l);
@@ -466,8 +664,18 @@ impl PeopleSim {
                 p.heading = bn.heading_at(l) + p.lheading;
                 p.interior = bn.interior;
                 p.vel = DVec2::ZERO;
-                p.activity = if s.seated { Activity::Sit } else { Activity::Stand };
-                AnimInput { kind: if s.seated { 2 } else { 0 }, seat_height: s.height, room_height: pax::OUTSIDE_ROOM, dt_ms, ..Default::default() }
+                p.activity = if s.seated {
+                    Activity::Sit
+                } else {
+                    Activity::Stand
+                };
+                AnimInput {
+                    kind: if s.seated { 2 } else { 0 },
+                    seat_height: s.height,
+                    room_height: pax::OUTSIDE_ROOM,
+                    dt_ms,
+                    ..Default::default()
+                }
             }
             None if cmd.aboard.is_some_and(|(b, _)| bus_ix.contains_key(&b)) => {
                 let (b, l) = cmd.aboard.unwrap();
@@ -481,8 +689,19 @@ impl PeopleSim {
                 p.interior = bn.interior;
                 p.vel = cmd.vel;
                 let v = cmd.vel.length() as f32;
-                p.activity = if v > 0.05 { Activity::Walk } else { Activity::Stand };
-                AnimInput { kind: (v > 0.05) as u8, speed: v, moved: v * dt, room_height: pax::OUTSIDE_ROOM, dt_ms, ..Default::default() }
+                p.activity = if v > 0.05 {
+                    Activity::Walk
+                } else {
+                    Activity::Stand
+                };
+                AnimInput {
+                    kind: (v > 0.05) as u8,
+                    speed: v,
+                    moved: v * dt,
+                    room_height: pax::OUTSIDE_ROOM,
+                    dt_ms,
+                    ..Default::default()
+                }
             }
             None => {
                 p.place = Place::Ground;
@@ -490,14 +709,37 @@ impl PeopleSim {
                 p.interior = 0.0;
                 // The floor at the walker's own level, not the highest face here: the highest is
                 // the roof of the building they stand under (an indoor bus terminus, a canopy).
-                let ground = cmd.floor.unwrap_or_else(|| world.walk_height_near(cmd.pos.x, cmd.pos.y, cmd.pos.z).unwrap_or(cmd.pos.z));
-                let origin = DVec3::new(cmd.pos.x, cmd.pos.y, if cmd.floor.is_some() { ground } else { cmd.pos.z.max(ground) } + cmd.lift.max(0.0));
+                let ground = cmd.floor.unwrap_or_else(|| {
+                    world
+                        .walk_height_near(cmd.pos.x, cmd.pos.y, cmd.pos.z)
+                        .unwrap_or(cmd.pos.z)
+                });
+                let origin = DVec3::new(
+                    cmd.pos.x,
+                    cmd.pos.y,
+                    if cmd.floor.is_some() {
+                        ground
+                    } else {
+                        cmd.pos.z.max(ground)
+                    } + cmd.lift.max(0.0),
+                );
                 p.position = origin;
                 p.heading = cmd.heading;
                 p.vel = cmd.vel;
                 let v = cmd.vel.length() as f32;
-                p.activity = if v > 0.05 { Activity::Walk } else { Activity::Stand };
-                AnimInput { kind: (v > 0.05) as u8, speed: v, moved: v * dt, room_height: pax::OUTSIDE_ROOM, dt_ms, ..Default::default() }
+                p.activity = if v > 0.05 {
+                    Activity::Walk
+                } else {
+                    Activity::Stand
+                };
+                AnimInput {
+                    kind: (v > 0.05) as u8,
+                    speed: v,
+                    moved: v * dt,
+                    room_height: pax::OUTSIDE_ROOM,
+                    dt_ms,
+                    ..Default::default()
+                }
             }
         };
         p.anim.advance(&p.ty.omsi, &input);

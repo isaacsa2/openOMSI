@@ -220,12 +220,16 @@ mod tests {
             people.nearest_door_request(exit, Some(BusId::Player), 3.2),
             Some(exit_req)
         );
-        assert!(people
-            .nearest_door_request(exit, Some(BusId::Ai(7)), 3.2)
-            .is_none());
-        assert!(people
-            .nearest_door_request(entry + DVec3::Z * 6.0, None, 3.2)
-            .is_none());
+        assert!(
+            people
+                .nearest_door_request(exit, Some(BusId::Ai(7)), 3.2)
+                .is_none()
+        );
+        assert!(
+            people
+                .nearest_door_request(entry + DVec3::Z * 6.0, None, 3.2)
+                .is_none()
+        );
         assert!(!people.door_request_near(exit_req, exit, None, 3.2));
         assert!(!people.door_request_near(entry_req, entry, Some(BusId::Player), 3.2));
         assert!(!people.door_request_near(entry_req, DVec3::splat(f64::NAN), None, 3.2));

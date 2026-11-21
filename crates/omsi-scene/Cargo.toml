@@ -14,6 +14,7 @@ omsi-htmlengine = { path = "../omsi-htmlengine" }
 omsi-htmlpage = { path = "../omsi-htmlpage" }
 omsi-map = { path = "../omsi-map" }
 omsi-model = { path = "../omsi-model" }
+omsi-proton = { path = "../omsi-proton" }
 omsi-o3d = { path = "../omsi-o3d" }
 omsi-render = { path = "../omsi-render" }
 omsi-scenery = { path = "../omsi-scenery" }

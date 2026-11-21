@@ -177,3 +177,6 @@ fn debug_pax() -> bool {
         omsi_cfg::flags::OMSI_DEBUG_PAX.is_set() || omsi_cfg::flags::OMSI_DEBUG_HUMANS.is_set()
     })
 }
+
+#[cfg(test)]
+mod unscheduled_tests;

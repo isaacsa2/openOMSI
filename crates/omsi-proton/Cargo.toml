@@ -1,0 +1,23 @@
+[package]
+name = "omsi-proton"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Declared local Proton Bus map and rigid-vehicle conversion"
+
+[dependencies]
+anyhow.workspace = true
+glam.workspace = true
+encoding_rs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+flate2.workspace = true
+omsi-cfg = { path = "../omsi-cfg" }
+omsi-map = { path = "../omsi-map" }
+omsi-o3d = { path = "../omsi-o3d" }
+
+[dev-dependencies]
+omsi-sim = { path = "../omsi-sim" }
+omsi-vehicle = { path = "../omsi-vehicle" }
+omsi-geometry = { path = "../omsi-geometry" }
+omsi-scenery = { path = "../omsi-scenery" }

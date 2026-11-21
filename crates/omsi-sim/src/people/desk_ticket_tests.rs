@@ -51,16 +51,25 @@ fn pick_up(h: &mut PeopleSim, bus: &BusNow, given_now: Option<f32>) {
 fn a_ticket_issued_during_the_reach_does_not_replace_the_accepted_one() {
     let (mut h, bus) = reaching_for("desk-swap", 0.0);
     pick_up(&mut h, &bus, Some(1.0));
-    assert_eq!(h.take_sale_events(), vec![(None, SaleEvent::PassengerTookTicket(0))]);
+    assert_eq!(
+        h.take_sale_events(),
+        vec![(None, SaleEvent::PassengerTookTicket(0))]
+    );
 }
 
 #[test]
 fn given_ticket_reset_during_the_reach_still_picks_up_the_accepted_one() {
     let (mut h, bus) = reaching_for("desk-reset", 0.0);
     pick_up(&mut h, &bus, Some(-1.0));
-    assert_eq!(h.take_sale_events(), vec![(None, SaleEvent::PassengerTookTicket(0))]);
+    assert_eq!(
+        h.take_sale_events(),
+        vec![(None, SaleEvent::PassengerTookTicket(0))]
+    );
 
     let (mut h, bus) = reaching_for("desk-gone", 0.0);
     pick_up(&mut h, &bus, None);
-    assert_eq!(h.take_sale_events(), vec![(None, SaleEvent::PassengerTookTicket(0))]);
+    assert_eq!(
+        h.take_sale_events(),
+        vec![(None, SaleEvent::PassengerTookTicket(0))]
+    );
 }

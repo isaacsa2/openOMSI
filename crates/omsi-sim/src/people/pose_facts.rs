@@ -27,16 +27,33 @@ pub struct PoseFacts {
 
 /// Only riders standing still at their standing place are steadied against the sway: queued,
 /// walking and paying passengers are not.
-pub fn grip_for_standing_rider(inside: bool, assigned_standing: bool, walking: bool, reaching: bool) -> f32 {
-    if inside && assigned_standing && !walking && !reaching { 1.0 } else { 0.0 }
+pub fn grip_for_standing_rider(
+    inside: bool,
+    assigned_standing: bool,
+    walking: bool,
+    reaching: bool,
+) -> f32 {
+    if inside && assigned_standing && !walking && !reaching {
+        1.0
+    } else {
+        0.0
+    }
 }
 
 /// A passenger is anchored at a model's [seatheight] below the seat's hip point.
 /// Its actual floor is at the cabin [passpos] height below that point, which may differ.
 /// Re-anchor the procedural floor and keep the pelvis on the seat's [passpos], not below it.
-pub fn seated_pose(model_height: f32, place_height: f32, seat_front: f32, seat_lift: f32) -> (Vec3, f32) {
+pub fn seated_pose(
+    model_height: f32,
+    place_height: f32,
+    seat_front: f32,
+    seat_lift: f32,
+) -> (Vec3, f32) {
     let lift = model_height - place_height;
-    (Vec3::new(0.0, seat_front - 0.03, place_height - seat_lift), lift)
+    (
+        Vec3::new(0.0, seat_front - 0.03, place_height - seat_lift),
+        lift,
+    )
 }
 
 impl Person {
@@ -52,7 +69,12 @@ impl Person {
                     _ => Activity::Stand,
                 };
                 let (seat, floor_lift) = if kind == 2 {
-                    let (seat, lift) = seated_pose(self.ty.def.seat_height, x.seat_h, self.ty.rig.seat_front(), self.ty.rig.seat_lift);
+                    let (seat, lift) = seated_pose(
+                        self.ty.def.seat_height,
+                        x.seat_h,
+                        self.ty.rig.seat_front(),
+                        self.ty.rig.seat_lift,
+                    );
                     (Some(seat), lift)
                 } else {
                     (None, 0.0)
@@ -60,7 +82,11 @@ impl Person {
                 let reach = (x.reach && x.inside.is_some()).then(|| {
                     let d = x.reach_at.as_dvec3() - x.pos;
                     let (s, c) = x.yaw.sin_cos();
-                    Vec3::new((d.x * c - d.y * s) as f32, (d.x * s + d.y * c) as f32, d.z as f32)
+                    Vec3::new(
+                        (d.x * c - d.y * s) as f32,
+                        (d.x * s + d.y * c) as f32,
+                        d.z as f32,
+                    )
                 });
                 let hold = grip_for_standing_rider(
                     x.inside.is_some(),
@@ -74,10 +100,19 @@ impl Person {
         };
         // A seated renderer anchor is [passpos] - human [seatheight], not the floor.
         let seated_level = match &self.state {
-            State::Pax(x) if x.pax_state.round() >= 1.5 => Some((self.ty.def.seat_height - x.seat_h) as f64),
+            State::Pax(x) if x.pax_state.round() >= 1.5 => {
+                Some((self.ty.def.seat_height - x.seat_h) as f64)
+            }
             _ => None,
         };
-        PoseFacts { activity, seat, reach, floor_lift, hold, seated_level }
+        PoseFacts {
+            activity,
+            seat,
+            reach,
+            floor_lift,
+            hold,
+            seated_level,
+        }
     }
 }
 

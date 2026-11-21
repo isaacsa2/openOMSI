@@ -64,7 +64,11 @@ pub struct TicketChange {
 
 impl TicketChange {
     fn changes_ticket(&self) -> bool {
-        self.kind.is_some() || self.ticket.is_some() || self.name.is_some() || self.price.is_some() || self.voice.is_some()
+        self.kind.is_some()
+            || self.ticket.is_some()
+            || self.name.is_some()
+            || self.price.is_some()
+            || self.voice.is_some()
     }
 }
 
@@ -84,7 +88,13 @@ pub struct PluginTicket {
 }
 
 /// A passenger nobody changed.
-static NO_PLUGIN: PluginTicket = PluginTicket { name: None, voice: None, payment: None, by: None, tag: None };
+static NO_PLUGIN: PluginTicket = PluginTicket {
+    name: None,
+    voice: None,
+    payment: None,
+    by: None,
+    tag: None,
+};
 
 impl Pax {
     /// What a plugin made of the ticket (nothing for most passengers).
@@ -133,13 +143,21 @@ impl PeopleSim {
     /// in the doorway and at the cash desk - however many steps of the people come before
     /// that frame - `TICKET_HOLD` at most, and not at all once no plugin listens.
     pub fn ticket_pending(&self, i: usize) -> bool {
-        self.ticket_hook && self.pax(i).and_then(|p| p.ticket_hold).is_some_and(|t| self.time >= t && self.time - t < TICKET_HOLD)
+        self.ticket_hook
+            && self
+                .pax(i)
+                .and_then(|p| p.ticket_hold)
+                .is_some_and(|t| self.time >= t && self.time - t < TICKET_HOLD)
     }
 
     /// The pack's ticket `id` (from 1) as the desk asks for it: its name and value; for 0
     /// the first ticket's, as Omsi.exe asked.
     pub fn pack_ticket(&self, id: u8) -> (String, f32) {
-        self.tickets.as_ref().and_then(|t| t.tickets.get((id as usize).saturating_sub(1))).map(|t| (t.name.clone(), t.value)).unwrap_or_default()
+        self.tickets
+            .as_ref()
+            .and_then(|t| t.tickets.get((id as usize).saturating_sub(1)))
+            .map(|t| (t.name.clone(), t.value))
+            .unwrap_or_default()
     }
 
     /// What a passenger asks for at the desk: the pack's ticket, or what a plugin made of it
@@ -159,7 +177,15 @@ impl PeopleSim {
     /// of), else the stop object's.
     pub fn stop_name(&self, stop: i64) -> Option<String> {
         let timetable = self.stop_names.as_ref().and_then(|n| n.get(&stop)).cloned();
-        let own = || self.stops.get(&stop).map(|s| if s.alias.trim().is_empty() { s.name.clone() } else { s.alias.clone() });
+        let own = || {
+            self.stops.get(&stop).map(|s| {
+                if s.alias.trim().is_empty() {
+                    s.name.clone()
+                } else {
+                    s.alias.clone()
+                }
+            })
+        };
         timetable.or_else(own).map(|n| n.trim().to_string())
     }
 
@@ -176,7 +202,13 @@ impl PeopleSim {
             stop_index = stop.and_then(|s| trip.stops.iter().position(|(id, _, _)| *id == s));
             if let Some(d) = &destination {
                 let from = stop_index.map_or(0, |k| k + 1);
-                destination_index = trip.stops.iter().enumerate().skip(from).find(|(_, (_, n, _))| n.trim() == d.as_str()).map(|(k, _)| k);
+                destination_index = trip
+                    .stops
+                    .iter()
+                    .enumerate()
+                    .skip(from)
+                    .find(|(_, (_, n, _))| n.trim() == d.as_str())
+                    .map(|(k, _)| k);
             }
         }
         let (name, price) = self.ticket_request(p);
@@ -224,21 +256,37 @@ impl PeopleSim {
     /// the tag always. A buyer always has a ticket of the pack: `ticket` 0 is refused for
     /// them, and one made a buyer without a ticket gets the pack's ticket for their age. The
     /// reason when nothing was changed.
-    pub fn set_ticket(&mut self, person: u32, c: &TicketChange, by: &str) -> Result<(), &'static str> {
-        let Some(i) = self.people.iter().position(|p| p.id == person) else { return Err("no such person") };
+    pub fn set_ticket(
+        &mut self,
+        person: u32,
+        c: &TicketChange,
+        by: &str,
+    ) -> Result<(), &'static str> {
+        let Some(i) = self.people.iter().position(|p| p.id == person) else {
+            return Err("no such person");
+        };
         let pack_len = self.tickets.as_ref().map_or(0, |t| t.tickets.len());
-        let (has_sale, has_stamper) = self.player_cabin.as_ref().map_or((false, false), |c| (c.sale.is_some(), !c.stampers.is_empty()));
+        let (has_sale, has_stamper) = self.player_cabin.as_ref().map_or((false, false), |c| {
+            (c.sale.is_some(), !c.stampers.is_empty())
+        });
         let walk = self.boarding.eq_ignore_ascii_case("walk");
         let age = self.people[i].age;
-        let Some(p) = self.pax(i) else { return Err("not a passenger") };
-        if c.payment.is_some_and(|v| !v.is_finite() || v < 0.0) { return Err("invalid payment") }
+        let Some(p) = self.pax(i) else {
+            return Err("not a passenger");
+        };
+        if c.payment.is_some_and(|v| !v.is_finite() || v < 0.0) {
+            return Err("invalid payment");
+        }
         let mut ticket = c.ticket;
         let mut pick = false;
         let changes_ticket = c.changes_ticket();
         let changes_payment = c.payment.is_some();
         // (they decide on their way to the door: `new_ticket`)
         let outside = p.inside.is_none() && p.task == Task::WalkingToBus;
-        let at_desk_yet = p.inside.is_some() && p.task == Task::InBusToPlace && p.ticket == TICKET_BUY && p.sub < 4;
+        let at_desk_yet = p.inside.is_some()
+            && p.task == Task::InBusToPlace
+            && p.ticket == TICKET_BUY
+            && p.sub < 4;
 
         // The ticket and payment can only be changed for the player's bus,
         // while the passenger is boarding or on the way to the cash desk.
@@ -253,7 +301,11 @@ impl PeopleSim {
             }
 
             if !outside && !at_desk_yet {
-                return Err(if p.inside.is_some() { "already asked for the ticket" } else { "not boarding the bus yet" });
+                return Err(if p.inside.is_some() {
+                    "already asked for the ticket"
+                } else {
+                    "not boarding the bus yet"
+                });
             }
             if changes_ticket {
                 if let Some(kind) = c.kind.filter(|k| *k != p.ticket) {
@@ -283,7 +335,9 @@ impl PeopleSim {
         if pick {
             match self.pick_ticket(age) {
                 Some(t) => ticket = Some((t + 1).min(255) as u8),
-                None => return Err("no ticket of the pack is for their age: give one with `ticket`"),
+                None => {
+                    return Err("no ticket of the pack is for their age: give one with `ticket`");
+                }
             }
         }
         let pack_price = ticket.map(|t| self.pack_ticket(t).1);

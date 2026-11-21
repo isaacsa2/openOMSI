@@ -21,7 +21,9 @@ pub mod index;
 pub mod input_profiles;
 pub mod install;
 pub mod instances;
+mod map_dates;
 pub mod map_uses;
+pub use map_dates::fit_date_to_years;
 pub mod mods;
 pub mod optimise;
 pub mod storage;
@@ -1110,33 +1112,6 @@ fn year_span_of(g: &omsi_map::GlobalCfg) -> Option<(i32, i32)> {
     }
 }
 
-fn is_leap_year(y: i32) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
-}
-
-/// `date` (YYYY-MM-DD) fitted to a map's year span, as OMSI 2 starts a map on a day it
-/// allows so that its AI lists, chrono and timetables fit: the same day in the nearest
-/// allowed year (29 February becomes the 28th where that year has none). A date inside the
-/// span, or one that is no date, is kept.
-pub fn fit_date_to_years(date: &str, span: Option<(i32, i32)>) -> String {
-    let mut fields = date.trim().splitn(3, '-').map(|f| f.trim().parse::<i32>());
-    let (Some((from, to)), Some(Ok(year)), Some(Ok(month)), Some(Ok(day))) =
-        (span, fields.next(), fields.next(), fields.next())
-    else {
-        return date.to_string();
-    };
-    if (from..=to).contains(&year) {
-        return date.to_string();
-    }
-    let year = year.clamp(from, to);
-    let day = if (month, day) == (2, 29) && !is_leap_year(year) {
-        28
-    } else {
-        day
-    };
-    format!("{year:04}-{month:02}-{day:02}")
-}
-
 /// The `--date` of a duty: the date the player chose as it stands. Only a date taken from
 /// the machine's calendar (`use_real_date`) is fitted to the map's `[years]` - an old saved
 /// duty or a manually picked year must not be moved behind the player's back.
@@ -1169,6 +1144,7 @@ pub fn list_maps() -> Result<Vec<MapInfo>> {
         };
         let key = format!("map|{lang}|{}", d.display());
         let mut stamped = vec![d.clone(), d.join("global.cfg"), d.join("ailists.cfg")];
+        stamped.push(d.join(omsi_proton::depot::NAME_FILE));
         stamped.extend(dsc_candidates(&d.join("global.cfg"), lang));
         let stamp = index::files_stamp(&stamped);
         keys.push(key.clone());
@@ -1283,6 +1259,8 @@ fn read_map(d: &Path, folder: &str, lang: &str) -> (Option<MapInfo>, Vec<PathBuf
                 .chain(l.groups.iter())
                 .find_map(|g| g.hof.clone())
         })
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| omsi_proton::depot::installed_name(d))
         .unwrap_or_default();
     (
         Some(MapInfo {

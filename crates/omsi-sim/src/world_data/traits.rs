@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 impl crate::people::World for WorldData {
+    fn unscheduled_passengers(&self) -> bool {
+        self.map.unscheduled_passengers
+    }
     fn root(&self) -> &Path {
         &self.map.root
     }
