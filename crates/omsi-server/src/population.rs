@@ -9,7 +9,7 @@ use omsi_sim::world_data::WorldCell;
 use omsi_sim::{SimClock, VehicleHost, VehicleInstance, VehicleType};
 use std::sync::Arc;
 
-pub const MAX_EXPERIMENTAL_TRAFFIC: usize = 320;
+pub const MAX_EXPERIMENTAL_TRAFFIC: usize = 512;
 const MAX_SPAWNS_PER_SECOND: usize = 4;
 const RECYCLE_DISTANCE: f64 = 900.0;
 const SPAWN_INTERVAL: f32 = 1.0;
@@ -288,8 +288,10 @@ mod tests {
         assert_eq!(random_slots(8, 7), 1);
         assert_eq!(random_slots(8, 8), 0);
         assert_eq!(random_slots(0, 0), 0);
-        assert_eq!(random_slots(usize::MAX, 319), 1);
-        assert_eq!(random_slots(usize::MAX, 320), 0);
+        assert_eq!(random_slots(usize::MAX, 507), MAX_SPAWNS_PER_SECOND);
+        assert_eq!(random_slots(usize::MAX, 511), 1);
+        assert_eq!(random_slots(usize::MAX, 512), 0);
+        assert_eq!(random_slots(usize::MAX, 600), 0);
     }
 
     #[test]
