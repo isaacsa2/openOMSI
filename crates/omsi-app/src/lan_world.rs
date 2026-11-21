@@ -408,7 +408,9 @@ impl LanWorld {
                     .push(f.host_ms as f64, p);
             }
             for (_, pid) in f.gone {
-                up.tracks.remove(&pid);
+                if up.tracks.get(&pid).is_some_and(|t| t.remove_is_current(f.host_ms as f64)) {
+                    up.tracks.remove(&pid);
+                }
             }
         }
         // players that left: their people go with them
@@ -727,7 +729,7 @@ impl Mirror {
                 world.mirror_departed(renderer, scene, &keys, *complete);
             }
             for (person, id) in f.gone {
-                if person {
+                if person && m.people.get(&id).is_some_and(|t| t.remove_is_current(ms)) {
                     m.people.remove(&id);
                 }
             }
