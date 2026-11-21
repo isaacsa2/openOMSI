@@ -79,6 +79,60 @@ pub fn resend_until_ack(
     }
 }
 
+/// Coalesce bursty passenger requests into one bounded UDP CLAIM message.
+/// Individual frames can discover waiting people in several groups, while the
+/// host also rate-limits INFO and PAXBOARD/RETURN messages from this peer.
+#[derive(Default)]
+pub struct ClaimQueue {
+    pending: std::collections::BTreeSet<u32>,
+    last_sent: Option<std::time::Instant>,
+}
+
+impl ClaimQueue {
+    const INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+    const MAX_BATCH: usize = 64;
+
+    /// Clear claims belonging to the previous host/session.
+    pub fn clear(&mut self) {
+        self.pending.clear();
+        self.last_sent = None;
+    }
+
+    fn take_due(
+        &mut self,
+        requested: impl IntoIterator<Item = u32>,
+        now: std::time::Instant,
+    ) -> Vec<u32> {
+        self.pending.extend(requested);
+        if self.pending.is_empty()
+            || self
+                .last_sent
+                .is_some_and(|last| now.saturating_duration_since(last) < Self::INTERVAL)
+        {
+            return Vec::new();
+        }
+        let due: Vec<u32> = self.pending.iter().take(Self::MAX_BATCH).copied().collect();
+        for id in &due {
+            self.pending.remove(id);
+        }
+        self.last_sent = Some(now);
+        due
+    }
+
+    pub fn send_due(
+        &mut self,
+        lan: &omsi_net::LanSession,
+        requested: impl IntoIterator<Item = u32>,
+        now: std::time::Instant,
+    ) -> usize {
+        let due = self.take_due(requested, now);
+        if !due.is_empty() {
+            lan.claim(&due);
+        }
+        due.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +151,38 @@ mod tests {
         assert!(inside(&bus, [0.8, -5.5, 1.0]));
         assert!(!inside(&bus, [5.0, 0.0, 1.0]));
         assert!(!inside(&bus, [0.0, 200.0, 1.0]));
+    }
+
+    #[test]
+    fn claims_are_deduplicated_and_sent_at_most_twice_per_second() {
+        let mut queue = ClaimQueue::default();
+        let now = std::time::Instant::now();
+        let first = queue.take_due(0..100, now);
+        assert_eq!(first.len(), 64);
+        assert_eq!(first[0], 0);
+        assert_eq!(first[63], 63);
+        // A second group found in the same frame must not flood the
+        // authenticated host's 10-message-per-second bucket.
+        assert!(queue
+            .take_due(50..150, now + std::time::Duration::from_millis(200))
+            .is_empty());
+        let second = queue.take_due(
+            std::iter::empty(),
+            now + std::time::Duration::from_millis(500),
+        );
+        assert_eq!(second, (64..128).collect::<Vec<_>>());
+        let third = queue.take_due(
+            std::iter::empty(),
+            now + std::time::Duration::from_millis(1_000),
+        );
+        assert_eq!(third, (128..150).collect::<Vec<_>>());
+        queue.clear();
+        assert!(queue
+            .take_due(
+                std::iter::empty(),
+                now + std::time::Duration::from_millis(1_500),
+            )
+            .is_empty());
     }
 
     #[test]
