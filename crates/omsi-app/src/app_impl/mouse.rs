@@ -840,27 +840,10 @@ fn drag_heading(press: [f32; 2], release: [f32; 2], from: glam::DVec2, to: Optio
 }
 
 #[cfg(test)]
-mod drag_tests {
-    use super::drag_heading;
-    use glam::DVec2;
-
-    #[test]
-    fn a_ctrl_drag_gives_the_heading_and_a_click_none() {
-        let from = DVec2::new(10.0, 10.0);
-        assert_eq!(drag_heading([100.0, 100.0], [105.0, 104.0], from, Some(DVec2::new(30.0, 10.0))), None, "under 12 px: a click");
-        assert_eq!(drag_heading([100.0, 100.0], [140.0, 100.0], from, Some(DVec2::new(30.0, 10.0))), Some(90.0), "east");
-        assert_eq!(drag_heading([100.0, 100.0], [100.0, 60.0], from, Some(DVec2::new(10.0, 40.0))), Some(0.0), "north");
-        assert_eq!(drag_heading([100.0, 100.0], [140.0, 100.0], from, None), None, "let go off the map");
-    }
-}
+mod drag_tests;
 
 #[cfg(test)]
-mod look_tests {
-    #[test]
-    fn a_cursor_way_of_78_75_px_turns_by_the_field_of_view() {
-        assert!((78.75 * super::look_deg_per_px(60.0) - 60.0).abs() < 1e-4);
-    }
-}
+mod look_tests;
 
 /// A part of a vehicle (its origin, heading in degrees and `[boundingbox]`) is in reach of
 /// a person standing at `eye`: within 3 m of the box's half length round its centre.
@@ -874,23 +857,7 @@ fn part_in_reach(eye: glam::DVec3, at: glam::DVec3, heading: f64, bb: Option<[f3
 }
 
 #[cfg(test)]
-mod reach_tests {
-    use super::part_in_reach;
-    use glam::DVec3;
-
-    /// Standing by the rear section of an articulated bus, 17 m behind the front part's
-    /// origin: out of the front part's reach, in the rear one's.
-    #[test]
-    fn the_rear_section_is_reached_by_its_own_box() {
-        let front = [2.5, 11.0, 3.0, 0.0, -3.0, 1.5];
-        let rear = [2.5, 7.0, 3.0, 0.0, -3.5, 1.5];
-        let eye = DVec3::new(2.0, -17.0, 1.7);
-        assert!(!part_in_reach(eye, DVec3::ZERO, 0.0, Some(front)));
-        assert!(part_in_reach(eye, DVec3::new(0.0, -12.0, 0.0), 0.0, Some(rear)));
-        // (the box's centre turns with the part: heading 180, the rear is ahead)
-        assert!(part_in_reach(DVec3::new(-2.0, 17.0, 1.7), DVec3::new(0.0, 12.0, 0.0), 180.0, Some(rear)));
-    }
-}
+mod reach_tests;
 
 impl App {
     /// A key pressed while a MileZero song request is being typed: true when it was taken.
