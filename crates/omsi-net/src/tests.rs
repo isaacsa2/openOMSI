@@ -5,6 +5,7 @@ mod bus_info;
 mod freetex;
 mod join_queue;
 mod parked;
+mod passenger_returns;
 
 fn pose(x: f64) -> Pose {
     Pose {
