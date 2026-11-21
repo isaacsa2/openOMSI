@@ -24,6 +24,7 @@ struct PostParams {
     // x how much of a metered shortfall (the picture darker than the light model expects: a
     // tunnel, a dark cab) the eye makes up. Nothing anchors it as white anchors a surplus (a
     // snow field stays white), so it follows far more of it than of a surplus.
+    // y the transition from sunset to night (0..1), for the display shadow lift.
     e: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> p: PostParams;
@@ -347,6 +348,10 @@ fn graded(in: VsOut) -> vec3<f32> {
     } else {
         c = natural_tone(c * pow(2.0, ev), max(p.d.w, 1.0));
     }
+    // Lift the display's lowest tones after metering and bloom. The gain tapers to
+    // one at 10% display-linear intensity, preserving true black and lit surfaces.
+    let shadow = 1.0 - clamp(max(c.r, max(c.g, c.b)) / 0.1, 0.0, 1.0);
+    c = c * (1.0 + 0.8 * p.e.y * shadow * shadow);
     var e = to_srgb(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
     // triangular dither of one code value: no bands in the sky's gradient
     let px = in.clip.xy;

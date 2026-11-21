@@ -54,7 +54,7 @@ impl Renderer {
                 let contrast = tone_contrast(self.tone.exposure.unwrap_or(0.0));
                 if rt_frame && !f.env.no_rt_grade { [1.0, 0.08, 0.0, contrast] } else { [0.0, 0.0, 0.0, contrast] }
             },
-            e: [shortfall_gain, 0.0, 0.0, 0.0],
+            e: [shortfall_gain, after_sunset, 0.0, 0.0],
         };
         self.queue
             .write_buffer(&self.tone.post_buf, 0, bytemuck::bytes_of(&pu));

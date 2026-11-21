@@ -297,7 +297,13 @@ fn sun_glare(dir: vec3<f32>) -> vec3<f32> {
     if (seen <= 0.0) {
         return vec3<f32>(0.0);
     }
-    return enh.sun.rgb * seen * (10.0 / (theta * theta * theta));
+    let glare = enh.sun.rgb * (seen * enh.exposure.x * 10.0 / (theta * theta * theta));
+    // Keep the lens veil below scene white near the disc. The disc itself is drawn by
+    // the sky and can still bloom. Compress all channels together to retain its colour.
+    let peak = max(glare.r, max(glare.g, glare.b));
+    let excess = max(peak - 0.25, 0.0);
+    let compressed = 0.25 + excess / (1.0 + excess / 0.75);
+    return glare * (compressed / max(peak, 0.25));
 }
 
 // at full size, added onto the picture: the four nearest half-size rays, each as far as
@@ -313,9 +319,9 @@ fn fs_fog_composite(in: FogVsOut) -> @location(0) vec4<f32> {
     // the eye's glare from the sun, on top of everything (fp.size.z: on)
     var glare = vec3<f32>(0.0);
     if (fp.size.z > 0.5) {
-        glare = sun_glare(ray.xyz) * enh.exposure.x;
+        glare = sun_glare(ray.xyz);
     }
-    return vec4<f32>(air_light + min(glare, vec3<f32>(4000.0)), 0.0);
+    return vec4<f32>(air_light + glare, 0.0);
 }
 
 fn gathered_air_light(at: vec2<f32>, len: f32) -> vec3<f32> {
