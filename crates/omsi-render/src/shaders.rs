@@ -124,8 +124,11 @@ mod tests {
             "camera uniform must initialize the ground-pass flag to zero and glare in z"
         );
         let render = include_str!("render.rs");
+        // rustfmt may split write_buffer's arguments across lines; preserve the
+        // offset and value assertion without tying it to whitespace layout.
+        let normalized_render = render.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            render.contains(
+            normalized_render.contains(
                 "(std::mem::offset_of!(CameraUniform, lod) + 4) as u64, bytemuck::bytes_of(&flag)"
             ),
             "the ground pass must set lod.y alone and keep the glare in lod.z"
