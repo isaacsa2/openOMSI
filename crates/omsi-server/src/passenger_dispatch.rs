@@ -167,6 +167,17 @@ impl PassengerDispatch {
         )
     }
 
+    /// Session-local per-bus occupancy. IDs are LAN player numbers, not names.
+    pub(crate) fn per_bus(&self) -> Vec<(u32, u32, u64, u64)> {
+        let mut buses: Vec<_> = self
+            .drivers
+            .values()
+            .map(|driver| (driver.id, driver.onboard, driver.boarded, driver.alighted))
+            .collect();
+        buses.sort_unstable_by_key(|row| row.0);
+        buses
+    }
+
     /// Filter a batch of eligible host passenger IDs before PeopleSim hands
     /// them over. `waiting` contains only people waiting at an identified
     /// stop. A person who has no stop still uses the legacy individual claim.
