@@ -19,6 +19,7 @@ pub mod dds;
 pub mod disk_cache;
 pub mod ktx;
 pub mod gpu;
+mod warm_cache;
 pub mod tga;
 
 #[cfg(test)]
@@ -542,6 +543,8 @@ pub struct TextureCache {
     images: Mutex<HashMap<PathBuf, Arc<Image>>>,
     /// Pictures prepared for the GPU (blocks where the device takes them), until uploaded.
     gpu: Mutex<HashMap<PathBuf, Arc<TextureData>>>,
+    /// A small bounded LRU of compressed GPU-ready textures for quick vehicle respawns.
+    warm: Mutex<warm_cache::WarmCache>,
     misses: Mutex<HashMap<String, ()>>,
     alpha: Mutex<HashMap<PathBuf, bool>>,
     /// The sidecars read, by the name asked for and the file found, with the content
@@ -661,6 +664,9 @@ impl TextureCache {
         if let Some(t) = self.gpu.lock().get(path) {
             return Some(t.clone());
         }
+        if let Some(t) = self.warm.lock().get(path) {
+            return Some(t);
+        }
         match gpu::load_gpu(path) {
             Ok((t, _)) => {
                 let t = Arc::new(t);
@@ -684,6 +690,9 @@ impl TextureCache {
     pub fn get_gpu_fast(&self, path: &Path) -> Option<(Arc<TextureData>, bool)> {
         if let Some(t) = self.gpu.lock().get(path) {
             return Some((t.clone(), false));
+        }
+        if let Some(t) = self.warm.lock().get(path) {
+            return Some((t, false));
         }
         match gpu::load_gpu_fast(path) {
             Ok((t, worth)) => {
@@ -709,22 +718,32 @@ impl TextureCache {
         self.get(name, dirs).map(|i| i.has_alpha)
     }
 
-    /// The decoded picture of `path` is not needed any more (it is on the GPU): the memory
-    /// goes back. A later `get` decodes it again.
+    /// Retain only a bounded compressed copy in RAM when a file-backed vehicle texture
+    /// was uploaded, for quick re-use after a set has been evicted from the GPU.
+    /// Never retain huge, uncompressed RGBA staging data here.
+    pub fn cache_uploaded_vehicle(&self, path: &Path, data: &Arc<TextureData>) {
+        self.images.lock().remove(path);
+        self.gpu.lock().remove(path);
+        self.warm.lock().insert(path.to_path_buf(), data.clone());
+    }
+
+    /// Invalidate a texture's staging and warm copy (for content edits and reloads).
     pub fn release(&self, path: &Path) {
         self.images.lock().remove(path);
         self.gpu.lock().remove(path);
+        self.warm.lock().remove(path);
     }
 
     /// Let go of every decoded picture (what a batch decoded ahead and nobody uploaded).
     pub fn release_all(&self) {
         self.images.lock().clear();
         self.gpu.lock().clear();
+        self.warm.lock().clear();
     }
 
     /// Bytes of the pictures held (decoded and prepared ones).
     pub fn held_bytes(&self) -> usize {
-        self.images.lock().values().map(|i| i.rgba.len()).sum::<usize>() + self.gpu.lock().values().map(|t| t.cpu_bytes()).sum::<usize>()
+        self.images.lock().values().map(|i| i.rgba.len()).sum::<usize>() + self.gpu.lock().values().map(|t| t.cpu_bytes()).sum::<usize>() + self.warm.lock().bytes()
     }
 
     pub fn len(&self) -> usize {
