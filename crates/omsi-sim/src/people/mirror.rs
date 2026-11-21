@@ -203,9 +203,12 @@ impl PeopleSim {
                 continue;
             }
             let (stop, spot) = self.pax(i).map_or((None, None), |p| (p.stop, p.spot));
-            if let Some(stop) = stop {
-                self.handed.push((stop, remote_bus_id(player)));
-            }
+            let Some(known_stop) = stop.filter(|stop| self.stops.contains_key(stop)) else {
+                // No safe location to restore this person if the client
+                // later abandons its bus. Refuse a non-restorable GRANT.
+                continue;
+            };
+            self.handed.push((known_stop, remote_bus_id(player)));
             self.release(i);
             let person = self.people.swap_remove(i);
             self.retire(&person);
