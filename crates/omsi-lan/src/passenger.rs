@@ -163,9 +163,11 @@ mod tests {
         assert_eq!(first[63], 63);
         // A second group found in the same frame must not flood the
         // authenticated host's 10-message-per-second bucket.
-        assert!(queue
-            .take_due(50..150, now + std::time::Duration::from_millis(200))
-            .is_empty());
+        assert!(
+            queue
+                .take_due(50..150, now + std::time::Duration::from_millis(200))
+                .is_empty()
+        );
         let second = queue.take_due(
             std::iter::empty(),
             now + std::time::Duration::from_millis(500),
@@ -177,12 +179,14 @@ mod tests {
         );
         assert_eq!(third, (128..150).collect::<Vec<_>>());
         queue.clear();
-        assert!(queue
-            .take_due(
-                std::iter::empty(),
-                now + std::time::Duration::from_millis(1_500),
-            )
-            .is_empty());
+        assert!(
+            queue
+                .take_due(
+                    std::iter::empty(),
+                    now + std::time::Duration::from_millis(1_500),
+                )
+                .is_empty()
+        );
     }
 
     #[test]
