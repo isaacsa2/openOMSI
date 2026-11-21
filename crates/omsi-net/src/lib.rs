@@ -104,6 +104,7 @@ pub mod wire;
 pub mod world;
 pub mod traffic_table;
 mod traffic_net;
+mod pax_protocol;
 pub use traffic_net::TrafficNetStats;
 pub mod vars;
 pub mod var_schema;
@@ -2099,58 +2100,6 @@ impl LanSession {
         }
     }
 
-    /// Return people who were granted but never boarded. The sender must have
-    /// removed its local unboarded copies before calling this. It retries until
-    /// the server acknowledges each ID; UDP delivery is not guaranteed.
-    pub fn return_unboarded(&self, people: &[u32]) {
-        if let (Role::Client, Some(host), true) = (self.role, self.host, self.connected) {
-            for chunk in people.chunks(64) {
-                let ids: Vec<String> = chunk.iter().map(u32::to_string).collect();
-                self.send(
-                    format!("PAXRETURN|{}|{}", self.my_id, ids.join(",")).as_bytes(),
-                    host,
-                );
-            }
-        }
-    }
-
-    /// Confirm that granted people have actually entered the player's bus.
-    /// This is separate from GRANT and from the aggregate Pose.passengers.
-    pub fn confirm_boarded(&self, people: &[u32]) {
-        if let (Role::Client, Some(host), true) = (self.role, self.host, self.connected) {
-            for chunk in people.chunks(64) {
-                let ids: Vec<String> = chunk.iter().map(u32::to_string).collect();
-                self.send(
-                    format!("PAXBOARD|{}|{}", self.my_id, ids.join(",")).as_bytes(),
-                    host,
-                );
-            }
-        }
-    }
-
-    /// Answer a client's return request; duplicates are safe and acknowledged.
-    pub fn acknowledge_returns(&self, player: u32, people: &[u32]) {
-        let Some(to) = self.peer_addr(player).filter(|_| self.role == Role::Host) else {
-            return;
-        };
-        for chunk in people.chunks(64).filter(|chunk| !chunk.is_empty()) {
-            let ids: Vec<String> = chunk.iter().map(u32::to_string).collect();
-            self.send(format!("PAXACK|{}", ids.join(",")).as_bytes(), to);
-        }
-    }
-
-    pub fn take_pax_returns(&mut self) -> Vec<(u32, Vec<u32>)> {
-        std::mem::take(&mut self.pax_returns)
-    }
-
-    pub fn take_pax_boarded(&mut self) -> Vec<(u32, Vec<u32>)> {
-        std::mem::take(&mut self.pax_boarded)
-    }
-
-    pub fn take_pax_acks(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.pax_acks)
-    }
-
     /// Answer a player's claim (host).
     pub fn answer_claim(&self, id: u32, granted: &[u32], denied: &[u32]) {
         let Some(to) = self.peer_addr(id) else { return };
@@ -2805,26 +2754,7 @@ impl LanSession {
                     self.connected = false;
                 }
                 ("PAXRETURN", Role::Host) | ("PAXBOARD", Role::Host) => {
-                    let Some(id) = field(&parts, 1).parse::<u32>().ok() else {
-                        continue;
-                    };
-                    if self.checked_peer(id, from, MESSAGE_RATE, PeerTraffic::Message).is_none() {
-                        continue;
-                    }
-                    let ids: Vec<u32> = field(&parts, 2)
-                        .split(',')
-                        .filter_map(|value| value.trim().parse().ok())
-                        .take(64)
-                        .collect();
-                    if !ids.is_empty() {
-                        if parts[0] == "PAXRETURN" {
-                            if self.pax_returns.len() < 64 {
-                                self.pax_returns.push((id, ids));
-                            }
-                        } else if self.pax_boarded.len() < 64 {
-                            self.pax_boarded.push((id, ids));
-                        }
-                    }
+                    self.on_pax_message(&parts, from)
                 }
                 ("WANT", Role::Host) | ("CLAIM", Role::Host) => {
                     let Some(id) = field(&parts, 1).parse::<u32>().ok() else {
@@ -2875,18 +2805,7 @@ impl LanSession {
                         }
                     }
                 }
-                ("PAXACK", Role::Client) => {
-                    // Only the accepted session host may acknowledge a return.
-                    if Some(from) != self.host {
-                        continue;
-                    }
-                    let ids: Vec<u32> = field(&parts, 1)
-                        .split(',')
-                        .filter_map(|value| value.trim().parse().ok())
-                        .take(64)
-                        .collect();
-                    self.pax_acks.extend(ids);
-                }
+                ("PAXACK", Role::Client) => self.on_pax_ack(&parts, from),
                 ("GRANT", Role::Client) | ("DENY", Role::Client) => {
                     let list: Vec<u32> = field(&parts, 1)
                         .split(',')
