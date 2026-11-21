@@ -106,7 +106,9 @@ use runners::*;
 pub use avatar::{AvatarCmd, SeatSpot};
 pub use door_requests::DoorRequest;
 pub use bodies::{BodyOp, BodyOps};
-pub use mirror::{placed_bus_id, remote_bus_id, remote_bus_player, HandedPerson, LanPerson, MirrorPose};
+pub use mirror::{
+    placed_bus_id, remote_bus_id, remote_bus_player, HandedPerson, LanPerson, MirrorPose,
+};
 pub use model::{BusId, DoorWants, Eye, Footfall, PeopleSim, Person, Place, State, VoiceLine};
 pub use money::Money;
 pub use pose_facts::PoseFacts;
