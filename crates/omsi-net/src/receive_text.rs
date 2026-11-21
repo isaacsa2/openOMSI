@@ -83,8 +83,7 @@ impl LanSession {
             ("INFO", _) => self.on_info(&parts, from),
             ("PLACE", Role::Host) => self.on_place(&parts, from),
             ("NEAR", Role::Client) => {
-                if field(&parts, 1).parse::<u32>().ok() == Some(self.my_id)
-                    && self.place.is_some()
+                if field(&parts, 1).parse::<u32>().ok() == Some(self.my_id) && self.place.is_some()
                 {
                     self.near = Some(
                         field(&parts, 2)

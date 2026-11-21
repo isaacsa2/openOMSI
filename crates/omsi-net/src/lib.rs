@@ -222,8 +222,8 @@ mod join_queue;
 mod parked;
 mod receive_budget;
 mod receive_text;
-mod send_own;
 mod receive_world;
+mod send_own;
 pub use join_queue::LOADING_ALIVE;
 pub use parked::{FIRST_PARKED_ID, is_parked};
 // ---------------------------------------------------------------------------------------
