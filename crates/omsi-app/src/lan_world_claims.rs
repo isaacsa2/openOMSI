@@ -16,15 +16,10 @@ impl Mirror {
         renderer: &Renderer,
         scene: &mut Scene,
     ) {
-        // Host acknowledges both the physical-boarding notification and a
-        // cancelled claim. Never stop retrying a UDP return before PAXACK.
         for id in lan.take_pax_acks() {
             self.return_pending.remove(&id);
             self.boarded_pending.remove(&id);
         }
-        // A GRANT is only a provisional transfer. Keep its original identity
-        // until the person physically crosses the player's bus boundary.
-        // Passing the point without boarding returns it to the next driver.
         let current_bus = h
             .last_buses
             .iter()
@@ -33,8 +28,6 @@ impl Mirror {
         let mut cancelled = Vec::new();
         for (&id, &(stop, received)) in &self.granted_waiting {
             let Some(person) = h.people.iter().find(|p| p.id == id) else {
-                // Locally retired/disappeared people must not be recreated
-                // without proof that they stayed outside the bus.
                 finished.push(id);
                 continue;
             };
@@ -69,7 +62,6 @@ impl Mirror {
         if !cancelled.is_empty() {
             for id in &cancelled {
                 if let Some(index) = h.people.iter().position(|p| p.id == *id) {
-                    // Only the not-yet-boarded people can be removed here.
                     if matches!(h.people[index].place, omsi_sim::people::Place::Ground) {
                         h.release(index);
                         let person = h.people.swap_remove(index);
@@ -80,36 +72,36 @@ impl Mirror {
             }
             crate::view_sync::apply_people(h, &mut view.people, world, renderer, scene);
         }
-        // Retry both positive boarding acknowledgements and cancellations
-        // once per second. The server restores each original person at most
-        // once and sends an idempotent PAXACK to stop the retries.
         let now = Instant::now();
-        let due = |last: &Option<Instant>| {
+        resend_until_ack(lan, &mut self.return_pending, now, false);
+        resend_until_ack(lan, &mut self.boarded_pending, now, true);
+    }
+}
+
+/// Keep the UDP boarding or return notification alive until the host's
+/// authenticated acknowledgement arrives.
+fn resend_until_ack(
+    lan: &mut LanSession,
+    pending: &mut HashMap<u32, Option<Instant>>,
+    now: Instant,
+    boarded: bool,
+) {
+    let due: Vec<u32> = pending
+        .iter()
+        .filter(|(_, last)| {
             last.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_secs(1))
-        };
-        let returning: Vec<u32> = self
-            .return_pending
-            .iter()
-            .filter(|(_, at)| due(at))
-            .map(|(id, _)| *id)
-            .collect();
-        if !returning.is_empty() {
-            lan.return_unboarded(&returning);
-            for id in returning {
-                self.return_pending.insert(id, Some(now));
-            }
-        }
-        let boarded: Vec<u32> = self
-            .boarded_pending
-            .iter()
-            .filter(|(_, at)| due(at))
-            .map(|(id, _)| *id)
-            .collect();
-        if !boarded.is_empty() {
-            lan.confirm_boarded(&boarded);
-            for id in boarded {
-                self.boarded_pending.insert(id, Some(now));
-            }
-        }
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    if due.is_empty() {
+        return;
+    }
+    if boarded {
+        lan.confirm_boarded(&due);
+    } else {
+        lan.return_unboarded(&due);
+    }
+    for id in due {
+        pending.insert(id, Some(now));
     }
 }
