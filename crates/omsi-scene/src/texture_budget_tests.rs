@@ -221,25 +221,14 @@ fn near_texture_queues_restore_when_the_full_texture_would_not_fit() {
             (bytes * 4 + 4095, u64::MAX),
             now,
         ),
-        0,
+        (0, true),
         "a new allocation must fit before attempting even a partial restore",
     );
+    assert_eq!(gpu.textures[&path].retry_after, None);
     assert_eq!(
-        gpu.textures[&path].retry_after,
-        Some(now + std::time::Duration::from_secs(2)),
-        "blocked textures must be rechecked when a small amount of VRAM returns",
-    );
-    assert_eq!(
-        queue_near_restores(
-            &mut gpu,
-            &pending,
-            &entries,
-            150.0,
-            (room, u64::MAX),
-            now + std::time::Duration::from_secs(3),
-        ),
+        queue_near_restores(&mut gpu, &pending, &entries, 150.0, (room, u64::MAX), now).0,
         1,
-        "a partial restore may be queued when capacity returns after the retry interval",
+        "a partial restore may be queued as soon as capacity returns",
     );
     assert_eq!(gpu.wants_restore, [path.clone()]);
     assert!(gpu.textures[&path].near_restore);
@@ -277,7 +266,7 @@ fn emergency_squeezed_near_texture_needs_budget_for_an_intermediate_mip() {
             (next, next - 350_000 - 1),
             std::time::Instant::now(),
         ),
-        0,
+        (0, true),
         "squeezed textures must still obey their own texture budget",
     );
     assert_eq!(
@@ -288,7 +277,8 @@ fn emergency_squeezed_near_texture_needs_budget_for_an_intermediate_mip() {
             150.0,
             (next, next - 350_000),
             std::time::Instant::now(),
-        ),
+        )
+        .0,
         1,
     );
 }
@@ -415,6 +405,46 @@ fn an_idle_look_is_kept_until_something_changes() {
         !m.unchanged(1, 900, limit, 0, &c),
         "a look that did something looks again"
     );
+}
+
+#[test]
+fn blocked_near_restores_recheck_small_changes_in_card_room() {
+    let (_fixture, world) = Fixture::world();
+    let renderer = renderer();
+    let mut scene = renderer.new_scene();
+    let (path, id) = scenery(&world, &renderer, &mut scene, "near.png", (0, 0));
+    assert!(renderer.drop_top_levels(&mut scene, id, 2));
+    let full_bytes = {
+        let mut gpu = world.gpu.lock();
+        let entry = gpu.textures.get_mut(&path).unwrap();
+        entry.record_upload(&data(1024), &scene);
+        entry.full_bytes
+    };
+    let centers = [DVec3::new(150.0, 150.0, 0.0)];
+    let total = renderer.gpu_memory(&scene).total();
+    world.set_texture_budget(400_000);
+    world.set_video_memory_limit(total + 1);
+    let before_scan = std::time::Instant::now();
+    assert_eq!(
+        world.update_texture_budget(&renderer, &mut scene, &centers, true),
+        0
+    );
+    {
+        let mut memo = world.budget_checked.lock();
+        let deadline = memo
+            .near_retry_at
+            .expect("blocked restore must schedule a scan");
+        assert!(deadline >= before_scan + std::time::Duration::from_secs(2));
+        let now = std::time::Instant::now();
+        memo.checked = Some(now - std::time::Duration::from_secs(3));
+        memo.near_retry_at = Some(now);
+    }
+    world.set_video_memory_limit(total + full_bytes);
+    assert_eq!(
+        world.update_texture_budget(&renderer, &mut scene, &centers, false),
+        1
+    );
+    assert_eq!(world.gpu.lock().wants_restore, [path]);
 }
 
 #[test]

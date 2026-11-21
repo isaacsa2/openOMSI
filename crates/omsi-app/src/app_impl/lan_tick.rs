@@ -8,7 +8,7 @@ impl App {
     pub(crate) fn tick_lan(&mut self, dt: f32) {
         let lan_tick_started = std::time::Instant::now();
         if self.net.lan.is_none() {
-            self.coop_cab_assistant = None;
+            self.net.coop_cab_assistant = None;
             omsi_lan::commands::set_speed_limit_kmh(0);
             self.net.speed_limit_welcome = None;
             self.net.dedicated_teleport = None;
@@ -40,7 +40,7 @@ impl App {
                     .unwrap_or(0),
             ));
             if !lan.connected {
-                self.coop_cab_assistant = None;
+                self.net.coop_cab_assistant = None;
                 self.net.speed_limit_welcome = None;
                 self.net.dedicated_teleport = None;
                 omsi_lan::commands::set_speed_limit_kmh(0);
@@ -366,7 +366,7 @@ impl App {
                 lan,
                 from,
                 self.player.as_ref().map(|p| &p.vehicle),
-                self.coop_cab_assistant,
+                self.net.coop_cab_assistant,
                 action,
             )
         });

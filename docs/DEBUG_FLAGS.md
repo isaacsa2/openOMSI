@@ -86,7 +86,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_DEBUG_SWITCHES` | bool | off | use | sim | Log railway switches thrown for a train. |
 | `OMSI_DEBUG_TEXT` | bool | off | once | sim | Log the scripts' string variable operations. |
 | `OMSI_DEBUG_TEXTURES` | bool | off | use | scene | Log all textures by size and format. |
-| `OMSI_DEBUG_TRAFFIC` | bool | off | use | app, scene, sim | Log traffic light programs, cars standing for long and hard bends. |
+| `OMSI_DEBUG_TRAFFIC` | bool | off | use | app, scene, server, sim | Log traffic light programs, cars standing for long and hard bends. |
 | `OMSI_DEBUG_TRAILER` | bool | off | use | sim | Log a trailer's rest, sag and lift on the ground. |
 | `OMSI_DEBUG_TRAILERS` | bool | off | use | sim | Log coupled parts off the level of what pulls them. |
 | `OMSI_DEBUG_TRIGGERS` | bool | off | use | app | Log the variables a mouse trigger changed. |
@@ -191,7 +191,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_HIDE_MESH` | text | - | use | scene | a\|b: leave out the meshes whose file names contain one of the parts. |
 | `OMSI_HIDE_WINDOW` | text | - | use | app | from,to: treat the window as hidden between these seconds. |
 | `OMSI_HOLE_PHOTO` | bool | off | use | app | With OMSI_ROAD_PHOTO: photograph from above down to 25 m under the lane (holes in the world). |
-| `OMSI_INPUT` | text | - | use | app | Scripted keyboard, mouse and camera input for window runs. |
+| `OMSI_INPUT` | text | - | use | app, input | Scripted keyboard, mouse and camera input for window runs. |
 | `OMSI_JOINT_ANGLE` | num | - | use | app | Degrees: the rear section of an articulated bus held at that angle. |
 | `OMSI_LANES_NEAR` | text | - | use | app | x,y,r: log the driving lanes passing there. |
 | `OMSI_LAN_AUDIO` | bool | off | use | app | Offscreen LAN: with the other buses' sounds. |

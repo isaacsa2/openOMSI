@@ -52,6 +52,8 @@ pub(crate) struct NetState {
     pub(crate) remote_walkers: Vec<(u32, u64)>,
     /// The player on foot is in this other player's bus (see `lan`: drawn from inside).
     pub(crate) inside_remote: Option<u32>,
+    /// The owner has explicitly delegated non-driving cabin switches to riders.
+    pub(crate) coop_cab_assistant: Option<u32>,
     /// A dedicated server said we administer it (`admin`).
     pub(crate) is_admin: bool,
     /// What that server told its menu (`admin_panel`).
