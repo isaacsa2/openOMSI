@@ -85,7 +85,21 @@ impl PeopleSim {
     ) -> Option<f32> {
         let s = self.stops.get(&stop)?;
         let left = LEFT_HAND.load(std::sync::atomic::Ordering::Relaxed);
-        boarding_side(s.side, left, bn.to_local(position).x)
+        let wanted = boarding_side(s.side, left, bn.to_local(position).x);
+        if s.side == 0
+            && wanted.is_some_and(|w| {
+                !bn.cabin
+                    .entries
+                    .iter()
+                    .any(|d| d.point.is_some() && d.side == w)
+            })
+        {
+            // Ordinary kerb stops (side 0) must allow buses with entries only on the opposite
+            // side (e.g. RHD buses on LHD maps, or LHT maps without a global [lht] tag) to serve
+            // passengers through their existing doors (#4062).
+            return None;
+        }
+        wanted
     }
 
     /// The passenger of person `i`, if it is one.
