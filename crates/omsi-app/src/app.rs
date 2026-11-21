@@ -78,6 +78,8 @@ pub(crate) struct App {
     pub(crate) net: NetState,
     /// Last workshop / fuel pump / wash message, and how long it still shows.
     pub(crate) service_msg: Option<(String, f32)>,
+    /// The owner has explicitly delegated non-driving cabin switches to riders.
+    pub(crate) coop_cab_enabled: bool,
     pub(crate) settings: settings::Settings,
     /// The exit is under way.
     pub(crate) exiting: bool,
