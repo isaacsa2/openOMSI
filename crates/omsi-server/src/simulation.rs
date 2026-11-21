@@ -45,6 +45,12 @@ impl CpuSimulation {
         self.passenger_dispatch.totals()
     }
 
+    /// One reported onboard count and observed boarding/alighting deltas per
+    /// connected LAN bus, without exposing player names or network addresses.
+    pub fn player_passenger_counts(&self) -> Vec<(u32, u32, u64, u64)> {
+        self.passenger_dispatch.per_bus()
+    }
+
     pub fn new(root: &Path, world: Arc<WorldCell>, traffic: TrafficSim, max_people: usize) -> Self {
         Self {
             world,
