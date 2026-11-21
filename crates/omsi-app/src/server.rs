@@ -19,6 +19,25 @@ pub(crate) use omsi_lan::server_cfg::{SERVER_VEHICLES, ServerCfg, enforce_vehicl
 
 pub(crate) use omsi_server::fleet::announce_fleet;
 
+// Keep the legacy graphical host's admin panel compatible while the native
+// headless server owns real timing measurements. Do not invent legacy TPS.
+pub(crate) use omsi_server::admin::tick_status;
+
+pub(crate) fn admin_state(
+    time: f64,
+    speed: f64,
+    weather: &str,
+    metar: Option<&str>,
+    world: omsi_net::ws::WorldCounts,
+) -> omsi_admin::ServerState {
+    let meter = omsi_admin::metrics::TickMeter::new(omsi_server::tick::SERVER_TPS as f64);
+    let profiler = omsi_admin::profiler::Profiler::new();
+    let mut state =
+        omsi_server::admin::admin_state(time, speed, weather, metar, world, &meter, &profiler);
+    state.profiler = None;
+    state
+}
+
 pub(crate) fn info_of(cfg: &ServerCfg, _root: &Path) -> omsi_net::ws::ServerInfo {
     omsi_server::admin::info_of(cfg, &format!("{} ({})", omsi_platform::VERSION, BUILD))
 }
