@@ -1,0 +1,83 @@
+# One-time, branch-limited formatter for PR #405. Remove after use.
+name: PR405 targeted rustfmt
+on:
+  push:
+    branches:
+      - refactor/dedicated-server-tick-20261117
+    paths:
+      - .github/workflows/pr405-format-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format only the 14 files actually failing rustfmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            crates/omsi-app/src/app/parts.rs
+            crates/omsi-app/src/app_impl/lan_tick.rs
+            crates/omsi-app/src/app_impl/mouse.rs
+            crates/omsi-app/src/input_script.rs
+            crates/omsi-app/src/lan_world.rs
+            crates/omsi-app/src/lib.rs
+            crates/omsi-app/src/on_foot/door_requests.rs
+            crates/omsi-lan/src/coop_permissions.rs
+            crates/omsi-lan/src/mirror.rs
+            crates/omsi-lan/src/passenger.rs
+            crates/omsi-navigator/src/lib.rs
+            crates/omsi-navigator/src/panel/cards.rs
+            crates/omsi-navigator/src/signal_countdown.rs
+            crates/omsi-server/src/people_sync.rs
+          )
+          for path in "${files[@]}"; do
+            test -f "$path"
+            rustfmt --edition 2024 --config skip_children=true "$path"
+          done
+          git diff --check
+          bash scripts/size-budget.sh
+          # Verify the strict app-growth rule against the complete working tree,
+          # not HEAD (which would miss these uncommitted rustfmt changes).
+          git fetch --no-tags origin main
+          python3 - <<'PY'
+          import re, subprocess, sys
+          diff = subprocess.check_output(
+              ["git", "diff", "--numstat", "-z", "--no-renames", "origin/main", "--", "crates/omsi-app"]
+          ).decode()
+          growth = 0
+          for record in filter(None, diff.split("\0")):
+              added, removed, path = record.split("\t", 2)
+              if (path.endswith(".rs") and added != "-"
+                  and not re.search(r"(^|/)tests?(/|\.rs$)|_tests?\.rs$", path)):
+                  growth += int(added) - int(removed)
+          rules = open("scripts/arch-rules.txt", encoding="utf-8").read()
+          cap = int(re.search(r"^app-growth\s+(\d+)", rules, re.M).group(1))
+          print(f"Proposed app growth: {growth:+} / {cap}")
+          if growth > cap:
+              sys.exit("Refusing to push: rustfmt exceeds architectural app growth cap")
+          PY
+          # The checked-in Rust files in this exact PR must all format correctly.
+          git branch -f main origin/main
+          while IFS= read -r -d '' path; do
+            bash scripts/format-check-file.sh "$PWD/$path"
+          done < <(git diff --name-only -z --diff-filter=ACMR origin/main -- '*.rs')
+          cargo fmt --check -p omsi-admin -- --files-with-diff
+          git add -- "${files[@]}"
+          if git diff --cached --quiet; then
+            echo "Formatting already correct; no commit."
+            exit 0
+          fi
+          git -c user.name='openOMSI CI formatter' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'style: apply rustfmt to PR 405 integration files'
+          git push origin "HEAD:refs/heads/refactor/dedicated-server-tick-20261117"
