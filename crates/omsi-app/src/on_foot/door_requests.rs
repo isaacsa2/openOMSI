@@ -69,7 +69,7 @@ impl App {
         }
     }
 
-    fn remote_cabin_owner(&self) -> Option<u32> {
+    pub(crate) fn remote_cabin_owner(&self) -> Option<u32> {
         let BusId::Ai(id) = self.foot_bus()? else {
             return None;
         };
