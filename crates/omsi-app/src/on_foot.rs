@@ -1861,7 +1861,9 @@ pub(crate) fn tick(cx: &mut OnFootCx, dt: f32) {
 
 /// Other players on foot: their avatars.
 pub(crate) fn remote_walkers(cx: &mut OnFootCx) {
-    let walkers: Vec<(
+    // Players on foot without an assigned bus have a network pose, but no
+    // RemoteVehicle. Include their avatars directly from the session peers.
+    let mut walkers: Vec<(
         u32,
         Option<omsi_net::Walker>,
         String,
@@ -1880,6 +1882,23 @@ pub(crate) fn remote_walkers(cx: &mut OnFootCx) {
             )
         })
         .collect();
+    if let Some(lan) = cx.net.lan.as_ref() {
+        for peer in lan.peers() {
+            if !peer.has_pose
+                || !peer.has_info
+                || peer.pose.walker.is_none()
+                || cx.net.remotes.remotes.contains_key(&peer.pose.id)
+            {
+                continue;
+            }
+            walkers.push((
+                peer.pose.id,
+                peer.pose.walker,
+                peer.pose.figure.clone(),
+                cx.gfx.gfx.sim_view.lan.figure_type(peer.pose.id),
+            ));
+        }
+    }
     if walkers.iter().all(|w| w.1.is_none()) && cx.net.remote_walkers.is_empty() {
         return;
     }
