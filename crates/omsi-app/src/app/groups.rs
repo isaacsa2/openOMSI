@@ -54,6 +54,8 @@ pub(crate) struct NetState {
     pub(crate) inside_remote: Option<u32>,
     /// The owner has explicitly delegated non-driving cabin switches to riders.
     pub(crate) coop_cab_assistant: Option<u32>,
+    /// A remote cabin switch held by this client, with its owner and pointer origin.
+    pub(crate) coop_cab_press: Option<(u32, String, (f32, f32))>,
     /// A dedicated server said we administer it (`admin`).
     pub(crate) is_admin: bool,
     /// What that server told its menu (`admin_panel`).

@@ -149,6 +149,9 @@ impl App {
                 self.request_passenger_door();
                 return;
             }
+            if code == KeyCode::KeyT && pressed && !repeat && !alt && self.coop_fare_key(ctrl, shift_now) {
+                return;
+            }
             // A remapped get-up key also steps out on foot, before the walker takes
             // G, Space, F1 or a movement key (and before driving-layout fallbacks).
             if pressed && !repeat && get_up_key(&self.input.game_keys, code, shift_now, ctrl, alt) {

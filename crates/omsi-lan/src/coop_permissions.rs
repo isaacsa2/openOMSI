@@ -37,10 +37,13 @@ pub fn may_handover_driver(roles: CoopRoles, request: DriverRequest) -> bool {
 }
 
 /// A narrow in-cabin request. It never transfers driving authority.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CabinAction {
     Door(usize),
     Window(usize),
+    Switch(String),
+    Adjust(String, i8),
+    Fare(FareAction),
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -51,26 +54,38 @@ pub struct CabinRequest {
     pub speed_kmh: f32,
 }
 
-/// A role can operate door buttons only while the bus is stationary. Windows
-/// are allowed while moving; neither grant includes engine, gearbox or steering.
-pub fn may_operate_cabin(roles: CoopRoles, req: CabinRequest, action: CabinAction) -> bool {
+/// Door, boarding aid and cash-desk shortcuts require a stationary bus.
+/// The remaining controls are validated against the owner's model before execution.
+pub fn may_operate_cabin(roles: CoopRoles, req: CabinRequest, action: &CabinAction) -> bool {
     roles.conductor
         && req.same_session
         && req.owner_consented
         && req.passenger_inside_bus
         && req.speed_kmh.is_finite()
         && match action {
-            CabinAction::Door(index) => index < 9 && req.speed_kmh.abs() <= 0.5,
-            CabinAction::Window(index) => index < 9,
+            CabinAction::Door(index) => *index < 9 && req.speed_kmh.abs() <= 0.5,
+            CabinAction::Window(index) => *index < 9,
+            CabinAction::Switch(event) => {
+                auxiliary_switch(event) && switch_speed_allowed(event, req.speed_kmh)
+            }
+            CabinAction::Adjust(event, direction) => {
+                is_adjustable_control(event)
+                    && matches!(direction, -1 | 1)
+                    && switch_speed_allowed(event, req.speed_kmh)
+            }
+            CabinAction::Fare(_) => req.speed_kmh.abs() <= 0.5,
         }
 }
 
 /// Commands are routed through the authenticated LAN session, not chat text.
 impl CabinAction {
-    pub fn command(self) -> String {
+    pub fn command(&self) -> String {
         match self {
             Self::Door(index) => format!("coop-door {index}"),
             Self::Window(index) => format!("coop-window {index}"),
+            Self::Switch(event) => format!("coop-switch {event}"),
+            Self::Adjust(event, direction) => format!("coop-adjust {event} {direction}"),
+            Self::Fare(fare) => format!("coop-fare {}", fare.as_str()),
         }
     }
 }
@@ -78,13 +93,26 @@ impl CabinAction {
 pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
     let mut words = text.split_whitespace();
     let kind = words.next()?;
-    let index = words.next()?.parse::<usize>().ok()?;
-    if words.next().is_some() || index >= 9 {
+    let value = words.next()?;
+    if kind == "coop-adjust" {
+        let direction = words.next()?.parse::<i8>().ok()?;
+        if words.next().is_none() && is_adjustable_control(value) && matches!(direction, -1 | 1) {
+            return Some(CabinAction::Adjust(value.into(), direction));
+        }
+        return None;
+    }
+    if words.next().is_some() {
         return None;
     }
     match kind {
-        "coop-door" => Some(CabinAction::Door(index)),
-        "coop-window" => Some(CabinAction::Window(index)),
+        "coop-door" => value.parse().ok().filter(|&i| i < 9).map(CabinAction::Door),
+        "coop-window" => value
+            .parse()
+            .ok()
+            .filter(|&i| i < 9)
+            .map(CabinAction::Window),
+        "coop-switch" if auxiliary_switch(value) => Some(CabinAction::Switch(value.into())),
+        "coop-fare" => FareAction::parse(value).map(CabinAction::Fare),
         _ => None,
     }
 }
@@ -95,29 +123,243 @@ pub fn matches_assistant(assigned: Option<u32>, sender: u32) -> bool {
     sender != 0 && assigned == Some(sender)
 }
 
-/// Only explicit model window controls can be delegated. Never interpret a
-/// string from a remote peer as an arbitrary script/engine trigger.
-pub fn cabin_window_trigger(name: &str) -> bool {
-    let n = name.trim().to_ascii_lowercase();
-    n.len() <= 96
-        && (n.contains("window") || n.contains("fenster"))
-        && !n.ends_with("_off")
-        && !n.ends_with("_drag")
-        && !["engine", "motor", "steer", "brake", "door"]
+fn window_control(event: &str) -> bool {
+    control_name(event).is_some_and(|name| name.contains("window") || name.contains("fenster"))
+}
+
+fn control_name(event: &str) -> Option<String> {
+    if event.is_empty()
+        || event.len() > 96
+        || !event
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_+-".contains(&b))
+    {
+        return None;
+    }
+
+    let name = event.to_ascii_lowercase();
+    if name.ends_with("_off")
+        || name.ends_with("_drag")
+        || [
+            "steer",
+            "lenk",
+            "throttle",
+            "gas_pedal",
+            "accelerator",
+            "brake",
+            "bremse",
+            "gear",
+            "gang",
+            "clutch",
+            "kupplung",
+            "ignition",
+            "zuend",
+            "zund",
+            "engine",
+            "motor",
+            "starter",
+            "anlasser",
+            "battery",
+            "batter",
+            "retarder",
+            "fahrstufe",
+            "drive",
+            "handbr",
+            "holdbrake",
+            "pedal",
+            "door",
+            "tuer",
+            "shifter",
+            "parking",
+            "getriebe",
+        ]
+        .iter()
+        .any(|term| name.contains(term))
+    {
+        return None;
+    }
+
+    Some(name)
+}
+
+/// These are the model control families that the owner's client may execute.
+fn auxiliary_switch(event: &str) -> bool {
+    let Some(name) = control_name(event) else {
+        return false;
+    };
+    let family = name
+        .strip_prefix("cp_")
+        .or_else(|| name.strip_prefix("cockpit_"))
+        .or_else(|| name.strip_prefix("taster_"))
+        .unwrap_or(&name);
+    [
+        "licht",
+        "light",
+        "fahrerlicht",
+        "innenlicht",
+        "scheinwerfer",
+        "blinker",
+        "warnblinker",
+        "horn",
+        "hupe",
+        "microphone",
+        "ansage",
+        "kneel",
+        "autokneel",
+        "rampe",
+        "ramp_",
+        "wheelchair_ramp",
+        "lift_",
+        "schalter_kinderwagen",
+        "wiper",
+        "wischer",
+        "wascher",
+        "heiz",
+        "heat",
+        "hvac",
+        "klima",
+        "lueft",
+        "fan_",
+        "vent_",
+        "defrost",
+        "spiegelheizung",
+        "geblaese",
+        "umluft",
+        "rollo",
+        "sunblind",
+        "sonnenblende",
+        "ibis",
+        "ibox",
+        "afc_",
+        "matrix_",
+        "ziel",
+        "rollband",
+        "bus_rollband",
+        "rlbnd",
+        "rlb_",
+        "ticketprinter",
+        "ticket_printer",
+        "ticketmachine",
+        "ticket_machine",
+        "ticket_",
+        "fare_",
+        "cashdesk",
+        "zahltisch",
+        "kassentisch",
+        "entwerter",
+        "changer",
+        "change_",
+        "wechsel",
+        "drucker",
+    ]
+    .iter()
+    .any(|prefix| family.starts_with(prefix))
+}
+
+fn switch_speed_allowed(event: &str, speed_kmh: f32) -> bool {
+    let name = event.to_ascii_lowercase();
+    speed_kmh.abs() <= 0.5
+        || !["kneel", "ramp", "lift_"]
             .iter()
-            .any(|word| n.contains(word))
+            .any(|tag| name.contains(tag))
+}
+
+fn is_adjustable_control(event: &str) -> bool {
+    (window_control(event) || auxiliary_switch(event)) && !momentary_button(event)
+}
+
+fn momentary_button(event: &str) -> bool {
+    let name = event.to_ascii_lowercase();
+    ["taste", "ibox", "ticket"]
+        .iter()
+        .any(|tag| name.contains(tag))
+}
+
+fn window_events(ty: &omsi_sim::VehicleType) -> Vec<&str> {
+    let mut events: Vec<_> = ty
+        .model
+        .meshes
+        .iter()
+        .filter_map(|mesh| mesh.mouse_event.as_deref())
+        .filter(|event| window_control(event))
+        .collect();
+    events.sort_unstable();
+    events.dedup();
+    events
+}
+
+pub fn click_cabin_window(vehicle: &mut omsi_sim::VehicleInstance, index: usize) -> bool {
+    let ty = vehicle.ty.clone();
+    window_events(&ty)
+        .get(index)
+        .is_some_and(|event| click_auxiliary_switch(vehicle, event))
+}
+
+pub fn cabin_adjustment_for_model(
+    ty: &omsi_sim::VehicleType,
+    event: &str,
+    direction: i8,
+) -> Option<CabinAction> {
+    supports_adjustment(ty, event, direction).then(|| CabinAction::Adjust(event.into(), direction))
+}
+
+fn supports_adjustment(ty: &omsi_sim::VehicleType, event: &str, direction: i8) -> bool {
+    is_adjustable_control(event)
+        && matches!(direction, -1 | 1)
+        && model_has_event(ty, event)
+        && ty.program.trigger(&format!("{event}_drag")).is_some()
+}
+
+pub fn adjust_auxiliary_switch(
+    vehicle: &mut omsi_sim::VehicleInstance,
+    event: &str,
+    direction: i8,
+) -> bool {
+    if !supports_adjustment(&vehicle.ty, event, direction) {
+        return false;
+    }
+    let step = f32::from(direction) * 40.0;
+    vehicle.host.mouse = if window_control(event) {
+        (step, 0.0)
+    } else {
+        (0.0, step)
+    };
+    let moved = vehicle.trigger(&format!("{event}_drag"));
+    vehicle.host.mouse = (0.0, 0.0);
+    vehicle.trigger(&format!("{event}_off"));
+    moved
+}
+
+/// Apply the switch only if this exact mouse event exists on the owner's model.
+/// Run one script frame before releasing a momentary printer or IBIS key.
+pub fn click_auxiliary_switch(vehicle: &mut omsi_sim::VehicleInstance, event: &str) -> bool {
+    if !(window_control(event) || auxiliary_switch(event))
+        || !model_has_event(&vehicle.ty, event)
+        || !vehicle.trigger(event)
+    {
+        return false;
+    }
+    vehicle.update_scripts_only(0.0);
+    vehicle.host.mouse = (0.0, 0.0);
+    if momentary_button(event) {
+        vehicle.trigger(&format!("{event}_drag"));
+    }
+    vehicle.trigger(&format!("{event}_off"));
+    true
+}
+
+fn model_has_event(ty: &omsi_sim::VehicleType, event: &str) -> bool {
+    ty.model
+        .meshes
+        .iter()
+        .any(|mesh| mesh.mouse_event.as_deref() == Some(event))
 }
 
 /// Translate a real model click to the existing restricted cabin wire actions.
 /// The event must belong to one of this vehicle's mouse-event meshes; never run
 /// arbitrary script triggers supplied by network peers.
 pub fn cabin_action_for_model(ty: &omsi_sim::VehicleType, event: &str) -> Option<CabinAction> {
-    if !ty
-        .model
-        .meshes
-        .iter()
-        .any(|mesh| mesh.mouse_event.as_deref() == Some(event))
-    {
+    if !model_has_event(ty, event) {
         return None;
     }
     if let Some(index) = omsi_sim::door_keys::door_keys(ty).iter().position(|group| {
@@ -127,19 +369,10 @@ pub fn cabin_action_for_model(ty: &omsi_sim::VehicleType, event: &str) -> Option
     }) {
         return (index < 9).then_some(CabinAction::Door(index));
     }
-    if !cabin_window_trigger(event) {
-        return None;
+    if !window_control(event) {
+        return auxiliary_switch(event).then(|| CabinAction::Switch(event.into()));
     }
-    let mut windows: Vec<&str> = ty
-        .model
-        .meshes
-        .iter()
-        .filter_map(|mesh| mesh.mouse_event.as_deref())
-        .filter(|name| cabin_window_trigger(name))
-        .collect();
-    windows.sort_unstable();
-    windows.dedup();
-    windows
+    window_events(ty)
         .iter()
         .position(|name| *name == event)
         .filter(|index| *index < 9)
@@ -152,6 +385,26 @@ pub fn cabin_action_for_model(ty: &omsi_sim::VehicleType, event: &str) -> Option
 pub enum FareAction {
     IssueTicket,
     GiveChange,
+    CollectPayment,
+}
+
+impl FareAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::IssueTicket => "ticket",
+            Self::GiveChange => "change",
+            Self::CollectPayment => "collect",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ticket" => Some(Self::IssueTicket),
+            "change" => Some(Self::GiveChange),
+            "collect" => Some(Self::CollectPayment),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -300,16 +553,16 @@ mod tests {
         assert!(!may_operate_cabin(
             CoopRoles::default(),
             valid,
-            CabinAction::Door(0)
+            &CabinAction::Door(0)
         ));
-        assert!(may_operate_cabin(roles, valid, CabinAction::Door(0)));
+        assert!(may_operate_cabin(roles, valid, &CabinAction::Door(0)));
         assert!(!may_operate_cabin(
             roles,
             CabinRequest {
                 owner_consented: false,
                 ..valid
             },
-            CabinAction::Door(0)
+            &CabinAction::Door(0)
         ));
         assert!(!may_operate_cabin(
             roles,
@@ -317,7 +570,7 @@ mod tests {
                 passenger_inside_bus: false,
                 ..valid
             },
-            CabinAction::Window(0)
+            &CabinAction::Window(0)
         ));
         assert!(!may_operate_cabin(
             roles,
@@ -325,7 +578,7 @@ mod tests {
                 speed_kmh: 30.0,
                 ..valid
             },
-            CabinAction::Door(0)
+            &CabinAction::Door(0)
         ));
         assert!(may_operate_cabin(
             roles,
@@ -333,9 +586,27 @@ mod tests {
                 speed_kmh: 30.0,
                 ..valid
             },
-            CabinAction::Window(0)
+            &CabinAction::Window(0)
         ));
-        assert!(!may_operate_cabin(roles, valid, CabinAction::Window(9)));
+        let fare = CabinAction::Fare(FareAction::IssueTicket);
+        assert!(may_operate_cabin(roles, valid, &fare));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                owner_consented: false,
+                ..valid
+            },
+            &fare
+        ));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                speed_kmh: 12.0,
+                ..valid
+            },
+            &fare
+        ));
+        assert!(!may_operate_cabin(roles, valid, &CabinAction::Window(9)));
     }
 
     #[test]
@@ -358,14 +629,13 @@ mod tests {
         ] {
             assert!(parse_cabin_action(invalid).is_none());
         }
-        assert!(cabin_window_trigger("cp_fenster_rechts"));
-        assert!(cabin_window_trigger("bus_window_left"));
-        assert!(!cabin_window_trigger("window_engine_start"));
-        assert!(!cabin_window_trigger("window_slider_drag"));
-        assert!(!cabin_window_trigger("bus_doorfront0"));
+        assert!(window_control("cp_fenster_rechts"));
+        assert!(window_control("bus_window_left"));
+        assert!(!window_control("window_engine_start"));
+        assert!(!window_control("window_slider_drag"));
+        assert!(!window_control("bus_doorfront0"));
     }
 
-    #[test]
     #[test]
     fn generic_cabin_consent_cannot_authorize_other_players() {
         assert!(matches_assistant(Some(7), 7));
@@ -374,6 +644,50 @@ mod tests {
         assert!(!matches_assistant(None, 7));
     }
 
+    #[test]
+    fn auxiliary_switches_and_fare_actions_accept_only_supported_inputs() {
+        for event in [
+            "cp_licht_unterdeck",
+            "cp_wischer_intervall",
+            "ibox_taste_1",
+            "ticketprinter_getticket",
+            "hvac_fan",
+        ] {
+            let action = CabinAction::Switch(event.into());
+            assert_eq!(parse_cabin_action(&action.command()), Some(action));
+        }
+        for event in [
+            "engine_start",
+            "cockpit_steering",
+            "cp_batterietrennschalter_toggle",
+            "ticketprinter_gear_up",
+            "ibox_motor_off",
+            "ticketprinter_print_drag",
+            "override",
+        ] {
+            assert!(parse_cabin_action(&format!("coop-switch {event}")).is_none());
+        }
+        for fare in [
+            FareAction::IssueTicket,
+            FareAction::GiveChange,
+            FareAction::CollectPayment,
+        ] {
+            let action = CabinAction::Fare(fare);
+            assert_eq!(parse_cabin_action(&action.command()), Some(action));
+        }
+        assert!(parse_cabin_action("coop-fare change 500").is_none());
+        assert_eq!(
+            parse_cabin_action("coop-adjust cp_fenster_rechts -1"),
+            Some(CabinAction::Adjust("cp_fenster_rechts".into(), -1))
+        );
+        assert!(parse_cabin_action("coop-adjust cp_fenster_rechts 2").is_none());
+        assert!(parse_cabin_action("coop-adjust cp_wiper_engine 1").is_none());
+        assert!(parse_cabin_action("coop-adjust ticketprinter_getticket 1").is_none());
+        assert!(switch_speed_allowed("cp_rampe", 0.0));
+        assert!(!switch_speed_allowed("cp_rampe", 15.0));
+    }
+
+    #[test]
     fn ticket_grants_reject_replays_other_passengers_and_revoked_roles() {
         let enabled = CoopRoles {
             conductor: true,

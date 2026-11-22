@@ -360,26 +360,30 @@ impl App {
     }
 
     fn receive_coop_cabin(&mut self, from: u32, action: omsi_lan::coop_permissions::CabinAction) {
-        use omsi_lan::coop_permissions::{CabinAction, cabin_window_trigger};
+        use omsi_lan::coop_permissions::{self, CabinAction};
         let permitted = self.net.lan.as_ref().is_some_and(|lan| {
             omsi_lan::passenger::may_work_cabin(
                 lan,
                 from,
                 self.player.as_ref().map(|p| &p.vehicle),
                 self.net.coop_cab_assistant,
-                action,
+                &action,
             )
         });
         if !permitted {
             log::debug!("LAN: co-op cabin control denied for player {from}: {action:?}");
             return;
         }
+        if let CabinAction::Fare(fare) = action {
+            self.apply_coop_fare(fare);
+            return;
+        }
         let Some(player) = self.player.as_mut() else {
             return;
         };
-        let worked = match action {
+        let worked = match &action {
             CabinAction::Door(index) => omsi_sim::door_keys::door_keys(&player.vehicle.ty)
-                .get(index)
+                .get(*index)
                 .map(|group| crate::player::door_group_to_fire(&mut player.vehicle, group))
                 .is_some_and(|events| {
                     let any = !events.is_empty();
@@ -389,25 +393,15 @@ impl App {
                     any
                 }),
             CabinAction::Window(index) => {
-                let mut controls: Vec<_> = player
-                    .vehicle
-                    .ty
-                    .model
-                    .meshes
-                    .iter()
-                    .filter_map(|mesh| mesh.mouse_event.as_ref())
-                    .filter(|name| cabin_window_trigger(name))
-                    .cloned()
-                    .collect();
-                controls.sort_unstable();
-                controls.dedup();
-                controls.get(index).is_some_and(|event| {
-                    if player.vehicle.ty.program.trigger(event).is_none() {
-                        return false;
-                    }
-                    player.vehicle.trigger(event)
-                })
+                coop_permissions::click_cabin_window(&mut player.vehicle, *index)
             }
+            CabinAction::Switch(event) => {
+                coop_permissions::click_auxiliary_switch(&mut player.vehicle, event)
+            }
+            CabinAction::Adjust(event, direction) => {
+                coop_permissions::adjust_auxiliary_switch(&mut player.vehicle, event, *direction)
+            }
+            CabinAction::Fare(_) => unreachable!(),
         };
         log::info!(
             "LAN: co-op cabin action {action:?} from player {from}: {}",

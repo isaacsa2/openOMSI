@@ -62,7 +62,7 @@ pub fn may_work_cabin(
     from: u32,
     bus: Option<&omsi_sim::VehicleInstance>,
     assistant: Option<u32>,
-    action: crate::coop_permissions::CabinAction,
+    action: &crate::coop_permissions::CabinAction,
 ) -> bool {
     use crate::coop_permissions::{CabinRequest, CoopRoles, matches_assistant, may_operate_cabin};
     let Some(bus) = bus else { return false };

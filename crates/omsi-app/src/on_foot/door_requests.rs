@@ -25,11 +25,15 @@ fn location(f: &OnFoot, h: &Humans) -> (DVec3, Option<BusId>) {
 }
 
 impl App {
-    pub(super) fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
-        let Some(BusId::Ai(id)) = self.foot_bus() else {
-            return;
+    fn remote_cabin_owner(&self) -> Option<u32> {
+        let BusId::Ai(id) = self.foot_bus()? else {
+            return None;
         };
-        let Some(owner) = crate::humans::remote_bus_player(id) else {
+        crate::humans::remote_bus_player(id)
+    }
+
+    pub(super) fn request_coop_cabin(&mut self, action: omsi_lan::coop_permissions::CabinAction) {
+        let Some(owner) = self.remote_cabin_owner() else {
             return;
         };
         let Some(lan) = self.net.lan.as_mut() else {
@@ -41,55 +45,101 @@ impl App {
         lan.command(owner, &action.command());
     }
 
-    /// Only a real mouse-event hit in another player's bus is sent to the owner.
-    /// The owning client still validates a designated assistant and its distance.
+    pub(crate) fn coop_fare_key(&mut self, ctrl: bool, shift: bool) -> bool {
+        use omsi_lan::coop_permissions::{CabinAction, FareAction};
+        if self.view != "foot" || self.net.inside_remote.is_none() || (ctrl && shift) {
+            return false;
+        }
+        let fare = match (ctrl, shift) {
+            (true, _) => FareAction::GiveChange,
+            (_, true) => FareAction::CollectPayment,
+            _ => FareAction::IssueTicket,
+        };
+        self.request_coop_cabin(CabinAction::Fare(fare));
+        true
+    }
+
+    pub(crate) fn apply_coop_fare(&mut self, action: omsi_lan::coop_permissions::FareAction) {
+        use omsi_lan::coop_permissions::FareAction;
+        let Some((p, people)) = self.player.as_mut().zip(self.session.humans.as_mut()) else {
+            return;
+        };
+        match action {
+            FareAction::IssueTicket if people.desk_busy.is_some() && people.paid.is_some() => {
+                p.give_ticket = true;
+            }
+            FareAction::GiveChange
+                if people.change_due.is_some_and(|owed| owed > 0.0)
+                    && people
+                        .money
+                        .as_ref()
+                        .is_some_and(|money| money.change_count() == 0) =>
+            {
+                p.give_change = true;
+            }
+            FareAction::CollectPayment => {
+                if let Some(money) = people.money.as_mut() {
+                    money.clear(false);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A short press uses the switch. A drag gives registered rotary/sliding
+    /// controls one bounded adjustment once the mouse is released.
     pub(crate) fn click_remote_cabin(&mut self, pressed: bool) {
-        if !pressed {
+        use omsi_lan::coop_permissions::{cabin_action_for_model, cabin_adjustment_for_model};
+        if pressed {
+            self.net.coop_cab_press = self
+                .remote_cabin_switch()
+                .zip(self.remote_cabin_owner())
+                .map(|((_, event), owner)| (owner, event.to_owned(), self.input.cursor));
             return;
         }
-        let Some(BusId::Ai(id)) = self.foot_bus() else {
+        let Some((owner, event, start)) = self.net.coop_cab_press.take() else {
             return;
         };
-        let Some(owner) = crate::humans::remote_bus_player(id) else {
+        let (dx, dy) = (self.input.cursor.0 - start.0, self.input.cursor.1 - start.1);
+        let movement = if dx.abs() > dy.abs() { dx } else { dy };
+        let Some(vehicle) = self
+            .remote_cabin_owner()
+            .filter(|&id| id == owner)
+            .and_then(|id| self.net.remotes.remotes.get(&id))
+            .map(|remote| remote.vehicle())
+        else {
             return;
         };
-        let ray = self
-            .camera
-            .as_ref()
-            .zip(self.gfx.surface.as_ref())
-            .map(|(camera, surface)| {
-                self.cockpit_cursor_ray(camera, (surface.config.width, surface.config.height))
-            });
-        let Some((origin, direction, spread)) = ray else {
-            return;
-        };
-        let Some(remote) = self.net.remotes.remotes.get(&owner) else {
-            return;
-        };
-        let vehicle = remote.vehicle();
-        let Some((mesh, _)) = crate::player::pick_in(
+        let adjusted = (movement.abs() >= 4.0)
+            .then(|| cabin_adjustment_for_model(&vehicle.ty, &event, movement.signum() as i8))
+            .flatten();
+        if let Some(action) = adjusted.or_else(|| cabin_action_for_model(&vehicle.ty, &event)) {
+            self.request_coop_cabin(action);
+        }
+    }
+
+    fn remote_cabin_switch(&self) -> Option<(&omsi_sim::VehicleInstance, &str)> {
+        let owner = self.remote_cabin_owner()?;
+        let (camera, surface) = self.camera.as_ref().zip(self.gfx.surface.as_ref())?;
+        let (origin, direction, spread) =
+            self.cockpit_cursor_ray(camera, (surface.config.width, surface.config.height));
+        let vehicle = self.net.remotes.remotes.get(&owner)?.vehicle();
+        let (mesh, _) = crate::player::pick_in(
             vehicle,
             origin,
             direction,
             spread,
-            crate::player::Reach(3.2),
+            crate::player::Reach(REACH as f32),
             false,
-        ) else {
-            return;
-        };
-        let Some(event) = vehicle
+        )?;
+        let event = vehicle
             .ty
             .model
             .meshes
-            .get(vehicle.ty.meshes[mesh].def_index)
-            .and_then(|m| m.mouse_event.as_deref())
-        else {
-            return;
-        };
-        if let Some(action) = omsi_lan::coop_permissions::cabin_action_for_model(&vehicle.ty, event)
-        {
-            self.request_coop_cabin(action);
-        }
+            .get(vehicle.ty.meshes[mesh].def_index)?
+            .mouse_event
+            .as_deref()?;
+        Some((vehicle, event))
     }
 
     pub(crate) fn request_passenger_door(&mut self) {
