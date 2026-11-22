@@ -5058,10 +5058,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
             _ => "auto",
         }
     ));
-    text.push_str(&format!(
-        "pax_bad_driving_alight={}\n",
-        b("pax_bad_driving_alight", true)
-    ));
+    text.push_str(&format!("pax_bad_driving_alight={}\n", b("pax_bad_driving_alight", true)));
     text.push_str(&format!(
         "pax_board_when_stopped={}\n",
         b("pax_board_when_stopped", false)
@@ -5075,10 +5072,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         "passenger_hailing={}\n",
         b("passenger_hailing", false)
     ));
-    text.push_str(&format!(
-        "passenger_ambient_talk={}\n",
-        b("passenger_ambient_talk", false)
-    ));
+    text.push_str(&format!("passenger_ambient_talk={}\n", b("passenger_ambient_talk", false)));
     text.push_str(&format!(
         "passenger_full_bus_reaction={}\n",
         b("passenger_full_bus_reaction", false)

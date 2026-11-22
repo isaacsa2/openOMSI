@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod client_world;
+
 #[rustfmt::skip]
 pub(super) fn options_pages(app: &App) -> Vec<Page> {
     let s = &app.settings;
@@ -969,66 +971,7 @@ pub(super) fn world_pages(app: &App) -> Vec<Page> {
             "editor",
         ));
     } else {
-        let (day, month) = app.clock.day_month();
-        let timestamp = format!(
-            "{:04}-{month:02}-{day:02} {:02}:{:02}",
-            app.clock.year,
-            (app.clock.time.rem_euclid(86_400.0) / 3600.0) as u32,
-            (app.clock.time.rem_euclid(86_400.0) as u32 / 60) % 60
-        );
-        time.push((
-            row(
-                "Server clock",
-                'i',
-                &timestamp,
-                "Synchronized from the host",
-                None,
-            ),
-            "noop".into(),
-        ));
-        if let Some(w) = app.session.weather.as_ref() {
-            weather.push((
-                row("Server weather", 'i', &w.name, "Read-only shared weather", None),
-                "noop".into(),
-            ));
-            weather.push((
-                row(
-                    "Precipitation",
-                    'i',
-                    &format!(
-                        "{:.0} %",
-                        if w.precip[0] < 0.5 {
-                            0.0
-                        } else {
-                            (w.precip[1] / 255.0).clamp(0.0, 1.0) * 100.0
-                        }
-                    ),
-                    "Host rain or snow",
-                    None,
-                ),
-                "noop".into(),
-            ));
-            climate.push((
-                row(
-                    "Temperature",
-                    'i',
-                    &format!("{:.1} °C", w.temp.0),
-                    "Host temperature",
-                    None,
-                ),
-                "noop".into(),
-            ));
-            climate.push((
-                row(
-                    "Wind",
-                    'i',
-                    &format!("{:.1} m/s, {:.0}°", w.wind.1, w.wind.0.rem_euclid(360.0)),
-                    "Host wind",
-                    None,
-                ),
-                "noop".into(),
-            ));
-        }
+        client_world::add_server_world_rows(app, &mut time, &mut weather, &mut climate);
     }
     let mut people: Vec<(String, String)> = Vec::new();
     people.extend(slider_row(
