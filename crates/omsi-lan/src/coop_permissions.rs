@@ -155,12 +155,11 @@ pub fn keyboard_cabin_action(event: &str) -> bool {
 }
 
 pub fn keyboard_cabin_speed_allowed(event: &str, speed_kmh: f32) -> bool {
-    speed_kmh.is_finite()
-        && (!door_switch(event)
-            && !["ticket_give", "change_give", "change_take"]
-                .contains(&event.to_ascii_lowercase().as_str())
-            && switch_speed_allowed(event, speed_kmh)
-            || speed_kmh.abs() <= 0.5)
+    let name = event.to_ascii_lowercase();
+    let stopped_only = door_switch(event)
+        || ["ticket_give", "change_give", "change_take"].contains(&name.as_str())
+        || ["kneel", "ramp", "lift_"].iter().any(|tag| name.contains(tag));
+    speed_kmh.is_finite() && (!stopped_only || speed_kmh.abs() <= 0.5)
 }
 
 /// Door controls remain stationary-only, even when their script names are custom.
@@ -335,6 +334,12 @@ fn auxiliary_switch(event: &str) -> bool {
     ]
     .iter()
     .any(|prefix| family.starts_with(prefix))
+        // Vehicle mods often use custom cockpit names. Permit their physical
+        // mouse/key events after rejecting all motion and engine-related names;
+        // the owner still checks its own model or keyboard binding before firing.
+        || ["cp_", "cockpit_", "taster_", "schalter_", "switch_", "button_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
 }
 
 fn switch_speed_allowed(event: &str, speed_kmh: f32) -> bool {
@@ -790,6 +795,8 @@ mod tests {
             assert!(!keyboard_cabin_action(name), "{name}");
         }
         assert!(keyboard_cabin_action("cp_licht_unterdeck"));
+        assert!(keyboard_cabin_action("cockpit_custom_aux"));
+        assert!(!keyboard_cabin_action("cockpit_engine_start"));
         assert!(keyboard_cabin_action("bus_doorfront0"));
         assert!(!keyboard_cabin_speed_allowed("bus_doorfront0", 25.0));
         assert!(keyboard_cabin_speed_allowed("cp_licht_unterdeck", 25.0));
