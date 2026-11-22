@@ -40,7 +40,10 @@ pub fn may_handover_driver(roles: CoopRoles, request: DriverRequest) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CabinAction {
     Door(usize),
+    DoorSwitch(String),
     Window(usize),
+    /// A key from the guest; resolved against the *owner's* keyboard.cfg.
+    Key(i32, i32),
     Switch(String),
     Adjust(String, i8),
     Fare(FareAction),
@@ -64,7 +67,9 @@ pub fn may_operate_cabin(roles: CoopRoles, req: CabinRequest, action: &CabinActi
         && req.speed_kmh.is_finite()
         && match action {
             CabinAction::Door(index) => *index < 9 && req.speed_kmh.abs() <= 0.5,
+            CabinAction::DoorSwitch(event) => door_switch(event) && req.speed_kmh.abs() <= 0.5,
             CabinAction::Window(index) => *index < 9,
+            CabinAction::Key(scan, modifiers) => valid_cabin_key(*scan, *modifiers),
             CabinAction::Switch(event) => {
                 auxiliary_switch(event) && switch_speed_allowed(event, req.speed_kmh)
             }
@@ -82,7 +87,9 @@ impl CabinAction {
     pub fn command(&self) -> String {
         match self {
             Self::Door(index) => format!("coop-door {index}"),
+            Self::DoorSwitch(event) => format!("coop-door-switch {event}"),
             Self::Window(index) => format!("coop-window {index}"),
+            Self::Key(scan, modifiers) => format!("coop-key {scan} {modifiers}"),
             Self::Switch(event) => format!("coop-switch {event}"),
             Self::Adjust(event, direction) => format!("coop-adjust {event} {direction}"),
             Self::Fare(fare) => format!("coop-fare {}", fare.as_str()),
@@ -94,6 +101,12 @@ pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
     let mut words = text.split_whitespace();
     let kind = words.next()?;
     let value = words.next()?;
+    if kind == "coop-key" {
+        let scan = value.parse::<i32>().ok()?;
+        let modifiers = words.next()?.parse::<i32>().ok()?;
+        return (words.next().is_none() && valid_cabin_key(scan, modifiers))
+            .then_some(CabinAction::Key(scan, modifiers));
+    }
     if kind == "coop-adjust" {
         let direction = words.next()?.parse::<i8>().ok()?;
         if words.next().is_none() && is_adjustable_control(value) && matches!(direction, -1 | 1) {
@@ -106,6 +119,7 @@ pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
     }
     match kind {
         "coop-door" => value.parse().ok().filter(|&i| i < 9).map(CabinAction::Door),
+        "coop-door-switch" if door_switch(value) => Some(CabinAction::DoorSwitch(value.into())),
         "coop-window" => value
             .parse()
             .ok()
@@ -121,6 +135,52 @@ pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
 /// Id zero and an absent assignment always fail closed.
 pub fn matches_assistant(assigned: Option<u32>, sender: u32) -> bool {
     sender != 0 && assigned == Some(sender)
+}
+
+/// Keyboard packets carry physical scan codes, never client-chosen script names.
+fn valid_cabin_key(scan: i32, modifiers: i32) -> bool {
+    (1..=255).contains(&scan) && modifiers & !(2 | 4 | 8) == 0
+}
+
+/// Only the owning player's local key bindings select a script action.
+/// This filter also applies to model mouse events and preserves driving isolation.
+pub fn keyboard_cabin_action(event: &str) -> bool {
+    door_switch(event)
+        || window_control(event)
+        || auxiliary_switch(event)
+        || matches!(
+            event.to_ascii_lowercase().as_str(),
+            "ticket_give" | "change_give" | "change_take" | "blinker_left_toggle" | "blinker_right_toggle"
+        )
+}
+
+pub fn keyboard_cabin_speed_allowed(event: &str, speed_kmh: f32) -> bool {
+    speed_kmh.is_finite()
+        && (!door_switch(event)
+            && !["ticket_give", "change_give", "change_take"]
+                .contains(&event.to_ascii_lowercase().as_str())
+            && switch_speed_allowed(event, speed_kmh)
+            || speed_kmh.abs() <= 0.5)
+}
+
+/// Door controls remain stationary-only, even when their script names are custom.
+fn door_switch(event: &str) -> bool {
+    if event.is_empty()
+        || event.len() > 96
+        || !event.bytes().all(|b| b.is_ascii_alphanumeric() || b"_+-".contains(&b))
+    {
+        return false;
+    }
+    let name = event.to_ascii_lowercase();
+    (name.contains("door") || name.contains("tuer"))
+        && ![
+            "steer", "lenk", "throttle", "accelerator", "brake", "bremse", "gear",
+            "gang", "clutch", "kupplung", "ignition", "engine", "motor", "starter",
+            "anlasser", "battery", "batter", "retarder", "fahrstufe", "drive",
+            "handbr", "pedal", "parking", "getriebe", "override",
+        ]
+        .iter()
+        .any(|term| name.contains(term))
 }
 
 fn window_control(event: &str) -> bool {
@@ -251,6 +311,27 @@ fn auxiliary_switch(event: &str) -> bool {
         "change_",
         "wechsel",
         "drucker",
+        "radio",
+        "lautsprecher",
+        "speaker",
+        "display",
+        "dashboard",
+        "instrument",
+        "heizung",
+        "heizregler",
+        "intercom",
+        "passenger_light",
+        "saloon",
+        "destination",
+        "mirror",
+        "spiegel",
+        "windscreen",
+        "windshield",
+        "gong",
+        "bell",
+        "haltwunsch",
+        "uhr",
+        "clock",
     ]
     .iter()
     .any(|prefix| family.starts_with(prefix))
@@ -259,7 +340,7 @@ fn auxiliary_switch(event: &str) -> bool {
 fn switch_speed_allowed(event: &str, speed_kmh: f32) -> bool {
     let name = event.to_ascii_lowercase();
     speed_kmh.abs() <= 0.5
-        || !["kneel", "ramp", "lift_"]
+        || !["kneel", "ramp", "lift_", "door", "tuer"]
             .iter()
             .any(|tag| name.contains(tag))
 }
@@ -333,7 +414,7 @@ pub fn adjust_auxiliary_switch(
 /// Apply the switch only if this exact mouse event exists on the owner's model.
 /// Run one script frame before releasing a momentary printer or IBIS key.
 pub fn click_auxiliary_switch(vehicle: &mut omsi_sim::VehicleInstance, event: &str) -> bool {
-    if !(window_control(event) || auxiliary_switch(event))
+    if !(window_control(event) || auxiliary_switch(event) || door_switch(event))
         || !model_has_event(&vehicle.ty, event)
         || !vehicle.trigger(event)
     {
@@ -368,6 +449,9 @@ pub fn cabin_action_for_model(ty: &omsi_sim::VehicleType, event: &str) -> Option
             .any(|name| name.split('|').any(|trigger| trigger == event))
     }) {
         return (index < 9).then_some(CabinAction::Door(index));
+    }
+    if door_switch(event) {
+        return Some(CabinAction::DoorSwitch(event.into()));
     }
     if !window_control(event) {
         return auxiliary_switch(event).then(|| CabinAction::Switch(event.into()));
@@ -685,6 +769,36 @@ mod tests {
         assert!(parse_cabin_action("coop-adjust ticketprinter_getticket 1").is_none());
         assert!(switch_speed_allowed("cp_rampe", 0.0));
         assert!(!switch_speed_allowed("cp_rampe", 15.0));
+    }
+
+    #[test]
+    fn keybinds_use_owner_resolution_and_reject_movement_commands() {
+        let valid = CabinRequest {
+            same_session: true, owner_consented: true,
+            passenger_inside_bus: true, speed_kmh: 0.0,
+        };
+        let roles = CoopRoles { conductor: true, ..Default::default() };
+        assert_eq!(parse_cabin_action("coop-key 17 2"), Some(CabinAction::Key(17, 2)));
+        assert!(may_operate_cabin(roles, valid, &CabinAction::Key(17, 2)));
+        assert!(!may_operate_cabin(CoopRoles::default(), valid, &CabinAction::Key(17, 2)));
+        for invalid in ["coop-key 0 0", "coop-key 999 0", "coop-key 17 1",
+            "coop-key 17 16", "coop-key 17 2 extra", "coop-key 17 -1"] {
+            assert!(parse_cabin_action(invalid).is_none(), "{invalid}");
+        }
+        for name in ["kw_s_1", "engine_start", "cp_bremse", "throttle",
+            "cockpit_steering", "ticketprinter_gear_up"] {
+            assert!(!keyboard_cabin_action(name), "{name}");
+        }
+        assert!(keyboard_cabin_action("cp_licht_unterdeck"));
+        assert!(keyboard_cabin_action("bus_doorfront0"));
+        assert!(!keyboard_cabin_speed_allowed("bus_doorfront0", 25.0));
+        assert!(keyboard_cabin_speed_allowed("cp_licht_unterdeck", 25.0));
+        assert_eq!(parse_cabin_action("coop-door-switch cp_tuertaster1"),
+            Some(CabinAction::DoorSwitch("cp_tuertaster1".into())));
+        assert!(may_operate_cabin(roles, valid,
+            &CabinAction::DoorSwitch("cp_tuertaster1".into())));
+        assert!(!may_operate_cabin(roles, CabinRequest { speed_kmh: 15.0, ..valid },
+            &CabinAction::DoorSwitch("cp_tuertaster1".into())));
     }
 
     #[test]
