@@ -196,6 +196,16 @@ impl App {
             if code == KeyCode::KeyT && pressed && !repeat && !alt && self.coop_fare_key(ctrl, shift_now) {
                 return;
             }
+            // A dedicated conductor signal works even outside cabin keyboard mode.
+            // It asks the owner to sound a two-tone bell; it never closes the doors.
+            if code == KeyCode::KeyB && ctrl && alt && !shift_now
+                && self.view == "foot" && self.net.inside_remote.is_some()
+            {
+                if pressed && !repeat {
+                    self.request_coop_departure_signal();
+                }
+                return;
+            }
             // The guest explicitly switches between walking and using the owner's
             // keyboard.cfg bus keys. Chat, panels and ticket shortcuts stay available.
             if pressed && !repeat && code == KeyCode::KeyJ && ctrl && alt && !shift_now
