@@ -4258,7 +4258,6 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             | "mirror_particles"
             | "ai_wait_timed_stops_only"
             | "pax_bad_driving"
-            | "pax_bad_driving"
             | "pax_no_ticket"
             | "pax_bad_driving_alight"
             | "pax_board_when_stopped"
@@ -5052,6 +5051,8 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
             "off" | "0" | "no" | "false" | "never" => "off",
             _ => "auto",
         }
+    ));
+    text.push_str(&format!(
         "pax_bad_driving_alight={}\n",
         b("pax_bad_driving_alight", true)
     ));
