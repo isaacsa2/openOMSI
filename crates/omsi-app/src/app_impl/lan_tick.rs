@@ -242,6 +242,17 @@ impl App {
     /// (`omsi_lan::commands::Command`), carried out here.
     pub(crate) fn lan_command(&mut self, from: u32, text: &str) {
         use omsi_lan::commands::Command;
+        // The owner sends this only after validating the cabin request.
+        // Ignore signals from strangers or a bus the local walker has left.
+        if text == "coop-signal-ack" {
+            if self.view == "foot" && self.net.inside_remote == Some(from)
+                && self.remote_cabin_owner() == Some(from)
+            {
+                self.play_coop_departure_signal();
+                self.service_msg = Some(("Conductor departure signal sent".into(), 3.0));
+            }
+            return;
+        }
         if text.starts_with("coop-") {
             if let Some(action) = omsi_lan::coop_permissions::parse_cabin_action(text) {
                 self.receive_coop_cabin(from, action);
@@ -382,6 +393,24 @@ impl App {
             self.apply_coop_fare(fare);
             return;
         }
+        if let CabinAction::DepartureSignal = action {
+            // A bounded on-demand chime, never a physical door-close command.
+            // Only the vehicle owner approves it and rate-limits repeated requests.
+            let now = std::time::Instant::now();
+            if self.net.coop_departure_last.is_some_and(|last| {
+                now.saturating_duration_since(last) < std::time::Duration::from_millis(1500)
+            }) {
+                return;
+            }
+            self.net.coop_departure_last = Some(now);
+            self.play_coop_departure_signal();
+            self.service_msg =
+                Some(("Conductor: ready to close doors (check clearance)".into(), 4.0));
+            if let Some(lan) = self.net.lan.as_mut() {
+                lan.command(from, "coop-signal-ack");
+            }
+            return;
+        }
         let Some(player) = self.player.as_mut() else {
             return;
         };
@@ -434,7 +463,7 @@ impl App {
             CabinAction::Adjust(event, direction) => {
                 coop_permissions::adjust_auxiliary_switch(&mut player.vehicle, event, *direction)
             }
-            CabinAction::Fare(_) => unreachable!(),
+            CabinAction::Fare(_) | CabinAction::DepartureSignal => unreachable!(),
         };
         log::info!(
             "LAN: co-op cabin action {action:?} from player {from}: {}",
