@@ -45,6 +45,32 @@ impl App {
         lan.command(owner, &action.command());
     }
 
+    /// Forward a physical key only in the assistant's explicit keyboard mode.
+    /// The owning client resolves its own bindings and enforces cabin-only access.
+    pub(crate) fn coop_keyboard_key(
+        &mut self,
+        code: winit::keyboard::KeyCode,
+        pressed: bool,
+        repeat: bool,
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+    ) -> bool {
+        if !self.net.coop_keyboard_mode || self.view != "foot" || self.net.inside_remote.is_none() {
+            return false;
+        }
+        if pressed && !repeat {
+            if let Some(scan) = omsi_input::keys::dik_code(code) {
+                let modifier = omsi_content::input::chord(shift, ctrl, alt)
+                    & !omsi_input::keys::own_modifier_bit(code);
+                self.request_coop_cabin(omsi_lan::coop_permissions::CabinAction::Key(
+                    scan, modifier,
+                ));
+            }
+        }
+        true
+    }
+
     pub(crate) fn coop_fare_key(&mut self, ctrl: bool, shift: bool) -> bool {
         use omsi_lan::coop_permissions::{CabinAction, FareAction};
         if self.view != "foot" || self.net.inside_remote.is_none() || (ctrl && shift) {
