@@ -57,8 +57,6 @@ pub(crate) use omsi_scene::editor;
 use omsi_scene::wheel_surface;
 #[rustfmt::skip]
 use omsi_vehicle::cam_approach;
-#[rustfmt::skip]
-use omsi_vehicle::cam_approach;
 mod duty_book;
 #[rustfmt::skip]
 mod first_graphics;
