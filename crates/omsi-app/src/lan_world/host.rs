@@ -104,10 +104,14 @@ impl LanWorld {
                     };
                     cars.insert(tid.raw());
                     let sent = view.context_pages.entry(tid.raw()).or_default();
-                    if !sent.due(MOVING_EVERY_S, c.is_bus()) {
+                    let context = ai_context(&c.vehicle.host);
+                    let Some(pages) = context.pages() else {
+                        continue;
+                    };
+                    if !sent.due(MOVING_EVERY_S, c.is_bus(), pages) {
                         continue;
                     }
-                    if let Some(packet) = ai_context(&c.vehicle.host).packet(
+                    if let Some(packet) = context.packet(
                         omsi_net::PROTOCOL as u8,
                         tid.raw(),
                         lan.stamp_ms(),
