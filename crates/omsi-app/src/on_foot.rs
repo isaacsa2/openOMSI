@@ -1354,17 +1354,26 @@ impl App {
 
 crate::app::stage_ctx!(
     /// Taking the wheel of a placed vehicle: its part of the game.
-    SeatCx { reads: [sound], writes: [people, player, ui, view] }
+    SeatCx {
+        reads: [sound],
+        writes: [people, player, ui, view]
+    }
 );
 
 crate::app::stage_ctx!(
     /// Back at the own bus's wheel: its part of the game.
-    WheelCx { reads: [player], writes: [people, ui, view] }
+    WheelCx {
+        reads: [player],
+        writes: [people, ui, view]
+    }
 );
 
 crate::app::stage_ctx!(
     /// The on-foot stage's part of the game: the walker, the other players' walkers.
-    OnFootCx { reads: [input, clock, world, traffic, sound, perf], writes: [people, player, ui, view, gfx, net] }
+    OnFootCx {
+        reads: [input, clock, world, traffic, sound, perf],
+        writes: [people, player, ui, view, gfx, net]
+    }
 );
 
 impl SeatCx<'_, '_> {
