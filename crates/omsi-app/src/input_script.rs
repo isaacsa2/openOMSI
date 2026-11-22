@@ -196,10 +196,38 @@ impl App {
             if code == KeyCode::KeyT && pressed && !repeat && !alt && self.coop_fare_key(ctrl, shift_now) {
                 return;
             }
+            // The guest explicitly switches between walking and using the owner's
+            // keyboard.cfg bus keys. Chat, panels and ticket shortcuts stay available.
+            if pressed && !repeat && code == KeyCode::KeyJ && ctrl && alt && !shift_now
+                && self.view == "foot" && self.net.inside_remote.is_some()
+            {
+                self.net.coop_keyboard_mode = !self.net.coop_keyboard_mode;
+                self.service_msg = Some((
+                    if self.net.coop_keyboard_mode {
+                        "Co-op bus keyboard ON (driver authorization required). Ctrl+Alt+J or Esc to leave".into()
+                    } else {
+                        "Co-op bus keyboard OFF (walking controls restored)".into()
+                    },
+                    4.0,
+                ));
+                return;
+            }
+            if self.net.coop_keyboard_mode && code == KeyCode::Escape {
+                if pressed && !repeat {
+                    self.net.coop_keyboard_mode = false;
+                    self.service_msg = Some(("Co-op bus keyboard OFF".into(), 2.5));
+                }
+                return;
+            }
             // A remapped get-up key also steps out on foot, before the walker takes
             // G, Space, F1 or a movement key (and before driving-layout fallbacks).
             if pressed && !repeat && get_up_key(&self.input.game_keys, code, shift_now, ctrl, alt) {
                 self.game_action("get_up");
+                return;
+            }
+            // Consume cabin-mode keys before the walker applies them to movement.
+            // No driver axes or arbitrary script triggers are sent from here.
+            if self.coop_keyboard_key(code, pressed, repeat, ctrl, shift_now, alt) {
                 return;
             }
             // on foot, the walker's keys
