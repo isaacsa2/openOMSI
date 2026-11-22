@@ -69,10 +69,19 @@ struct ContextSent {
     page: usize,
     sent: u32,
     age: f32,
+    /// The trip's hash last sent and the pages it takes: a new trip goes out quickly again,
+    /// every page of it (#3957).
+    version: u64,
+    pages: u32,
 }
 
 impl ContextSent {
-    fn due(&mut self, dt: f32, bus: bool) -> bool {
+    fn due(&mut self, dt: f32, bus: bool, (version, pages): (u64, usize)) -> bool {
+        if version != self.version {
+            self.version = version;
+            self.pages = pages as u32;
+            self.sent = 0;
+        }
         self.age += dt;
         let every = if self.sent < 4 {
             0.15

@@ -1542,6 +1542,7 @@ fn a_full_session_turns_the_next_player_away() {
 
 mod session_limits;
 
+mod car_vars;
 mod connections;
 
 mod lifecycle;

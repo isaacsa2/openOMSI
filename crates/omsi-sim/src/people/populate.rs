@@ -329,11 +329,15 @@ impl PeopleSim {
                     .due_dests
                     .as_ref()
                     .is_some_and(|d| d.get(&id).is_none_or(|set| set.is_empty()));
-                let served = if self.stop_targets.is_some() && (s.lines.is_empty() || none_due) {
-                    0.0
-                } else {
-                    1.0
-                };
+                // (in free drive the stops fill by their own numbers: nobody is working the
+                // timetable, so nothing is "due" anywhere, #2712)
+                let free = self.free_drive_fill.fills(self.duty.is_some());
+                let served = super::free_drive::stop_served(
+                    self.stop_targets.is_some(),
+                    free,
+                    !s.lines.is_empty(),
+                    !none_due,
+                );
                 let w = (self.focused_density() * mean * s.factor * served)
                     .round()
                     .max(0.0) as usize;
@@ -373,7 +377,12 @@ impl PeopleSim {
             return (None, None);
         };
         // (of the trips due here soon, `due_dests`; their weights made a whole again)
-        let due = self.due_dests.as_ref().map(|d| d.get(&id));
+        let free = self.free_drive_fill.fills(self.duty.is_some());
+        let due = if free {
+            None
+        } else {
+            self.due_dests.as_ref().map(|d| d.get(&id))
+        };
         let dests: Vec<(&String, f32)> = match due {
             Some(set) => {
                 let kept: Vec<(&String, f32)> = stop
