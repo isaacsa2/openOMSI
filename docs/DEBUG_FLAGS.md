@@ -234,6 +234,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_ROAD_SNOW_LOG` | bool | off | use | scene, scene-mx | With the roads' snow: log its cover, the snow fallen, the weather and what it costs a frame (mean, worst, rut texels drawn) every ten seconds. |
 | `OMSI_SCENE_DIGEST` | bool | off | use | app, app-mx | Log a hash of the renderer's scene (its instances in order, their places, materials and parameters) before each offscreen picture: two runs whose renderers saw the same calls log the same digests. |
 | `OMSI_SEED` | num | random | use | app, app-mx | Seed of the scripts' random numbers (repeat a session). |
+| `OMSI_SHADER_HOT` | text | - | use | render, render-mx | Read the renderer's WGSL from this copy of a renderer crate's `src` folder (1: the source tree the game was built from), not the copy compiled in: trying shaders without a rebuild. |
 | `OMSI_SKIP_OBJECT` | text | - | use | scene, scene-mx | Leave out the objects whose file name contains this text. |
 | `OMSI_SKIP_PIPE` | text | - | frame | render, render-mx | Pipeline kinds to leave out of the main pass (comma-separated numbers). |
 | `OMSI_SPOT_SELECT` | num | - | use | scene, scene-mx | Turn on spotlight n (headlight pictures). |
@@ -364,6 +365,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SKY_CUBE_EVERY_FRAME` | bool | off | frame | render, render-mx | Enhanced: redraw a slice of the sky cube every frame again, not at most 60 a second (A/B). |
 | `OMSI_TERRAIN_ALIGN` | bool | off | use | scene, scene-mx | Align the terrain to the splines again at load (A/B; Omsi.exe does not). |
 | `OMSI_TEXTURE_RAIN` | bool | off | use | scene, scene-mx | OMSI 2's own texture rain on the glass instead of the drops. |
+| `OMSI_TEXTURE_RAM_CACHE_MB` | num | 128 desktop / 0 mobile | once | scene | Keep at most this many MiB of compressed static texture sources in system RAM (0 disables; capped at 512). |
 | `OMSI_TRACKIR_NATIVE` | text | on | use | input | 0 turns the native TrackIR interface off. |
 | `OMSI_TRAFFIC_ALL_GROUPS` | bool | off | use | app, app-mx, server | Let restricted AI groups (aircraft, depot fleets) drive everywhere. |
 | `OMSI_TYRE_SUSPENSION` | bool | off | once | sim | The old suspension with wheel mass, tyre and bump stops (A/B). |
@@ -397,7 +399,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SURFACE_BIAS` | num | -24 | use | render, render-mx | Depth bias of road surfaces. |
 | `OMSI_SURFACE_FLUSH` | num | 0.12 | once | sim | Height in metres under which a surface counts as flush with the road. |
 | `OMSI_TEXTURE_MEMORY` | num | settings | use | app, app-mx | Texture budget in MB. |
-| `OMSI_TEXTURE_RAM_CACHE_MB` | num | 128 desktop / 0 mobile | once | scene | Keep at most this many MiB of compressed static texture sources in system RAM (0 disables; capped at 512). |
 | `OMSI_TONE_CONTRAST` | text | 1 | once | render, render-mx | day[,night]: tone mapping contrast. |
 | `OMSI_VIDEO_MEMORY` | num | settings | use | app, app-mx | What the game may hold on the graphics card all together (textures, meshes, render targets), in MB. |
 | `OMSI_WIDE_AO` | text | - | use | render, render-mx | reach,strength,gain,max: the street-scale occlusion of the sky and the bounced light (m, 0..1, 0..1, radiance). |
@@ -418,7 +419,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_INSTANCE` | text | - | use | app, app-mx, lan, launcher-core | The id of a game instance started by the launcher (set for the child process). |
 | `OMSI_LAN_IP` | text | - | use | net | a.b.c.d[,e.f.g.h]: LAN addresses to offer first (when the detection gets them wrong). |
 | `OMSI_LAUNCHER` | text | - | use | app, app-mx, guard | Program a plain start opens as the launcher instead of the desktop launcher (openomsi-launcher-app) beside the game. |
-| `OMSI_MX` | text | settings | use | app | on or off: draw with mX, openOMSI's own graphics library, through wgpu (mX Graphics, experimental), or with wgpu's own backends (overrides the setting, which a Mac only reads; elsewhere the way to try mX). |
 | `OMSI_OFFICIAL_KEY` | text | - | use | lan | File of the official server's signing key. |
 | `OMSI_PLUGIN_HOST32` | text | beside the game | use | plugin | Path of omsi-plugin-host32.exe. |
 | `OMSI_PLUGIN_PROCESS_ALLOW` | text | none | use | plugin | Optional native process preapproval: absolute path to a JSON manifest binding plugin content and in-folder helpers to SHA256 hashes. The interactive game otherwise asks the player. Changes revoke consent; packages must declare process. Approved programs run with the game account permissions. |

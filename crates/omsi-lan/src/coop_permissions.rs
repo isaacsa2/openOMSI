@@ -80,9 +80,7 @@ pub fn may_operate_cabin(roles: CoopRoles, req: CabinRequest, action: &CabinActi
                     && matches!(direction, -1 | 1)
                     && switch_speed_allowed(event, req.speed_kmh)
             }
-            CabinAction::Fare(_) | CabinAction::DepartureSignal => {
-                req.speed_kmh.abs() <= 0.5
-            },
+            CabinAction::Fare(_) | CabinAction::DepartureSignal => req.speed_kmh.abs() <= 0.5,
         }
 }
 

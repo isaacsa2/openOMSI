@@ -100,7 +100,7 @@ const graphics = {
         { type: 'select', key: 'render_scale', label: 'Render scale', options: [['auto', 'Auto'], ['1', '100%'], ['0.85', '85%'], ['0.75', '75%'], ['0.67', '67%'], ['0.5', '50%']], when: (s, p) => !temporalOn(s, p) },
         { type: 'select', key: 'anisotropy', label: 'Anisotropic', options: [['1', 'Off'], ['2', '2x'], ['4', '4x'], ['8', '8x'], ['16', '16x']] },
         // Vanilla draws what OMSI 2 draws: no sun shadows, ambient occlusion or detail grain
-        { type: 'select', key: 'shadow_size', label: 'Shadow map', options: [['1024', '1024'], ['2048', '2048'], ['4096', '4096']], when: (s) => !classic(s) },
+        { type: 'select', key: 'shadow_size', label: 'Shadow map', options: [['256', '256'], ['512', '512'], ['1024', '1024'], ['2048', '2048'], ['4096', '4096']], when: (s) => !classic(s) },
         // (with Real-Time Ray Tracing the shadows, occlusion and reflections are traced: always on)
         { type: 'toggle', key: 'ssao', label: 'Ambient occlusion', when: (s) => !classic(s) && !traced(s) },
         { type: 'toggle', key: 'shadows', label: 'Sun shadows', when: (s) => !classic(s) && !traced(s) },
@@ -123,6 +123,7 @@ const graphics = {
         { type: 'select', key: 'light_shadows', label: 'Light has shadows', options: [['off', 'Off'], ['street', 'Street lamps and vehicles'], ['all', 'Every light']], help: 'Enhanced: which lights cast shadows - the street lamps and the vehicles\' headlamps, or every light: spots along their own axis and the lamps that shine every way in cube maps. Cached maps, a few passes a frame', when: enhanced },
         { type: 'toggle', key: 'cloud_shadows', label: 'Cloud shadows and light shafts', help: 'Enhanced: the clouds\' shadow moving over the land and the sun\'s shafts through the gaps of a broken sky', when: enhanced },
         { type: 'toggle', key: 'light_glow', label: 'Glow of lights', help: 'Enhanced: the glare round bright lights and the lamps\' halo in the night air', when: enhanced },
+        { type: 'toggle', key: 'volumetric_fog', label: 'Volumetric fog', help: 'Enhanced: fog you can see the light in - the sun\'s shafts, drifting banks of mist, the clouds\' shadows in the air', when: enhanced },
         { type: 'select', key: 'rain_quality', label: 'Rain quality', options: [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']] },
         { type: 'select', key: 'vehicle_smoke', label: 'Vehicle smoke', options: [['all', 'All vehicles'], ['player', 'Player only'], ['off', 'Off']], help: 'Controls the vehicles\' smoke particles, not scenery effects or glowing particles.' },
         // (the wet roads' reflections need the reflection maps on)
@@ -148,8 +149,8 @@ const graphics = {
         { type: 'select', key: 'graphics_api', label: 'Graphics API', options: [['auto', 'Automatic'], ['vulkan', 'Vulkan'], ['gl', 'OpenGL']], when: (s, p) => p !== 'windows' && p !== 'macos' },
         { type: 'toggle', key: 'mx_graphics', label: 'mX Graphics (Experimental)', help: 'Draws the game with mX, openOMSI\'s own graphics library, instead of wgpu (takes effect when the game starts the next time). On, the whole game runs on mX; off, it runs on wgpu alone.' },
         { type: 'section', title: 'World & memory' },
-        { type: 'select', key: 'view_distance', label: 'View distance', options: [['auto', 'Default (1200 m)'], ['600', '600 m - fastest'], ['900', '900 m'], ['1200', '1200 m'], ['1500', '1500 m'], ['2000', '2000 m'], ['2500', '2500 m']], heavy: (v) => Number(v) >= 2000 },
-        { type: 'select', key: 'max_obj_dist', label: 'Object distance', options: [['auto', 'Automatic'], ['500', '500 m'], ['750', '750 m'], ['900', '900 m'], ['1500', '1500 m'], ['3000', '3000 m']], heavy: (v) => Number(v) >= 1500 },
+        { type: 'select', key: 'view_distance', label: 'View distance', options: [['auto', 'Default (1200 m)'], ['300', '300 m'], ['600', '600 m'], ['900', '900 m'], ['1200', '1200 m'], ['1500', '1500 m'], ['2000', '2000 m'], ['2500', '2500 m']], heavy: (v) => Number(v) >= 2000 },
+        { type: 'select', key: 'max_obj_dist', label: 'Object distance', options: [['auto', 'Automatic'], ['300', '300 m'], ['500', '500 m'], ['750', '750 m'], ['900', '900 m'], ['1500', '1500 m'], ['3000', '3000 m']], heavy: (v) => Number(v) >= 1500 },
         { type: 'select', key: 'min_obj_size', label: 'Small objects', options: [['0.005', 'All'], ['0.013', 'Normal'], ['0.02', 'Fewer (faster)'], ['0.03', 'Few (fastest)']] },
         { type: 'select', key: 'mirror_size', label: 'Mirrors', options: [['0', 'Off'], ['128', 'Low (128)'], ['256', 'Normal (256)'], ['512', 'High (512)'], ['1024', 'Very high (1024)']] },
         { type: 'select', key: 'mirror_refresh', label: 'Bus mirror refresh', options: [['off', 'None (frozen picture)'], ['eco', 'Economical'], ['full', 'Full'], ['every', 'Every frame (smoothest)']], heavy: (v, s) => v === 'every' && String(s.mirror_size) !== '0' },
@@ -388,8 +389,8 @@ const gameplay = {
         { type: 'toggle', key: 'pax_bad_driving_alight', label: 'Riders may leave after rough driving', help: 'Off: passengers complain but stay aboard', when: (s) => !!s.pax_bad_driving },
         { type: 'toggle', key: 'passenger_connections', label: 'Passenger connections between lines', help: 'Optional onward trips in single player only; disabled in multiplayer' },
         { type: 'slider', key: 'passenger_transfer_percent', label: 'Connection chance', min: 0, max: 100, step: 5, def: 20, format: (v) => `${v}%`, when: (s) => !!s.passenger_connections },
-        { type: 'toggle', key: 'passenger_ambient_talk', label: 'Conversations between seated passengers', help: 'Rare optional conversations using installed voice packs' },
         { type: 'toggle', key: 'passenger_hailing', label: 'Passengers signal approaching buses', help: 'Optional visual hailing; only effective with supported natural animations' },
+        { type: 'toggle', key: 'passenger_ambient_talk', label: 'Conversations between seated passengers', help: 'Rare optional conversations using installed voice packs' },
         { type: 'toggle', key: 'passenger_full_bus_reaction', label: 'Passengers react to full buses', help: 'Optional visual acknowledgement when an approaching compatible bus is at passenger capacity' },
         { type: 'toggle', key: 'pax_short_rides_stand', label: 'Short rides stand by a door', help: 'Passengers with no set stop who ride only a few kilometres take a free standing place near an exit rather than a seat' },
         { type: 'toggle', key: 'auto_announce', label: 'Arrival announcements at the stop', help: 'On depot files that keep two recordings per stop (the Chinese maps), the arrival one is played as the bus reaches the stop: the IBIS\'s next stop key, pressed as the driver would' },
@@ -515,6 +516,6 @@ export const SETTINGS_TABS = [graphics, driving, camera, sound, gameplay, genera
 
 /** The settings a saved graphics profile holds (`GRAPHICS_PROFILE_KEYS`). */
 export const GRAPHICS_PROFILE_KEYS = [
-  'graphics', 'msaa', 'render_scale', 'upscaler', 'upscale_quality', 'frame_generation', 'fsr_quality', 'fsr_sharpness', 'anisotropy', 'shadow_size', 'ssao', 'shadows', 'shadow_casters', 'detail_textures', 'night_brightness', 'led_glow', 'led_mips', 'shadow_blobs', 'lamp_shadows', 'reflections', 'road_glare', 'traffic_headlights', 'clouds', 'cloud_quality', 'street_light', 'rain_quality', 'vehicle_smoke', 'puddles', 'windy_trees', 'detailed_trees', 'road_snow', 'ray_tracing', 'light_shadows', 'cloud_shadows', 'light_glow',
+  'graphics', 'msaa', 'render_scale', 'upscaler', 'upscale_quality', 'frame_generation', 'fsr_quality', 'fsr_sharpness', 'anisotropy', 'shadow_size', 'ssao', 'shadows', 'shadow_casters', 'detail_textures', 'night_brightness', 'led_glow', 'led_mips', 'shadow_blobs', 'lamp_shadows', 'reflections', 'road_glare', 'traffic_headlights', 'clouds', 'cloud_quality', 'street_light', 'rain_quality', 'vehicle_smoke', 'puddles', 'windy_trees', 'detailed_trees', 'road_snow', 'ray_tracing', 'light_shadows', 'cloud_shadows', 'light_glow', 'volumetric_fog',
   'vsync', 'max_fps', 'view_distance', 'max_obj_dist', 'min_obj_size', 'mirror_size', 'mirror_refresh', 'mirror_quality', 'mirror_hud_every_frame', 'video_memory', 'texture_compression', 'gpu_texture_compression',
 ];

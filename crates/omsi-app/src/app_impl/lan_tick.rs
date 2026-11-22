@@ -245,7 +245,8 @@ impl App {
         // The owner sends this only after validating the cabin request.
         // Ignore signals from strangers or a bus the local walker has left.
         if text == "coop-signal-ack" {
-            if self.view == "foot" && self.net.inside_remote == Some(from)
+            if self.view == "foot"
+                && self.net.inside_remote == Some(from)
                 && self.remote_cabin_owner() == Some(from)
             {
                 self.play_coop_departure_signal();
@@ -404,8 +405,10 @@ impl App {
             }
             self.net.coop_departure_last = Some(now);
             self.play_coop_departure_signal();
-            self.service_msg =
-                Some(("Conductor: ready to close doors (check clearance)".into(), 4.0));
+            self.service_msg = Some((
+                "Conductor: ready to close doors (check clearance)".into(),
+                4.0,
+            ));
             if let Some(lan) = self.net.lan.as_mut() {
                 lan.command(from, "coop-signal-ack");
             }

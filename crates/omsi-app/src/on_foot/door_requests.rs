@@ -27,8 +27,7 @@ fn location(f: &OnFoot, h: &Humans) -> (DVec3, Option<BusId>) {
 /// Built-in conductor's two-tone bell. It is not tied to vehicle script events:
 /// the signal is available on modded buses that lack a dedicated door-close gong.
 fn coop_departure_clip() -> std::sync::Arc<omsi_audio::Clip> {
-    static CLIP: std::sync::OnceLock<std::sync::Arc<omsi_audio::Clip>> =
-        std::sync::OnceLock::new();
+    static CLIP: std::sync::OnceLock<std::sync::Arc<omsi_audio::Clip>> = std::sync::OnceLock::new();
     CLIP.get_or_init(|| {
         let sample_rate = 48_000u32;
         let chirp = (sample_rate as usize * 14) / 100;
