@@ -896,15 +896,30 @@ mod tests {
             speed_kmh: 0.0,
         };
         assert!(may_operate_cabin(roles, approved, &signal));
-        assert!(!may_operate_cabin(roles, CabinRequest {
-            speed_kmh: 8.0, ..approved
-        }, &signal));
-        assert!(!may_operate_cabin(roles, CabinRequest {
-            owner_consented: false, ..approved
-        }, &signal));
-        assert!(!may_operate_cabin(roles, CabinRequest {
-            passenger_inside_bus: false, ..approved
-        }, &signal));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                speed_kmh: 8.0,
+                ..approved
+            },
+            &signal
+        ));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                owner_consented: false,
+                ..approved
+            },
+            &signal
+        ));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                passenger_inside_bus: false,
+                ..approved
+            },
+            &signal
+        ));
         assert!(!may_operate_cabin(CoopRoles::default(), approved, &signal));
     }
 
