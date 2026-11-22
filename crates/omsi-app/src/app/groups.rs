@@ -56,6 +56,9 @@ pub(crate) struct NetState {
     pub(crate) coop_cab_assistant: Option<u32>,
     /// A remote cabin switch held by this client, with its owner and pointer origin.
     pub(crate) coop_cab_press: Option<(u32, String, (f32, f32))>,
+    /// The walking assistant routes keyboard.cfg vehicle keys instead of walking.
+    /// Enabled locally with Ctrl+Alt+J; never grants remote permissions.
+    pub(crate) coop_keyboard_mode: bool,
     /// A dedicated server said we administer it (`admin`).
     pub(crate) is_admin: bool,
     /// What that server told its menu (`admin_panel`).
