@@ -150,7 +150,11 @@ pub fn keyboard_cabin_action(event: &str) -> bool {
         || auxiliary_switch(event)
         || matches!(
             event.to_ascii_lowercase().as_str(),
-            "ticket_give" | "change_give" | "change_take" | "blinker_left_toggle" | "blinker_right_toggle"
+            "ticket_give"
+                | "change_give"
+                | "change_take"
+                | "blinker_left_toggle"
+                | "blinker_right_toggle"
         )
 }
 
@@ -158,7 +162,9 @@ pub fn keyboard_cabin_speed_allowed(event: &str, speed_kmh: f32) -> bool {
     let name = event.to_ascii_lowercase();
     let stopped_only = door_switch(event)
         || ["ticket_give", "change_give", "change_take"].contains(&name.as_str())
-        || ["kneel", "ramp", "lift_"].iter().any(|tag| name.contains(tag));
+        || ["kneel", "ramp", "lift_"]
+            .iter()
+            .any(|tag| name.contains(tag));
     speed_kmh.is_finite() && (!stopped_only || speed_kmh.abs() <= 0.5)
 }
 
@@ -166,17 +172,40 @@ pub fn keyboard_cabin_speed_allowed(event: &str, speed_kmh: f32) -> bool {
 fn door_switch(event: &str) -> bool {
     if event.is_empty()
         || event.len() > 96
-        || !event.bytes().all(|b| b.is_ascii_alphanumeric() || b"_+-".contains(&b))
+        || !event
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_+-".contains(&b))
     {
         return false;
     }
     let name = event.to_ascii_lowercase();
     (name.contains("door") || name.contains("tuer"))
         && ![
-            "steer", "lenk", "throttle", "accelerator", "brake", "bremse", "gear",
-            "gang", "clutch", "kupplung", "ignition", "engine", "motor", "starter",
-            "anlasser", "battery", "batter", "retarder", "fahrstufe", "drive",
-            "handbr", "pedal", "parking", "getriebe", "override",
+            "steer",
+            "lenk",
+            "throttle",
+            "accelerator",
+            "brake",
+            "bremse",
+            "gear",
+            "gang",
+            "clutch",
+            "kupplung",
+            "ignition",
+            "engine",
+            "motor",
+            "starter",
+            "anlasser",
+            "battery",
+            "batter",
+            "retarder",
+            "fahrstufe",
+            "drive",
+            "handbr",
+            "pedal",
+            "parking",
+            "getriebe",
+            "override",
         ]
         .iter()
         .any(|term| name.contains(term))
@@ -779,19 +808,43 @@ mod tests {
     #[test]
     fn keybinds_use_owner_resolution_and_reject_movement_commands() {
         let valid = CabinRequest {
-            same_session: true, owner_consented: true,
-            passenger_inside_bus: true, speed_kmh: 0.0,
+            same_session: true,
+            owner_consented: true,
+            passenger_inside_bus: true,
+            speed_kmh: 0.0,
         };
-        let roles = CoopRoles { conductor: true, ..Default::default() };
-        assert_eq!(parse_cabin_action("coop-key 17 2"), Some(CabinAction::Key(17, 2)));
+        let roles = CoopRoles {
+            conductor: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_cabin_action("coop-key 17 2"),
+            Some(CabinAction::Key(17, 2))
+        );
         assert!(may_operate_cabin(roles, valid, &CabinAction::Key(17, 2)));
-        assert!(!may_operate_cabin(CoopRoles::default(), valid, &CabinAction::Key(17, 2)));
-        for invalid in ["coop-key 0 0", "coop-key 999 0", "coop-key 17 1",
-            "coop-key 17 16", "coop-key 17 2 extra", "coop-key 17 -1"] {
+        assert!(!may_operate_cabin(
+            CoopRoles::default(),
+            valid,
+            &CabinAction::Key(17, 2)
+        ));
+        for invalid in [
+            "coop-key 0 0",
+            "coop-key 999 0",
+            "coop-key 17 1",
+            "coop-key 17 16",
+            "coop-key 17 2 extra",
+            "coop-key 17 -1",
+        ] {
             assert!(parse_cabin_action(invalid).is_none(), "{invalid}");
         }
-        for name in ["kw_s_1", "engine_start", "cp_bremse", "throttle",
-            "cockpit_steering", "ticketprinter_gear_up"] {
+        for name in [
+            "kw_s_1",
+            "engine_start",
+            "cp_bremse",
+            "throttle",
+            "cockpit_steering",
+            "ticketprinter_gear_up",
+        ] {
             assert!(!keyboard_cabin_action(name), "{name}");
         }
         assert!(keyboard_cabin_action("cp_licht_unterdeck"));
@@ -800,12 +853,23 @@ mod tests {
         assert!(keyboard_cabin_action("bus_doorfront0"));
         assert!(!keyboard_cabin_speed_allowed("bus_doorfront0", 25.0));
         assert!(keyboard_cabin_speed_allowed("cp_licht_unterdeck", 25.0));
-        assert_eq!(parse_cabin_action("coop-door-switch cp_tuertaster1"),
-            Some(CabinAction::DoorSwitch("cp_tuertaster1".into())));
-        assert!(may_operate_cabin(roles, valid,
-            &CabinAction::DoorSwitch("cp_tuertaster1".into())));
-        assert!(!may_operate_cabin(roles, CabinRequest { speed_kmh: 15.0, ..valid },
-            &CabinAction::DoorSwitch("cp_tuertaster1".into())));
+        assert_eq!(
+            parse_cabin_action("coop-door-switch cp_tuertaster1"),
+            Some(CabinAction::DoorSwitch("cp_tuertaster1".into()))
+        );
+        assert!(may_operate_cabin(
+            roles,
+            valid,
+            &CabinAction::DoorSwitch("cp_tuertaster1".into())
+        ));
+        assert!(!may_operate_cabin(
+            roles,
+            CabinRequest {
+                speed_kmh: 15.0,
+                ..valid
+            },
+            &CabinAction::DoorSwitch("cp_tuertaster1".into())
+        ));
     }
 
     #[test]
