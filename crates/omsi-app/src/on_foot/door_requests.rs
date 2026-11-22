@@ -24,7 +24,51 @@ fn location(f: &OnFoot, h: &Humans) -> (DVec3, Option<BusId>) {
     (at, inside)
 }
 
+/// Built-in conductor's two-tone bell. It is not tied to vehicle script events:
+/// the signal is available on modded buses that lack a dedicated door-close gong.
+fn coop_departure_clip() -> std::sync::Arc<omsi_audio::Clip> {
+    static CLIP: std::sync::OnceLock<std::sync::Arc<omsi_audio::Clip>> =
+        std::sync::OnceLock::new();
+    CLIP.get_or_init(|| {
+        let sample_rate = 48_000u32;
+        let chirp = (sample_rate as usize * 14) / 100;
+        let pause = (sample_rate as usize * 8) / 100;
+        let mut samples = vec![0i16; chirp * 2 + pause];
+        for (start, hz) in [(0, 780.0f32), (chirp + pause, 990.0)] {
+            for i in 0..chirp {
+                let fade = (i.min(chirp - i - 1) as f32 / 360.0).min(1.0);
+                let angle = std::f32::consts::TAU * hz * i as f32 / sample_rate as f32;
+                samples[start + i] = (angle.sin() * fade * 10_000.0) as i16;
+            }
+        }
+        std::sync::Arc::new(omsi_audio::Clip {
+            sample_rate,
+            channels: 1,
+            samples,
+        })
+    })
+    .clone()
+}
+
 impl App {
+    pub(crate) fn play_coop_departure_signal(&self) {
+        if let Some(audio) = self.sound.audio.as_ref() {
+            audio.play(
+                coop_departure_clip(),
+                omsi_audio::VoiceParams {
+                    gain: 0.65,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    pub(crate) fn request_coop_departure_signal(&mut self) {
+        if self.view == "foot" && self.net.inside_remote.is_some() {
+            self.request_coop_cabin(omsi_lan::coop_permissions::CabinAction::DepartureSignal);
+        }
+    }
+
     fn remote_cabin_owner(&self) -> Option<u32> {
         let BusId::Ai(id) = self.foot_bus()? else {
             return None;
