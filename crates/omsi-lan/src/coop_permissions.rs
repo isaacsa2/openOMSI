@@ -47,6 +47,8 @@ pub enum CabinAction {
     Switch(String),
     Adjust(String, i8),
     Fare(FareAction),
+    /// A dedicated two-tone departure signal, without touching door state.
+    DepartureSignal,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -78,7 +80,9 @@ pub fn may_operate_cabin(roles: CoopRoles, req: CabinRequest, action: &CabinActi
                     && matches!(direction, -1 | 1)
                     && switch_speed_allowed(event, req.speed_kmh)
             }
-            CabinAction::Fare(_) => req.speed_kmh.abs() <= 0.5,
+            CabinAction::Fare(_) | CabinAction::DepartureSignal => {
+                req.speed_kmh.abs() <= 0.5
+            },
         }
 }
 
@@ -93,6 +97,7 @@ impl CabinAction {
             Self::Switch(event) => format!("coop-switch {event}"),
             Self::Adjust(event, direction) => format!("coop-adjust {event} {direction}"),
             Self::Fare(fare) => format!("coop-fare {}", fare.as_str()),
+            Self::DepartureSignal => "coop-signal departure".into(),
         }
     }
 }
@@ -127,6 +132,7 @@ pub fn parse_cabin_action(text: &str) -> Option<CabinAction> {
             .map(CabinAction::Window),
         "coop-switch" if auxiliary_switch(value) => Some(CabinAction::Switch(value.into())),
         "coop-fare" => FareAction::parse(value).map(CabinAction::Fare),
+        "coop-signal" if value == "departure" => Some(CabinAction::DepartureSignal),
         _ => None,
     }
 }
@@ -870,6 +876,36 @@ mod tests {
             },
             &CabinAction::DoorSwitch("cp_tuertaster1".into())
         ));
+    }
+
+    #[test]
+    fn departure_signal_is_a_bounded_stationary_only_cabin_request() {
+        let signal = CabinAction::DepartureSignal;
+        assert_eq!(signal.command(), "coop-signal departure");
+        assert_eq!(parse_cabin_action(&signal.command()), Some(signal.clone()));
+        assert!(parse_cabin_action("coop-signal door-open").is_none());
+        assert!(parse_cabin_action("coop-signal departure extra").is_none());
+        let roles = CoopRoles {
+            conductor: true,
+            ..Default::default()
+        };
+        let approved = CabinRequest {
+            same_session: true,
+            owner_consented: true,
+            passenger_inside_bus: true,
+            speed_kmh: 0.0,
+        };
+        assert!(may_operate_cabin(roles, approved, &signal));
+        assert!(!may_operate_cabin(roles, CabinRequest {
+            speed_kmh: 8.0, ..approved
+        }, &signal));
+        assert!(!may_operate_cabin(roles, CabinRequest {
+            owner_consented: false, ..approved
+        }, &signal));
+        assert!(!may_operate_cabin(roles, CabinRequest {
+            passenger_inside_bus: false, ..approved
+        }, &signal));
+        assert!(!may_operate_cabin(CoopRoles::default(), approved, &signal));
     }
 
     #[test]
