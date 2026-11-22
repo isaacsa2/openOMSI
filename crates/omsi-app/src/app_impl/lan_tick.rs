@@ -9,9 +9,13 @@ impl App {
         let lan_tick_started = std::time::Instant::now();
         if self.net.lan.is_none() {
             self.net.coop_cab_assistant = None;
+            self.net.coop_keyboard_mode = false;
             omsi_lan::commands::set_speed_limit_kmh(0);
             self.net.speed_limit_welcome = None;
             self.net.dedicated_teleport = None;
+        }
+        if self.net.inside_remote.is_none() {
+            self.net.coop_keyboard_mode = false;
         }
         let walker = self.walker_pose();
         let radio_keyed = self.voice_radio_keyed();
@@ -394,6 +398,35 @@ impl App {
                 }),
             CabinAction::Window(index) => {
                 coop_permissions::click_cabin_window(&mut player.vehicle, *index)
+            }
+            CabinAction::DoorSwitch(event) => {
+                coop_permissions::click_auxiliary_switch(&mut player.vehicle, event)
+            }
+            CabinAction::Key(scan, modifiers) => {
+                // Never trust a trigger name sent over the network. Resolve the scan
+                // against this vehicle owner's installed keyboard.cfg.
+                let speed = player.vehicle.physics.speed * 3.6;
+                let actions: Vec<_> = player
+                    .bindings
+                    .iter()
+                    .filter(|b| b.scan_code == *scan && b.matches(*modifiers))
+                    .map(|b| &b.action)
+                    .filter(|action| {
+                        coop_permissions::keyboard_cabin_action(action)
+                            && coop_permissions::keyboard_cabin_speed_allowed(action, speed)
+                    })
+                    .cloned()
+                    .collect();
+                let mut any = false;
+                for name in actions {
+                    // Tap and release locally so a network dropout cannot leave an
+                    // owner's switch held indefinitely.
+                    let fired = player.action(&name, true);
+                    player.vehicle.update_scripts_only(0.0);
+                    player.action(&name, false);
+                    any |= fired;
+                }
+                any
             }
             CabinAction::Switch(event) => {
                 coop_permissions::click_auxiliary_switch(&mut player.vehicle, event)
