@@ -1058,7 +1058,8 @@ impl World {
         // what it takes)
         let urgent = card_cap > 0 && card.total() >= card_cap.saturating_sub(128 << 20);
         let max_shrinks = if urgent { 192 } else { 96 };
-        let budget_end = std::time::Instant::now() + budget_pass_duration(pass == BudgetPass::Now, urgent);
+        let budget_end = std::time::Instant::now()
+            + budget_pass_duration(pass == BudgetPass::Now, urgent);
         let pending = self.upgrades_pending.lock();
         let reserved = if card_cap == 0 && usage > limit { 0 } else { reserved_restore_bytes(&gpu, &pending) };
         let rooms = (card_near_room(video_limit, card).saturating_sub(reserved), texture_room(limit, texture_usage).saturating_sub(reserved));
