@@ -16,7 +16,15 @@ fn st_load(path: &std::path::Path) -> Result<Arc<crate::image_decode::DecodedIma
     let got = crate::image_decode::decode(path).map(Arc::new);
     let mut c = cache.lock();
     let bytes = got.as_ref().map(|i| i.rgba.len()).unwrap_or(0);
-    if c.1 + bytes > 64 << 20 {
+    const LIMIT_BYTES: usize = 64 << 20;
+    const LIMIT_ENTRIES: usize = 512;
+    // A missing file also takes an entry; thousands of changing destinations must
+    // not grow the negative cache indefinitely. Very large images may be drawn
+    // but must not displace the entire cache and stay above its byte limit.
+    if bytes > LIMIT_BYTES {
+        return got;
+    }
+    if c.1.saturating_add(bytes) > LIMIT_BYTES || c.0.len() >= LIMIT_ENTRIES {
         c.0.clear();
         c.1 = 0;
     }
