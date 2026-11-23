@@ -884,11 +884,20 @@ impl Renderer {
     /// Checked render target allocation for displays that can safely skip one frame.
     /// A failed GPU allocation must not leave a permanent invalid texture in the scene:
     /// callers can retry after the next memory-budget cleanup instead.
-    pub fn try_add_render_texture(&self, scene: &mut Scene, width: u32, height: u32) -> Option<TextureId> {
+    pub fn try_add_render_texture(
+        &self,
+        scene: &mut Scene,
+        width: u32,
+        height: u32,
+    ) -> Option<TextureId> {
         let (width, height) = fit_size(width.max(1), height.max(1), self.device.limits().max_texture_dimension_2d);
         let texture = try_create_texture(&self.device, &wgpu::TextureDescriptor {
             label: Some("render target"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
