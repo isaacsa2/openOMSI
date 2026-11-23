@@ -144,6 +144,101 @@ fn apply_optional_bus_visual(
     }
 }
 
+/// Update the face of a nearby human. Returns (near, active face pose, was active).
+fn update_avatar_face(
+    p: &PersonFrame,
+    st: &mut PersonView,
+    ty: &HumanType,
+    camera: DVec3,
+    dt: f32,
+    hour: f32,
+    frame_no: u32,
+) -> (bool, bool, bool) {
+    // an avatar's face near the eye: blinks, looks, expressions, the lips
+    // (from the camera the picture is drawn from: a face is seen from there)
+    let near = ty.face.is_some() && (p.position - camera).length() < avatars::FACE_DISTANCE;
+    let mut face_now = false;
+    if near {
+        let face = st.face.get_or_insert_with(|| avatars::FaceView::new(p.id));
+        let input = omsi_sim::human::face::FaceInput {
+            paying: p.facts.activity == omsi_sim::human::Activity::Pay,
+            walking: p.vel.length() > 0.3,
+            talking: avatars::talking(p.id),
+            hour,
+            glare: 0.0,
+            head_turn: (0.0, 0.0),
+        };
+        let mut w = *face.face.advance(&input, dt);
+        {
+            use omsi_sim::human::face::Channel as C;
+            let force: &[C] = match omsi_cfg::flags::OMSI_DEBUG_FACE.var() {
+                Some("smile") => &[C::SmileL, C::SmileR, C::CheekSquintL, C::CheekSquintR],
+                Some("open") => &[C::JawOpen, C::VisemeAA],
+                Some("blink") => &[C::BlinkL, C::BlinkR],
+                _ => &[],
+            };
+            for c in force {
+                w[*c as usize] = 1.0;
+            }
+        }
+        if omsi_cfg::flags::OMSI_DEBUG_FACE.is_set() && (frame_no < 8 || frame_no % 30 == 0)
+        {
+            let mut top: Vec<(usize, f32)> = w
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, v)| *v > 0.02)
+                .collect();
+            top.sort_by(|a, b| b.1.total_cmp(&a.1));
+            log::info!(
+                "face {} ({}): {:?} talking {:?}",
+                p.id,
+                ty.def
+                    .path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy(),
+                &top[..top.len().min(6)],
+                input.talking
+            );
+        }
+        face_now = ty.face_rest(0, &w, &mut face.rest);
+        face.live = face_now;
+    }
+    let face_was = st.face.as_ref().is_some_and(|f| f.live);
+    if !near {
+        if let Some(f) = st.face.as_mut() {
+            f.live = false;
+        }
+    }
+    (near, face_now, face_was)
+}
+
+/// Diagnose visible T-poses only when the explicit diagnostic flag is enabled.
+fn check_tpose(frame: &PeopleFrame, states: &[PersonView]) {
+    // OMSI_CHECK_TPOSE=1: everybody drawn with the arms out (the file's rest pose): the
+    // skinned mesh wider than 1.3 m from hand to hand
+    if omsi_cfg::flags::OMSI_CHECK_TPOSE.is_set() {
+        for (p, st) in frame.people.iter().zip(&states) {
+            let [who, pax] = p.debug.clone().unwrap_or_default();
+            let Some((pos, _)) = st.skins.first() else {
+                log::info!("t-pose? {who}: never skinned");
+                continue;
+            };
+            let (lo, hi) = pos.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+                (lo.min(v.x), hi.max(v.x))
+            });
+            if hi - lo > 1.3 {
+                log::info!(
+                    "t-pose: {who} width {:.2} skinned {} {pax}",
+                    hi - lo,
+                    st.skinned
+                );
+            }
+        }
+    }
+}
+
 impl PeopleView {
     pub(crate) fn new() -> PeopleView {
         PeopleView {
@@ -867,63 +962,8 @@ impl PeopleView {
                 omsi_sim::human::slots_from_omsi(&p.anim.bones(&ty.omsi))
             };
             apply_optional_bus_visual(p, st, &ty, &mut bones, enhanced, camera, dt);
-            // an avatar's face near the eye: blinks, looks, expressions, the lips
-            // (from the camera the picture is drawn from: a face is seen from there)
-            let near = ty.face.is_some() && (p.position - camera).length() < avatars::FACE_DISTANCE;
-            let mut face_now = false;
-            if near {
-                let face = st.face.get_or_insert_with(|| avatars::FaceView::new(p.id));
-                let input = omsi_sim::human::face::FaceInput {
-                    paying: p.facts.activity == omsi_sim::human::Activity::Pay,
-                    walking: p.vel.length() > 0.3,
-                    talking: avatars::talking(p.id),
-                    hour,
-                    glare: 0.0,
-                    head_turn: (0.0, 0.0),
-                };
-                let mut w = *face.face.advance(&input, dt);
-                {
-                    use omsi_sim::human::face::Channel as C;
-                    let force: &[C] = match omsi_cfg::flags::OMSI_DEBUG_FACE.var() {
-                        Some("smile") => &[C::SmileL, C::SmileR, C::CheekSquintL, C::CheekSquintR],
-                        Some("open") => &[C::JawOpen, C::VisemeAA],
-                        Some("blink") => &[C::BlinkL, C::BlinkR],
-                        _ => &[],
-                    };
-                    for c in force {
-                        w[*c as usize] = 1.0;
-                    }
-                }
-                if omsi_cfg::flags::OMSI_DEBUG_FACE.is_set() && (frame_no < 8 || frame_no % 30 == 0)
-                {
-                    let mut top: Vec<(usize, f32)> = w
-                        .iter()
-                        .copied()
-                        .enumerate()
-                        .filter(|(_, v)| *v > 0.02)
-                        .collect();
-                    top.sort_by(|a, b| b.1.total_cmp(&a.1));
-                    log::info!(
-                        "face {} ({}): {:?} talking {:?}",
-                        p.id,
-                        ty.def
-                            .path
-                            .file_stem()
-                            .unwrap_or_default()
-                            .to_string_lossy(),
-                        &top[..top.len().min(6)],
-                        input.talking
-                    );
-                }
-                face_now = ty.face_rest(0, &w, &mut face.rest);
-                face.live = face_now;
-            }
-            let face_was = st.face.as_ref().is_some_and(|f| f.live);
-            if !near {
-                if let Some(f) = st.face.as_mut() {
-                    f.live = false;
-                }
-            }
+            let (near, face_now, face_was) =
+                update_avatar_face(p, st, &ty, camera, dt, hour, frame_no);
             let PersonView {
                 skins,
                 skin_bones,
@@ -1101,27 +1141,7 @@ impl PeopleView {
                 }
             }
         }
-        // OMSI_CHECK_TPOSE=1: everybody drawn with the arms out (the file's rest pose): the
-        // skinned mesh wider than 1.3 m from hand to hand
-        if omsi_cfg::flags::OMSI_CHECK_TPOSE.is_set() {
-            for (p, st) in frame.people.iter().zip(&states) {
-                let [who, pax] = p.debug.clone().unwrap_or_default();
-                let Some((pos, _)) = st.skins.first() else {
-                    log::info!("t-pose? {who}: never skinned");
-                    continue;
-                };
-                let (lo, hi) = pos.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
-                    (lo.min(v.x), hi.max(v.x))
-                });
-                if hi - lo > 1.3 {
-                    log::info!(
-                        "t-pose: {who} width {:.2} skinned {} {pax}",
-                        hi - lo,
-                        st.skinned
-                    );
-                }
-            }
-        }
+        check_tpose(&frame, &states);
         drop(buses);
         for (p, st) in frame.people.iter().zip(states) {
             self.people.insert(p.id, st);
