@@ -979,7 +979,7 @@ impl World {
         // and every step up failed the idle look's check - the whole scan and its sort every
         // second while over)
         const STEP: u64 = 32 << 20;
-        let card_over = if card_cap > 0 { card.total().saturating_sub(card_cap) / STEP * STEP } else { 0 };
+        let card_over = card_soft_over(video_limit, card, STEP);
         let usage = if card_over > 0 { texture_usage.max(limit.saturating_add(card_over)) } else { texture_usage };
         memo.in_use = usage;
         if pass == BudgetPass::AfterStreaming && usage <= limit && !memo.resume {
@@ -1056,8 +1056,10 @@ impl World {
         let mut cut_short = false;
         // (2 ms of shrinking a frame, the scan's own time not counted; a picture takes
         // what it takes)
+        let urgent = card_cap > 0 && card.total() >= card_cap.saturating_sub(128 << 20);
+        let max_shrinks = if urgent { 192 } else { 96 };
         let budget_end = std::time::Instant::now()
-            + if pass == BudgetPass::Now { std::time::Duration::from_secs(3600) } else { std::time::Duration::from_millis(2) };
+            + budget_pass_duration(pass == BudgetPass::Now, urgent);
         let pending = self.upgrades_pending.lock();
         let reserved = if card_cap == 0 && usage > limit { 0 } else { reserved_restore_bytes(&gpu, &pending) };
         let rooms = (card_near_room(video_limit, card).saturating_sub(reserved), texture_room(limit, texture_usage).saturating_sub(reserved));
@@ -1068,9 +1070,9 @@ impl World {
             let card_part = (usage - texture_usage.max(limit)).saturating_sub(card_hard_over(card, video_limit, card_over, STEP));
             let mut drops = renderer.begin_level_drops();
             for (d, p) in &entries {
-                // (96 a second: at 16 a map's first tiles stayed over a small card's budget
+                // (96 ordinarily, 192 near OOM: at 16 a map's first tiles stayed over budget
                 // for a minute and a half)
-                if over == 0 || shrunk.len() >= 96 || *d < NEAR {
+                if over == 0 || shrunk.len() >= max_shrinks || *d < NEAR {
                     break;
                 }
                 if std::time::Instant::now() >= budget_end {
@@ -1112,7 +1114,7 @@ impl World {
                     .collect();
                 own.sort_by(|a, b| b.1.cmp(&a.1));
                 for (id, before) in own {
-                    if over == 0 || shrunk.len() >= 96 {
+                    if over == 0 || shrunk.len() >= max_shrinks {
                         break;
                     }
                     if std::time::Instant::now() >= budget_end {
@@ -1137,7 +1139,7 @@ impl World {
                     .filter(|(p, _)| !player.contains(*p))
                     .map(|(_, (id, _))| (*id, None)));
                 for (id, path) in emergency {
-                    if over <= card_part || shrunk.len() >= 96 {
+                    if over <= card_part || shrunk.len() >= max_shrinks {
                         break;
                     }
                     if std::time::Instant::now() >= budget_end {
