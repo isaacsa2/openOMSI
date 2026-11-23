@@ -104,8 +104,17 @@ impl InProcess {
         req["id"] = json!(id);
         let (tx, rx) = std::sync::mpsc::channel();
         self.waiting.lock().unwrap_or_else(|e| e.into_inner()).insert(id, tx);
-        self.tx.lock().unwrap_or_else(|e| e.into_inner()).send(req).map_err(|_| "the preview service ended".to_string())?;
-        let (head, body) = rx.recv_timeout(wait).map_err(|_| "the preview service did not answer".to_string())?;
+        if self.tx.lock().unwrap_or_else(|e| e.into_inner()).send(req).is_err() {
+            self.waiting.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+            return Err("the preview service ended".to_string());
+        }
+        let answer = rx.recv_timeout(wait);
+        if answer.is_err() {
+            // A request can expire while the shared renderer is still loading a bus.
+            // Its result will be discarded when it arrives, not retained in the table.
+            self.waiting.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        }
+        let (head, body) = answer.map_err(|_| "the preview service did not answer".to_string())?;
         if head.get("ok").and_then(Value::as_bool) == Some(false) {
             return Err(head.get("error").and_then(Value::as_str).unwrap_or("the preview service failed").to_string());
         }
