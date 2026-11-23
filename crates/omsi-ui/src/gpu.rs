@@ -635,7 +635,10 @@ impl Gpu {
         }
         // The CPU staging Vec also kept the largest UI upload forever. Reclaim only
         // after sustained lower use, so a momentary UI spike does not cause churn.
-        let held_bytes = self.packed.capacity().saturating_mul(std::mem::size_of::<Packed>());
+        let held_bytes = self
+            .packed
+            .capacity()
+            .saturating_mul(std::mem::size_of::<Packed>());
         if held_bytes >= (1 << 20) && self.packed.len().saturating_mul(4) < self.packed.capacity() {
             self.packed_small_uploads = self.packed_small_uploads.saturating_add(1);
             if self.packed_small_uploads >= 180 {
