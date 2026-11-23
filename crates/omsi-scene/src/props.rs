@@ -1056,17 +1056,9 @@ impl World {
         let mut cut_short = false;
         // (2 ms of shrinking a frame, the scan's own time not counted; a picture takes
         // what it takes)
-        // When memory is close to the driver's cap, spend a little more CPU time
-        // freeing distant mips so the next upload can still allocate a replacement.
-        // Normal frames keep the original 2 ms limit.
         let urgent = card_cap > 0 && card.total() >= card_cap.saturating_sub(128 << 20);
         let max_shrinks = if urgent { 192 } else { 96 };
-        let budget_end = std::time::Instant::now()
-            + if pass == BudgetPass::Now {
-                std::time::Duration::from_secs(3600)
-            } else {
-                std::time::Duration::from_millis(if urgent { 4 } else { 2 })
-            };
+        let budget_end = std::time::Instant::now() + budget_pass_duration(pass == BudgetPass::Now, urgent);
         let pending = self.upgrades_pending.lock();
         let reserved = if card_cap == 0 && usage > limit { 0 } else { reserved_restore_bytes(&gpu, &pending) };
         let rooms = (card_near_room(video_limit, card).saturating_sub(reserved), texture_room(limit, texture_usage).saturating_sub(reserved));
