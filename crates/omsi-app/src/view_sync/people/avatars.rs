@@ -492,6 +492,20 @@ impl Warm {
     }
 }
 
+/// Multiple read-ahead workers may be active while the figures list is growing.
+/// Reserve atomically, without exceeding the configured decoded-image budget.
+fn reserve_figure_bytes(
+    decoded: &std::sync::atomic::AtomicUsize,
+    bytes: usize,
+) -> bool {
+    use std::sync::atomic::Ordering;
+    decoded
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            used.checked_add(bytes).filter(|&next| next <= FIGURES_AHEAD_BYTES)
+        })
+        .is_ok()
+}
+
 /// Read `types`' default pictures on a thread of their own, into `read`'s output and budget
 /// (see `FigureRead`).
 fn read_figures_ahead(types: &[Arc<HumanType>], root: &std::path::Path, read: &FigureRead) {
@@ -519,10 +533,10 @@ fn read_figures_ahead(types: &[Arc<HumanType>], root: &std::path::Path, read: &F
                     let Ok((data, _)) = omsi_texture::gpu::load_gpu(&path) else {
                         continue;
                     };
-                    decoded.fetch_add(
-                        data.levels.iter().map(Vec::len).sum::<usize>(),
-                        Ordering::Relaxed,
-                    );
+                    let bytes = data.levels.iter().map(Vec::len).sum::<usize>();
+                    if !reserve_figure_bytes(&decoded, bytes) {
+                        return;
+                    }
                     sink.lock().push((path, (Some(Arc::new(data)), None)));
                 }
             }
@@ -561,5 +575,20 @@ mod speech_cache_tests {
         ));
         assert!(voice_expired(start, 50, start + Duration::from_secs(1)));
         assert!(voice_expired(start, 0, start));
+    }
+}
+
+#[cfg(test)]
+mod figure_budget_tests {
+    use super::{reserve_figure_bytes, FIGURES_AHEAD_BYTES};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn figure_read_ahead_never_exceeds_its_budget() {
+        let used = AtomicUsize::new(FIGURES_AHEAD_BYTES - 32);
+        assert!(!reserve_figure_bytes(&used, 33));
+        assert!(reserve_figure_bytes(&used, 32));
+        assert_eq!(used.load(Ordering::Relaxed), FIGURES_AHEAD_BYTES);
+        assert!(!reserve_figure_bytes(&used, 1));
     }
 }
