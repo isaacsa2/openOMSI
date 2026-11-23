@@ -15,9 +15,9 @@ use std::time::{Duration, Instant};
 
 type Pending = Arc<Mutex<HashMap<u64, Sender<(Value, Vec<u8>)>>>>;
 
-/// The helper sends JPEG previews, not arbitrary multi-gigabyte binary payloads.
-/// Reject malformed or excessive replies before allocating their buffers.
-const MAX_REPLY_BYTES: u64 = 64 << 20;
+/// The helper sends JPEG previews and map data. Leave room for large maps, but
+/// reject malformed multi-gigabyte replies before allocating their buffers.
+const MAX_REPLY_BYTES: u64 = 256 << 20;
 
 fn receive(
     pending: &Pending,
