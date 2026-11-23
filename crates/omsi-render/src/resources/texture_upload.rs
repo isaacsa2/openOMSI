@@ -192,4 +192,3 @@ pub(crate) fn fit_image(img: &omsi_texture::Image, max: u32) -> Option<omsi_text
         has_alpha: img.has_alpha,
     })
 }
-
