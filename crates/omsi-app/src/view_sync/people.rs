@@ -64,6 +64,8 @@ pub(crate) struct PeopleView {
     pub(crate) avatars: bool,
     /// Simulation time of the last `sync`.
     pub(crate) last_sync: f64,
+    /// Last cleanup of ended voice envelopes (even when faces are offscreen).
+    last_speech_cleanup: Option<std::time::Instant>,
     /// Frames synced, people posed and skinned, the time that took and the part of it spent
     /// uploading (ms), in total.
     pub(crate) pose_stats: (u32, usize, f64, f64),
@@ -141,6 +143,7 @@ impl PeopleView {
             mirror_hz: None,
             avatars: avatars::enabled(),
             last_sync: 0.0,
+            last_speech_cleanup: None,
             pose_stats: (0, 0, 0.0, 0.0),
             due: Vec::new(),
             pbr_done: hashbrown::HashSet::new(),
@@ -444,6 +447,13 @@ impl Humans {
     /// who went since first, then what the posing reads of them is taken into the view's
     /// `PeopleFrame` and posed from it ([`PeopleView::pose`]).
     pub(super) fn sync(&mut self, view: &mut PeopleView, world: &World, renderer: &Renderer, scene: &mut Scene, camera: DVec3) {
+        let now = std::time::Instant::now();
+        if view.last_speech_cleanup.is_none_or(|last| {
+            now.duration_since(last) >= std::time::Duration::from_secs(10)
+        }) {
+            avatars::trim_finished_speech();
+            view.last_speech_cleanup = Some(now);
+        }
         self.catch_up_bodies(view, renderer, scene);
         self.sim.snapshot_into(&mut view.frame);
         view.pose(world, renderer, scene, camera);
