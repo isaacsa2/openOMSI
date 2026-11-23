@@ -224,3 +224,105 @@ mod card_pressure_tests {
         assert_eq!(card_soft_over(100 << 20, small, 1 << 20), 5 << 20);
     }
 }
+
+/// Rank scenery pictures by their nearest tile while preserving shared texture users.
+pub(super) fn texture_budget_entries(
+    states: &HashMap<(i32, i32), TileState>,
+    gpu: &GpuCache,
+    centers: &[DVec3],
+) -> (Vec<(f64, PathBuf)>, hashbrown::HashSet<PathBuf>) {
+    let ts = tile_size();
+    let tile_distance = |k: &(i32, i32)| -> f64 {
+        centers
+            .iter()
+            .map(|c| {
+                let (x0, y0) = (k.0 as f64 * ts, k.1 as f64 * ts);
+                let dx = (x0 - c.x).max(c.x - (x0 + ts)).max(0.0);
+                let dy = (y0 - c.y).max(c.y - (y0 + ts)).max(0.0);
+                (dx * dx + dy * dy).sqrt()
+            })
+            .fold(f64::MAX, f64::min)
+    };
+    // how near each scenery texture is: the nearest tile that uses it
+    let mut near: hashbrown::HashMap<TextureId, f64> = hashbrown::HashMap::new();
+    let mut spline_textures = hashbrown::HashSet::new();
+    let (mut types, mut splines): (
+        hashbrown::HashMap<usize, f64>,
+        hashbrown::HashMap<usize, f64>,
+    ) = Default::default();
+    let (mut trees, mut shared): (
+        hashbrown::HashMap<&str, f64>,
+        hashbrown::HashMap<&PathBuf, f64>,
+    ) = Default::default();
+    for (key, st) in states.iter() {
+        let d = tile_distance(key);
+        let nearer = |e: &mut f64| *e = e.min(d);
+        st.gpu
+            .types
+            .iter()
+            .for_each(|t| nearer(types.entry(*t).or_insert(f64::MAX)));
+        st.gpu
+            .spline_types
+            .iter()
+            .for_each(|t| nearer(splines.entry(*t).or_insert(f64::MAX)));
+        st.gpu
+            .trees
+            .iter()
+            .for_each(|t| nearer(trees.entry(t.as_str()).or_insert(f64::MAX)));
+        st.gpu
+            .shared_textures
+            .iter()
+            .for_each(|p| nearer(shared.entry(p).or_insert(f64::MAX)));
+    }
+    {
+        let g = &*gpu;
+        let mut see = |p: &PathBuf, d: f64| {
+            if let Some(e) = g.textures.get(p) {
+                let n = near.entry(e.id).or_insert(f64::MAX);
+                *n = n.min(d);
+            }
+        };
+        for (t, d) in &types {
+            g.types
+                .get(t)
+                .into_iter()
+                .flat_map(|t| t.textures.iter())
+                .for_each(|p| see(p, *d));
+        }
+        for (t, d) in &splines {
+            for p in g.splines.get(t).into_iter().flat_map(|s| s.textures.iter()) {
+                see(p, *d);
+                spline_textures.insert(p.clone());
+            }
+        }
+        for (t, d) in &trees {
+            g.trees
+                .get(*t)
+                .and_then(|t| t.texture.as_ref())
+                .into_iter()
+                .for_each(|p| see(p, *d));
+        }
+        for (p, d) in &shared {
+            see(p, *d);
+        }
+    }
+    ground_is_near(&gpu, &mut near);
+    let entries: Vec<(f64, PathBuf)> = gpu
+        .textures
+        .iter()
+        .map(|(p, e)| (near.get(&e.id).copied().unwrap_or(f64::MAX), p.clone()))
+        .collect();
+    (entries, spline_textures)
+}
+
+/// Count cached pictures, dropped levels and due retries without allocating a new list.
+pub(super) fn texture_budget_snapshot(
+    gpu: &GpuCache,
+    t0: std::time::Instant,
+    last: Option<std::time::Instant>,
+) -> (u64, bool, bool) {
+    gpu.textures.values().fold((0u64, false, false), |(b, d, r), e| {
+        let due = e.retry_after.is_some_and(|t| t <= t0 && last.is_none_or(|c| t > c));
+        (b + e.bytes, d || e.dropped > 0, r || due)
+    })
+}
