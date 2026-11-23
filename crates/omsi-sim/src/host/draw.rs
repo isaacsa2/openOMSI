@@ -32,14 +32,22 @@ impl STCache {
         }
         self.clock = self.clock.wrapping_add(1);
         if let Some((previous, _)) = self.map.insert(path, (image, self.clock)) {
-            self.bytes = self.bytes.saturating_sub(previous.as_ref().map_or(0, |i| i.rgba.len()));
+            self.bytes = self
+                .bytes
+                .saturating_sub(previous.as_ref().map_or(0, |i| i.rgba.len()));
         }
         self.bytes = self.bytes.saturating_add(bytes);
         while self.bytes > ST_CACHE_BYTES || self.map.len() > ST_CACHE_ENTRIES {
-            let oldest = self.map.iter().min_by_key(|(_, (_, used))| *used).map(|(path, _)| path.clone());
+            let oldest = self
+                .map
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(path, _)| path.clone());
             let Some(oldest) = oldest else { break };
             if let Some((previous, _)) = self.map.remove(&oldest) {
-                self.bytes = self.bytes.saturating_sub(previous.as_ref().map_or(0, |i| i.rgba.len()));
+                self.bytes = self
+                    .bytes
+                    .saturating_sub(previous.as_ref().map_or(0, |i| i.rgba.len()));
             }
         }
     }
@@ -322,7 +330,10 @@ mod script_texture_cache_tests {
     fn missing_script_pictures_have_bounded_lru_cache() {
         let mut cache = STCache::default();
         for n in 0..ST_CACHE_ENTRIES {
-            cache.insert(std::path::PathBuf::from(format!("missing-{n}")), Err("missing".into()));
+            cache.insert(
+                std::path::PathBuf::from(format!("missing-{n}")),
+                Err("missing".into()),
+            );
         }
         let first = std::path::Path::new("missing-0");
         assert!(cache.get(first).is_some());
