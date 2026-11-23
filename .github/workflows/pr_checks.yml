@@ -85,7 +85,7 @@ jobs:
           bash scripts/arch-guard-test.sh
 
       - name: Drive page layouts
-        if: ${{ success() }}
+        if: ${{ !cancelled() }}
         run: |
           if git diff --quiet "$BASE" HEAD -- launcher/ui launcher/tests .github/workflows/pr_checks.yml; then
             echo "The launcher's page is not changed."
@@ -98,13 +98,13 @@ jobs:
           fi
 
       - name: AI Lists state
-        if: ${{ success() }}
+        if: ${{ !cancelled() }}
         run: node launcher/tests/ai-lists-check.mjs
 
       - name: Graphics profile sharing
-        if: ${{ success() }}
+        if: ${{ !cancelled() }}
         run: node --experimental-websocket launcher/tests/graphics-profile-transfer-check.mjs
 
       - name: Launcher settings startup
-        if: ${{ success() }}
+        if: ${{ !cancelled() }}
         run: node --experimental-vm-modules --test launcher/tests/*.test.mjs
