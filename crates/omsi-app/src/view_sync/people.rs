@@ -218,7 +218,7 @@ fn check_tpose(frame: &PeopleFrame, states: &[PersonView]) {
     // OMSI_CHECK_TPOSE=1: everybody drawn with the arms out (the file's rest pose): the
     // skinned mesh wider than 1.3 m from hand to hand
     if omsi_cfg::flags::OMSI_CHECK_TPOSE.is_set() {
-        for (p, st) in frame.people.iter().zip(&states) {
+        for (p, st) in frame.people.iter().zip(states) {
             let [who, pax] = p.debug.clone().unwrap_or_default();
             let Some((pos, _)) = st.skins.first() else {
                 log::info!("t-pose? {who}: never skinned");
