@@ -238,6 +238,24 @@ pub(crate) fn speak(speaker: u32, clip: &omsi_audio::mixer::Clip) {
     TALK.get_or_init(Default::default).lock().insert(speaker, (std::time::Instant::now(), Arc::new(env)));
 }
 
+/// A voice can finish outside the camera; lip-sync lookups must not be
+/// responsible for freeing the waveform forever.
+fn voice_expired(
+    start: std::time::Instant,
+    frames: usize,
+    now: std::time::Instant,
+) -> bool {
+    now.saturating_duration_since(start).as_secs_f64() * 50.0 >= frames as f64
+}
+
+/// Run infrequently from the people view, even when nobody has a visible face.
+/// Prevents old voice envelopes accumulating as passengers despawn or walk away.
+pub(super) fn trim_finished_speech() {
+    let Some(talk) = TALK.get() else { return };
+    let now = std::time::Instant::now();
+    talk.lock().retain(|_, (start, env)| !voice_expired(*start, env.len(), now));
+}
+
 /// How loud person `id` speaks now, if they do.
 pub(super) fn talking(id: u32) -> Option<f32> {
     let talk = TALK.get()?;
@@ -453,5 +471,19 @@ mod tests {
         assert_eq!(super::weight("Pilot_Male_01"), 1);
         assert_eq!(super::weight("Construction_Male_03"), 1);
         assert_eq!(super::weight("Business_Female_02"), 4);
+    }
+}
+
+#[cfg(test)]
+mod speech_cache_tests {
+    use super::voice_expired;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn finished_voice_expires_without_another_visible_face_lookup() {
+        let start = Instant::now();
+        assert!(!voice_expired(start, 50, start + Duration::from_millis(999)));
+        assert!(voice_expired(start, 50, start + Duration::from_secs(1)));
+        assert!(voice_expired(start, 0, start));
     }
 }
