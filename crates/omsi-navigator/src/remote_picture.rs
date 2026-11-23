@@ -135,7 +135,7 @@ impl Navigator {
             self.gpu = Some(Gpu::with_depth(device, format, map_samples(format), self.atlas.size));
         }
         if self.remote_pic.target.as_ref().is_none_or(|t| (t.2, t.3) != (w, h)) {
-            let Some(texture) = renderer.try_create_transient_texture(&wgpu::TextureDescriptor {
+            let desc = wgpu::TextureDescriptor {
                 label: Some("navigator remote picture"),
                 size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
                 mip_level_count: 1,
@@ -144,7 +144,8 @@ impl Navigator {
                 format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
-            }) else {
+            };
+            let Some(texture) = renderer.try_create_transient_texture(&desc) else {
                 // A failed target is not a texture view. Retry after the capture interval
                 // once the renderer has had a chance to free GPU memory.
                 return;
@@ -167,12 +168,13 @@ impl Navigator {
         let buffer = match self.remote_pic.spare.pop() {
             Some(buffer) => buffer,
             None => {
-                let Some(buffer) = renderer.try_create_transient_buffer(&wgpu::BufferDescriptor {
+                let desc = wgpu::BufferDescriptor {
                     label: Some("navigator remote picture"),
                     size,
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                     mapped_at_creation: false,
-                }) else {
+                };
+                let Some(buffer) = renderer.try_create_transient_buffer(&desc) else {
                     // Do not submit a copy using a buffer the GPU failed to create.
                     return;
                 };
