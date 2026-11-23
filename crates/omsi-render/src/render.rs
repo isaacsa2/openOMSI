@@ -1127,7 +1127,8 @@ impl Renderer {
         lighting: &Lighting,
         rig: Option<&TripleScreen>,
     ) -> Result<Vec<u8>> {
-        let tex = self.try_create_transient_texture(&wgpu::TextureDescriptor {
+        let tex = self
+            .try_create_transient_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
             size: wgpu::Extent3d {
                 width,
@@ -1178,7 +1179,8 @@ impl Renderer {
                 .block_copy_size(Some(aspect))
                 .context("unsupported readback format")?;
         let bpr = row_bytes.div_ceil(256) * 256;
-        let buf = self.try_create_transient_buffer(&wgpu::BufferDescriptor {
+        let buf = self
+            .try_create_transient_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
             size: (bpr * height) as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
