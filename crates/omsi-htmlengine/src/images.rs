@@ -14,6 +14,7 @@ const MAX_SRC_PX: u64 = 16 * 1024 * 1024;
 const MAX_DST_PX: u64 = 4 * 1024 * 1024;
 /// Memory the resized copies may hold together; the lot is dropped when it is exceeded.
 const SCALED_BUDGET: usize = 64 * 1024 * 1024;
+const SCALED_ENTRIES: usize = 512;
 /// Decoded original pictures need a budget too: an animated display can
 /// otherwise retain every file it has ever used for the entire journey.
 const ORIGINAL_BUDGET: usize = 64 * 1024 * 1024;
@@ -30,8 +31,37 @@ pub(crate) struct Img {
 
 #[derive(Default)]
 struct Scaled {
-    map: HashMap<(String, u32, u32), Arc<Img>>,
+    map: HashMap<(String, u32, u32), (Arc<Img>, u64)>,
     bytes: usize,
+    clock: u64,
+}
+
+impl Scaled {
+    fn get(&mut self, key: &(String, u32, u32)) -> Option<Arc<Img>> {
+        self.clock = self.clock.wrapping_add(1);
+        let (img, used) = self.map.get_mut(key)?;
+        *used = self.clock;
+        Some(img.clone())
+    }
+
+    fn insert_limited(&mut self, key: (String, u32, u32), img: Arc<Img>) {
+        let size = img.rgba.len();
+        if size > SCALED_BUDGET {
+            return;
+        }
+        self.clock = self.clock.wrapping_add(1);
+        if let Some((old, _)) = self.map.insert(key, (img, self.clock)) {
+            self.bytes = self.bytes.saturating_sub(old.rgba.len());
+        }
+        self.bytes = self.bytes.saturating_add(size);
+        while self.bytes > SCALED_BUDGET || self.map.len() > SCALED_ENTRIES {
+            let oldest = self.map.iter().min_by_key(|(_, (_, used))| *used).map(|(key, _)| key.clone());
+            let Some(oldest) = oldest else { break };
+            if let Some((old, _)) = self.map.remove(&oldest) {
+                self.bytes = self.bytes.saturating_sub(old.rgba.len());
+            }
+        }
+    }
 }
 
 /// Originals and missing-file lookups, with bounded memory and LRU timestamps.
@@ -176,21 +206,15 @@ impl ImageStore {
             return None;
         }
         let key = (src.to_string(), w, h);
-        if let Some(hit) = self.scaled.lock().unwrap().map.get(&key) {
-            return Some(hit.clone());
+        if let Some(hit) = self.scaled.lock().unwrap().get(&key) {
+            return Some(hit);
         }
         let out = Arc::new(resize(&orig, w, h));
         // A single large resize must not exceed the shared cache budget.
         if out.rgba.len() > SCALED_BUDGET {
             return Some(out);
         }
-        let mut g = self.scaled.lock().unwrap();
-        if g.bytes + out.rgba.len() > SCALED_BUDGET {
-            g.map.clear();
-            g.bytes = 0;
-        }
-        g.bytes += out.rgba.len();
-        g.map.insert(key, out.clone());
+        self.scaled.lock().unwrap().insert_limited(key, out.clone());
         Some(out)
     }
 }
@@ -369,5 +393,29 @@ mod original_cache_tests {
         }
         assert_eq!(cache.map.len(), 2);
         assert_eq!(cache.bytes, 0);
+    }
+}
+
+// Keep the hot resized variants instead of discarding every variant whenever
+// a new screen resolution pushes the cache over the budget.
+#[cfg(test)]
+mod scaled_cache_tests {
+    use super::*;
+
+    fn image() -> Arc<Img> {
+        Arc::new(Img { w: 1, h: 1, rgba: vec![255; 4], alpha: false })
+    }
+
+    #[test]
+    fn scaled_cache_evicts_least_recent_variant() {
+        let mut cache = Scaled::default();
+        for i in 0..SCALED_ENTRIES {
+            cache.insert_limited(("display".into(), i as u32 + 1, 1), image());
+        }
+        assert!(cache.get(&("display".into(), 1, 1)).is_some());
+        cache.insert_limited(("display".into(), 999, 1), image());
+        assert!(cache.get(&("display".into(), 1, 1)).is_some());
+        assert!(cache.get(&("display".into(), 2, 1)).is_none());
+        assert_eq!(cache.map.len(), SCALED_ENTRIES);
     }
 }
