@@ -38,6 +38,16 @@ pub(super) fn card_soft_over(video_limit: u64, card: omsi_render::GpuMemory, ste
     card.total().saturating_sub(soft_cap) / step * step
 }
 
+/// Keep the original 2 ms work slice until the card is near its hard cap;
+/// only then spend up to 4 ms on texture shrinking to free allocation room.
+pub(super) fn budget_pass_duration(forced: bool, urgent: bool) -> std::time::Duration {
+    if forced {
+        std::time::Duration::from_secs(3600)
+    } else {
+        std::time::Duration::from_millis(if urgent { 4 } else { 2 })
+    }
+}
+
 pub(super) fn card_restore_room(video_limit: u64, card: omsi_render::GpuMemory) -> u64 {
     match card.cap(video_limit) {
         0 => u64::MAX,
@@ -178,7 +188,13 @@ mod card_pressure_tests {
     use super::*;
 
     fn card(total: u64, budget: u64) -> omsi_render::GpuMemory {
-        omsi_render::GpuMemory { textures: total, meshes: 0, other: 0, budget: Some(budget), measured: true }
+        omsi_render::GpuMemory {
+            textures: total,
+            meshes: 0,
+            other: 0,
+            budget: Some(budget),
+            measured: true,
+        }
     }
 
     #[test]
@@ -193,7 +209,11 @@ mod card_pressure_tests {
     #[test]
     fn unknown_budget_without_limit_does_not_force_shrinks() {
         let unknown = omsi_render::GpuMemory {
-            textures: 2_000_000_000, meshes: 0, other: 0, budget: None, measured: false,
+            textures: 2_000_000_000,
+            meshes: 0,
+            other: 0,
+            budget: None,
+            measured: false,
         };
         assert_eq!(card_soft_over(0, unknown, 32 << 20), 0);
     }
