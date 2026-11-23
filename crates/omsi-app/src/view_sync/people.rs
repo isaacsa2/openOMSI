@@ -181,8 +181,7 @@ fn update_avatar_face(
                 w[*c as usize] = 1.0;
             }
         }
-        if omsi_cfg::flags::OMSI_DEBUG_FACE.is_set() && (frame_no < 8 || frame_no % 30 == 0)
-        {
+        if omsi_cfg::flags::OMSI_DEBUG_FACE.is_set() && (frame_no < 8 || frame_no % 30 == 0) {
             let mut top: Vec<(usize, f32)> = w
                 .iter()
                 .copied()
