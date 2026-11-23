@@ -1231,13 +1231,14 @@ impl Navigator {
                 renderer.free_texture(scene, t);
                 scene.premultiplied.remove(&t);
             }
-            if self.target_retry_after.is_some_and(|until| std::time::Instant::now() < until) {
+            let now = std::time::Instant::now();
+            if self.target_retry_after.is_some_and(|until| now < until) {
                 return;
             }
             let Some(t) = renderer.try_add_render_texture(scene, w, h) else {
                 // Keep the slot empty, not an invalid GPU resource permanently cached
                 // under the current size. Retry when the memory budget has settled.
-                self.target_retry_after = Some(std::time::Instant::now() + std::time::Duration::from_millis(500));
+                self.target_retry_after = Some(now + std::time::Duration::from_millis(500));
                 return;
             };
             self.target_retry_after = None;
