@@ -55,6 +55,8 @@ pub(crate) struct PeopleView {
     pub(crate) people: HashMap<u32, PersonView>,
     /// What the posing reads of the simulation, taken at each sync (its buffer kept).
     pub(crate) frame: PeopleFrame,
+    /// Reusable scratch for the poses of visible people. Avoid a fresh allocation every frame.
+    pose_states: Vec<PersonView>,
     pub(crate) sync_frame: u32,
     /// Animation choice for this session, refreshed on Android in-process launches.
     pub(crate) enhanced_poses: bool,
@@ -247,6 +249,7 @@ impl PeopleView {
             spare: HashMap::new(),
             people: HashMap::new(),
             frame: PeopleFrame::default(),
+            pose_states: Vec::new(),
             sync_frame: 0,
             enhanced_poses: animation::enabled(),
             mirror_hz: None,
@@ -890,11 +893,14 @@ impl PeopleView {
         let sdt = (frame.time - self.last_sync).clamp(0.0, 0.5) as f32;
         self.last_sync = frame.time;
         // everybody's pose as drawn, in the frame's order (put back below)
-        let mut states: Vec<PersonView> = frame
-            .people
-            .iter()
-            .map(|p| self.people.remove(&p.id).unwrap_or_default())
-            .collect();
+        let mut states = std::mem::take(&mut self.pose_states);
+        states.clear();
+        states.extend(
+            frame
+                .people
+                .iter()
+                .map(|p| self.people.remove(&p.id).unwrap_or_default()),
+        );
         let mut due = std::mem::take(&mut self.due);
         due.clear();
         let mirror_every = match self.mirror_hz {
@@ -1142,9 +1148,10 @@ impl PeopleView {
         }
         check_tpose(&frame, &states);
         drop(buses);
-        for (p, st) in frame.people.iter().zip(states) {
+        for (p, st) in frame.people.iter().zip(states.drain(..)) {
             self.people.insert(p.id, st);
         }
+        self.pose_states = states;
         self.frame = frame;
         self.due = due;
         self.pose_stats.0 += 1;
