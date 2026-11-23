@@ -62,11 +62,18 @@ pub(super) fn card_near_room(video_limit: u64, card: omsi_render::GpuMemory) -> 
     }
 }
 
-pub(super) fn card_hard_over(card: omsi_render::GpuMemory, video_limit: u64, card_over: u64, step: u64) -> u64 {
+pub(super) fn card_hard_over(
+    card: omsi_render::GpuMemory,
+    video_limit: u64,
+    card_over: u64,
+    step: u64,
+) -> u64 {
     match (card.budget, video_limit) {
         (None, _) => card_over,
         (Some(budget), 0) => (card.total().saturating_sub(budget) / step * step).min(card_over),
-        (Some(budget), limit) => (card.total().saturating_sub(budget.min(limit)) / step * step).min(card_over),
+        (Some(budget), limit) => {
+            (card.total().saturating_sub(budget.min(limit)) / step * step).min(card_over)
+        }
     }
 }
 
@@ -120,7 +127,9 @@ pub(super) fn queue_near_restores(
         if *d >= near || queued >= 24 || pending.contains(p) || gpu.wants_restore.contains(p) {
             continue;
         }
-        let Some(e) = gpu.textures.get_mut(p) else { continue };
+        let Some(e) = gpu.textures.get_mut(p) else {
+            continue;
+        };
         if e.dropped == 0 || e.retry_after.is_some_and(|t| t > t0) {
             continue;
         }
@@ -321,8 +330,12 @@ pub(super) fn texture_budget_snapshot(
     t0: std::time::Instant,
     last: Option<std::time::Instant>,
 ) -> (u64, bool, bool) {
-    gpu.textures.values().fold((0u64, false, false), |(b, d, r), e| {
-        let due = e.retry_after.is_some_and(|t| t <= t0 && last.is_none_or(|c| t > c));
-        (b + e.bytes, d || e.dropped > 0, r || due)
-    })
+    gpu.textures
+        .values()
+        .fold((0u64, false, false), |(b, d, r), e| {
+            let due = e
+                .retry_after
+                .is_some_and(|t| t <= t0 && last.is_none_or(|c| t > c));
+            (b + e.bytes, d || e.dropped > 0, r || due)
+        })
 }
