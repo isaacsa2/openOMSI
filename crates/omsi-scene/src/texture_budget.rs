@@ -23,6 +23,21 @@ pub(super) fn fit_upgrade(data: &Arc<TextureData>, allowed: u64) -> Option<Arc<T
     Some(upload)
 }
 
+/// Start trimming low-priority textures before running into the driver's hard budget.
+/// A small reserve lets mip downsizing allocate a replacement before the old mip chain
+/// is freed, and leaves room for mandatory UI targets and the driver's own allocations.
+/// The video-memory setting stays the hard upper bound; this is an earlier trigger.
+pub(super) fn card_soft_over(video_limit: u64, card: omsi_render::GpuMemory, step: u64) -> u64 {
+    let cap = card.cap(video_limit);
+    if cap == 0 || step == 0 {
+        return 0;
+    }
+    // Cap the reserve on large GPUs while still protecting low-VRAM devices.
+    let reserve = (cap / 8).clamp(128 << 20, 512 << 20).min(cap / 4);
+    let soft_cap = cap.saturating_sub(reserve);
+    card.total().saturating_sub(soft_cap) / step * step
+}
+
 pub(super) fn card_restore_room(video_limit: u64, card: omsi_render::GpuMemory) -> u64 {
     match card.cap(video_limit) {
         0 => u64::MAX,
@@ -155,5 +170,37 @@ impl World {
     pub fn texture_budget_bytes(&self) -> u64 {
         self.texture_limit
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod card_pressure_tests {
+    use super::*;
+
+    fn card(total: u64, budget: u64) -> omsi_render::GpuMemory {
+        omsi_render::GpuMemory { textures: total, meshes: 0, other: 0, budget: Some(budget), measured: true }
+    }
+
+    #[test]
+    fn small_card_trims_before_reaching_hard_limit() {
+        let cap = 3_000_000_000;
+        let before_pressure = card(2_000_000_000, 3_464_000_000);
+        let under_pressure = card(2_850_000_000, 3_464_000_000);
+        assert_eq!(card_soft_over(cap, before_pressure, 32 << 20), 0);
+        assert!(card_soft_over(cap, under_pressure, 32 << 20) > 0);
+    }
+
+    #[test]
+    fn unknown_budget_without_limit_does_not_force_shrinks() {
+        let unknown = omsi_render::GpuMemory {
+            textures: 2_000_000_000, meshes: 0, other: 0, budget: None, measured: false,
+        };
+        assert_eq!(card_soft_over(0, unknown, 32 << 20), 0);
+    }
+
+    #[test]
+    fn tiny_cap_cannot_reserve_more_than_a_quarter() {
+        let small = card(80 << 20, 2_000_000_000);
+        assert_eq!(card_soft_over(100 << 20, small, 1 << 20), 5 << 20);
     }
 }
