@@ -140,6 +140,8 @@ pub struct Gpu {
     sampler: wgpu::Sampler,
     /// The vertex buffers and their capacity (None: making it failed; tried again next upload).
     buffers: Vec<(Option<wgpu::Buffer>, u64)>,
+    /// Consecutive small uploads: shrink only after sustained low usage.
+    small_uploads: Vec<u16>,
     packed: Vec<Packed>,
     textures: Vec<Option<Tex>>,
     msaa: Option<(wgpu::TextureView, u32, u32)>,
@@ -239,7 +241,7 @@ impl Gpu {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        let mut g = Gpu { pipeline, pipeline_depth, pipeline_shadow, depth: None, tex_layout, uniform, uniform_group, sampler, buffers: Vec::new(), packed: Vec::new(), textures: Vec::new(), msaa: None, failed_target: None, samples, format, atlas_size: atlas_size.max(1), device: device.clone() };
+        let mut g = Gpu { pipeline, pipeline_depth, pipeline_shadow, depth: None, tex_layout, uniform, uniform_group, sampler, buffers: Vec::new(), small_uploads: Vec::new(), packed: Vec::new(), textures: Vec::new(), msaa: None, failed_target: None, samples, format, atlas_size: atlas_size.max(1), device: device.clone() };
         let atlas = vec![0u8; (atlas_size * atlas_size * 4) as usize];
         g.add_texture_internal(device, None, atlas_size, atlas_size, &atlas);
         g
@@ -371,10 +373,26 @@ impl Gpu {
         let bytes = std::mem::size_of_val(self.packed.as_slice()) as u64;
         while self.buffers.len() <= id {
             self.buffers.push((None, 0));
+            self.small_uploads.push(0);
         }
-        if bytes > self.buffers[id].1 || self.buffers[id].0.is_none() {
-            let cap = bytes.next_power_of_two().max(4096);
-            self.buffers[id] = (Self::vertex_buffer(device, cap, false), cap);
+        let cap = self.buffers[id].1;
+        if bytes > cap || self.buffers[id].0.is_none() {
+            let grown = bytes.next_power_of_two().max(4096);
+            self.buffers[id] = (Self::vertex_buffer(device, grown, false), grown);
+            self.small_uploads[id] = 0;
+        } else if cap >= (1 << 20) && bytes < cap / 4 {
+            // A short UI spike can need tens of MB; only reclaim the oversized buffer
+            // after 180 smaller uploads to avoid thrashing on menus and city-map pans.
+            self.small_uploads[id] = self.small_uploads[id].saturating_add(1);
+            if self.small_uploads[id] >= 180 {
+                let smaller = bytes.next_power_of_two().max(4096);
+                if let Some(new_buffer) = Self::vertex_buffer(device, smaller, false) {
+                    self.buffers[id] = (Some(new_buffer), smaller);
+                    self.small_uploads[id] = 0;
+                }
+            }
+        } else {
+            self.small_uploads[id] = 0;
         }
         if let (Some(buf), true) = (&self.buffers[id].0, bytes > 0) {
             queue.write_buffer(buf, 0, bytemuck::cast_slice(&self.packed));
@@ -406,6 +424,9 @@ impl Gpu {
         if let Some(b) = self.buffers.get_mut(id) {
             *b = (None, 0);
         }
+        if let Some(small) = self.small_uploads.get_mut(id) {
+            *small = 0;
+        }
     }
 
     pub fn drop_targets(&mut self) {
@@ -416,8 +437,10 @@ impl Gpu {
     pub fn put(&mut self, id: usize, v: Vertices) {
         while self.buffers.len() <= id {
             self.buffers.push((None, 0));
+            self.small_uploads.push(0);
         }
         self.buffers[id] = (v.0, v.1);
+        self.small_uploads[id] = 0;
     }
 
     /// A vertex buffer of `size` bytes, made where its failure can be seen: a card out of
