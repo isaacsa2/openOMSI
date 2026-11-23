@@ -55,7 +55,11 @@ impl Scaled {
         }
         self.bytes = self.bytes.saturating_add(size);
         while self.bytes > SCALED_BUDGET || self.map.len() > SCALED_ENTRIES {
-            let oldest = self.map.iter().min_by_key(|(_, (_, used))| *used).map(|(key, _)| key.clone());
+            let oldest = self
+                .map
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(key, _)| key.clone());
             let Some(oldest) = oldest else { break };
             if let Some((old, _)) = self.map.remove(&oldest) {
                 self.bytes = self.bytes.saturating_sub(old.rgba.len());
@@ -403,7 +407,12 @@ mod scaled_cache_tests {
     use super::*;
 
     fn image() -> Arc<Img> {
-        Arc::new(Img { w: 1, h: 1, rgba: vec![255; 4], alpha: false })
+        Arc::new(Img {
+            w: 1,
+            h: 1,
+            rgba: vec![255; 4],
+            alpha: false,
+        })
     }
 
     #[test]
