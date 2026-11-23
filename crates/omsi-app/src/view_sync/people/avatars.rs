@@ -494,14 +494,12 @@ impl Warm {
 
 /// Multiple read-ahead workers may be active while the figures list is growing.
 /// Reserve atomically, without exceeding the configured decoded-image budget.
-fn reserve_figure_bytes(
-    decoded: &std::sync::atomic::AtomicUsize,
-    bytes: usize,
-) -> bool {
+fn reserve_figure_bytes(decoded: &std::sync::atomic::AtomicUsize, bytes: usize) -> bool {
     use std::sync::atomic::Ordering;
     decoded
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
-            used.checked_add(bytes).filter(|&next| next <= FIGURES_AHEAD_BYTES)
+            used.checked_add(bytes)
+                .filter(|&next| next <= FIGURES_AHEAD_BYTES)
         })
         .is_ok()
 }
@@ -580,7 +578,7 @@ mod speech_cache_tests {
 
 #[cfg(test)]
 mod figure_budget_tests {
-    use super::{reserve_figure_bytes, FIGURES_AHEAD_BYTES};
+    use super::{FIGURES_AHEAD_BYTES, reserve_figure_bytes};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
