@@ -1103,12 +1103,18 @@ impl Renderer {
 
     /// Do not draw with an invalid render target if the GPU ran out of memory.
     /// Checked texture creation also reports OOM to the normal recovery path.
-    pub fn try_create_transient_texture(&self, desc: &wgpu::TextureDescriptor<'_>) -> Option<wgpu::Texture> {
+    pub fn try_create_transient_texture(
+        &self,
+        desc: &wgpu::TextureDescriptor<'_>,
+    ) -> Option<wgpu::Texture> {
         crate::resources::try_create_texture(&self.device, desc)
     }
 
     /// Readback buffers need the same error handling as scene mesh buffers.
-    pub fn try_create_transient_buffer(&self, desc: &wgpu::BufferDescriptor<'_>) -> Option<wgpu::Buffer> {
+    pub fn try_create_transient_buffer(
+        &self,
+        desc: &wgpu::BufferDescriptor<'_>,
+    ) -> Option<wgpu::Buffer> {
         crate::resources::try_create_buffer(&self.device, desc)
     }
 
@@ -1135,7 +1141,7 @@ impl Renderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         })
-        .context("offscreen image target could not be allocated on the GPU")?;
+            .context("offscreen image target could not be allocated on the GPU")?;
         let view = tex.create_view(&Default::default());
         // a picture on its own: the enhanced exposure is where the light puts it at once
         self.instant_exposure = true;
@@ -1178,7 +1184,7 @@ impl Renderer {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         })
-        .context("image readback buffer could not be allocated on the GPU")?;
+            .context("image readback buffer could not be allocated on the GPU")?;
         let mut enc = self.device.create_command_encoder(&Default::default());
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
