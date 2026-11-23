@@ -1,6 +1,10 @@
 //! Parked cars and props, the object editor, the texture budget and summaries.
 use super::*;
 
+#[path = "props_gpu_summary.rs"]
+mod props_gpu_summary;
+#[path = "props_texture_upgrades.rs"]
+mod props_texture_upgrades;
 #[path = "texture_budget.rs"]
 mod texture_budget;
 use texture_budget::*;
@@ -666,142 +670,6 @@ impl World {
         self.data.peek().ground.terrains.contains_key(&key)
     }
 
-    /// What the loaded tiles hold, for the streaming statistics.
-    pub fn gpu_summary(&self, scene: &Scene) -> String {
-        let (vehicle_tex, vehicle_formats) = {
-            let v = self.vehicle_textures.lock();
-            let mut f: std::collections::BTreeMap<String, (usize, u64)> =
-                std::collections::BTreeMap::new();
-            let mut total = 0u64;
-            for (t, _) in v.values() {
-                let b = scene.texture_bytes_of(*t);
-                total += b;
-                let e = f.entry(scene.texture_format_of(*t)).or_default();
-                e.0 += 1;
-                e.1 += b;
-            }
-            (
-                total,
-                f.iter()
-                    .map(|(k, (n, b))| format!("{n} {k} {:.0} MB", *b as f64 / 1e6))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            )
-        };
-        let (tile_tex, tile_formats) = {
-            let mut f: std::collections::BTreeMap<String, (usize, u64)> =
-                std::collections::BTreeMap::new();
-            let mut total = 0u64;
-            for t in self
-                .tile_state
-                .lock()
-                .values()
-                .flat_map(|s| s.gpu.textures.iter())
-            {
-                let b = scene.texture_bytes_of(*t);
-                total += b;
-                let e = f
-                    .entry(format!(
-                        "{} {}",
-                        scene.texture_format_of(*t),
-                        scene
-                            .texture_size_of(*t)
-                            .map(|s| format!("{}x{}", s.0, s.1))
-                            .unwrap_or_default()
-                    ))
-                    .or_default();
-                e.0 += 1;
-                e.1 += b;
-            }
-            let mut v: Vec<(String, (usize, u64))> = f.into_iter().collect();
-            v.sort_by(|a, b| b.1.1.cmp(&a.1.1));
-            (
-                total,
-                v.iter()
-                    .take(6)
-                    .map(|(k, (n, b))| format!("{n} {k} {:.0} MB", *b as f64 / 1e6))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            )
-        };
-        let all_formats = {
-            let mut f: std::collections::BTreeMap<String, (usize, u64)> =
-                std::collections::BTreeMap::new();
-            for t in 0..scene.textures.len() {
-                let b = scene.texture_bytes_of(t);
-                let e = f
-                    .entry(format!(
-                        "{} {}",
-                        scene.texture_format_of(t),
-                        scene
-                            .texture_size_of(t)
-                            .map(|s| format!("{}x{}", s.0, s.1))
-                            .unwrap_or_default()
-                    ))
-                    .or_default();
-                e.0 += 1;
-                e.1 += b;
-            }
-            let mut v: Vec<(String, (usize, u64))> = f.into_iter().collect();
-            v.sort_by(|a, b| b.1.1.cmp(&a.1.1));
-            let total: u64 = v.iter().map(|x| x.1.1).sum();
-            format!(
-                "{:.0} MB in all: {}",
-                total as f64 / 1e6,
-                v.iter()
-                    .take(30)
-                    .map(|(k, (n, b))| format!("{n} {k} {:.1} MB", *b as f64 / 1e6))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        if omsi_cfg::flags::OMSI_DEBUG_TEXTURES.is_set() {
-            log::info!("all textures by size: {all_formats}");
-        }
-        let gpu = self.gpu.lock();
-        let texels: u64 = gpu.textures.values().map(|t| t.texels).sum();
-        let bytes: u64 = gpu.textures.values().map(|t| t.bytes).sum();
-        let mut by_format: std::collections::BTreeMap<String, (usize, u64)> =
-            std::collections::BTreeMap::new();
-        for t in gpu.textures.values() {
-            let e = by_format.entry(format!("{:?}", t.format)).or_default();
-            e.0 += 1;
-            e.1 += t.bytes;
-        }
-        let formats: Vec<String> = by_format
-            .iter()
-            .map(|(k, (n, b))| format!("{n} {k} {:.0} MB", *b as f64 / 1e6))
-            .collect();
-        let (tex_all, mesh_all, other_all) = scene.gpu_bytes();
-
-        let free_instances: usize = gpu.free_instances.values().map(|v| v.len()).sum();
-        format!(
-            "{} tiles; {} scenery textures ({:.0} MB of texels, {:.0} MB on the GPU: {}), {} object types on the GPU, {} in the type cache; scene {} meshes / {} textures / {} materials / {} instances, free {} / {} / {} / {}; GPU {:.0} MB textures ({:.0} MB vehicles': {}; {:.0} MB tiles' own: {}), {:.0} MB meshes, {:.0} MB draw data",
-            self.tile_state.lock().len(),
-            gpu.textures.len(),
-            texels as f64 * 4.0 / 1e6,
-            bytes as f64 / 1e6,
-            formats.join(", "),
-            gpu.types.len(),
-            self.object_types.lock().len(),
-            scene.meshes.len(),
-            scene.textures.len(),
-            scene.materials.len(),
-            scene.instances.len(),
-            gpu.free_meshes.len(),
-            gpu.free_textures.len(),
-            gpu.free_materials.len(),
-            free_instances,
-            tex_all as f64 / 1e6,
-            vehicle_tex as f64 / 1e6,
-            vehicle_formats,
-            tile_tex as f64 / 1e6,
-            tile_formats,
-            mesh_all as f64 / 1e6,
-            other_all as f64 / 1e6
-        )
-    }
-
     /// What the loaded map holds in memory on the CPU side (MB, estimated from the sizes of
     /// the big buffers), for OMSI_PROFILE.
     pub fn cpu_summary(&self) -> String {
@@ -874,201 +742,6 @@ impl World {
             vehicle_textures,
             self.vehicle_gpu.lock().len()
         )
-    }
-
-    /// Swap in the textures compressed on the workers since the last call (until
-    /// `deadline`), and start compressing the ones uploaded as RGBA since. Returns how many
-    /// were swapped.
-    pub fn apply_texture_upgrades(
-        &self,
-        renderer: &Renderer,
-        scene: &mut Scene,
-        deadline: Option<std::time::Instant>,
-    ) -> usize {
-        let (wanted, restores) = {
-            let mut gpu = self.gpu.lock();
-            let mut w = std::mem::take(&mut gpu.wants_upgrade);
-            w.append(&mut self.freetex_upgrades.lock());
-            let r = std::mem::take(&mut gpu.wants_restore);
-            w.extend(r.iter().cloned());
-            (w, r)
-        };
-        if !wanted.is_empty() {
-            let mut pending = self.upgrades_pending.lock();
-            for path in wanted {
-                if !pending.insert(path.clone()) {
-                    continue;
-                }
-                let done = self.upgrades_done.clone();
-                let restore = restores.contains(&path);
-                let reloads = self.freetex_reloads.clone();
-                // (off the frame's pool: see `threads`)
-                crate::threads::background_pool().spawn(move || {
-                    let tracked = reloads.tracks(&path);
-                    let before = tracked
-                        .then(|| crate::freetex_reload::FileStamp::read(&path))
-                        .flatten();
-                    if let Some(t) = load_texture_key(&path, true).filter(|_| {
-                        !tracked || crate::freetex_reload::FileStamp::read(&path) == before
-                    }) {
-                        // (a texture over the budget comes back whatever it is, and so
-                        // does one put up at half its size meanwhile: see
-                        // `omsi_texture::gpu::halved_for_now`)
-                        if t.format.is_compressed()
-                            || restore
-                            || (t.width >= 256 && t.height >= 256)
-                        {
-                            done.lock().push((path, Arc::new(t), before));
-                            return;
-                        }
-                    }
-                    // nothing better to be had: it stays as it is
-                    done.lock().push((
-                        path,
-                        Arc::new(TextureData {
-                            width: 0,
-                            height: 0,
-                            format: omsi_texture::PixelFormat::Rgba8,
-                            levels: Vec::new(),
-                            has_alpha: false,
-                            gpu_mips: false,
-                        }),
-                        before,
-                    ));
-                });
-            }
-        }
-        let mut swapped: Vec<TextureId> = Vec::new();
-        let mut refreshed = 0;
-        let mut rebound_reload = 0;
-        // One ready file at most per frame, under the existing upload deadline.
-        // All cached material variants keep referring to this same texture id.
-        if deadline.is_none_or(|d| std::time::Instant::now() < d) {
-            if let Some(reload) = self.freetex_reloads.next() {
-                let id = self.vehicle_textures.lock().get(&reload.path).map(|e| e.0);
-                if id == Some(reload.id)
-                    && self
-                        .freetex_reloads
-                        .accepts(&reload.path, Some(reload.stamp))
-                {
-                    self.textures.release(&reload.path);
-                    self.freetex_reloads
-                        .remember(reload.id, reload.data.clone());
-                    if renderer.refresh_texture(scene, reload.id, &reload.data) {
-                        swapped.push(reload.id);
-                        rebound_reload = 1;
-                    }
-                    refreshed = 1;
-                }
-            }
-        }
-        let mut usage = self.budget_checked.lock().in_use;
-        let video_limit = self
-            .video_memory_limit
-            .load(std::sync::atomic::Ordering::Relaxed);
-        loop {
-            if deadline
-                .map(|d| std::time::Instant::now() >= d)
-                .unwrap_or(false)
-                && (!swapped.is_empty() || refreshed > 0)
-            {
-                break;
-            }
-            let Some((path, data, stamp)) = self.upgrades_done.lock().pop() else {
-                break;
-            };
-            self.upgrades_pending.lock().remove(&path);
-            if !self.freetex_reloads.accepts(&path, stamp) {
-                continue;
-            }
-            // the texture is still up under that name (it may have gone meanwhile)
-            let vid = self.vehicle_textures.lock().get(&path).map(|e| e.0);
-            let found = match vid {
-                Some(id) => Some((id, false, false)),
-                None => self
-                    .gpu
-                    .lock()
-                    .textures
-                    .get(&path)
-                    .map(|e| (e.id, e.near_restore, e.squeezed)),
-            };
-            let Some((id, near, squeezed)) = found else {
-                continue;
-            };
-            if data.levels.is_empty() {
-                // nothing better to be had (an upgrade that stays RGBA)
-                continue;
-            }
-            let card = renderer.gpu_memory(scene);
-            let before = scene.texture_bytes_of(id);
-            let allowed =
-                if near {
-                    let room = card_near_room(video_limit, card);
-                    if squeezed {
-                        room.min(
-                            before.saturating_add(texture_room(self.texture_budget_bytes(), usage)),
-                        )
-                    } else {
-                        room
-                    }
-                } else {
-                    card_near_room(video_limit, card).min(before.saturating_add(
-                        texture_restore_room(self.texture_budget_bytes(), usage, video_limit, card),
-                    ))
-                };
-            let upload = if self.player_textures.lock().contains(&path) {
-                data.clone()
-            } else {
-                let Some(upload) = fit_upgrade(&data, allowed) else {
-                    continue;
-                };
-                upload
-            };
-            let replaced = renderer.replace_texture(scene, id, &upload);
-            usage = (usage + scene.texture_bytes_of(id)).saturating_sub(before);
-            if self.freetex_reloads.snapshot(id).is_some() {
-                self.freetex_reloads.remember(id, data.clone());
-            }
-            if let Some(e) = self.gpu.lock().textures.get_mut(&path) {
-                e.record_upload(&data, scene);
-                e.retry_after = (e.dropped > 0)
-                    .then(|| std::time::Instant::now() + std::time::Duration::from_secs(5));
-            }
-            if replaced {
-                swapped.push(id);
-            }
-        }
-        let n = swapped.len();
-        // The materials are pointed at the new textures a quarter of a second after the
-        // first of them came in, all together: the rebinding looks through every material of
-        // the map (half a millisecond on Berlin-Spandau), and while driving a texture or two
-        // came in nearly every frame. Until then they draw the texture they had (the same
-        // picture: uncompressed, or with fewer levels).
-        let mut memo = self.budget_checked.lock();
-        if memo.rebind.is_empty() && n > 0 {
-            memo.rebind_since = Some(std::time::Instant::now());
-        }
-        memo.rebind.extend_from_slice(&swapped);
-        // (without a deadline - a picture - at once)
-        let due = deadline.is_none()
-            || memo.rebind.len() >= 64
-            || memo
-                .rebind_since
-                .is_some_and(|t| t.elapsed().as_secs_f32() >= 0.25);
-        if due && !memo.rebind.is_empty() {
-            let ids = std::mem::take(&mut memo.rebind);
-            drop(memo);
-            let t = std::time::Instant::now();
-            let rebound = renderer.rebind_textures(scene, &ids);
-            if omsi_cfg::flags::OMSI_PROFILE.is_set() {
-                log::info!(
-                    "textures: {} compressed ones swapped in, {rebound} materials rebound in {:.1} ms",
-                    ids.len(),
-                    t.elapsed().as_secs_f64() * 1000.0
-                );
-            }
-        }
-        n + refreshed - rebound_reload
     }
 
     /// Keep the textures within their budget, once a second (`force`: now, whatever was
@@ -1170,33 +843,14 @@ impl World {
         let states = self.tile_state.lock();
         let mut gpu = self.gpu.lock();
         let last = memo.checked;
-        let (scenery_bytes, any_dropped, retry_due) =
-            gpu.textures
-                .values()
-                .fold((0u64, false, false), |(b, d, r), e| {
-                    let due = e
-                        .retry_after
-                        .is_some_and(|t| t <= t0 && last.is_none_or(|c| t > c));
-                    (b + e.bytes, d || e.dropped > 0, r || due)
-                });
-        // Every texture of the scene counts against the card as well (the people, the
-        // script and text textures, the sky's and the terrain's): past half of the card's own
-        // memory, what they hold beyond it is taken from the scenery and the vehicles. The
-        // budget counted the scenery and the vehicles alone, and on an 8 GB card with a
-        // 4000 MB budget the textures grew to 5.4 GB over a drive; with the picture's targets
-        // the card paged to the system's memory and the frame rate fell from 140 to 25 (#2295).
+        let (scenery_bytes, any_dropped, retry_due) = texture_budget_snapshot(&gpu, t0, last);
+        // Count all scene textures, not just pictures belonging to tiles or vehicles.
         let texture_usage =
             scenery_bytes + vehicle_bytes + texture_overdraft(renderer.texture_bytes(scene));
-        // And everything the game holds on the card - the meshes, the render targets and
-        // shadow maps, the driver's own - stays within the video memory setting and the
-        // driver's budget: the textures counted against their budget alone, the game took
-        // gigabytes more than it was set to, and an 8 GB card paged to the system's memory
-        // past its budget. What is over goes from the textures, the only part that can give.
+        // Use the driver's measured total usage to enforce the video memory budget.
         let card = renderer.gpu_memory(scene);
         let card_cap = card.cap(video_limit);
-        // (in steps of 32 MiB: the driver's count wanders by a few MB from second to second,
-        // and every step up failed the idle look's check - the whole scan and its sort every
-        // second while over)
+        // Ignore tiny budget variations when deciding whether to shrink again.
         const STEP: u64 = 32 << 20;
         let card_over = card_soft_over(video_limit, card, STEP);
         let usage = if card_over > 0 {
@@ -1227,89 +881,8 @@ impl World {
         {
             return 0;
         }
-        let ts = tile_size();
-        let tile_distance = |k: &(i32, i32)| -> f64 {
-            centers
-                .iter()
-                .map(|c| {
-                    let (x0, y0) = (k.0 as f64 * ts, k.1 as f64 * ts);
-                    let dx = (x0 - c.x).max(c.x - (x0 + ts)).max(0.0);
-                    let dy = (y0 - c.y).max(c.y - (y0 + ts)).max(0.0);
-                    (dx * dx + dy * dy).sqrt()
-                })
-                .fold(f64::MAX, f64::min)
-        };
-        // how near each scenery texture is: the nearest tile that uses it
-        let mut near: hashbrown::HashMap<TextureId, f64> = hashbrown::HashMap::new();
-        let mut spline_textures = hashbrown::HashSet::new();
-        let (mut types, mut splines): (
-            hashbrown::HashMap<usize, f64>,
-            hashbrown::HashMap<usize, f64>,
-        ) = Default::default();
-        let (mut trees, mut shared): (
-            hashbrown::HashMap<&str, f64>,
-            hashbrown::HashMap<&PathBuf, f64>,
-        ) = Default::default();
-        for (key, st) in states.iter() {
-            let d = tile_distance(key);
-            let nearer = |e: &mut f64| *e = e.min(d);
-            st.gpu
-                .types
-                .iter()
-                .for_each(|t| nearer(types.entry(*t).or_insert(f64::MAX)));
-            st.gpu
-                .spline_types
-                .iter()
-                .for_each(|t| nearer(splines.entry(*t).or_insert(f64::MAX)));
-            st.gpu
-                .trees
-                .iter()
-                .for_each(|t| nearer(trees.entry(t.as_str()).or_insert(f64::MAX)));
-            st.gpu
-                .shared_textures
-                .iter()
-                .for_each(|p| nearer(shared.entry(p).or_insert(f64::MAX)));
-        }
-        {
-            let g = &*gpu;
-            let mut see = |p: &PathBuf, d: f64| {
-                if let Some(e) = g.textures.get(p) {
-                    let n = near.entry(e.id).or_insert(f64::MAX);
-                    *n = n.min(d);
-                }
-            };
-            for (t, d) in &types {
-                g.types
-                    .get(t)
-                    .into_iter()
-                    .flat_map(|t| t.textures.iter())
-                    .for_each(|p| see(p, *d));
-            }
-            for (t, d) in &splines {
-                for p in g.splines.get(t).into_iter().flat_map(|s| s.textures.iter()) {
-                    see(p, *d);
-                    spline_textures.insert(p.clone());
-                }
-            }
-            for (t, d) in &trees {
-                g.trees
-                    .get(*t)
-                    .and_then(|t| t.texture.as_ref())
-                    .into_iter()
-                    .for_each(|p| see(p, *d));
-            }
-            for (p, d) in &shared {
-                see(p, *d);
-            }
-        }
-        ground_is_near(&gpu, &mut near);
-        drop((trees, shared));
+        let (mut entries, spline_textures) = texture_budget_entries(&states, &gpu, centers);
         drop(states);
-        let mut entries: Vec<(f64, PathBuf)> = gpu
-            .textures
-            .iter()
-            .map(|(p, e)| (near.get(&e.id).copied().unwrap_or(f64::MAX), p.clone()))
-            .collect();
         let mut shrunk: Vec<TextureId> = Vec::new();
         let mut restoring = 0usize;
         let mut cut_short = false;
@@ -1371,10 +944,7 @@ impl World {
                     shrunk.push(e.id);
                 }
             }
-            // Still over: the vehicles' pictures give way as well, the biggest first, down
-            // to 1024 pixels a side. Counted but never made smaller, the timetable's fleet
-            // filled 5 GB of textures on a graphics chip with 0.5 GB of its own until the
-            // device was lost (#1463).
+            // Distant vehicles' textures can shrink after scenery textures.
             if over > 0 && shrunk.len() < 96 && !cut_short {
                 let mut own: Vec<(TextureId, u64)> = self
                     .vehicle_textures
@@ -1445,10 +1015,7 @@ impl World {
             }
             renderer.finish_level_drops(drops);
         } else {
-            // Room for the near ones to come back, with 15 % kept free: a texture
-            // restored only into the room under 85 % of the budget is not shrunk again
-            // before the textures have grown by that much (with a tenth, textures at
-            // 150-400 m went back and forth as the tiles around came and went).
+            // Restore nearby pictures only with enough headroom to avoid thrashing.
             entries.sort_by(|a, b| a.0.total_cmp(&b.0));
             let mut room =
                 texture_restore_room(limit, usage, video_limit, card).saturating_sub(reserved);
