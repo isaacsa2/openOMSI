@@ -170,6 +170,7 @@ pub struct Gpu {
     /// Consecutive small uploads: shrink only after sustained low usage.
     small_uploads: Vec<u16>,
     packed: Vec<Packed>,
+    packed_small_uploads: u16,
     textures: Vec<Option<Tex>>,
     msaa: Option<(wgpu::TextureView, u32, u32)>,
     failed_target: Option<(u32, u32)>,
@@ -371,6 +372,7 @@ impl Gpu {
             buffers: Vec::new(),
             small_uploads: Vec::new(),
             packed: Vec::new(),
+            packed_small_uploads: 0,
             textures: Vec::new(),
             msaa: None,
             failed_target: None,
@@ -630,6 +632,18 @@ impl Gpu {
         }
         if let (Some(buf), true) = (&self.buffers[id].0, bytes > 0) {
             queue.write_buffer(buf, 0, bytemuck::cast_slice(&self.packed));
+        }
+        // The CPU staging Vec also kept the largest UI upload forever. Reclaim only
+        // after sustained lower use, so a momentary UI spike does not cause churn.
+        let held_bytes = self.packed.capacity().saturating_mul(std::mem::size_of::<Packed>());
+        if held_bytes >= (1 << 20) && self.packed.len().saturating_mul(4) < self.packed.capacity() {
+            self.packed_small_uploads = self.packed_small_uploads.saturating_add(1);
+            if self.packed_small_uploads >= 180 {
+                self.packed.shrink_to(self.packed.len().max(1024));
+                self.packed_small_uploads = 0;
+            }
+        } else {
+            self.packed_small_uploads = 0;
         }
     }
 
