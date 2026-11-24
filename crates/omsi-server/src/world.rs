@@ -159,7 +159,9 @@ impl HostWorld {
             .iter()
             .map(|(_, x, y, p)| ((*x, *y), p.clone()))
             .collect();
-        let index = Arc::new(MapIndex::build(&files, &chrono_dirs, root));
+        let index = Arc::new(MapIndex::build(&files, &chrono_dirs, &|file: &str| {
+            omsi_cfg::resolve_path(root, file)
+        }));
         let mut data = WorldData {
             map: Arc::new(MapFacts {
                 root: root.to_path_buf(),
