@@ -367,7 +367,6 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SKY_CUBE_EVERY_FRAME` | bool | off | frame | render, render-mx | Enhanced: redraw a slice of the sky cube every frame again, not at most 60 a second (A/B). |
 | `OMSI_TERRAIN_ALIGN` | bool | off | use | scene, scene-mx | Align the terrain to the splines again at load (A/B; Omsi.exe does not). |
 | `OMSI_TEXTURE_RAIN` | bool | off | use | scene, scene-mx | OMSI 2's own texture rain on the glass instead of the drops. |
-| `OMSI_TEXTURE_RAM_CACHE_MB` | num | 128 desktop / 0 mobile | once | scene | Keep at most this many MiB of compressed static texture sources in system RAM (0 disables; capped at 512). |
 | `OMSI_TRACKIR_NATIVE` | text | on | use | input | 0 turns the native TrackIR interface off. |
 | `OMSI_TRAFFIC_ALL_GROUPS` | bool | off | use | app, app-mx, server | Let restricted AI groups (aircraft, depot fleets) drive everywhere. |
 | `OMSI_TYRE_SUSPENSION` | bool | off | once | sim | The old suspension with wheel mass, tyre and bump stops (A/B). |
@@ -401,6 +400,7 @@ effect. On Android, `openOMSI/env.txt` holds `NAME=value` lines that are set bef
 | `OMSI_SURFACE_BIAS` | num | -24 | use | render, render-mx | Depth bias of road surfaces. |
 | `OMSI_SURFACE_FLUSH` | num | 0.12 | once | sim | Height in metres under which a surface counts as flush with the road. |
 | `OMSI_TEXTURE_MEMORY` | num | settings | use | app, app-mx | Texture budget in MB. |
+| `OMSI_TEXTURE_RAM_CACHE_MB` | num | 128 desktop / 0 mobile | once | scene | Keep at most this many MiB of compressed static texture sources in system RAM (0 disables; capped at 512). |
 | `OMSI_TONE_CONTRAST` | text | 1 | once | render, render-mx | day[,night]: tone mapping contrast. |
 | `OMSI_VIDEO_MEMORY` | num | settings | use | app, app-mx | What the game may hold on the graphics card all together (textures, meshes, render targets), in MB. |
 | `OMSI_WIDE_AO` | text | - | use | render, render-mx | reach,strength,gain,max: the street-scale occlusion of the sky and the bounced light (m, 0..1, 0..1, radiance). |
