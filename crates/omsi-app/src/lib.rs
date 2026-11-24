@@ -757,8 +757,6 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
     let view = args.view.clone();
     let args_root_for_keys = args.root.clone();
     let clock_note = args.clock_moved.clone();
-    // (as the last session left it, #1164)
-    let info_bar = settings.info_bar;
     let is_server = args.server.is_some();
     let sky = crate::weather_setup::SkyState {
         look: args.session_settings,
@@ -893,6 +891,7 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             vehicle_list: Vec::new(),
             dropdown: None,
             vehicle_meta: std::collections::HashMap::new(),
+            vehicle_about: std::collections::HashMap::new(),
             hud: None,
             navigator: None,
             menu: None,
@@ -920,7 +919,8 @@ fn assemble_app(args: Args, settings: settings::Settings) -> App {
             key_capture: None,
             ctrl_add_action: false,
             menu_prev_pause: false,
-            info_bar,
+            // (as the last session left it, #1164)
+            info_bar: settings.info_bar,
             timetable: false,
             clean_screen: false,
             hud_resize: None,
