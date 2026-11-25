@@ -66,8 +66,8 @@ struct UploadPacer {
 impl UploadPacer {
     fn reserve(&mut self, now: Instant, bytes: usize) -> Duration {
         let start = self.next.max(now);
-        self.next = start
-            + Duration::from_secs_f64(bytes as f64 / self.bytes_per_second as f64);
+        let duration = Duration::from_secs_f64(bytes as f64 / self.bytes_per_second as f64);
+        self.next = start + duration;
         start.duration_since(now)
     }
 }
@@ -83,11 +83,8 @@ fn upload_limit(value: Option<&str>) -> u64 {
 fn pace_upload(bytes: usize) {
     static PACER: OnceLock<Option<Mutex<UploadPacer>>> = OnceLock::new();
     let pacer = PACER.get_or_init(|| {
-        let rate = upload_limit(
-            std::env::var("OMSI_MOD_UPLOAD_KIB_PER_SEC")
-                .ok()
-                .as_deref(),
-        );
+        let configured = std::env::var("OMSI_MOD_UPLOAD_KIB_PER_SEC").ok();
+        let rate = upload_limit(configured.as_deref());
         if rate == 0 {
             return None;
         }
