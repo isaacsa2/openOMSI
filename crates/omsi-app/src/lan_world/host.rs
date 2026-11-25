@@ -234,6 +234,7 @@ impl LanWorld {
                         .map(|(object, time, held)| LightState { object, time, held })
                         .collect();
                 }
+                frame.points = self.points.around(id);
             }
             // what went out of sight (or away) since the last frame
             let gone: Vec<Key> = view
