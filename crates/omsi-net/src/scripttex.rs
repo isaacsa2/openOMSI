@@ -68,28 +68,26 @@ fn encode_image(image: &Image, previous: Option<&Image>) -> Option<Vec<u8>> {
     raw.extend(image.height.to_le_bytes());
     raw.push(u8::from(image.mipmaps));
     if let Some(p) = previous {
+        let pixels = image.rgba.len() / 4;
+        let changed = |pixel: usize| {
+            let start = pixel * 4;
+            image.rgba[start..start + 4] != p.rgba[start..start + 4]
+        };
         let mut pixel = 0;
-        while pixel < image.rgba.len() / 4 {
-            if image.rgba[pixel * 4..pixel * 4 + 4] == p.rgba[pixel * 4..pixel * 4 + 4] {
+        while pixel < pixels {
+            if !changed(pixel) {
                 pixel += 1;
                 continue;
             }
             let first = pixel;
-            while pixel < image.rgba.len() / 4
-                && image.rgba[pixel * 4..pixel * 4 + 4] != p.rgba[pixel * 4..pixel * 4 + 4]
-            {
+            while pixel < pixels && changed(pixel) {
                 pixel += 1;
             }
             // A run header costs eight bytes; including one unchanged RGBA pixel
             // costs only four. Coalesce those gaps before compression.
-            while pixel + 1 < image.rgba.len() / 4
-                && image.rgba[(pixel + 1) * 4..(pixel + 2) * 4]
-                    != p.rgba[(pixel + 1) * 4..(pixel + 2) * 4]
-            {
+            while pixel + 1 < pixels && changed(pixel + 1) {
                 pixel += 2;
-                while pixel < image.rgba.len() / 4
-                    && image.rgba[pixel * 4..pixel * 4 + 4] != p.rgba[pixel * 4..pixel * 4 + 4]
-                {
+                while pixel < pixels && changed(pixel) {
                     pixel += 1;
                 }
             }
@@ -108,8 +106,9 @@ fn encode_image(image: &Image, previous: Option<&Image>) -> Option<Vec<u8>> {
         raw[0] = 1;
         raw.truncate(10);
         raw.extend(image.rgba.as_slice());
-        if let Some(full) = compress_image_bytes(&raw).filter(|f| f.len() < compressed.len()) {
-            compressed = full;
+        match compress_image_bytes(&raw) {
+            Some(full) if full.len() < compressed.len() => compressed = full,
+            _ => {}
         }
     }
     (compressed.len() <= MAX_BLOB).then_some(compressed)
@@ -461,16 +460,12 @@ impl Sync {
                         continue;
                     }
                     let reference = self.references.get(index).copied().flatten();
-                    let blob = if reference.is_none() && tx.baseline[index].is_none() {
-                        if let Some(blob) = initial_images.get(&index) {
-                            Some(Arc::clone(blob))
-                        } else {
-                            encode_image(image, None).map(|blob| {
-                                let blob = Arc::new(blob);
-                                initial_images.insert(index, Arc::clone(&blob));
-                                blob
-                            })
-                        }
+                    let initial = reference.is_none() && tx.baseline[index].is_none();
+                    let blob = if initial {
+                        initial_images
+                            .get(&index)
+                            .cloned()
+                            .or_else(|| encode_image(image, None).map(Arc::new))
                     } else {
                         reference
                             .and_then(|key| encode_reference(image, key))
@@ -484,6 +479,9 @@ impl Sync {
                         continue;
                     }
                     retained += blob.len();
+                    if initial {
+                        initial_images.insert(index, Arc::clone(&blob));
+                    }
                     let Some(seq) = tx.seq.checked_add(1) else {
                         break;
                     };
