@@ -14,6 +14,8 @@ const MAX_BLOB: usize = MAX_BYTES * 2 + 64;
 const MAX_TEXTURES: usize = 64;
 const MAX_RETAINED: usize = 64 * 1024 * 1024;
 const WINDOW: usize = 16;
+// Leave room for poses, voice and other applications sharing the uplink.
+const DEFAULT_PACKET_BUDGET: usize = 8;
 const RETRY: f32 = 0.25;
 const SUBSCRIBE: u8 = 0;
 const DATA: u8 = 1;
@@ -77,6 +79,19 @@ fn encode_image(image: &Image, previous: Option<&Image>) -> Option<Vec<u8>> {
             {
                 pixel += 1;
             }
+            // A run header costs eight bytes; including one unchanged RGBA pixel
+            // costs only four. Coalesce those gaps before compression.
+            while pixel + 1 < image.rgba.len() / 4
+                && image.rgba[(pixel + 1) * 4..(pixel + 2) * 4]
+                    != p.rgba[(pixel + 1) * 4..(pixel + 2) * 4]
+            {
+                pixel += 2;
+                while pixel < image.rgba.len() / 4
+                    && image.rgba[pixel * 4..pixel * 4 + 4] != p.rgba[pixel * 4..pixel * 4 + 4]
+                {
+                    pixel += 1;
+                }
+            }
             raw.extend((first as u32).to_le_bytes());
             raw.extend(((pixel - first) as u32).to_le_bytes());
             raw.extend(&image.rgba[first * 4..pixel * 4]);
@@ -84,10 +99,27 @@ fn encode_image(image: &Image, previous: Option<&Image>) -> Option<Vec<u8>> {
     } else {
         raw.extend(image.rgba.as_slice());
     }
-    let mut compressor = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
-    compressor.write_all(&raw).ok()?;
-    let compressed = compressor.finish().ok()?;
+    let mut compressed = compress_image_bytes(&raw)?;
+    // Dense/fragmented deltas may cost more than an independently compressed full
+    // image. Both representations already exist in the wire format. Avoid a second
+    // compression pass for sparse updates and keep whichever is smaller otherwise.
+    if previous.is_some() && raw.len() >= (10 + image.rgba.len()) / 2 {
+        raw[0] = 1;
+        raw.truncate(10);
+        raw.extend(image.rgba.as_slice());
+        if let Some(full) = compress_image_bytes(&raw)
+            && full.len() < compressed.len()
+        {
+            compressed = full;
+        }
+    }
     (compressed.len() <= MAX_BLOB).then_some(compressed)
+}
+
+fn compress_image_bytes(raw: &[u8]) -> Option<Vec<u8>> {
+    let mut compressor = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    compressor.write_all(raw).ok()?;
+    compressor.finish().ok()
 }
 
 fn encode_reference(image: &Image, key: [u8; 32]) -> Option<Vec<u8>> {
@@ -267,7 +299,7 @@ impl Default for Sync {
         Self {
             references: Vec::new(),
             reusable: BTreeMap::new(),
-            packet_budget: 32,
+            packet_budget: DEFAULT_PACKET_BUDGET,
             local: None,
             senders: BTreeMap::new(),
             receivers: BTreeMap::new(),
@@ -802,7 +834,7 @@ mod tests {
         flate2::read::ZlibDecoder::new(delta.as_slice())
             .read_to_end(&mut raw)
             .unwrap();
-        assert_eq!(raw[0], 0, "an update is never a full-image packet");
+        assert_eq!(raw[0], 0, "a sparse update remains a delta");
         assert_eq!(raw.len(), 10 + 2 * (8 + 4), "only two changed RGBA pixels");
         owner.set_local(77, vec![Some(changed.clone())]);
         exchange(&mut owner, &mut reader, 100, true);
@@ -819,9 +851,67 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_changes_share_a_run_and_preserve_unchanged_pixels() {
+        let original = image(64, 64);
+        let mut changed = original.clone();
+        let pixels = Arc::make_mut(&mut changed.rgba);
+        pixels[0] ^= 255;
+        pixels[8] ^= 255;
+        let blob = encode_image(&changed, Some(&original)).unwrap();
+        let mut raw = Vec::new();
+        flate2::read::ZlibDecoder::new(blob.as_slice())
+            .read_to_end(&mut raw)
+            .unwrap();
+        assert_eq!(raw[0], 0);
+        assert_eq!(raw.len(), 10 + 8 + 12);
+        assert_eq!(decode_image(&blob, Some(&original)), Some(changed));
+    }
+
+    #[test]
+    fn dense_updates_can_use_a_smaller_full_image_without_a_protocol_change() {
+        let original = Image {
+            width: 128,
+            height: 64,
+            mipmaps: false,
+            rgba: Arc::new(vec![0; 128 * 64 * 4]),
+        };
+        let mut changed = original.clone();
+        for pixel in Arc::make_mut(&mut changed.rgba).chunks_exact_mut(4).step_by(3) {
+            pixel.copy_from_slice(&[1, 2, 3, 4]);
+        }
+        let blob = encode_image(&changed, Some(&original)).unwrap();
+        let full = encode_image(&changed, None).unwrap();
+        assert!(blob.len() <= full.len());
+        assert_eq!(decode_image(&blob, Some(&original)), Some(changed));
+    }
+
+    #[test]
+    fn default_texture_pacing_shares_a_bounded_burst_between_subscribers() {
+        let original = image(128, 64);
+        let mut owner = Sync::default();
+        owner.set_local(7, vec![Some(original)]);
+        for id in 2..=5 {
+            let mut reader = Sync::default();
+            reader.subscribe(1, 7);
+            for request in reader.tick(5, id, 0.05) {
+                owner.receive(5, 1, &request);
+            }
+        }
+        let mut recipients = std::collections::BTreeSet::new();
+        for _ in 0..4 {
+            let packets = owner.tick(5, 1, 0.05);
+            assert_eq!(packets.len(), DEFAULT_PACKET_BUDGET);
+            for packet in packets {
+                recipients.insert(address(&packet, 5).unwrap().to);
+            }
+        }
+        assert_eq!(recipients.len(), 4);
+    }
+
+    #[test]
     fn fragments_are_atomic_and_a_lost_commit_ack_is_retried() {
         let original = image(64, 64);
-        let mut owner = Sync::default();
+        let mut owner = Sync::with_packet_budget(32);
         let mut reader = Sync::default();
         owner.set_local(7, vec![Some(original.clone())]);
         reader.subscribe(1, 7);
