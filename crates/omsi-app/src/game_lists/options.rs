@@ -693,7 +693,9 @@ fn toggle_set_gameplay(
         }
         "passenger_ambient_talk" => {
             app.settings.passenger_ambient_talk = on;
-            if let Some(h) = app.session.humans.as_mut() { h.ambient_talk = on; }
+            if let Some(h) = app.session.humans.as_mut() {
+                h.ambient_talk = on;
+            }
             Some(("passenger_ambient_talk", bit))
         }
         "passenger_hailing" => {
@@ -1002,7 +1004,9 @@ fn toggle_set_environment_and_graphics(
         }
         "pax_bad_driving_alight" => {
             app.settings.pax_bad_driving_alight = on;
-            if let Some(h) = app.session.humans.as_mut() { h.bad_driving_alight = on; }
+            if let Some(h) = app.session.humans.as_mut() {
+                h.bad_driving_alight = on;
+            }
             Some(("pax_bad_driving_alight", bit))
         }
         "pax_stop_numbers_exact" => {
