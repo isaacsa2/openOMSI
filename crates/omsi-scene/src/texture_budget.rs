@@ -761,5 +761,4 @@ impl World {
         }
         shrunk_n + restoring
     }
-
 }
