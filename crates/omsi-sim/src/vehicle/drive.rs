@@ -12,12 +12,24 @@ pub(super) fn script_speed(speed_kmh: f32) -> f32 {
     }
 }
 
+/// `Velocity` (m/s) from the driven wheels' speed (`driven_wheels_speed`, `None` without
+/// driven wheels): Omsi.exe (0x7e2574) works `Velocity` out of `n_Wheel`, the driven axles'
+/// turning, which is 0 when the vehicle has no driven axle (the count at +0x71c, 0x7cffb8) -
+/// so such a vehicle's `Velocity` stays 0 however it rolls. Only a vehicle without any axle
+/// shows the body's speed there (`body`).
+pub(super) fn speedometer_speed(driven: Option<f32>, has_axles: bool, body: f32) -> f32 {
+    match driven {
+        Some(v) => v,
+        None if has_axles => 0.0,
+        None => body,
+    }
+}
+
 /// The speed the driven wheels' turning gives (m/s): the mean of their rims' speed, each
 /// wheel's spin (rad/s) times its radius - Omsi.exe's `Velocity` (0x7e2574 sums each driven
 /// axle's two wheel speeds times its size, averages them over the driven wheels and turns
 /// that into km/h), while its `Velocity_Ground` is the body's speed. They part when a wheel
-/// spins or locks. `None` for a vehicle without driven wheels: then OMSI's `Velocity` is the
-/// body's speed too.
+/// spins or locks. `None` for a vehicle without driven wheels (see `speedometer_speed`).
 pub(super) fn driven_wheels_speed(wheels: impl Iterator<Item = (f32, f32, bool)>) -> Option<f32> {
     let (sum, n) = wheels
         .filter(|w| w.2)
@@ -25,6 +37,25 @@ pub(super) fn driven_wheels_speed(wheels: impl Iterator<Item = (f32, f32, bool)>
             (sum + spin * radius, n + 1)
         });
     (n > 0).then(|| sum / n as f32)
+}
+
+/// `n_Wheel` (rpm) as Omsi.exe works it out (0x7e2574, before it sets `Velocity`): each
+/// driven axle's two wheels' rpm times that axle's diameter, summed and divided by twice the
+/// driven axles times the diameter of the first axle - the mean turning of all driven
+/// wheels, as the first axle's wheel would turn at their speed. Each item is a wheel's
+/// (rpm, radius, driven); `first_radius` is the first axle's. `None` without driven wheels.
+/// (The first driven wheel's own rpm, read before, swung with the side of the bend it was on
+/// and with that one wheel spinning.)
+pub(super) fn driven_wheels_rpm(
+    wheels: impl Iterator<Item = (f32, f32, bool)>,
+    first_radius: f32,
+) -> Option<f32> {
+    let (sum, n) = wheels
+        .filter(|w| w.2)
+        .fold((0.0f32, 0u32), |(sum, n), (rpm, radius, _)| {
+            (sum + rpm * radius, n + 1)
+        });
+    (n > 0 && first_radius > 0.0).then(|| sum / (n as f32 * first_radius))
 }
 
 /// How far either side of the track's middle a rail vehicle meets scenery under its body
@@ -431,14 +462,16 @@ impl VehicleInstance {
         let v = script_speed(self.physics.velocity_kmh());
         self.put(self.v_velocity, v);
         self.put(self.v_velocity_ground, v);
-        let n_wheel = self
-            .physics
-            .wheels
-            .iter()
-            .find(|w| w[0].driven)
-            .or(self.physics.wheels.first())
-            .map(|w| w[0].rpm)
-            .unwrap_or(0.0);
+        let n_wheel = driven_wheels_rpm(
+            self.physics
+                .wheels
+                .iter()
+                .flatten()
+                .map(|w| (w.rpm, w.radius, w.driven)),
+            self.physics.wheels.first().map_or(0.0, |a| a[0].radius),
+        )
+        .or_else(|| self.physics.wheels.first().map(|w| w[0].rpm))
+        .unwrap_or(0.0);
         self.put(self.v_n_wheel, n_wheel);
         let a = self.physics.accel;
         self.physics.a_trans = a;
@@ -508,12 +541,7 @@ impl VehicleInstance {
                 crate::rigid::CoupledPart {
                     point: first.coupling_back,
                     dir,
-                    mass: if def.mass < 100.0 {
-                        def.mass * 1000.0
-                    } else {
-                        def.mass
-                    }
-                    .max(0.0),
+                    mass: def.mass_kg().max(0.0) + t.load_kg,
                     driven_wheels: driven.len() * 2,
                     radius: driven
                         .first()
@@ -527,7 +555,15 @@ impl VehicleInstance {
                         .sum::<f32>()
                         + def.rolling_resistance.max(0.0),
                     load: (0..def.axles.len()).map(wheel_load).sum(),
-                    joint_load: t.joint_load,
+                    // (the people in it hang on the coupling in the share its own weight does)
+                    joint_load: t.joint_load * (1.0 + t.load_kg / def.mass_kg().max(500.0)),
+                    spin: t.drive_spin,
+                    slipping: t.drive_slipping,
+                    inertia_inv: driven
+                        .first()
+                        .map(|&a| def.axles[a].inertia_inv)
+                        .filter(|i| *i > 0.0)
+                        .unwrap_or(crate::rigid::DEFAULT_INERTIA_INV),
                 }
             })
             .collect()
@@ -589,6 +625,10 @@ impl VehicleInstance {
                     .collect()
             });
             rb.step(dt, m_wheel, brakes, steer, probe);
+            // (the turning of the rear sections' driven wheels goes on in the next step)
+            for (t, d) in self.trailers.iter_mut().zip(&rb.coupled) {
+                (t.drive_spin, t.drive_slipping) = (d.spin, d.slipping);
+            }
             for (w, (r, t)) in rb.wheels.iter_mut().zip(rail_turns.into_iter().flatten()) {
                 (w.rotation_deg, w.turned) = (r, t);
             }
@@ -727,11 +767,37 @@ impl VehicleInstance {
         // `Velocity` is what the driven wheels' turning makes of the speed, `Velocity_Ground`
         // the body's own (see `driven_wheels_speed`): a wheel spinning on ice or locked by
         // the brake shows on the speedometer as in OMSI.
-        let wheels = rb.wheels.iter().map(|w| (w.spin, w.radius, w.driven));
+        // a `[scriptshare]` rear section's driven axles are counted with this vehicle's
+        // (0x7cffb8 shares the count, 0x7e2574 adds their wheels' turning to `n_Wheel`),
+        // two wheels an axle turning as the leading body's step turned them (#1083; on the
+        // rails, with the train's speed)
+        let rails = self.on_rails();
+        let rear: Vec<(f32, f32, bool)> = self
+            .trailers
+            .iter()
+            .filter(|t| t.ty.def.script_share)
+            .flat_map(|t| {
+                t.ty.def
+                    .axles
+                    .iter()
+                    .filter(|a| a.driven)
+                    .flat_map(move |a| {
+                        let r = (a.wheel_diameter / 2.0).max(0.15);
+                        let spin = if rails { speed / r } else { t.drive_spin };
+                        [(spin, r, true); 2]
+                    })
+            })
+            .collect();
+        let wheels = rb
+            .wheels
+            .iter()
+            .map(|w| (w.spin, w.radius, w.driven))
+            .chain(rear.iter().copied());
         // (a bus standing on its brakes: the wheels' rocking of a few hundredths of a metre a
         // second is no speed, scripts test `!Velocity` for a bus at rest)
         let ground = script_speed(speed * 3.6);
-        let wheels = driven_wheels_speed(wheels).unwrap_or(speed) * 3.6;
+        let driven = driven_wheels_speed(wheels);
+        let wheels = speedometer_speed(driven, !rb.wheels.is_empty(), speed) * 3.6;
         let v = if ground == 0.0 && wheels.abs() < 0.5 {
             0.0
         } else {
@@ -739,13 +805,15 @@ impl VehicleInstance {
         };
         self.put(self.v_velocity, v);
         self.put(self.v_velocity_ground, ground);
-        let n_wheel = rb
-            .wheels
-            .iter()
-            .find(|w| w.driven)
-            .or(rb.wheels.first())
-            .map(|w| w.rpm)
-            .unwrap_or(0.0);
+        let n_wheel = driven_wheels_rpm(
+            rb.wheels.iter().map(|w| (w.rpm, w.radius, w.driven)).chain(
+                rear.iter()
+                    .map(|&(spin, r, d)| (spin * 60.0 / std::f32::consts::TAU, r, d)),
+            ),
+            rb.wheels.first().map_or(0.0, |w| w.radius),
+        )
+        .or_else(|| rb.wheels.first().map(|w| w.rpm))
+        .unwrap_or(0.0);
         self.put(self.v_n_wheel, n_wheel);
         // `A_Trans_*` as Omsi.exe has them (0x7d5124): the change of the body's velocity
         // over the frame, turned into the body frame - its acceleration, not what an

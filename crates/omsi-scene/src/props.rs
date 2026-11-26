@@ -3,7 +3,6 @@ use super::*;
 
 #[path = "texture_budget.rs"]
 mod texture_budget;
-pub(super) use texture_budget::BudgetMemo;
 use texture_budget::*;
 
 #[cfg(test)]
@@ -1332,4 +1331,93 @@ pub(super) fn mesh_bounds(m: &MeshData, xf: &Mat4, origin: DVec3) -> [f64; 4] {
         b[3] = b[3].max(w.y);
     }
     b
+}
+
+/// What all textures of the scene (`total`, bytes) hold beyond half of the graphics card's
+/// own memory (none on a card that shares the system's memory, whose size is not known).
+fn texture_overdraft(total: u64) -> u64 {
+    let vram_mb = omsi_render::ADAPTER_VRAM_MB.load(std::sync::atomic::Ordering::Relaxed);
+    if vram_mb == 0 {
+        return 0;
+    }
+    total.saturating_sub(vram_mb * 1_000_000 / 2)
+}
+
+/// Which look at the texture budget (see [`World::update_texture_budget`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BudgetPass {
+    /// The one a second.
+    Timed,
+    /// Now, the whole of it.
+    Now,
+    /// After a streaming frame: only when over the budget.
+    AfterStreaming,
+}
+
+/// What the texture budget's last look found (see [`World::update_texture_budget`]).
+#[derive(Default)]
+pub(super) struct BudgetMemo {
+    /// When it last looked.
+    pub(super) checked: Option<std::time::Instant>,
+    /// The last pass ran out of its time: the next frame goes on with it.
+    pub(super) resume: bool,
+    /// Textures swapped in whose materials still bind the texture they replaced (see
+    /// `World::apply_texture_upgrades`), and since when.
+    rebind: Vec<TextureId>,
+    rebind_since: Option<std::time::Instant>,
+    /// The last full look found nothing to do, with these tiles (`World::tiles_generation`),
+    /// these bytes in use (within a hundredth of the budget below: the textures compressed
+    /// on the workers come in one by one and change it a little all the time) and the
+    /// centers here.
+    idle: bool,
+    generation: u64,
+    usage: u64,
+    limit: u64,
+    room: u64,
+    centers: Vec<DVec3>,
+    pub(super) in_use: u64,
+    pub(super) near_retry_at: Option<std::time::Instant>,
+}
+
+impl BudgetMemo {
+    /// How far a center may move before the textures' distances are looked at again.
+    const MOVED: f64 = 25.0;
+
+    fn unchanged(
+        &self,
+        generation: u64,
+        usage: u64,
+        limit: u64,
+        room: u64,
+        centers: &[DVec3],
+    ) -> bool {
+        self.idle
+            && self.generation == generation
+            && self.limit == limit
+            && room <= self.room.saturating_add(64 << 20)
+            && usage <= self.usage.max(limit)
+            && usage + limit / 100 >= self.usage
+            && self.centers.len() == centers.len()
+            && self.centers.iter().zip(centers).all(|(a, b)| {
+                a.truncate().distance_squared(b.truncate()) < Self::MOVED * Self::MOVED
+            })
+    }
+
+    fn remember(
+        &mut self,
+        generation: u64,
+        usage: u64,
+        limit: u64,
+        room: u64,
+        centers: &[DVec3],
+        idle: bool,
+    ) {
+        self.idle = idle;
+        self.room = room;
+        self.generation = generation;
+        self.usage = usage;
+        self.limit = limit;
+        self.centers.clear();
+        self.centers.extend_from_slice(centers);
+    }
 }

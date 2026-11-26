@@ -86,6 +86,11 @@ impl Renderer {
             && (self.temporal_failed || self.temporal_pipes.is_none())
         {
             self.fall_back_without_upscaler(scene);
+        } else if self
+            .upscaler_retry
+            .is_some_and(|(at, _)| at.elapsed() >= crate::pipelines::errors::OUT_OF_MEMORY_SPELL)
+        {
+            self.retry_upscaler(scene);
         }
         true
     }
@@ -238,8 +243,11 @@ impl Renderer {
             scene,
             &eye,
             enhanced_frame,
-            lighting.lamp_shadows
-                && self.options.light_shadows > 0
+            // (the saloon's lamps always have their maps in the Enhanced picture - the
+            // seats', the handrails' and the partitions' shadows under them; the street's
+            // and the headlamps' follow `light_shadows`, see `LampTiles::tiles`)
+            enhanced_frame
+                && lighting.lamp_shadows
                 && with_overlays
                 && projection.is_none()
                 && self.shadows.shadow_pipelines.len() > 6,
@@ -326,6 +334,9 @@ impl Renderer {
                 .is_some_and(|rt| rt.ensure_targets(&self.device, width, height))
         {
             // the camera bind group must point at the new lighting texture
+            scene.camera_heaps = None;
+        }
+        if rt_frame && self.ensure_rt_gi(width, height) {
             scene.camera_heaps = None;
         }
         if masked_frame {
@@ -519,6 +530,11 @@ impl Renderer {
                     if v.overcast { 1.0 } else { 0.0 },
                     ro.z as f32,
                 ],
+                moon: lighting
+                    .moon_dir
+                    .normalize_or_zero()
+                    .extend(crate::lighting::MOON_RADIUS)
+                    .to_array(),
             };
             self.queue
                 .write_buffer(&self.sky.vanilla_sky_buf, 0, bytemuck::bytes_of(&u))
@@ -611,8 +627,14 @@ impl Renderer {
                 lighting.cloud_density,
                 lighting.cloud_offset[0],
                 lighting.cloud_offset[1],
-                // (2: the traced lighting, full size, see `ao_at`)
-                if rt_frame {
+                // (2: the traced lighting, full size, see `ao_at`; 3: with the traced global
+                // illumination, see `gi_at`)
+                if rt_frame
+                    && self.options.rt_gi
+                    && self.rt.as_ref().is_some_and(|r| r.gi_view().is_some())
+                {
+                    3.0
+                } else if rt_frame {
                     2.0
                 } else if ao_on {
                     1.0
@@ -762,7 +784,7 @@ impl Renderer {
                 camera.near,
             );
             self.prepare_ray_tracing(
-                scene, camera, lighting, vp_mat, proj, f.width, f.height, f.dt,
+                scene, camera, lighting, vp_mat, proj, f.width, f.height, f.dt, f.grid,
             );
             clock.stage(self, "ray tracing", "mirror.ray tracing");
         }

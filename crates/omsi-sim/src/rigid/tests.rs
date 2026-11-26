@@ -361,6 +361,9 @@ fn pusher_front_section_is_pushed_through_the_joint() {
         brake: 0.0,
         load: 70_000.0,
         joint_load: 0.0,
+        spin: 0.0,
+        slipping: false,
+        inertia_inv: DEFAULT_INERTIA_INV,
     };
     let g = road(1e9, 0.0);
     let start = |def: &Vehicle, parts: Vec<CoupledPart>| {
@@ -453,6 +456,54 @@ fn pusher_front_section_is_pushed_through_the_joint() {
     );
 }
 
+/// #1083: the driven axle of a pusher's rear section spins on ice as the bus's own driven
+/// wheels do (Omsi.exe runs the section as a vehicle of its own wheels): asked for more than
+/// the road gives, its wheels turn faster than the bus goes and push it with the sliding
+/// friction; let off, they grip again.
+#[test]
+fn a_pushers_driven_rear_axle_spins_on_ice() {
+    let mut def = bus();
+    def.axles.iter_mut().for_each(|a| a.driven = false);
+    let rear = CoupledPart {
+        point: Vec3::new(0.0, -4.456, 0.503),
+        dir: Vec3::Y,
+        mass: 0.0,
+        driven_wheels: 2,
+        radius: 0.47,
+        driven_load: 70_000.0,
+        brake: 0.0,
+        load: 70_000.0,
+        joint_load: 0.0,
+        spin: 0.0,
+        slipping: false,
+        inertia_inv: DEFAULT_INERTIA_INV,
+    };
+    let g = road(1e9, 0.0);
+    let mut rb = RigidBody::from_definition(&def, &[]);
+    rb.coupled = vec![rear];
+    rb.place(DVec3::ZERO, 0.0);
+    run(&mut rb, 1.0, 0.0, 5000.0, &g);
+    // ice: a tenth of the grip; 9 kN m at the wheels asks 9.6 kN of each tyre, which
+    // carries 35 kN
+    rb.friction = 0.1;
+    run(&mut rb, 1.0, 9000.0, 0.0, &g);
+    let part = rb.coupled[0];
+    let v = rb.forward_speed();
+    assert!(part.slipping, "{part:?}");
+    assert!(
+        part.spin * part.radius > v + 2.0,
+        "wheels at {} m/s, the bus at {v} m/s",
+        part.spin * part.radius
+    );
+    // pushed by what the ice gives: 0.1 x 70 kN on 12 t, about 0.6 m/s²
+    assert!(v > 0.2 && v < 1.2, "{v}");
+    // let off, the wheels come back to the road's speed
+    run(&mut rb, 2.0, 0.0, 0.0, &g);
+    let part = rb.coupled[0];
+    assert!(!part.slipping, "{part:?}");
+    assert!((part.spin * part.radius - rb.forward_speed()).abs() < 0.05);
+}
+
 /// A towed part on a grade pulls the body down it, and its brakes hold it there.
 #[test]
 fn towed_weight_on_a_grade() {
@@ -469,6 +520,9 @@ fn towed_weight_on_a_grade() {
         brake: 0.0,
         load: 70_000.0,
         joint_load: 0.0,
+        spin: 0.0,
+        slipping: false,
+        inertia_inv: DEFAULT_INERTIA_INV,
     };
     let mut rb = RigidBody::from_definition(&def, &[]);
     rb.coupled = vec![CoupledPart {
@@ -1612,48 +1666,7 @@ fn the_weather_changes_the_drag_the_scripts_give() {
     );
 }
 
-/// The OMSI 2 model (the setting off) is as it was: a bus follows its wheels at any speed
-/// short of the grip, asphalt is smooth, and the old drag (the mass-guessed area) acts.
-#[test]
-fn without_the_setting_the_body_is_omsi_s() {
-    let mut rb = RigidBody::from_definition(&bus(), &[]);
-    assert!(!rb.realistic, "off by default");
-    rb.place(DVec3::ZERO, 0.0);
-    for w in rb.wheels.iter_mut() {
-        w.surface = 2;
-    }
-    let g = road(1e9, 0.0);
-    run(&mut rb, 2.0, 0.0, 0.0, &g);
-    assert!(
-        rb.wheels
-            .iter()
-            .all(|w| w.rough == 0.0 && w.mu_scale == 1.0),
-        "no road unevenness or surface grip"
-    );
-    rb.wind = Vec3::new(-25.0, 0.0, 0.0);
-    let before = rb.velocity;
-    run(&mut rb, 1.0, 0.0, 0.0, &g);
-    assert!((rb.velocity - before).length() < 0.05, "no wind");
-    // a bend follows the wheels at 50 km/h, instantly
-    let mut rb = RigidBody::from_definition(&bus(), &[]);
-    rb.place(DVec3::ZERO, 0.0);
-    run(&mut rb, 2.0, 0.0, 0.0, &g);
-    rb.velocity = rb.orientation.mul_vec3(Vec3::Y) * 13.9;
-    for w in rb.wheels.iter_mut() {
-        w.spin = 13.9 / w.radius;
-    }
-    let radius = rb.wheels.iter().find(|w| w.driven).unwrap().radius;
-    let mut yaw = 0.0;
-    for i in 0..480 {
-        let torque = ((13.9 - rb.forward_speed()) * rb.mass * 2.0 + rb.rolling_resistance) * radius;
-        rb.step(1.0 / 60.0, torque, &[0.0; 4], 0.15, &g);
-        if i >= 420 {
-            yaw += rb.omega.z.abs() / 60.0;
-        }
-    }
-    let ratio = yaw / (rb.forward_speed() * 0.15 * rb.inv_min_turn_radius);
-    assert!((ratio - 1.0).abs() < 0.03, "{ratio}");
-}
+mod resistance;
 
 /// A tyre that leaves the ground or is put down anew starts without a lagging contact patch.
 #[test]
@@ -1923,4 +1936,28 @@ fn nan_obstacle_leaves_the_bus_alone() {
         "{:?}",
         rb.position
     );
+}
+
+/// #4014: with the people aboard as its load, a bus pulls away more slowly on the same drive.
+#[test]
+fn a_loaded_body_pulls_away_more_slowly() {
+    let speed_after = |loaded: bool| {
+        let mut rb = RigidBody::from_definition(&bus(), &[]);
+        rb.place(DVec3::ZERO, 0.0);
+        let g = road(1e9, 0.0);
+        run(&mut rb, 1.0, 0.0, 0.0, &g);
+        if loaded {
+            // 60 riders of 75 kg along the saloon
+            let loads: Vec<(f32, Vec3)> = (0..60)
+                .map(|k| (75.0, Vec3::new(0.0, -4.5 + k as f32 * 0.15, 1.2)))
+                .collect();
+            rb.set_load(&loads);
+            run(&mut rb, 1.0, 0.0, 0.0, &g);
+        }
+        run(&mut rb, 5.0, 3000.0, 0.0, &g);
+        rb.velocity.length()
+    };
+    let (empty, full) = (speed_after(false), speed_after(true));
+    assert!(empty > 1.0, "{empty}");
+    assert!(full < empty * 0.9, "empty {empty} m/s, full {full} m/s");
 }

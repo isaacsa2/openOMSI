@@ -214,7 +214,7 @@ impl Default for Vm {
 
 const MAX_DEPTH: u32 = 64;
 
-/// Instructions one vehicle's frame (all its `{frame}` or `{frame_ai}` blocks together), or
+/// Instructions one vehicle's frame (its `{frame}` or `{frame_ai}` block), or
 /// one trigger, may take, macros included. The language has no loops, but
 /// a macro that calls itself a few times over, 64 deep, would run for ever - a script that
 /// came from another machine (a host's mods, another player's bus) would stop this game. The
@@ -248,19 +248,19 @@ impl Vm {
         (r as f32) / ((1u64 << 24) as f32)
     }
 
-    /// Run the `{init}` blocks.
+    /// Run the `{init}` block (a set has one: its first, see `Program::init`).
     pub fn run_init(&mut self, p: &Program, state: &mut State, host: &mut dyn Host) {
         for &b in &p.init {
             self.run_top(p, b, state, host);
         }
     }
 
-    /// Run the `{frame}` blocks - one budget (`MAX_OPS`) for all of them: a vehicle's frame.
+    /// Run the `{frame}` block on one budget (`MAX_OPS`): a vehicle's frame.
     pub fn run_frame(&mut self, p: &Program, state: &mut State, host: &mut dyn Host) {
         self.run_frame_blocks(p, &p.frame, state, host);
     }
 
-    /// Run the `{frame_ai}` blocks (falls back to nothing when absent), on one budget too.
+    /// Run the `{frame_ai}` block (falls back to nothing when absent), on one budget too.
     pub fn run_frame_ai(&mut self, p: &Program, state: &mut State, host: &mut dyn Host) {
         self.run_frame_blocks(p, &p.frame_ai, state, host);
     }
@@ -335,7 +335,8 @@ impl Vm {
             return;
         }
         self.depth += 1;
-        let ops = &p.blocks[block as usize].ops;
+        let mut block = block;
+        let mut ops = &p.blocks[block as usize].ops;
         let mut pc = 0usize;
         while pc < ops.len() {
             if self.budget == 0 {
@@ -355,6 +356,17 @@ impl Vm {
                 Op::Macro(b) => {
                     let b = *b;
                     self.run_block(p, b, state, host);
+                }
+                // (a block without its `{end}` goes on with the next block's code at this
+                // depth, as Omsi.exe follows its word chain: 40 macros without their `{end}`
+                // called a few levels down are not cut off by `MAX_DEPTH`)
+                Op::FallThrough(b) => {
+                    let Some(next) = p.blocks.get(*b as usize) else {
+                        break;
+                    };
+                    block = *b;
+                    ops = &next.ops;
+                    pc = 0;
                 }
                 Op::Random => {
                     // `Random(Abs(Round(x)))` in the exe: a whole number in [0, n). Scripts
@@ -485,15 +497,14 @@ fn exec_hot(s: &mut Stacks, op: &Op, p: &Program, state: &mut State, host: &mut 
 #[inline(never)]
 fn exec_cold(s: &mut Stacks, op: &Op, p: &Program, state: &mut State, host: &mut dyn Host) {
     match op {
-        Op::Macro(_) | Op::Random | Op::JumpIfZero(_) | Op::Jump(_) => {
+        Op::Macro(_) | Op::FallThrough(_) | Op::Random | Op::JumpIfZero(_) | Op::Jump(_) => {
             unreachable!("handled by run_block")
         }
         Op::Callback(n) => host.callback(p.name(*n), *n, s, state),
         Op::SoundTrigger(n) => host.sound_trigger_vars(p.name(*n), *n, &state.vars),
-        Op::SoundTriggerFile(n) => {
-            let file = s.pop_str();
-            host.sound_trigger_file(p.name(*n), &file);
-        }
+        // the file stays on the string stack: Omsi.exe sub_5d4860 (`TXPC_calcblock_soundtrigger`)
+        // reads it there and does not pop it
+        Op::SoundTriggerFile(n) => host.sound_trigger_file(p.name(*n), s.top_str()),
         // (The string operations work on the stack's own buffers: a pop followed by a push
         // leaves the stack as changing `sst[0]` in place does, and a push takes over the
         // buffer of the string that falls off the bottom. Each of them used to allocate.)
@@ -874,9 +885,8 @@ mod tests {
         );
     }
 
-    /// The budget is one vehicle's frame, not one block's: a script split into many
-    /// `{frame}` blocks, each of which would run for ever, takes no more than one budget in
-    /// all (with a budget for each, 50 blocks would stall the game 50 times as long).
+    /// A script set with a `{frame}` in each of 50 files, each of which would run for ever,
+    /// runs the first only (as Omsi.exe) and takes no more than one budget.
     #[test]
     fn many_frame_blocks_share_one_budget() {
         let dir = std::env::temp_dir().join(format!("omsi_script_frames_{}", std::process::id()));
@@ -900,12 +910,11 @@ mod tests {
             ..Default::default()
         });
         assert!(p.errors.is_empty(), "{:?}", p.errors);
-        assert_eq!(p.frame.len(), 50);
+        assert_eq!(p.frame.len(), 1);
         let mut vm = Vm::new();
         let mut st = State::new(&p);
         vm.run_frame(&p, &mut st, &mut NullHost);
-        // every op of `m` that counts `a` is one of the budget's: the 50 blocks together
-        // stayed within one budget, not 50
+        // every op of `m` that counts `a` is one of the budget's
         let a = st.get(p.var("a").unwrap());
         assert!(a > 1000.0 && (a as u64) < MAX_OPS, "{a}");
     }
@@ -950,6 +959,31 @@ mod tests {
         assert_eq!(st.get(p.var("b").unwrap()), 50.0);
         assert_eq!(st.get(p.var("result").unwrap()), 4.0);
         assert_eq!(vm.stacks.st[0], 7.0);
+    }
+
+    #[test]
+    fn a_sound_trigger_with_a_file_leaves_the_file_on_the_stack() {
+        struct Files(Vec<String>);
+        impl Host for Files {
+            fn sys_var(&mut self, _v: SysVar) -> f32 {
+                0.0
+            }
+            fn callback(&mut self, _: &str, _: NameId, _: &mut Stacks, _: &mut State) {}
+            fn sound_trigger(&mut self, _name: &str, _id: NameId) {}
+            fn sound_trigger_file(&mut self, _name: &str, file: &str) {
+                self.0.push(file.to_string());
+            }
+        }
+        let p = prog("{init}\n\"x\" \"a.wav\" (T.F.snd) \"b.wav\" $+ (T.F.snd)\n{end}\n");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        let mut vm = Vm::new();
+        let mut host = Files(Vec::new());
+        vm.run_init(&p, &mut State::new(&p), &mut host);
+        assert_eq!(host.0, ["a.wav", "a.wavb.wav"]);
+        assert_eq!(
+            vm.stacks.sst[..2],
+            ["a.wavb.wav".to_string(), "x".to_string()]
+        );
     }
 
     #[test]

@@ -7,12 +7,7 @@ impl RigidBody {
     /// `hub_heights[a]`: unloaded hub height of axle `a` above the model origin; the tyre
     /// radius when the model does not say (see `VehicleType::wheel_geometry`).
     pub fn from_definition(def: &Vehicle, hub_heights: &[Option<f32>]) -> RigidBody {
-        let mass = if def.mass < 100.0 {
-            def.mass * 1000.0
-        } else {
-            def.mass
-        }
-        .max(500.0);
+        let mass = def.mass_kg().max(500.0);
         let moi = def.moment_of_inertia;
         let scale = if moi[0] < 5000.0 { 1000.0 } else { 1.0 };
         // `[momentofintertia]` goes to ODE as I11, I22, I33 of Omsi.exe's y-up body frame
@@ -154,11 +149,11 @@ impl RigidBody {
             inv_min_turn_radius,
             body_freq,
             holding: true,
-            rolling_resistance: if def.rolling_resistance > 0.0 {
-                def.rolling_resistance
-            } else {
-                0.008 * mass * 9.81
-            },
+            // `[rollwiderstand]` as the file gives it, nothing without one: Omsi.exe's
+            // LoadFromFile (0x7cb3f4) leaves it at 0 unless the file sets it, and its
+            // physics (0x7e2574) shares just that over the wheels with the brake force (the
+            // simple model and the coupled parts here read it the same way)
+            rolling_resistance: def.rolling_resistance.max(0.0),
             accel_body: Vec3::ZERO,
             friction: 0.85,
             wheel_impacts: Vec::new(),
@@ -171,6 +166,7 @@ impl RigidBody {
             wetness: 0.0,
             road_s: 0.0,
             realistic: realistic_default(),
+            unloaded: None,
         }
     }
 
@@ -650,19 +646,18 @@ impl RigidBody {
             // The coupled parts, each a tyre at the joint that pushes and brakes along the
             // body's axis and takes no side force.
             let fwd_flat = Vec3::new(body_fwd.x, body_fwd.y, 0.0).normalize_or(Vec3::Y);
-            for d in &self.coupled {
-                let share = Vec3::new(d.dir.x, d.dir.y, 0.0)
-                    .normalize_or(fwd_flat)
-                    .dot(fwd_flat)
-                    .max(0.0);
-                let r_world = rot.mul_vec3(d.point - self.cog);
-                let cap = self.friction * d.driven_load;
-                let drive = if d.driven_wheels > 0 {
-                    (drive_torque / d.radius.max(0.1) / driven * d.driven_wheels as f32)
-                        .clamp(-cap, cap)
-                } else {
-                    0.0
-                };
+            let (cog, friction, velocity) = (self.cog, self.friction, self.velocity);
+            for d in &mut self.coupled {
+                let part_fwd = Vec3::new(d.dir.x, d.dir.y, 0.0).normalize_or(fwd_flat);
+                let share = part_fwd.dot(fwd_flat).max(0.0);
+                let r_world = rot.mul_vec3(d.point - cog);
+                // (the part's driven wheels turn, and may spin, at its own speed over the road)
+                let drive = d.drive_step(
+                    drive_torque / d.radius.max(0.1) / driven,
+                    friction,
+                    (velocity + omega_world.cross(r_world)).dot(part_fwd),
+                    h,
+                );
                 contacts.push(Contact {
                     r: r_world,
                     fwd: body_fwd,
@@ -671,8 +666,8 @@ impl RigidBody {
                     drive: drive * share,
                     brake: d.brake.max(0.0) * share,
                     grip: d.load,
-                    mu: self.friction,
-                    v_long: (self.velocity + omega_world.cross(r_world)).dot(body_fwd),
+                    mu: friction,
+                    v_long: (velocity + omega_world.cross(r_world)).dot(body_fwd),
                     lateral: false,
                     wheel: None,
                 });
@@ -781,8 +776,8 @@ impl RigidBody {
     }
 
     /// What the air does to the body this substep (world force, body-frame torque) and where the
-    /// tyres stand on the road's unevenness and its surfaces (see `realism`). Without it a bus
-    /// rolling downhill without its brakes ran on to any speed, and no gale ever moved one.
+    /// tyres stand on the road's unevenness and its surfaces (see `realism`). The air acts only
+    /// in the realistic model; OMSI 2's leaves it to the vehicle's scripts.
     fn air_and_road(&mut self, rot: Quat, h: f32) -> (Vec3, Vec3) {
         let inv = rot.inverse();
         let (force, torque) = if self.realistic {
@@ -797,9 +792,12 @@ impl RigidBody {
             );
             (rot.mul_vec3(f), t)
         } else {
-            let v = self.velocity;
-            let area = (self.mass / 2200.0).clamp(2.0, 8.5);
-            (-v * v.length() * (0.5 * 1.2 * 0.6 * area), Vec3::ZERO)
+            // OMSI 2's own body has no air drag at all: the force Omsi.exe sums into the
+            // body's speed (0x7e2574: gravity from 0x7af69c, then the tyres, the drive and the
+            // brakes, speed += frame x force / mass) holds no term in the speed's square. The
+            // drag is the scripts' (bremse.osc above); a second one here slowed every bus by
+            // about 40 % more air than OMSI's.
+            (Vec3::ZERO, Vec3::ZERO)
         };
         // where on the road's unevenness the body stands (a reversing bus retraces it)
         let ds = self.velocity.dot(rot.mul_vec3(Vec3::Y)) as f64 * h as f64;

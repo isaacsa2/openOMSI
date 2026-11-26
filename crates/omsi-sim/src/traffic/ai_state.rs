@@ -84,10 +84,8 @@ pub struct AiState {
     pub min_gap: f32,
     pub accept_gap: f32,
     pub reaction: f32,
-    /// Additional personality settings: how long they wait to honk a horn (relative factor),
-    /// how often they can run a yellow light (probability) when they still can technically stop
+    /// Additional personality setting: how long they wait to honk a horn (relative factor).
     pub honk_factor: f32,
-    pub amber_factor: f32,
     /// From the vehicle's origin (the lane position `s`) to its front and rear bumper (m).
     pub front: f32,
     pub rear: f32,
@@ -423,7 +421,6 @@ impl AiState {
             accept_gap: 4.0,
             reaction: 0.7,
             honk_factor: 1.0,
-            amber_factor: 0.03,
             front: 2.5,
             rear: 2.5,
             held: false,
@@ -548,7 +545,8 @@ impl AiState {
         // (`no_cars`, bus and truck rules, Omsi.exe 0x71d714) stay closed, and so does a
         // lane the map closes to the car's pool by a rule of its own (a group's
         // `trafficdensity` other than the first, which is the path's density itself).
-        if choices.is_empty() && l.kind == LaneKind::Street {
+        let fallback = choices.is_empty() && l.kind == LaneKind::Street;
+        if fallback {
             let pool_closed = |nl: &Lane| {
                 pool.is_some_and(|(p, _)| {
                     *p != 0
@@ -584,25 +582,35 @@ impl AiState {
         }
         if choices.is_empty() {
             None
+        } else if choices.len() == 1 {
+            Some(choices[0])
+        } else if fallback || l.kind != LaneKind::Street {
+            // (no way on carries the car's traffic: Omsi.exe takes a random one, 0x71f6d8;
+            // the fill of the chains is the road traffic's)
+            Some(choices[(self.rand() % choices.len() as u64) as usize])
         } else {
-            if let Some((pool, defaults)) = self.traffic_pool.clone().filter(|_| weighted) {
-                let total: f32 = choices
-                    .iter()
-                    .map(|&n| net.lanes[n].pool_density(&defaults, pool))
-                    .sum();
-                let mut pick = (self.rand() >> 32) as f32 / (u32::MAX as f32 + 1.0) * total;
-                for &n in &choices {
-                    let weight = net.lanes[n].pool_density(&defaults, pool);
-                    if pick < weight {
-                        return Some(n);
-                    }
-                    pick -= weight;
-                }
-                choices.last().copied()
-            } else {
-                Some(choices[(self.rand() % choices.len() as u64) as usize])
+            Some(self.least_filled(net, &choices))
+        }
+    }
+
+    /// Of the ways on from a fork, the one whose chain has the fewest of the car's traffic
+    /// group for its density, the first of them on a tie (Omsi.exe FUN_0071ee40,
+    /// 0x71f584..0x71f6c4: `fill < best || best == -1`; see `chain_load`).
+    fn least_filled(&self, net: &Network, choices: &[usize]) -> usize {
+        let pool = self.traffic_pool.as_ref();
+        let group = load_group(pool.map(|p| p.0));
+        let density = |l: &Lane| match pool {
+            Some((p, defaults)) => l.pool_density(defaults, *p),
+            None => l.density,
+        };
+        let mut best = (choices[0], f32::INFINITY);
+        for &n in choices {
+            let fill = net.chain_fill(n, group, &density);
+            if fill < best.1 {
+                best = (n, fill);
             }
         }
+        best.0
     }
 
     /// Decide the way on: the lane after the current one and enough lanes after it to

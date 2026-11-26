@@ -238,6 +238,28 @@ impl PeopleSim {
         out
     }
 
+    /// LAN play (host): the stops player `player`'s bus has stood at and now left: more than
+    /// 60 m behind it, as Omsi.exe counts a bus past a station (0x7d5124). Each is told once.
+    pub fn remote_stops_left(&mut self, player: u32) -> Vec<i64> {
+        let id = remote_bus_id(player);
+        let Some(bus) = self.remote_now.iter().find(|b| b.id == BusId::Ai(id)) else {
+            self.remote_stood.retain(|s| s.0 != id);
+            return Vec::new();
+        };
+        let mut left = Vec::new();
+        for (&stop, s) in &self.stops {
+            if (bus.pos - s.pos).length() < 60.0 {
+                if bus.speed.abs() < 0.5 {
+                    self.remote_stood.insert((id, stop));
+                }
+            } else if self.remote_stood.remove(&(id, stop)) {
+                left.push(stop);
+            }
+        }
+        left.sort_unstable();
+        left
+    }
+
     /// The original graphical host does not hold a native escrow.
     pub fn hand_over(&mut self, player: u32, ids: &[u32]) -> Vec<u32> {
         self.hand_over_saved(player, ids)

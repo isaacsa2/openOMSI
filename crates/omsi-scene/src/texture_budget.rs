@@ -292,6 +292,17 @@ impl World {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Whether the textures were over their budget, or the card over the video memory, at the
+    /// budget's last look (see [`World::update_texture_budget`]): the time to let go of what
+    /// nobody draws rather than make the rest smaller.
+    pub fn textures_over_budget(&self) -> bool {
+        let limit = self.texture_budget_bytes();
+        let in_use = self.budget_checked.lock().in_use;
+        limit > 0 && in_use > limit
+    }
+}
+
+impl World {
     /// Keep the textures within their budget, once a second (`force`: now, whatever was
     /// looked at last - the offscreen pictures): while they take
     /// more, the scenery textures only far tiles use lose their finest mip level, the
@@ -346,6 +357,7 @@ impl World {
         pass: BudgetPass,
     ) -> usize {
         const NEAR: f64 = 150.0;
+        const RESTORE: f64 = 400.0;
         const MIN_SIDE: u32 = 64;
         let limit = self
             .texture_limit
@@ -389,13 +401,24 @@ impl World {
             .load(std::sync::atomic::Ordering::Relaxed);
         let states = self.tile_state.lock();
         let mut gpu = self.gpu.lock();
-        let (texture_usage, any_dropped, retry_due) = texture_usage(
-            &gpu,
-            renderer.texture_bytes(scene),
-            vehicle_bytes,
-            t0,
-            memo.checked,
-        );
+        let last = memo.checked;
+        let (scenery_bytes, any_dropped, retry_due) =
+            gpu.textures
+                .values()
+                .fold((0u64, false, false), |(b, d, r), e| {
+                    let due = e
+                        .retry_after
+                        .is_some_and(|t| t <= t0 && last.is_none_or(|c| t > c));
+                    (b + e.bytes, d || e.dropped > 0, r || due)
+                });
+        // Every texture of the scene counts against the card as well (the people, the
+        // script and text textures, the sky's and the terrain's): past half of the card's own
+        // memory, what they hold beyond it is taken from the scenery and the vehicles. The
+        // budget counted the scenery and the vehicles alone, and on an 8 GB card with a
+        // 4000 MB budget the textures grew to 5.4 GB over a drive; with the picture's targets
+        // the card paged to the system's memory and the frame rate fell from 140 to 25 (#2295).
+        let texture_usage =
+            scenery_bytes + vehicle_bytes + texture_overdraft(renderer.texture_bytes(scene));
         // And everything the game holds on the card - the meshes, the render targets and
         // shadow maps, the driver's own - stays within the video memory setting and the
         // driver's budget: the textures counted against their budget alone, the game took
@@ -403,7 +426,20 @@ impl World {
         // past its budget. What is over goes from the textures, the only part that can give.
         let card = renderer.gpu_memory(scene);
         let card_cap = card.cap(video_limit);
-        let (usage, card_over) = budget_usage(texture_usage, limit, card.total(), card_cap);
+        // (in steps of 32 MiB: the driver's count wanders by a few MB from second to second,
+        // and every step up failed the idle look's check - the whole scan and its sort every
+        // second while over)
+        const STEP: u64 = 32 << 20;
+        let card_over = if card_cap > 0 {
+            card.total().saturating_sub(card_cap) / STEP * STEP
+        } else {
+            0
+        };
+        let usage = if card_over > 0 {
+            texture_usage.max(limit.saturating_add(card_over))
+        } else {
+            texture_usage
+        };
         memo.in_use = usage;
         if pass == BudgetPass::AfterStreaming && usage <= limit && !memo.resume {
             // (the bytes are all a forced look is for: the restores wait for the second's)
@@ -415,11 +451,10 @@ impl World {
             memo.near_retry_at = None;
             return 0;
         }
-        let near_retry_due = memo.near_retry_at.is_some_and(|at| at <= t0);
         if pass != BudgetPass::Now
             && !memo.resume
             && !retry_due
-            && !near_retry_due
+            && !memo.near_retry_at.is_some_and(|at| at <= t0)
             && memo.unchanged(
                 generation,
                 usage,
@@ -430,7 +465,83 @@ impl World {
         {
             return 0;
         }
-        let (near, spline_textures) = Self::scenery_texture_distances(&states, &gpu, centers);
+        let ts = tile_size();
+        let tile_distance = |k: &(i32, i32)| -> f64 {
+            centers
+                .iter()
+                .map(|c| {
+                    let (x0, y0) = (k.0 as f64 * ts, k.1 as f64 * ts);
+                    let dx = (x0 - c.x).max(c.x - (x0 + ts)).max(0.0);
+                    let dy = (y0 - c.y).max(c.y - (y0 + ts)).max(0.0);
+                    (dx * dx + dy * dy).sqrt()
+                })
+                .fold(f64::MAX, f64::min)
+        };
+        // how near each scenery texture is: the nearest tile that uses it
+        let mut near: hashbrown::HashMap<TextureId, f64> = hashbrown::HashMap::new();
+        let mut spline_textures = hashbrown::HashSet::new();
+        let (mut types, mut splines): (
+            hashbrown::HashMap<usize, f64>,
+            hashbrown::HashMap<usize, f64>,
+        ) = Default::default();
+        let (mut trees, mut shared): (
+            hashbrown::HashMap<&str, f64>,
+            hashbrown::HashMap<&PathBuf, f64>,
+        ) = Default::default();
+        for (key, st) in states.iter() {
+            let d = tile_distance(key);
+            let nearer = |e: &mut f64| *e = e.min(d);
+            st.gpu
+                .types
+                .iter()
+                .for_each(|t| nearer(types.entry(*t).or_insert(f64::MAX)));
+            st.gpu
+                .spline_types
+                .iter()
+                .for_each(|t| nearer(splines.entry(*t).or_insert(f64::MAX)));
+            st.gpu
+                .trees
+                .iter()
+                .for_each(|t| nearer(trees.entry(t.as_str()).or_insert(f64::MAX)));
+            st.gpu
+                .shared_textures
+                .iter()
+                .for_each(|p| nearer(shared.entry(p).or_insert(f64::MAX)));
+        }
+        {
+            let g = &*gpu;
+            let mut see = |p: &PathBuf, d: f64| {
+                if let Some(e) = g.textures.get(p) {
+                    let n = near.entry(e.id).or_insert(f64::MAX);
+                    *n = n.min(d);
+                }
+            };
+            for (t, d) in &types {
+                g.types
+                    .get(t)
+                    .into_iter()
+                    .flat_map(|t| t.textures.iter())
+                    .for_each(|p| see(p, *d));
+            }
+            for (t, d) in &splines {
+                for p in g.splines.get(t).into_iter().flat_map(|s| s.textures.iter()) {
+                    see(p, *d);
+                    spline_textures.insert(p.clone());
+                }
+            }
+            for (t, d) in &trees {
+                g.trees
+                    .get(*t)
+                    .and_then(|t| t.texture.as_ref())
+                    .into_iter()
+                    .for_each(|p| see(p, *d));
+            }
+            for (p, d) in &shared {
+                see(p, *d);
+            }
+        }
+        ground_is_near(&gpu, &mut near);
+        drop((trees, shared));
         drop(states);
         let mut entries: Vec<(f64, PathBuf)> = gpu
             .textures
@@ -461,8 +572,6 @@ impl World {
         let (near_restores, blocked) =
             queue_near_restores(&mut gpu, &pending, &entries, NEAR, rooms, t0);
         restoring += near_restores;
-        // Recheck admission when little has changed, including with a stationary camera.
-        // This deadline wakes the scan without delaying uploads when memory is freed sooner.
         memo.near_retry_at = blocked.then(|| t0 + std::time::Duration::from_secs(2));
         if usage > limit {
             entries.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -471,7 +580,7 @@ impl World {
                 card,
                 video_limit,
                 card_over,
-                CARD_STEP,
+                STEP,
             ));
             let mut drops = renderer.begin_level_drops();
             for (d, p) in &entries {
@@ -579,16 +688,35 @@ impl World {
             }
             renderer.finish_level_drops(drops);
         } else {
-            let room =
+            // Room for the near ones to come back, with 15 % kept free: a texture
+            // restored only into the room under 85 % of the budget is not shrunk again
+            // before the textures have grown by that much (with a tenth, textures at
+            // 150-400 m went back and forth as the tiles around came and went).
+            entries.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut room =
                 texture_restore_room(limit, usage, video_limit, card).saturating_sub(reserved);
-            restoring += queue_distant_restores(
-                &mut gpu,
-                &pending,
-                &mut entries,
-                room,
-                16usize.saturating_sub(restoring),
-                t0,
-            );
+            for (d, p) in &entries {
+                if *d > RESTORE || restoring >= 16 {
+                    break;
+                }
+                if pending.contains(p) || gpu.wants_restore.contains(p) {
+                    continue;
+                }
+                let Some(e) = gpu.textures.get_mut(p) else {
+                    continue;
+                };
+                if e.dropped == 0 || e.retry_after.is_some_and(|t| t > t0) {
+                    continue;
+                }
+                e.retry_after = None;
+                let needed = texture_restore_cost(e);
+                if needed > room {
+                    continue;
+                }
+                room -= needed;
+                gpu.wants_restore.push(p.clone());
+                restoring += 1;
+            }
         }
         drop(pending);
         drop(gpu);
@@ -634,184 +762,4 @@ impl World {
         shrunk_n + restoring
     }
 
-    fn scenery_texture_distances(
-        states: &hashbrown::HashMap<(i32, i32), TileState>,
-        gpu: &GpuCache,
-        centers: &[DVec3],
-    ) -> (
-        hashbrown::HashMap<TextureId, f64>,
-        hashbrown::HashSet<PathBuf>,
-    ) {
-        let ts = tile_size();
-        let tile_distance = |k: &(i32, i32)| -> f64 {
-            centers
-                .iter()
-                .map(|c| {
-                    let (x0, y0) = (k.0 as f64 * ts, k.1 as f64 * ts);
-                    let dx = (x0 - c.x).max(c.x - (x0 + ts)).max(0.0);
-                    let dy = (y0 - c.y).max(c.y - (y0 + ts)).max(0.0);
-                    (dx * dx + dy * dy).sqrt()
-                })
-                .fold(f64::MAX, f64::min)
-        };
-        // how near each scenery texture is: the nearest tile that uses it
-        let mut near: hashbrown::HashMap<TextureId, f64> = hashbrown::HashMap::new();
-        let mut spline_textures = hashbrown::HashSet::new();
-        let (mut types, mut splines): (
-            hashbrown::HashMap<usize, f64>,
-            hashbrown::HashMap<usize, f64>,
-        ) = Default::default();
-        let (mut trees, mut shared): (
-            hashbrown::HashMap<&str, f64>,
-            hashbrown::HashMap<&PathBuf, f64>,
-        ) = Default::default();
-        for (key, st) in states.iter() {
-            let d = tile_distance(key);
-            let nearer = |e: &mut f64| *e = e.min(d);
-            st.gpu
-                .types
-                .iter()
-                .for_each(|t| nearer(types.entry(*t).or_insert(f64::MAX)));
-            st.gpu
-                .spline_types
-                .iter()
-                .for_each(|t| nearer(splines.entry(*t).or_insert(f64::MAX)));
-            st.gpu
-                .trees
-                .iter()
-                .for_each(|t| nearer(trees.entry(t.as_str()).or_insert(f64::MAX)));
-            st.gpu
-                .shared_textures
-                .iter()
-                .for_each(|p| nearer(shared.entry(p).or_insert(f64::MAX)));
-        }
-        {
-            let mut see = |p: &PathBuf, d: f64| {
-                if let Some(e) = gpu.textures.get(p) {
-                    let n = near.entry(e.id).or_insert(f64::MAX);
-                    *n = n.min(d);
-                }
-            };
-            for (t, d) in &types {
-                gpu.types
-                    .get(t)
-                    .into_iter()
-                    .flat_map(|t| t.textures.iter())
-                    .for_each(|p| see(p, *d));
-            }
-            for (t, d) in &splines {
-                for p in gpu
-                    .splines
-                    .get(t)
-                    .into_iter()
-                    .flat_map(|s| s.textures.iter())
-                {
-                    see(p, *d);
-                    spline_textures.insert(p.clone());
-                }
-            }
-            for (t, d) in &trees {
-                gpu.trees
-                    .get(*t)
-                    .and_then(|t| t.texture.as_ref())
-                    .into_iter()
-                    .for_each(|p| see(p, *d));
-            }
-            for (p, d) in &shared {
-                see(p, *d);
-            }
-        }
-        ground_is_near(gpu, &mut near);
-        (near, spline_textures)
-    }
-}
-
-/// What all textures of the scene (`total`, bytes) hold beyond half of the graphics card's
-/// own memory (none on a card that shares the system's memory, whose size is not known).
-fn texture_overdraft(total: u64) -> u64 {
-    let vram_mb = omsi_render::ADAPTER_VRAM_MB.load(std::sync::atomic::Ordering::Relaxed);
-    if vram_mb == 0 {
-        return 0;
-    }
-    total.saturating_sub(vram_mb * 1_000_000 / 2)
-}
-
-/// Which look at the texture budget (see [`World::update_texture_budget`]).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BudgetPass {
-    /// The one a second.
-    Timed,
-    /// Now, the whole of it.
-    Now,
-    /// After a streaming frame: only when over the budget.
-    AfterStreaming,
-}
-
-/// What the texture budget's last look found (see [`World::update_texture_budget`]).
-#[derive(Default)]
-pub(crate) struct BudgetMemo {
-    /// When it last looked.
-    pub(super) checked: Option<std::time::Instant>,
-    /// When to recheck nearby textures that could not fit.
-    pub(super) near_retry_at: Option<std::time::Instant>,
-    /// The last pass ran out of its time: the next frame goes on with it.
-    pub(super) resume: bool,
-    /// Textures swapped in whose materials still bind the texture they replaced (see
-    /// `World::apply_texture_upgrades`), and since when.
-    pub(super) rebind: Vec<TextureId>,
-    pub(super) rebind_since: Option<std::time::Instant>,
-    /// The last full look found nothing to do, with these tiles (`World::tiles_generation`),
-    /// these bytes in use (within a hundredth of the budget below: the textures compressed
-    /// on the workers come in one by one and change it a little all the time) and the
-    /// centers here.
-    idle: bool,
-    generation: u64,
-    usage: u64,
-    limit: u64,
-    room: u64,
-    pub(super) centers: Vec<DVec3>,
-    pub(super) in_use: u64,
-}
-
-impl BudgetMemo {
-    /// How far a center may move before the textures' distances are looked at again.
-    const MOVED: f64 = 25.0;
-
-    pub(super) fn unchanged(
-        &self,
-        generation: u64,
-        usage: u64,
-        limit: u64,
-        room: u64,
-        centers: &[DVec3],
-    ) -> bool {
-        self.idle
-            && self.generation == generation
-            && self.limit == limit
-            && room <= self.room.saturating_add(64 << 20)
-            && usage <= self.usage.max(limit)
-            && usage + limit / 100 >= self.usage
-            && self.centers.len() == centers.len()
-            && self.centers.iter().zip(centers).all(|(a, b)| {
-                a.truncate().distance_squared(b.truncate()) < Self::MOVED * Self::MOVED
-            })
-    }
-
-    pub(super) fn remember(
-        &mut self,
-        generation: u64,
-        usage: u64,
-        limit: u64,
-        room: u64,
-        centers: &[DVec3],
-        idle: bool,
-    ) {
-        self.idle = idle;
-        self.room = room;
-        self.generation = generation;
-        self.usage = usage;
-        self.limit = limit;
-        self.centers.clear();
-        self.centers.extend_from_slice(centers);
-    }
 }

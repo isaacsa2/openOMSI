@@ -715,6 +715,8 @@ pub(super) fn sync_live(app: &mut App) {
         r.options.cloud_shadows = live.cloud_shadows;
         r.options.light_glow = live.light_glow;
         r.options.volumetric_fog = live.volumetric_fog;
+        // (and the traced global illumination, while the ray tracing runs)
+        r.options.rt_gi = live.rt_gi;
     }
     let s = &app.settings;
     if let Some(w) = app.world.as_ref() {
@@ -749,6 +751,7 @@ pub(super) fn sync_live(app: &mut App) {
         h.ambient_talk = s.passenger_ambient_talk;
         h.bad_driving_alight = s.pax_bad_driving_alight;
         h.boarding = s.boarding.clone();
+        h.rear_door_boarding = s.rear_door_boarding;
         h.stand_chance = s.standing_chance;
         h.short_rides_stand = s.pax_short_rides_stand;
         h.voices = match s.pax_voices.as_str() {

@@ -22,7 +22,7 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("car.bus"), "[model]\nmodel.cfg\n").unwrap();
+        std::fs::write(dir.join("car.bus"), "[model]\nmodel.cfg\n[mass]\n7\n").unwrap();
         std::fs::write(dir.join("model.cfg"), "").unwrap();
         let ty = Arc::new(VehicleType::load_ai(&dir, &dir.join("car.bus")).unwrap());
         Fixture { dir, ty }
@@ -514,13 +514,18 @@ fn cars_still_cross_a_finite_exit_when_its_short_return_is_not_chosen() {
     let long = street(a.end(), 350.0, 700.0);
     let lanes = vec![a, finite, short, next, exit, long];
     let mut crossed = [0; 2];
-    for seed in 1..=32 {
+    // (a car on the finite exit already sends the next one onto the long road: the
+    // emptier way on is taken, Omsi.exe 0x71f584)
+    for (seed, ahead) in (1..=16).flat_map(|s| [(s, false), (s, true)]) {
         let mut net = Network {
             lanes: lanes.clone(),
             ..Default::default()
         };
         net.link(1.5);
         let mut t = traffic(&f, net);
+        if ahead {
+            add_car(&mut t, &f, 1, 15.0, seed + 100, Some(8.0));
+        }
         let id = add_car(&mut t, &f, 0, 26.0, seed, Some(5.0));
         run(&mut t, 15.0);
         let car = t

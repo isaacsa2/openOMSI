@@ -123,6 +123,12 @@ pub(super) fn lights(cx: LightsCx, dt: f32, daylight: omsi_sim::Daylight, behind
             cx.traffic.traffic.as_ref().map(|t| &t.net),
             &v,
         );
+        // the road dirt on the vehicles near the camera (omsi_scene::road_dirt)
+        // (the vehicles the player placed and left keep theirs: with their own dirt
+        // overlays hidden and no road dirt they stood there washed clean)
+        let mut dirty = v.clone();
+        dirty.extend(cx.player.placed.iter().map(|q| (0, &q.vehicle)));
+        omsi_scene::road_dirt::frame(r, cx.common.settings.procedural_dirt, cam.position, &dirty);
         omsi_scene::road_snow::show_roofs(r, scene, v.iter().map(|x| x.0), |k| {
             if k == 0 {
                 p.map(|p| (&p.render, &p.trailer_renders[..]))
@@ -466,7 +472,7 @@ pub(super) fn scripted(cx: ScriptedCx, dt: f32, daylight: omsi_sim::Daylight) {
             let inputs = w.scenery_prepare(
                 &mut *cx.world.scenery,
                 cam.position,
-                daylight.brightness,
+                daylight.daylight_sum,
                 &mut times,
             );
             cx.traffic.pipeline.owe_scenery(move |s, phase_of| {
@@ -491,7 +497,7 @@ pub(super) fn scripted(cx: ScriptedCx, dt: f32, daylight: omsi_sim::Daylight) {
                 scene,
                 dt,
                 cam.position,
-                daylight.brightness,
+                daylight.daylight_sum,
                 &phase,
                 cx.sound.audio.as_ref(),
                 cx.view.cam.heard_inside,
