@@ -2871,6 +2871,10 @@ _version: 2
   en: "The trees' leaves bend and sway in the wind and its gusts; with no wind they stand still"
 "Built-up snow on roads and roofs":
   en: "Built-up snow on roads and roofs"
+"Road dirt on the vehicles":
+  en: "Road dirt on the vehicles"
+"Enhanced: the vehicles gather road dirt where it lands - spray behind the wheels and on the lower sides on wet roads, film on the back, dust when dry, slush in winter - and the rain washes it; off: the bus's own dirt, as in OMSI 2":
+  en: "Enhanced: the vehicles gather road dirt where it lands - spray behind the wheels and on the lower sides on wet roads, film on the back, dust when dry, slush in winter - and the rain washes it; off: the bus's own dirt, as in OMSI 2"
 "While it snows, snow builds up on the roads and on the vehicles' roofs, with ruts and tyre tracks, and thaws again; off: the weather's own snow on road, as in OMSI 2":
   en: "While it snows, snow builds up on the roads and on the vehicles' roofs, with ruts and tyre tracks, and thaws again; off: the weather's own snow on road, as in OMSI 2"
 "How much the view sways on its own when nothing is done to it - a head at rest is never quite still, most of it seen while the bus waits at a stop":
@@ -7787,8 +7791,8 @@ _version: 2
   en: "Its log is in the openOMSI data folder (launcher.log); Microsoft Edge WebView2 {version} is installed."
 "The launcher's window needs Microsoft Edge WebView2 (part of Windows 10 and 11; for older systems: https://developer.microsoft.com/microsoft-edge/webview2/).":
   en: "The launcher's window needs Microsoft Edge WebView2 (part of Windows 10 and 11; for older systems: https://developer.microsoft.com/microsoft-edge/webview2/)."
-"SteamOS does not include it. In Desktop Mode, in Konsole: sudo steamos-readonly disable, then sudo pacman -S webkit2gtk-4.1, then sudo steamos-readonly enable (a SteamOS update can remove it again). See docs/USER_GUIDE.md.":
-  en: "SteamOS does not include it. In Desktop Mode, in Konsole: sudo steamos-readonly disable, then sudo pacman -S webkit2gtk-4.1, then sudo steamos-readonly enable (a SteamOS update can remove it again). See docs/USER_GUIDE.md."
+"SteamOS does not include it. In Desktop Mode, in Konsole: sudo steamos-readonly disable, then sudo pacman -S webkit2gtk-4.1, then sudo steamos-readonly enable (a SteamOS update can remove it again). See docs/TROUBLESHOOTING.md.":
+  en: "SteamOS does not include it. In Desktop Mode, in Konsole: sudo steamos-readonly disable, then sudo pacman -S webkit2gtk-4.1, then sudo steamos-readonly enable (a SteamOS update can remove it again). See docs/TROUBLESHOOTING.md."
 "this code was made by a game with LAN protocol {}, this one speaks {PROTOCOL} - both players need the same version":
   en: "this code was made by a game with LAN protocol {}, this one speaks {PROTOCOL} - both players need the same version"
 "the number {t} is not a port (1 to 65535)":
@@ -8427,6 +8431,12 @@ _version: 2
   en: "Projects made for openOMSI by others. Their own websites say what they do and how to get them."
 "No add-on yet":
   en: "No add-on yet"
+"The add-on list could not be loaded. Check the internet connection and try again.":
+  en: "The add-on list could not be loaded. Check the internet connection and try again."
+"No longer in the catalog":
+  en: "No longer in the catalog"
+"This plugin was taken out of the catalog. It stays in your game until you remove it.":
+  en: "This plugin was taken out of the catalog. It stays in your game until you remove it."
 "by {author}":
   en: "by {author}"
 "Open website":
@@ -8451,6 +8461,14 @@ _version: 2
   en: "Optional visual hailing; only effective with supported natural animations"
 "Passengers signal approaching buses":
   en: "Passengers signal approaching buses"
+"Passengers add weight to the bus":
+  en: "Passengers add weight to the bus"
+"Each rider's weight, from their .hum file, is added to the bus where they sit or stand: a full bus pulls away, brakes and climbs as the heavier vehicle it is; off, the bus weighs what its file says":
+  en: "Each rider's weight, from their .hum file, is added to the bus where they sit or stand: a full bus pulls away, brakes and climbs as the heavier vehicle it is; off, the bus weighs what its file says"
+"Passenger weight":
+  en: "Passenger weight"
+"For passengers whose file gives no weight; default 75 kg":
+  en: "For passengers whose file gives no weight; default 75 kg"
 "Multiplayer...":
   en: "Multiplayer..."
 "Connection code or server address":
@@ -8781,3 +8799,51 @@ _version: 2
   en: "Lights on in a downpour"
 "By day in a heavy rain some of the houses' windows are lit, as it gets dark enough to switch the light on":
   en: "By day in a heavy rain some of the houses' windows are lit, as it gets dark enough to switch the light on"
+"Driving end {number} of {count}: {name}":
+  en: "Driving end {number} of {count}: {name}"
+"At the wheel in the other cab":
+  en: "At the wheel in the other cab"
+"There are no points to set from here":
+  en: "There are no points to set from here"
+"Not on rails":
+  en: "Not on rails"
+"No points within {reach} m ahead":
+  en: "No points within {reach} m ahead"
+"The points {dist} m ahead cannot be set":
+  en: "The points {dist} m ahead cannot be set"
+"The points {dist} m ahead do not move":
+  en: "The points {dist} m ahead do not move"
+"Points {dist} m ahead: {way}":
+  en: "Points {dist} m ahead: {way}"
+"straight on":
+  en: "straight on"
+"to the left":
+  en: "to the left"
+"to the right":
+  en: "to the right"
+"Cruise control: {} km/h":
+  en: "Cruise control: {} km/h"
+"Cruise control off":
+  en: "Cruise control off"
+"Cruise control works above {} km/h":
+  en: "Cruise control works above {} km/h"
+"Yes":
+  en: "Yes"
+"Take control of this bus?":
+  en: "Take control of this bus?"
+"The bus cannot be changed while a timetable is active":
+  en: "The bus cannot be changed while a timetable is active"
+"The bus could not be taken over":
+  en: "The bus could not be taken over"
+"You have control of the bus":
+  en: "You have control of the bus"
+"Load a situation...":
+  en: "Load a situation..."
+"Enter saves, Esc cancels":
+  en: "Enter saves, Esc cancels"
+"Save under a name...":
+  en: "Save under a name..."
+"No saved situation of this map yet":
+  en: "No saved situation of this map yet"
+"Saved as \"{}\"":
+  en: "Saved as \"{}\""

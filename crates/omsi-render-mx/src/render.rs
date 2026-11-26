@@ -9,7 +9,7 @@ pub(crate) fn post_pass(
     view: &mx::TextureView,
     timer: Option<mx::PassTimestampWrites<'_>>,
     pipeline: &mx::RenderPipeline,
-    bg: &mx::BindGroup,
+    bg: &HeapGroup,
 ) {
     let mut pass = encoder.begin_render_pass(&mx::RenderPassDescriptor {
         label: Some("post"),
@@ -26,7 +26,7 @@ pub(crate) fn post_pass(
         occlusion_query_set: None,
     });
     pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, bg);
+    bg.set(&mut pass);
     pass.draw(0..3, 0..1);
 }
 
@@ -248,15 +248,73 @@ impl Renderer {
     }
 
     /// The upscaler could not start or stopped working: back to the player's anti-aliasing.
+    /// With the card out of memory (the upscaler's own textures could not be made) the
+    /// player's multisampling would only take more of it - 8x MSAA after DLSS gave up, and
+    /// the shadows went down to 512 - so the picture is drawn with FXAA instead, and the
+    /// upscaler, kept, is tried once more when the texture budget has lowered the textures.
     pub(crate) fn fall_back_without_upscaler(&mut self, scene: &mut Scene) {
-        let msaa = self.options.msaa_fallback.max(1);
-        log::warn!("drawing without the upscaler from now on, with {msaa}x MSAA");
+        let memory_short = crate::pipelines::errors::out_of_memory_within(
+            crate::pipelines::errors::OUT_OF_MEMORY_SPELL,
+        );
+        if memory_short && !self.upscaler_retried && self.options.temporal.is_some() {
+            log::warn!(
+                "the upscaler failed with the graphics card out of memory: drawing without it, with FXAA, until it is tried once more in {} s",
+                crate::pipelines::errors::OUT_OF_MEMORY_SPELL.as_secs()
+            );
+            self.upscaler_retry = Some((std::time::Instant::now(), self.options));
+            self.rebuild_with(scene, Self::without_upscaler(self.options, true));
+            return;
+        }
+        let options = Self::without_upscaler(self.options, memory_short);
+        if memory_short {
+            log::warn!(
+                "drawing without the upscaler from now on, with FXAA (the graphics card is out of memory)"
+            );
+        } else {
+            log::warn!(
+                "drawing without the upscaler from now on, with {}x MSAA",
+                options.msaa
+            );
+        }
+        self.upscaler_retry = None;
+        self.rebuild_with(scene, options);
+    }
+
+    /// `options` without the upscaler: the player's multisampling back, or, with the card out
+    /// of memory, none and FXAA.
+    pub(crate) fn without_upscaler(options: RenderOptions, memory_short: bool) -> RenderOptions {
+        if memory_short {
+            RenderOptions {
+                temporal: None,
+                msaa: 1,
+                fxaa: true,
+                ..options
+            }
+        } else {
+            RenderOptions {
+                temporal: None,
+                msaa: options.msaa_fallback.max(1),
+                msaa_fallback: 0,
+                ..options
+            }
+        }
+    }
+
+    /// The upscaler again, once, after it failed with the card out of memory (see
+    /// `fall_back_without_upscaler`): with the options it was drawn with.
+    pub(crate) fn retry_upscaler(&mut self, scene: &mut Scene) {
+        let Some((_, was)) = self.upscaler_retry.take() else {
+            return;
+        };
+        self.upscaler_retried = true;
+        log::info!("the upscaler is tried once more, now that the textures were lowered");
         self.rebuild_with(
             scene,
             RenderOptions {
-                temporal: None,
-                msaa,
-                msaa_fallback: 0,
+                temporal: was.temporal,
+                msaa: was.msaa,
+                msaa_fallback: was.msaa_fallback,
+                fxaa: was.fxaa,
                 ..self.options
             },
         );
@@ -341,7 +399,7 @@ impl Renderer {
         let upscaler = self
             .temporal_runtime()
             .or_else(|| self.temporal_kept.take())
-            .filter(|_| options.temporal.is_some());
+            .filter(|_| options.temporal.is_some() || self.upscaler_retry.is_some());
         // Release render targets before building their replacements. Keeping the old
         // targets alive while the new renderer is built can turn a recoverable OOM into
         // another allocation failure.
@@ -356,18 +414,20 @@ impl Renderer {
         self.targets.glass_mips = None;
         self.targets.target_use.clear();
         let (mesh_pages, frame_generation) = (self.mesh_pages, self.frame_generation.take());
+        let (upscaler_retry, upscaler_retried) = (self.upscaler_retry, self.upscaler_retried);
         *self = Renderer {
             mesh_pages,
             temporal_kept: upscaler,
             frame_generation,
+            upscaler_retry,
+            upscaler_retried,
             ..self.rebuilt(options)
         };
         scene.dirty = true;
         scene.model_buf = None;
         scene.params_buf = None;
-        scene.camera_bind_group = None;
-        scene.shadow_bind_group = None;
-        scene.precip_bind_group = None;
+        scene.camera_heaps = None;
+        self.remake_sky_bind_group(scene);
     }
 
     /// Render the scene into `target` (which must have the renderer's format).
@@ -457,25 +517,29 @@ impl Renderer {
                         &self.queue,
                         Some("triple screen composite"),
                         bytemuck::cast_slice(&params),
-                        mx::BufferUsages::UNIFORM,
+                        mx::BufferUsages::UNIFORM | mx::BufferUsages::STORAGE,
                     );
-                    let group = self.device.create_bind_group(&mx::BindGroupDescriptor {
-                        label: Some("triple screen composite"),
-                        entries: &[
-                            mx::BindGroupEntry {
-                                binding: 0,
-                                resource: buf.as_entire_binding(),
-                            },
-                            mx::BindGroupEntry {
-                                binding: 1,
-                                resource: mx::BindingResource::TextureView(&view),
-                            },
-                            mx::BindGroupEntry {
-                                binding: 2,
-                                resource: mx::BindingResource::Sampler(&self.sky.sky_sampler),
-                            },
-                        ],
-                    });
+                    let group = HeapGroup::of(
+                        picture_layout(),
+                        0,
+                        &mx::BindGroupDescriptor {
+                            label: Some("triple screen composite"),
+                            entries: &[
+                                mx::BindGroupEntry {
+                                    binding: 0,
+                                    resource: buf.as_entire_binding(),
+                                },
+                                mx::BindGroupEntry {
+                                    binding: 1,
+                                    resource: mx::BindingResource::TextureView(&view),
+                                },
+                                mx::BindGroupEntry {
+                                    binding: 2,
+                                    resource: mx::BindingResource::Sampler(&self.sky.sky_sampler),
+                                },
+                            ],
+                        },
+                    );
                     (view, group)
                 })
                 .collect();
@@ -532,13 +596,15 @@ impl Renderer {
                 // (the right panel loses its last pixel or two at the window's edge)
                 let [x, y, w, h] = v.viewport;
                 pass.set_scissor_rect(x, y, w.min(width - x), h);
-                pass.set_bind_group(0, &self.targets.triple_targets.as_ref().unwrap().1[i].1);
+                self.targets.triple_targets.as_ref().unwrap().1[i]
+                    .1
+                    .set(&mut pass);
                 pass.draw(0..3, 0..1);
             }
             pass.set_scissor_rect(0, 0, width, height);
             pass.set_pipeline(&self.overlay_pipeline_1x);
             for (_, _, group, _) in &scene.overlay_res {
-                pass.set_bind_group(0, group);
+                group.set(&mut pass);
                 pass.draw(0..6, 0..1);
             }
         }
@@ -635,25 +701,29 @@ impl Renderer {
                 &self.queue,
                 Some("OpenXR menu rectangle"),
                 bytemuck::cast_slice(&uniform),
-                mx::BufferUsages::UNIFORM,
+                mx::BufferUsages::UNIFORM | mx::BufferUsages::STORAGE,
             );
-            let group = self.device.create_bind_group(&mx::BindGroupDescriptor {
-                label: Some("OpenXR menu rectangle"),
-                entries: &[
-                    mx::BindGroupEntry {
-                        binding: 0,
-                        resource: buffer.as_entire_binding(),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 1,
-                        resource: mx::BindingResource::TextureView(&texture.view),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 2,
-                        resource: mx::BindingResource::Sampler(&self.sky.sky_sampler),
-                    },
-                ],
-            });
+            let group = HeapGroup::of(
+                picture_layout(),
+                0,
+                &mx::BindGroupDescriptor {
+                    label: Some("OpenXR menu rectangle"),
+                    entries: &[
+                        mx::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 1,
+                            resource: mx::BindingResource::TextureView(&texture.view),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 2,
+                            resource: mx::BindingResource::Sampler(&self.sky.sky_sampler),
+                        },
+                    ],
+                },
+            );
             Some((buffer, group))
         };
         let mut prepared = [Vec::new(), Vec::new()];
@@ -750,7 +820,7 @@ impl Renderer {
             });
             pass.set_pipeline(&self.xr_ui_pipeline);
             for (_, group) in &prepared[eye] {
-                pass.set_bind_group(0, group);
+                group.set(&mut pass);
                 pass.draw(0..6, 0..1);
             }
         }
@@ -788,25 +858,29 @@ impl Renderer {
                 &self.queue,
                 Some("overlay rect"),
                 bytemuck::cast_slice(&ndc),
-                mx::BufferUsages::UNIFORM | mx::BufferUsages::COPY_DST,
+                mx::BufferUsages::UNIFORM | mx::BufferUsages::STORAGE | mx::BufferUsages::COPY_DST,
             );
-            let bg = self.device.create_bind_group(&mx::BindGroupDescriptor {
-                label: Some("overlay"),
-                entries: &[
-                    mx::BindGroupEntry {
-                        binding: 0,
-                        resource: buf.as_entire_binding(),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 1,
-                        resource: mx::BindingResource::TextureView(&scene.textures[tex].view),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 2,
-                        resource: mx::BindingResource::Sampler(&self.sky.sky_sampler),
-                    },
-                ],
-            });
+            let bg = HeapGroup::of(
+                picture_layout(),
+                0,
+                &mx::BindGroupDescriptor {
+                    label: Some("overlay"),
+                    entries: &[
+                        mx::BindGroupEntry {
+                            binding: 0,
+                            resource: buf.as_entire_binding(),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 1,
+                            resource: mx::BindingResource::TextureView(&scene.textures[tex].view),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 2,
+                            resource: mx::BindingResource::Sampler(&self.sky.sky_sampler),
+                        },
+                    ],
+                },
+            );
             if k < scene.overlay_res.len() {
                 scene.overlay_res[k] = (tex, buf, bg, ndc);
             } else {
@@ -1223,7 +1297,7 @@ pub(crate) struct ToneMapping {
     /// into by turns (`adapt_front` is the current one), with their bind groups.
     pub(crate) meter_view: mx::TextureView,
     pub(crate) adapt_views: [mx::TextureView; 2],
-    pub(crate) adapt_bg: [mx::BindGroup; 2],
+    pub(crate) adapt_bg: [HeapGroup; 2],
     pub(crate) adapt_front: usize,
     /// OMSI_DEBUG_EXPOSURE: the adapted metering read back now and then, and logged.
     pub(crate) exposure_log: Option<ExposureLog>,
@@ -1251,4 +1325,43 @@ pub(crate) struct ToneMapping {
     /// From a view-space point to the last frame's clip space, and whether that picture can
     /// be read (0 or 1), for the AO pass.
     pub(crate) bounce_reproj: ([[f32; 4]; 4], f32),
+}
+
+#[cfg(test)]
+mod upscaler_fallback_tests {
+    use super::*;
+
+    fn upscaled() -> RenderOptions {
+        RenderOptions {
+            msaa: 1,
+            msaa_fallback: 8,
+            fxaa: false,
+            temporal: Some(Temporal {
+                upscaler: TemporalUpscaler::Dlss,
+                quality: TemporalQuality::Balanced,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// The upscaler gone with memory to spare: the player's multisampling, as set.
+    #[test]
+    fn without_the_upscaler_the_player_s_msaa_comes_back() {
+        let o = Renderer::without_upscaler(upscaled(), false);
+        assert_eq!(
+            (o.temporal, o.msaa, o.msaa_fallback, o.fxaa),
+            (None, 8, 0, false)
+        );
+    }
+
+    /// The upscaler gone with the card out of memory: no multisampling (8x took more of the
+    /// memory that was short), FXAA instead, and the player's MSAA kept for later.
+    #[test]
+    fn without_the_upscaler_and_memory_fxaa_and_no_msaa() {
+        let o = Renderer::without_upscaler(upscaled(), true);
+        assert_eq!(
+            (o.temporal, o.msaa, o.msaa_fallback, o.fxaa),
+            (None, 1, 8, true)
+        );
+    }
 }

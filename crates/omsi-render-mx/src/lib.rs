@@ -29,6 +29,8 @@ mod passes;
 use gpu_memory::adapter_vram_mb;
 use passes::{Encoders, FrameArgs, FrameEnv, PassTimers, StageClock};
 mod frame_plan;
+mod vehicle_dirt;
+pub use vehicle_dirt::{DIRT_VEHICLES, VehicleDirt};
 mod gpu;
 mod lighting;
 mod pipelines;
@@ -120,6 +122,8 @@ struct PassPipelines {
     rain_pipelines: Vec<mx::RenderPipeline>,
     /// Indexed by `pipe_code`: 4 depth/blend kinds x culled x depth-biased.
     pipelines: Vec<mx::RenderPipeline>,
+    /// The same with `override LEAN` (the enhanced passes only; see `main_key`).
+    lean: Option<Arc<LeanPipelines>>,
     corona_pipeline: mx::RenderPipeline,
     /// Smoke particles (`[smoke]`): the corona sprite alpha-blended with the smoke texture.
     smoke_pipeline: mx::RenderPipeline,
@@ -164,6 +168,12 @@ pub struct Renderer {
     temporal_failed: bool,
     temporal_window: bool,
     temporal_kept: Option<temporal::Runtime>,
+    /// The upscaler failed while the card was out of memory: the options it was drawn with,
+    /// tried once more when the texture budget has had its time (`retry_upscaler`), its
+    /// runtime kept meanwhile in `temporal_kept` (Streamline on Vulkan cannot start twice).
+    upscaler_retry: Option<(std::time::Instant, RenderOptions)>,
+    /// That retry was made (there is no second).
+    upscaler_retried: bool,
     /// The window's frame generation, while it has one (`SurfaceState::set_frame_generation`).
     frame_generation: Option<temporal::FrameGeneration>,
     /// The frame's numbers, waiting for `temporal_present` at the end of it.
@@ -174,13 +184,10 @@ pub struct Renderer {
     prepass_msaa_pipelines: Option<[mx::RenderPipeline; 6]>,
     prepass_eye_pipelines: Option<[mx::RenderPipeline; 6]>,
     pane_mask: Option<pipelines::scene::PaneMaskPipelines>,
-    pane_depth: Option<((u32, u32), mx::TextureView, mx::BindGroup)>,
+    pane_depth: Option<((u32, u32), mx::TextureView)>,
     /// The ground albedo pass's pipelines (see `SceneBase::ground_pipeline_at`); none where
     /// the enhanced path is left out or on OpenGL.
     ground_pipelines: Option<[mx::RenderPipeline; 8]>,
-    /// Whether the camera group's slot 8 (the AO's picture) holds the ground albedo picture
-    /// instead - while the ambient occlusion is off, see `ground_should_bind`.
-    ground_bound: std::cell::Cell<bool>,
     /// Ambient occlusion and its blur; none on OpenGL (GLES), whose shading language cannot
     /// read a depth texture texel by texel - the pipelines failed there, AO off or not (#422).
     ssao_pipeline: Option<mx::RenderPipeline>,
@@ -215,6 +222,8 @@ pub struct Renderer {
     mirror_sampler: mx::Sampler,
     /// The addressing of the next material's textures (`[matl_texadress_*]`).
     pub address_next: std::cell::Cell<TexAddressing>,
+    /// The vehicles' road dirt the enhanced picture lays over them (`set_vehicle_dirt`).
+    pub(crate) vehicle_dirt: std::cell::RefCell<Vec<VehicleDirt>>,
     /// The next material is lit at night by the tile light maps (`[LightMapMapping]`, the
     /// splines) instead of the map's lamps.
     pub light_map_next: std::cell::Cell<bool>,
@@ -365,6 +374,11 @@ pub struct RenderOptions {
     /// reflections, where the device can trace rays (hardware ray queries); elsewhere the
     /// enhanced picture as it is.
     pub ray_tracing: bool,
+    /// Experimental, with `ray_tracing`: ray-traced global illumination (the settings'
+    /// `rt_gi`) - the light the surfaces round a point send back to it, one diffuse bounce
+    /// traced at half size and gathered over the frames (rt/gi.rs). Read every frame: it
+    /// needs no rebuild.
+    pub rt_gi: bool,
     /// The Enhanced picture's street-scale light: the sky's occlusion by houses and trees
     /// over 18 m, and the light the surfaces send to each other (the settings'
     /// `street_light`). `None`: as the chip allows (off on a small or shared one, see
@@ -416,6 +430,7 @@ impl Default for RenderOptions {
             no_enhanced: false,
             preview_only: false,
             ray_tracing: false,
+            rt_gi: false,
             street_light: None,
             light_shadows: 1,
             cloud_shadows: false,

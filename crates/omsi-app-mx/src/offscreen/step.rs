@@ -411,9 +411,9 @@ impl Offscreen<'_> {
                     );
                 }
             }
-            // the AI's lights by the time of day, and by day in gloomy weather
+            // the AI's lights by Omsi.exe's daylight under the weather
             let daylight = omsi_sim::Daylight::compute(run_clock, envir.as_ref());
-            steps::set_ai_daylight(t, daylight, steps::gloomy_weather(Some(weather)));
+            steps::set_ai_daylight(t, daylight);
             let rail = player
                 .as_ref()
                 .and_then(|p| p.rail.as_ref())
@@ -454,6 +454,7 @@ impl Offscreen<'_> {
     pub(super) fn duty_step(&mut self) {
         let (args, dt) = (self.args, self.dt);
         let announce = self.settings.auto_announce;
+        let weight = self.settings.passenger_weight();
         let Self {
             ref mut player,
             ref mut duty,
@@ -488,6 +489,7 @@ impl Offscreen<'_> {
             }
         }
         let riders = humans_off.as_ref().map(|h| h.riding()).unwrap_or(0);
+        steps::passenger_load_step(player, humans_off.as_ref().map(|h| &h.sim), weight);
         let crash = steps::career_step(career, player, riders, duty.is_some(), dt, true);
         if crash > 0.0 {
             log::warn!("crash: {:.0} kJ", crash / 1000.0);
@@ -1192,6 +1194,9 @@ impl Offscreen<'_> {
                     s.set_lan_tours(tours);
                 }
             }
+            if let (Some(h), Some(s)) = (humans_off.as_mut(), schedule.as_mut()) {
+                crate::app_impl::lan_duties::lan_tour_progress(l, &mut h.sim, &mut s.sim);
+            }
             // the other games run in real time (see `RealTime`)
             std::thread::sleep(real_time.wait(Instant::now(), dt));
         }
@@ -1213,6 +1218,7 @@ impl Offscreen<'_> {
             ref world,
             ref weather,
             ref humans_off,
+            ref settings,
             ..
         } = *self;
         if let Some(p) = player.as_ref() {
@@ -1290,6 +1296,7 @@ impl Offscreen<'_> {
             traffic.as_ref().map(|t| &t.net),
             &v,
         );
+        omsi_scene::road_dirt::frame(renderer, settings.procedural_dirt, camera.position, &v);
     }
 
     /// A snapshot due at `t_s` (`--snapshots`).

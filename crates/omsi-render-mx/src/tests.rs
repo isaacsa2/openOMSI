@@ -1164,7 +1164,7 @@ fn terrain_paint_fast_path_preserves_composition() {
                     scene
                         .material_table
                         .write(&renderer.device, &renderer.queue, row, &uniform);
-                    scene.camera_bind_group = None;
+                    scene.camera_heaps = None;
                 }
             }
             let lighting = Lighting {
@@ -2085,7 +2085,9 @@ mod light_maps;
 mod long_road;
 mod more;
 mod night_coverage;
+mod pbr_maps;
 mod prepass_reach;
+mod rebuild;
 mod snow_track_field;
 mod transparency;
 mod vanilla_lighting;

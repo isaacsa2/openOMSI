@@ -12,6 +12,11 @@ pub(crate) struct Args {
     /// settings, no paths, names or log text) to this file and end, without starting the game.
     #[arg(long)]
     pub(crate) export_diagnostics: Option<PathBuf>,
+    /// Write the stop labels of the map's timetable - each stop's name, the lines calling at
+    /// it and where they go from here, from `TTData` - as a CSV, and end, without starting
+    /// the game (#2462: what a `Haltestellenschild` says, for a map's signs).
+    #[arg(long = "export-stop-labels")]
+    pub(crate) export_stop_labels: Option<PathBuf>,
     /// OMSI 2 installation root (the folder that contains `maps`, `Vehicles`, …).
     /// Found by itself when left out: $OMSI_ROOT, the folder remembered from last time,
     /// a folder next to this program, or the usual Steam locations.
@@ -84,6 +89,12 @@ pub(crate) struct Args {
     /// Explicitly allow selected server-owned bus/repaint downloads for this run.
     #[arg(long)]
     pub(crate) allow_server_fleet: bool,
+    /// When you host a session: the buses it drives, separated by `;` (bus files such as
+    /// Vehicles/MAN_SD200/MAN_SD77.bus, or their folders). Every other bus is refused and its
+    /// player told the list. Empty: every bus, as a session always was. A dedicated server
+    /// takes its list from server.cfg's `vehicles` instead.
+    #[arg(long)]
+    pub(crate) session_buses: Option<String>,
     /// Dedicated server: host a session from this server.cfg (written with the defaults when
     /// missing), with no window, no sound and no graphics card.
     #[arg(long)]
@@ -361,6 +372,12 @@ pub(crate) fn parse_triggers(args: &Args) -> Vec<(String, f32)> {
 }
 
 impl Args {
+    /// The buses this session drives when we host it (`--session-buses`), parsed: empty, every
+    /// bus.
+    pub(crate) fn session_bus_list(&self) -> Vec<String> {
+        omsi_lan::server_cfg::parse_vehicles(self.session_buses.as_deref().unwrap_or_default())
+    }
+
     /// Connections are local until passenger ownership handback is synchronized.
     pub(crate) fn passenger_connections_allowed(&self, connected: bool) -> bool {
         !connected && self.server.is_none() && self.lan_host.is_none() && self.lan_join.is_none()

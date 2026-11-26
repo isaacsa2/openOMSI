@@ -9,7 +9,11 @@ impl ScheduleSim {
         let group = self.departures[i].ai_group.to_ascii_lowercase();
         let key = self.tour_key(i);
         // the draw: the tour mixed with the session (#2250); `key` names the tour's choice
-        let h = if self.vehicle_seed == 0 { key } else { mix(key ^ self.vehicle_seed) };
+        let h = if self.vehicle_seed == 0 {
+            key
+        } else {
+            mix(key ^ self.vehicle_seed)
+        };
         // trains: the group lists .zug files instead of depot vehicles
         let train = self
             .trains
@@ -35,7 +39,8 @@ impl ScheduleSim {
                 let (k, j) = match self.tour_vehicle.get(&key) {
                     Some(&kj) => kj,
                     None => {
-                        let weights: Vec<usize> = vehicles.iter().map(|(_, n, _)| n.len().max(1)).collect();
+                        let weights: Vec<usize> =
+                            vehicles.iter().map(|(_, n, _)| n.len().max(1)).collect();
                         let total: usize = weights.iter().sum();
                         let mut x = (h % total.max(1) as u64) as usize;
                         let mut k = 0usize;
@@ -50,10 +55,15 @@ impl ScheduleSim {
                         let start = ((h >> 21) % nums.len().max(1) as u64) as usize;
                         let free = (0..nums.len())
                             .map(|o| (start + o) % nums.len())
-                            .find(|&j| !self.used_numbers.contains(&(group.clone(), nums[j].number.trim().to_string())));
+                            .find(|&j| {
+                                !self
+                                    .used_numbers
+                                    .contains(&(group.clone(), nums[j].number.trim().to_string()))
+                            });
                         let j = free.unwrap_or(start);
                         if let Some(n) = nums.get(j) {
-                            self.used_numbers.insert((group.clone(), n.number.trim().to_string()));
+                            self.used_numbers
+                                .insert((group.clone(), n.number.trim().to_string()));
                         }
                         self.tour_vehicle.insert(key, (k, j));
                         (k, j)
@@ -134,6 +144,20 @@ impl ScheduleSim {
         out
     }
 
+    /// The map tiles the trip of departure `i` runs over, from its track or the links between
+    /// its stations (each tile once); empty where the timetable gives no way for it. A bus is
+    /// only ever put on loaded tiles, so the fleet reads ahead the vehicles of the trips that
+    /// come near the player (omsi-app's `Schedule::upcoming_sets`).
+    pub fn trip_tiles(&self, i: usize) -> Vec<(i32, i32)> {
+        let trip = &self.data.trips[self.departures[i].trip];
+        let (steps, _) = self.steps_of(&trip.name, &trip_stations(trip));
+        let mut tiles: Vec<(i32, i32)> =
+            steps.iter().filter_map(|s| s.key.map(|k| k.tile)).collect();
+        tiles.sort_unstable();
+        tiles.dedup();
+        tiles
+    }
+
     /// The depot vehicles of every AI group.
     pub fn depot_vehicles(&self) -> impl Iterator<Item = &DepotVehicle> {
         self.depots.values().flatten()
@@ -145,7 +169,12 @@ impl ScheduleSim {
     }
 
     /// Vehicles of a plain `[aigroup_2]`, loaded on first use and kept.
-    fn pool(&mut self, root: &Path, world: &dyn TimetableWorld, group: &str) -> &[Arc<VehicleType>] {
+    fn pool(
+        &mut self,
+        root: &Path,
+        world: &dyn TimetableWorld,
+        group: &str,
+    ) -> &[Arc<VehicleType>] {
         if !self.pools.contains_key(group) {
             let mut out = Vec::new();
             for g in world
@@ -178,7 +207,11 @@ impl ScheduleSim {
 
     /// The depot file a plain `[aigroup_2]` vehicle or `.zug` train runs with (see [`pool_depot`]),
     /// looked up once per vehicle folder.
-    pub fn pool_hof(&mut self, dir: &Path, world: &dyn TimetableWorld) -> Option<Arc<omsi_vehicle::Hof>> {
+    pub fn pool_hof(
+        &mut self,
+        dir: &Path,
+        world: &dyn TimetableWorld,
+    ) -> Option<Arc<omsi_vehicle::Hof>> {
         if let Some(h) = self.pool_hofs.get(dir) {
             return h.clone();
         }

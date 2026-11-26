@@ -23,6 +23,7 @@
 
 use super::*;
 
+mod gi;
 mod reflect;
 
 /// How far from the camera meshes are traced (m): beyond it the shadow map holds.
@@ -158,6 +159,8 @@ struct Params {
     vehicle_centre: [f32; 4],
     sky: [f32; 4],
     sun_light: [f32; 4],
+    light_grid: [f32; 4],
+    gi: [f32; 4],
 }
 
 /// The traced lighting's textures for one picture size (all rgba16float: r the ambient
@@ -187,8 +190,8 @@ pub(super) struct RayTracer {
     /// Bumped whenever a buffer or the top level the bind groups name is made anew; the
     /// lighting's and the reflections' bind groups are kept while it and their textures stay.
     bind_gen: u64,
-    trace_groups: Option<(RtBindKey, [mx::BindGroup; 2])>,
-    refl_groups: Option<(RtBindKey, [mx::BindGroup; 2])>,
+    trace_groups: Option<(RtBindKey, [HeapGroup; 2])>,
+    refl_groups: Option<(RtBindKey, [HeapGroup; 2])>,
     records: Vec<Record>,
     records_buf: mx::Buffer,
     tex_avg: mx::Buffer,
@@ -221,7 +224,15 @@ pub(super) struct RayTracer {
     atrous: mx::ComputePipeline,
     steps: mx::Buffer,
     step_stride: u64,
-    denoise_groups: Option<(RtBindKey, [mx::BindGroup; 8])>,
+    denoise_groups: Option<(RtBindKey, [HeapGroup; 8])>,
+    /// Experimental: the traced global illumination (`gi.rs`) - on this frame, its
+    /// textures, pipelines and kept bind groups.
+    pub(super) gi_on: bool,
+    gi: Option<gi::GiState>,
+    gi_pipes: Option<gi::GiPipes>,
+    /// (the GI's pipelines were refused: it stays off)
+    gi_failed: bool,
+    gi_groups: Option<gi::GiGroups>,
 }
 
 /// The reflections' textures at the rays' size (all rgba16float).
@@ -248,6 +259,14 @@ fn refl_div() -> u32 {
     }
 }
 
+/// The ray tracing's modules, their groups read from the heap (`groups_to_heap`).
+pub(super) static RT_LIGHTING: HeapModule = HeapModule::new(lighting_source);
+pub(super) static RT_DENOISE: HeapModule = HeapModule::new(denoise_source);
+pub(super) static RT_REFLECT: HeapModule = HeapModule::new(reflect_source);
+pub(super) static RT_AVG: HeapModule = HeapModule::new(|| {
+    crate::shaders::hot_wgsl(include_str!("rt_avg.wgsl"), "rt_avg.wgsl").to_string()
+});
+
 /// The traced lighting's shader: the shared ray tracing and its own.
 pub(super) fn lighting_source() -> String {
     [
@@ -266,6 +285,7 @@ pub(super) fn denoise_source() -> String {
     [
         crate::shaders::hot_wgsl(include_str!("rt_common.wgsl"), "rt_common.wgsl"),
         crate::shaders::hot_wgsl(include_str!("rt_denoise.wgsl"), "rt_denoise.wgsl"),
+        crate::shaders::hot_wgsl(include_str!("rt_gi_denoise.wgsl"), "rt_gi_denoise.wgsl"),
     ]
     .join("\n")
 }
@@ -281,6 +301,7 @@ pub(super) fn reflect_source() -> String {
         crate::shaders::hot_wgsl(include_str!("rt_common.wgsl"), "rt_common.wgsl"),
         enh,
         crate::shaders::hot_wgsl(include_str!("rt_reflect.wgsl"), "rt_reflect.wgsl"),
+        crate::shaders::hot_wgsl(include_str!("rt_gi.wgsl"), "rt_gi.wgsl"),
     ]
     .join("\n")
 }
@@ -290,7 +311,7 @@ impl RayTracer {
         let module = device
             .create_shader_module(&mx::ShaderModuleDescriptor {
                 label: Some("ray tracing"),
-                source: &*(lighting_source()),
+                source: &RT_LIGHTING.wgsl(),
             })
             .expect("mX: a shader");
         let pipeline = |entry: &str, step: Option<f64>| {
@@ -310,7 +331,7 @@ impl RayTracer {
         let avg_module = device
             .create_shader_module(&mx::ShaderModuleDescriptor {
                 label: Some("texture means"),
-                source: crate::shaders::hot_wgsl(include_str!("rt_avg.wgsl"), "rt_avg.wgsl"),
+                source: &RT_AVG.wgsl(),
             })
             .expect("mX: a shader");
         let avg_pipeline = device
@@ -324,7 +345,7 @@ impl RayTracer {
         let refl_module = device
             .create_shader_module(&mx::ShaderModuleDescriptor {
                 label: Some("ray-traced reflections"),
-                source: &*(reflect_source()),
+                source: &RT_REFLECT.wgsl(),
             })
             .expect("mX: a shader");
         let div = [("REFL_DIV", refl_div() as f64)];
@@ -377,7 +398,7 @@ impl RayTracer {
         let denoise_module = device
             .create_shader_module(&mx::ShaderModuleDescriptor {
                 label: Some("rt reflections denoiser"),
-                source: &*(denoise_source()),
+                source: &RT_DENOISE.wgsl(),
             })
             .expect("mX: a shader");
         let denoise_pass = |entry: &str| {
@@ -397,8 +418,10 @@ impl RayTracer {
         let steps = device
             .create_buffer(&mx::BufferDescriptor {
                 label: Some("rt reflections denoiser steps"),
-                size: 3 * step_stride,
-                usage: mx::BufferUsages::UNIFORM | mx::BufferUsages::COPY_DST,
+                size: 4 * step_stride,
+                usage: mx::BufferUsages::UNIFORM
+                    | mx::BufferUsages::STORAGE
+                    | mx::BufferUsages::COPY_DST,
             })
             .expect("mX: a buffer");
         let spare = || {
@@ -447,7 +470,9 @@ impl RayTracer {
                 .create_buffer(&mx::BufferDescriptor {
                     label: Some("ray tracing params"),
                     size: std::mem::size_of::<Params>() as u64,
-                    usage: mx::BufferUsages::UNIFORM | mx::BufferUsages::COPY_DST,
+                    usage: mx::BufferUsages::UNIFORM
+                        | mx::BufferUsages::STORAGE
+                        | mx::BufferUsages::COPY_DST,
                 })
                 .expect("mX: a buffer"),
             targets: None,
@@ -464,6 +489,11 @@ impl RayTracer {
             steps,
             step_stride,
             denoise_groups: None,
+            gi_on: false,
+            gi: None,
+            gi_pipes: None,
+            gi_failed: false,
+            gi_groups: None,
         }
     }
 
@@ -596,11 +626,13 @@ impl Renderer {
         w: u32,
         h: u32,
         dt: f32,
+        grid: [f32; 4],
     ) -> bool {
         let Some(rt) = self.rt.as_mut() else {
             return false;
         };
         rt.frame += 1;
+        rt.gi_on = self.options.rt_gi && rt.gi.is_some();
         let frame = rt.frame;
         let ro = scene.render_origin;
         let cam = (camera.position - ro).as_vec3();
@@ -958,6 +990,8 @@ impl Renderer {
             vehicle_centre,
             sky: [0.0; 4],
             sun_light: [0.0; 4],
+            light_grid: gi::light_grid(scene, grid),
+            gi: gi::frame_params(rt, history, frame),
         };
         self.queue
             .write_buffer(&rt.params, 0, bytemuck::bytes_of(&p))
@@ -1016,34 +1050,38 @@ impl Renderer {
             rt.bind_gen += 1;
         }
         rt.tex.write_tiles(&self.queue, &wanted);
-        let groups: Vec<mx::BindGroup> = wanted
+        let groups: Vec<HeapGroup> = wanted
             .iter()
             .enumerate()
             .map(|(k, &t)| {
                 let [atlas, tile] = rt.tex.avg_bindings(k);
-                self.device.create_bind_group(&mx::BindGroupDescriptor {
-                    label: Some("texture mean"),
-                    entries: &[
-                        mx::BindGroupEntry {
-                            binding: 0,
-                            resource: mx::BindingResource::TextureView(&scene.textures[t].view),
-                        },
-                        mx::BindGroupEntry {
-                            binding: 1,
-                            resource: mx::BindingResource::Sampler(&self.tone.lin_sampler),
-                        },
-                        mx::BindGroupEntry {
-                            binding: 2,
-                            resource: mx::BindingResource::Buffer(mx::BufferBinding {
-                                buffer: &rt.tex_avg,
-                                offset: t as u64 * rt.avg_stride,
-                                size: Some(32),
-                            }),
-                        },
-                        atlas,
-                        tile,
-                    ],
-                })
+                HeapGroup::of(
+                    RT_AVG.layout(),
+                    0,
+                    &mx::BindGroupDescriptor {
+                        label: Some("texture mean"),
+                        entries: &[
+                            mx::BindGroupEntry {
+                                binding: 0,
+                                resource: mx::BindingResource::TextureView(&scene.textures[t].view),
+                            },
+                            mx::BindGroupEntry {
+                                binding: 1,
+                                resource: mx::BindingResource::Sampler(&self.tone.lin_sampler),
+                            },
+                            mx::BindGroupEntry {
+                                binding: 2,
+                                resource: mx::BindingResource::Buffer(mx::BufferBinding {
+                                    buffer: &rt.tex_avg,
+                                    offset: t as u64 * rt.avg_stride,
+                                    size: Some(32),
+                                }),
+                            },
+                            atlas,
+                            tile,
+                        ],
+                    },
+                )
             })
             .collect();
         {
@@ -1053,7 +1091,7 @@ impl Renderer {
             });
             pass.set_pipeline(&rt.avg_pipeline);
             for bg in &groups {
-                pass.set_bind_group(0, bg);
+                bg.set_compute(&mut pass);
                 pass.dispatch_workgroups(1, 1, 1);
             }
         }
@@ -1106,47 +1144,51 @@ impl Renderer {
             rt.tlas_built = true;
         }
         let group = |inp: &mx::TextureView, raw: &mx::TextureView, out: &mx::TextureView| {
-            self.device.create_bind_group(&mx::BindGroupDescriptor {
-                label: Some("ray tracing"),
-                entries: &[
-                    mx::BindGroupEntry {
-                        binding: 0,
-                        resource: rt.params.as_entire_binding(),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 1,
-                        resource: mx::BindingResource::AccelerationStructure(&rt.tlas),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 2,
-                        resource: mx::BindingResource::TextureView(depth),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 3,
-                        resource: rt.records_buf.as_entire_binding(),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 4,
-                        resource: rt.tex_avg.as_entire_binding(),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 5,
-                        resource: mx::BindingResource::TextureView(inp),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 6,
-                        resource: mx::BindingResource::TextureView(raw),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 7,
-                        resource: mx::BindingResource::TextureView(out),
-                    },
-                    mx::BindGroupEntry {
-                        binding: 8,
-                        resource: mx::BindingResource::Sampler(&self.tone.lin_sampler),
-                    },
-                ],
-            })
+            HeapGroup::of(
+                RT_LIGHTING.layout(),
+                0,
+                &mx::BindGroupDescriptor {
+                    label: Some("ray tracing"),
+                    entries: &[
+                        mx::BindGroupEntry {
+                            binding: 0,
+                            resource: rt.params.as_entire_binding(),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 1,
+                            resource: mx::BindingResource::AccelerationStructure(&rt.tlas),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 2,
+                            resource: mx::BindingResource::TextureView(depth),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 3,
+                            resource: rt.records_buf.as_entire_binding(),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 4,
+                            resource: rt.tex_avg.as_entire_binding(),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 5,
+                            resource: mx::BindingResource::TextureView(inp),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 6,
+                            resource: mx::BindingResource::TextureView(raw),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 7,
+                            resource: mx::BindingResource::TextureView(out),
+                        },
+                        mx::BindGroupEntry {
+                            binding: 8,
+                            resource: mx::BindingResource::Sampler(&self.tone.lin_sampler),
+                        },
+                    ],
+                },
+            )
         };
         // (each pass's input never is its output)
         let key: RtBindKey = (
@@ -1176,9 +1218,10 @@ impl Renderer {
                 }),
             });
             pass.set_pipeline(pipe);
-            pass.set_bind_group(0, bg);
+            bg.set_compute(&mut pass);
             pass.dispatch_workgroups(gx, gy, 1);
         }
+        self.encode_rt_gi(encoder, scene, queries, timed);
     }
 }
 

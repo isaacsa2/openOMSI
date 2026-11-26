@@ -235,6 +235,21 @@ impl GpuArray {
         }
     }
 
+    /// Its place in the heap (`frame_from_heap`): a buffer's view, kept in `views`, or the
+    /// texture's own.
+    pub(crate) fn heap_index(&self, views: &mut Vec<mx::BufferView>) -> u32 {
+        match self {
+            GpuArray::Buffer(b) => {
+                let view = crate::pipelines::common::heap_view(b);
+                let index = view.index();
+                views.push(view);
+                index
+            }
+            GpuArray::Texture { view, .. } => view.index(),
+            GpuArray::Unused => 0,
+        }
+    }
+
     pub(crate) fn binding(&self) -> mx::BindingResource<'_> {
         match self {
             GpuArray::Buffer(b) => b.as_entire_binding(),
@@ -691,6 +706,16 @@ impl Renderer {
 
     /// Whether the card ran out of memory since the last call (the game then keeps fewer
     /// textures, before the driver gives up the device).
+    /// Send the uploads written so far to the GPU and let go of their staging copies once it
+    /// has them (see the wgpu renderer's `flush_uploads`: a loading stage that uploads
+    /// without drawing held them all until the first frame).
+    pub fn flush_uploads(&self) {
+        self.queue.submit(Vec::<mx::CommandBuffer>::new());
+        if let Err(e) = self.device.poll() {
+            (self.errors.report)(&e);
+        }
+    }
+
     pub fn take_out_of_memory(&self) -> bool {
         let texture = crate::resources::TEXTURE_OUT_OF_MEMORY
             .swap(false, std::sync::atomic::Ordering::Relaxed);

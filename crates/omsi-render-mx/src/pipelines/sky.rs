@@ -13,12 +13,16 @@ pub(crate) struct SkyBase {
     pub cloud_base_view: mx::TextureView,
     pub cloud_curl_view: mx::TextureView,
     pub cloud_sampler: mx::Sampler,
+    pub moon_view: mx::TextureView,
     pub cloud_shape_cpu: crate::lighting::CloudCpu,
     /// Where the screen's clouds were traced from (`CloudView`, binding 12).
     pub cloud_view_buf: mx::Buffer,
     /// The classic sky's weather (`VanillaSkyUniform`, binding 10).
     pub vanilla_buf: mx::Buffer,
     pub shader: mx::ShaderModule,
+    /// the module's places in the heap (`groups_to_heap`): the dome's, the probe's and the
+    /// clouds' groups are made at them
+    pub layout: crate::shaders::HeapLayout,
 }
 
 impl SkyBase {
@@ -32,7 +36,7 @@ impl SkyBase {
             device,
             mx::ShaderModuleDescriptor {
                 label: Some("sky"),
-                source: &*(shader_source(enhanced)),
+                source: &crate::shaders::groups_to_heap(&shader_source(enhanced)),
             },
         );
         let vanilla_buf = uniform_buffer(
@@ -51,10 +55,12 @@ impl SkyBase {
             cloud_base_view: clouds.base,
             cloud_curl_view: clouds.curl,
             cloud_sampler: clouds.sampler,
+            moon_view: crate::sky::moon_texture(device, queue),
             cloud_shape_cpu: clouds.cpu,
             cloud_view_buf,
             vanilla_buf,
             shader: sky_shader,
+            layout: crate::shaders::layout_of(&shader_source(enhanced)),
         }
     }
 
@@ -137,7 +143,7 @@ impl SkyPipelineBase {
     }
 }
 
-fn shader_source(enhanced: bool) -> String {
+pub(crate) fn shader_source(enhanced: bool) -> String {
     if enhanced {
         sky_shader_source()
     } else {

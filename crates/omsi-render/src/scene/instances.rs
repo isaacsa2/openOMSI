@@ -40,6 +40,7 @@ impl Renderer {
             shadow_bind_group: None,
             precip_bind_group: None,
             sky_bind_group: None,
+            sky_textures: None,
             overlays: Vec::new(),
             premultiplied: Default::default(),
             transposed: Default::default(),
@@ -132,7 +133,7 @@ impl Renderer {
             })
             .collect();
         let (slot_levels, slot_depth_caps, slot_depth_floors) =
-            scene.object_run.levels_for_materials(
+            scene.object_run.levels_for_materials_with_depth_planes(
                 key,
                 draw_order,
                 mesh,
@@ -140,6 +141,7 @@ impl Renderer {
                 &scene.meshes[mesh].flats,
                 slots,
                 &alpha,
+                &scene.meshes[mesh].depth_normals,
             );
         scene.instances.push(Instance {
             draw_order,
@@ -204,14 +206,17 @@ impl Renderer {
         let draw_order = scene.next_instance_order;
         scene.next_instance_order += 1;
         let key = crate::frame_plan::origin_key(origin);
-        let (slot_levels, slot_depth_caps, slot_depth_floors) = scene.object_run.levels_with_caps(
-            key,
-            draw_order,
-            mesh,
-            transform,
-            &scene.meshes[mesh].flats,
-            slots,
-        );
+        let (slot_levels, slot_depth_caps, slot_depth_floors) =
+            scene.object_run.levels_for_materials_with_depth_planes(
+                key,
+                draw_order,
+                mesh,
+                transform,
+                &scene.meshes[mesh].flats,
+                slots,
+                &[],
+                &scene.meshes[mesh].depth_normals,
+            );
         scene.instances.push(Instance {
             draw_order,
             slot_levels,

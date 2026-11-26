@@ -150,6 +150,22 @@ impl App {
         self.service_msg = Some((text.into(), 1.5));
     }
 
+    /// `change_switch` (J): the points ahead of the train's leading end set to their next branch
+    /// (see `rail_drive::change_switch`), and what it did on the screen.
+    fn change_switch(&mut self) {
+        let msg = match (
+            self.player.as_ref(),
+            self.session.traffic.as_ref(),
+            self.world.clone(),
+        ) {
+            (Some(p), Some(t), Some(w)) if p.rail_bound => {
+                crate::rail_drive::change_switch(p, &t.net, &w, &mut self.session.scenery)
+            }
+            _ => omsi_ui::tr("There are no points to set from here").into_owned(),
+        };
+        self.service_msg = Some((msg, 3.0));
+    }
+
     /// One of OMSI's global key actions; false when it is not one this game does.
     pub(crate) fn game_action(&mut self, name: &str) -> bool {
         #[cfg(windows)]
@@ -179,6 +195,7 @@ impl App {
             }
             "screenshot" => self.take_screenshot(),
             "flashlight" => self.toggle_flashlight(),
+            "cruise_control" => self.toggle_cruise(),
             "clean_screen" => self.toggle_clean_screen(),
             "get_up" => {
                 if self
@@ -320,6 +337,9 @@ impl App {
                     && (self.cam.look != (0.0, 0.0) || self.cam.view_zoom.contains_key(&self.view));
                 if let Some(p) = self.player.as_mut() {
                     p.cam_choice = (0, 0);
+                    if let Some(k) = p.vehicle.active_cab {
+                        crate::on_foot::seat_in_cab(p, Some(k));
+                    }
                 }
                 self.cam.orbit = ORBIT_DEFAULT;
                 if eyed {
@@ -369,10 +389,19 @@ impl App {
             "gear_up" | "gear_down" => {
                 self.shift_gear(name == "gear_up");
             }
+            "change_switch" => self.change_switch(),
             "view_interiorcam_plus" | "view_interiorcam_minus" => {
                 let Some(p) = self.player.as_mut() else {
                     return true;
                 };
+                if self.view == "outside" {
+                    let back = name == "view_interiorcam_minus";
+                    if let Some(msg) = crate::on_foot::change_driving_end(p, back) {
+                        self.service_msg = Some((msg, 2.5));
+                        self.sync_view_look();
+                    }
+                    return true;
+                }
                 // (the interior cameras only cycle in the interior: from outside the keys
                 // would change an invisible camera)
                 if !matches!(self.view.as_str(), "driver" | "pax") {
@@ -593,6 +622,12 @@ impl App {
         if self.settings.info_bar != on {
             self.settings.info_bar = on;
             crate::game_lists::remember_setting("info_bar", if on { "1" } else { "0" });
+        }
+    }
+
+    pub(crate) fn toggle_cruise(&mut self) {
+        if let Some(p) = self.player.as_mut() {
+            self.service_msg = Some((p.toggle_cruise(), 2.5));
         }
     }
 

@@ -373,13 +373,15 @@ pub(crate) fn spawn_player_prepared(
     let trailer_renders: Vec<scene::VehicleRender> =
         attach_coupled_types(&mut vehicle, prepared.parts)
             .iter()
-            .map(|t| {
+            .enumerate()
+            .map(|(k, t)| {
                 world.add_vehicle_part(
                     renderer,
                     scene,
                     t,
                     scheme.filter(|i| *i < t.paint_schemes.len()),
                     &render,
+                    vehicle.mirror_base(k),
                 )
             })
             .collect();
@@ -511,11 +513,13 @@ pub(crate) fn spawn_player_prepared(
     // a situation remembers how dirty the bus was; --dirt sets it for a test run
     if let Some(d) = args.dirt {
         p.vehicle.dirt = d.clamp(0.0, 1.0);
+        p.vehicle.road_dirt = omsi_sim::vehicle::RoadDirt::from_dirt_norm(p.vehicle.dirt);
     }
     if args.is_resuming() {
         let (numeric, textual) = p
             .vehicle
             .restore_script_state(&args.situation_vars, &args.situation_strvars);
+        let cars = p.vehicle.restore_car_states(&args.situation_cars);
         if let Some(km) = args.situation_odometer_km {
             p.vehicle.set_odometer_km(km);
         }
@@ -523,7 +527,7 @@ pub(crate) fn spawn_player_prepared(
             .map(|f| crate::situation::restore_script_textures(&f, &mut p.vehicle))
             .unwrap_or(0);
         log::info!(
-            "situation: {numeric} of {} variables, {textual} of {} strings and {pictures} script textures restored",
+            "situation: {numeric} of {} variables, {textual} of {} strings, {cars} values of coupled cars and {pictures} script textures restored",
             args.situation_vars.len(),
             args.situation_strvars.len()
         );
@@ -749,6 +753,8 @@ fn new_player(
         occlude_controls: false,
         drawn_outside: false,
         startup: None,
+        cruise: None,
+        cruise_note: None,
         startup_at: None,
         give_ticket: false,
         give_change: false,
