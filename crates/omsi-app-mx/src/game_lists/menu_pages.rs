@@ -178,6 +178,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         switch_row(app, "precision_zoom", "Precision mouse zoom", "The mouse zoom follows the FOV curve instead of OMSI's linear way"),
         slider_row(app, "zoom_hold_amount", "Zoom on a key", "How far the view zooms while the zoom key is held (Controls: Zoom while held)", &|v| format!("{}x", format!("{:.2}", 1.0 / v.max(0.15)).trim_end_matches('0').trim_end_matches('.'))),
         switch_row(app, "zoom_hold_latch", "Zoom key stays", "One press zooms in, the next zooms out; off: only while the key is held"),
+        switch_row(app, "others_detail", "Draw other players' buses in less detail when far away", "Multiplayer: beyond 120 m, and whenever the frame rate is under 20, other players' buses keep their body but lose the driver figures and destination displays nobody reads from there; they come back in full over 26 fps"),
         switch_row(app, "flashlight_cursor", "Flashlight follows the cursor", "With the cursor free (on foot, or in the cab while the mouse does not steer) the flashlight lights where it points; otherwise straight ahead"),
         slider_row(app, "fov", "Field of view", "Vertical field of view; in triple screen Default uses physical measurements, an override moves the virtual eye", &|v| if v < 20.0 { "Default".to_string() } else { format!("{v:.0}°") }),
         slider_row(app, "seat 1", "Seat forward and back", "Adjust the driver's seat position forward or backward", &cm),
@@ -1241,10 +1242,14 @@ mod tests {
 }
 
 /// The upscaler's rows of the graphics page (after the render scale's): the upscaler, and
-/// FSR 1's quality and sharpening while it is chosen.
+/// FSR 1's quality and sharpening while it is chosen, and DLSS's sharpening while it is.
 fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
     let fsr = app.settings.upscaler == "fsr1";
     let temporal = app.settings.temporal_upscaling().is_some();
+    let dlss = app
+        .settings
+        .temporal_upscaling()
+        .is_some_and(|t| t.upscaler == omsi_render::TemporalUpscaler::Dlss);
     let offered =
         !omsi_cfg::upscaler_files::available(&omsi_cfg::upscaler_files::program_dir()).is_empty();
     let generation = app.settings.temporal_upscaling().is_some_and(|t| {
@@ -1257,6 +1262,7 @@ fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
         select_row(file, "frame_generation", "Frame generation", omsi_cfg::upscaler_files::frame_generation_help()).filter(|_| generation),
         select_row(file, "fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| fsr),
         slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength", &pct).filter(|_| fsr),
+        slider_row(app, "dlss_sharpness", "DLSS sharpness", "How much the picture is sharpened after DLSS; 25 % as before", &pct).filter(|_| dlss),
     ]
     .into_iter()
     .flatten()

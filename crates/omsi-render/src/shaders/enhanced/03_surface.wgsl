@@ -30,6 +30,27 @@ const GI_CAB_SHARE: f32 = 0.15;
 // How far the puddle threshold drops with the wetness: see the puddle mask in `shade_enhanced`.
 const PUDDLE_SPREAD: f32 = 0.37;
 
+// The water in the lanes' wheel tracks (`lane_ruts`: 0..1, how worn the road is there),
+// on a road `wet` (0..1): x the cover of the water standing in the ruts, y how far the
+// tyres have dried the wheel paths. A road soaked through holds a broken line of water in
+// each rut (the traffic has worn them a few millimetres deep), which the tyres run through
+// and throw up; as it dries, the wheels' paths dry first, lighter strips down each lane
+// before the rest of the road. The same as `rut_water` in omsi-scene's puddles.rs (the
+// spray), which keeps the numbers in step.
+fn rut_water(world: vec3<f32>, ruts: f32, wet: f32) -> vec2<f32> {
+    let breaks = vnoise_f(world_pattern_xy(world), 0.9, vec2<f32>(5.3, -2.2));
+    let level = ruts * smoothstep(0.75, 0.95, wet) * (0.7 + 0.6 * breaks);
+    return vec2<f32>(smoothstep(0.45, 0.55, level), ruts * (1.0 - smoothstep(0.6, 0.85, wet)));
+}
+
+// How far the rain is kept off the ground at `world` (0 open sky .. 1 under a roof). The
+// mX renderer reads its dry map here (omsi-render-mx enhanced/03_surface.wgsl); this one has
+// no texture unit left for it in the camera group (sixteen with the materials', see
+// `camera_layout_entries`), so the ground is out in the weather as before.
+fn roof_dry(world: vec3<f32>) -> f32 {
+    return 0.0;
+}
+
 /// The mip level a pixel's footprint asks for, in levels of the texture whose size is
 /// `texels` (the usual `log2` of the larger derivative, held at 0 and up). An LED panel is
 /// sampled with this, held at `enh.led.y` (`Lighting::led_mips`): 0 point-samples it, which
@@ -235,7 +256,7 @@ fn emission_light(buv: vec2<f32>, base: vec3<f32>, slot: f32, pre: f32) -> vec3<
 // (and how wet the dirt that `road_dirt` found is, 0..1)
 var<private> dirt_wet: f32;
 fn road_dirt(world: vec3<f32>, n: vec3<f32>, pane: bool) -> vec4<f32> {
-    let count = min(i32(enh.dirt_n.x + 0.5), 6);
+    let count = min(i32(enh.dirt_n.x + 0.5), 64);
     for (var i = 0; i < count; i = i + 1) {
         let b = i * 8;
         let o = enh.dirt[b];
@@ -266,8 +287,10 @@ fn road_dirt(world: vec3<f32>, n: vec3<f32>, pane: bool) -> vec4<f32> {
         let on_end = smoothstep(0.7, 0.25, to_end) * smoothstep(-0.3, 0.2, end_out);
         let on_roof = smoothstep(0.35, 0.1, hi.z - p.z) * smoothstep(0.6, 0.9, ln.z);
         let outside = max(on_side, on_end);
+        // (not this one's outside: the next box may hold the point too - an articulated
+        // bus's sections overlap at the joint, two vehicles parked nose to tail)
         if (outside + on_roof <= 0.0) {
-            return vec4<f32>(0.0);
+            continue;
         }
         let am = enh.dirt[b + 6];
         let kind = enh.dirt[b + 7];

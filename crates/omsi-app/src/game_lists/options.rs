@@ -22,6 +22,7 @@ pub(super) fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "led_glow" => s.led_glow as f32,
         "night_brightness" => s.night_brightness,
         "fsr_sharpness" => s.fsr_sharpness,
+        "dlss_sharpness" => s.dlss_sharpness,
         "reflections" => s.reflections,
         "road_glare" => s.road_glare,
         "traffic_headlights" => s.traffic_headlights,
@@ -154,6 +155,10 @@ pub(super) fn option_set(
         "fsr_sharpness" => {
             app.settings.fsr_sharpness = v.clamp(0.0, 1.0);
             Some(("fsr_sharpness", app.settings.fsr_sharpness.to_string()))
+        }
+        "dlss_sharpness" => {
+            app.settings.dlss_sharpness = v.clamp(0.0, 1.0);
+            Some(("dlss_sharpness", app.settings.dlss_sharpness.to_string()))
         }
         "reflections" => {
             app.settings.reflections = v.clamp(0.0, 1.0);
@@ -640,6 +645,7 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "zoom_hold_latch" => s.zoom_hold_latch,
         "others_detail" => s.others_detail,
         "flashlight_cursor" => s.flashlight_cursor,
+        "software_cursor" => s.software_cursor,
         "triple_screen" => s.triple.enabled,
         "triple_hud_center" => s.triple_hud_center,
         "triple_span" => s.triple_span,
@@ -1168,6 +1174,10 @@ fn toggle_set_graphics_and_controls(
         "others_detail" => {
             app.settings.others_detail = on;
             Some(("others_detail", bit))
+        }
+        "software_cursor" => {
+            app.settings.software_cursor = on;
+            Some(("software_cursor", bit))
         }
         "flashlight_cursor" => {
             app.settings.flashlight_cursor = on;

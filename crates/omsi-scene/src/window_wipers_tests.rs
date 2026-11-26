@@ -1,3 +1,5 @@
+//! Tests of the wipers' water film on the glass.
+
 use super::*;
 
 #[test]
