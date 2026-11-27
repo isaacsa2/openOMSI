@@ -105,7 +105,7 @@ session code. See [Playing together](MULTIPLAYER.md) and [Dedicated server](SERV
 
 ## Running games
 
-Every game started from the launcher, and the games that ended in the last half hour.
+The three newest game sessions started from the launcher, plus any older games still running. Each new game has its own `game-session-<id>.log` file. Active logs are never intentionally pruned.
 
 - **Show the log file** opens that game's log. Any number of games can run at once.
 - **Stop** asks the game to end as if Escape and Quit were chosen. It is given up to 8 s; only a
@@ -510,7 +510,9 @@ The second column, **Radio stations**, edits your stations (see [Radio](RADIO.md
 | Passengers signal approaching buses (`passenger_hailing`) | with natural animations | off |
 | Passengers react to full buses (`passenger_full_bus_reaction`) | | off |
 | Passengers add weight to the bus (`passenger_mass`) | each rider's weight on the bus's physics, see below | off |
-| Passenger weight (`passenger_weight_kg`) | for passengers whose `.hum` gives no `[mass]`, 40–120 kg | 75 kg |
+| Override original passenger weight (`passenger_weight_fixed`) | use the configured mass for every rider instead of their `.hum` | off |
+| Passenger weight (`passenger_weight_kg`) | override weight, or fallback for a model without a valid mass, 40–120 kg | 75 kg |
+| Individual weight variation (`passenger_weight_spread`) | stable variation around each rider’s base mass, 0–50% | 0% |
 | Short rides stand by a door (`pax_short_rides_stand`) | | off |
 | Arrival announcements at the stop (`auto_announce`) | depot files with two recordings per stop | off |
 | How many passengers (`pax_density`) | 0–200 % | 100 % |
@@ -702,3 +704,7 @@ be broken, are marked. Any release can also be downloaded by hand from
 [GitHub](https://github.com/openOMSI-org/openOMSI/releases/latest).
 
 What happens when a new version does not start: [Troubleshooting](TROUBLESHOOTING.md#a-version-does-not-start).
+
+### Native recovery launcher (desktop)
+
+If the WebView launcher fails to start, the game can open a minimal native free-drive launcher. It can also be opened explicitly with `openomsi --classic-launcher`. Select your original OMSI installation if necessary, a map's `global.cfg` and a `.bus` file, then confirm the drive. It uses the normal validated launch path and existing settings. This is a recovery mode, not the full historical launcher: timetable, multiplayer setup, mod management and previews remain in the regular launcher.
