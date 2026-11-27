@@ -185,8 +185,9 @@ fn launcher_error() -> Option<String> {
     let line = log
         .lines()
         .rev()
+        .filter(|l| !l.contains(" service::"))
         .take(20)
-        .find(|l| l.contains("could not open"))?;
+        .find(|l| l.contains("the launcher\'s window could not open: "))?;
     Some(
         line.split_once("could not open: ")
             .map(|(_, e)| e)
