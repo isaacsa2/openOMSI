@@ -18,8 +18,12 @@ pub(crate) fn keep_whole(whole: bool) {
 
 /// The logger of the game: env_logger's, every line it is given with the public addresses cut.
 pub(crate) fn init() {
-    let inner =
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).build();
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    builder.format_timestamp_millis();
+    if std::env::var_os("OMSI_GAME_LOG").is_some() {
+        builder.write_style(env_logger::WriteStyle::Never);
+    }
+    let inner = builder.build();
     let max = inner.filter();
     if log::set_boxed_logger(Box::new(Masked(inner))).is_ok() {
         log::set_max_level(max);
