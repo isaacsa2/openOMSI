@@ -85,7 +85,7 @@ fn main() {
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_default();
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-        omsi_launcher_lib::log_to_file(&format!("the launcher panicked on thread '{thread}'{at}: {what}"));
+        omsi_launcher_lib::diagnostic_log::launcher("ERROR", "panic", &format!("the launcher panicked on thread '{thread}'{at}: {what}"));
         default_hook(info);
     }));
     omsi_cfg::migrate_legacy_data_dir();
@@ -177,7 +177,7 @@ fn main() {
         });
 
     if let Err(e) = result {
-        omsi_launcher_lib::log_to_file(&format!("the launcher's window could not open: {e}"));
+        omsi_launcher_lib::diagnostic_log::launcher("ERROR", "startup", &format!("the launcher's window could not open: {e}"));
         eprintln!("the launcher's window could not open: {e}");
         std::process::exit(1);
     }
