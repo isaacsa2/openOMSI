@@ -66,3 +66,19 @@ fn passenger_mass_preferences_survive_launcher_saves() {
         assert_eq!(again["passenger_weight_fixed"], false);
     }
 }
+
+#[test]
+fn custom_passenger_weight_round_trips_through_launcher() {
+    for phone in [false, true] {
+        let mut settings = settings_from_text_on(None, phone);
+        settings["passenger_mass"] = json!(true);
+        settings["passenger_weight_kg"] = json!(90.0);
+        settings["passenger_weight_fixed"] = json!(true);
+        settings["passenger_weight_spread"] = json!(45.0);
+        let text = settings_to_text(&settings, None);
+        let again = settings_from_text_on(Some(&text), phone);
+        for key in ["passenger_mass", "passenger_weight_kg", "passenger_weight_fixed", "passenger_weight_spread"] {
+            assert_eq!(again[key], settings[key], "{key}");
+        }
+    }
+}

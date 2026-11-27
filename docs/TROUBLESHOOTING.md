@@ -117,13 +117,13 @@ All in `~/.openomsi` (on Windows `C:\Users\<you>\.openomsi`):
 
 | File | What it holds |
 | --- | --- |
-| `game.log` | the last game |
-| `launcher.log` | the launcher |
+| `game-session-<id>.log` | each desktop game launched through the launcher; latest three plus active sessions |
+| `game.log`, `game-prev.log`, `game-prev2.log` | legacy or mobile process logs |
+| `launcher.log`, `launcher.1.log`, `launcher.2.log` | combined launcher and preview helper diagnostics, rotated at about 4 MiB per segment |
 | `guard/guard.log` | the start watcher |
 | `diagnostics/` | a record of each game of the last 30 days: when, how long, how smoothly, how it ended |
 
-The first line of `game.log` and `launcher.log` is the build they were made from. **Running
-games → Show the log file** opens a running or recently ended game's log.
+**Running games → Show the log file** opens the selected session's log. Launcher records include local time, severity, process ID and a `launcher::` or `service::` component prefix; helper records include request IDs for slow or failed requests. Existing `launcher-service*.log` files from older builds are left untouched but are no longer written by the new launcher. Game log timestamps include milliseconds.
 
 ## Checking content
 
@@ -183,3 +183,5 @@ Never attach an API key (such as your Tomorrow.io key) to a report.
 (maps, processed textures, other rebuildable data) and of multiplayer downloads. Close all games
 first, then **Clean to limits**, **Clear local cache…** or **Clear multiplayer downloads…**. Mods,
 saves and settings are not removed.
+
+For a missing or broken desktop WebView, try `openomsi --classic-launcher`. The native recovery mode supports free drive without a browser engine. Keep the regular launcher for timetable and multiplayer setup. Diagnostic archives may contain personal paths and gameplay information; inspect before sharing.

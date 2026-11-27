@@ -85,7 +85,7 @@ fn main() {
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_default();
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-        omsi_launcher_lib::log_to_file(&format!("the launcher panicked on thread '{thread}'{at}: {what}"));
+        omsi_launcher_lib::diagnostic_log::launcher("ERROR", "panic", &format!("the launcher panicked on thread '{thread}'{at}: {what}"));
         default_hook(info);
     }));
     omsi_cfg::migrate_legacy_data_dir();
@@ -168,13 +168,16 @@ fn main() {
         .map(|app| {
             app.run(|_, e| match e {
                 tauri::RunEvent::ExitRequested { api, .. } if omsi_launcher_api::installing() => api.prevent_exit(),
-                tauri::RunEvent::Exit => service::stop(),
+                tauri::RunEvent::Exit => {
+                    service::stop();
+                    omsi_launcher_lib::diagnostic_log::launcher("INFO", "lifecycle", "launcher exited");
+                }
                 _ => {}
             })
         });
 
     if let Err(e) = result {
-        omsi_launcher_lib::log_to_file(&format!("the launcher's window could not open: {e}"));
+        omsi_launcher_lib::diagnostic_log::launcher("ERROR", "startup", &format!("the launcher's window could not open: {e}"));
         eprintln!("the launcher's window could not open: {e}");
         std::process::exit(1);
     }

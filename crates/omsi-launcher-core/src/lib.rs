@@ -23,6 +23,8 @@ pub mod index;
 pub mod input_profiles;
 pub mod install;
 pub mod instances;
+pub mod diagnostic_log;
+pub mod classic_launcher;
 pub mod map_uses;
 pub mod mods;
 pub mod optimise;
@@ -1650,19 +1652,7 @@ fn shared_depot_names() -> Vec<String> {
 
 /// One line into ~/.openomsi/launcher.log.
 fn log_line(line: &str) {
-    use std::io::Write;
-    let p = data_dir().join("launcher.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&p)
-    {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let _ = writeln!(f, "{now} {line}");
-    }
+    diagnostic_log::launcher("INFO", "core", line);
 }
 
 pub fn list_vehicles() -> Result<Vec<VehicleInfo>> {
@@ -5589,19 +5579,7 @@ pub fn check_join(text: &str) -> Value {
 
 /// A line into ~/.openomsi/launcher.log.
 pub fn log_to_file(line: &str) {
-    use std::io::Write;
-    let p = data_dir().join("launcher.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&p)
-    {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let _ = writeln!(f, "{now} {line}");
-    }
+    diagnostic_log::launcher("INFO", "core", line);
 }
 
 /// What interrupted installs left behind (and the old unzip folder): cleaned up once when

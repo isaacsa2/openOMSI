@@ -210,6 +210,7 @@ files, or show a debug view.
 
 | Variable | Values / default | What it does |
 | --- | --- | --- |
+| `OMSI_GAME_LOG` | path; unset: `game.log` for Open Log | Session log path supplied by the desktop launcher; disables terminal colours and lets the in-game Open Log action open the current session. Output redirection is performed by the launcher. |
 | `OMSI_AMBIENCE_DENSITY` | default `1` | The ambience's one-shots (birds, the far life, thunder, the objects' calls) this many times as often (a number), or only some of them (slot=factor,…: bird.geese=40) - what fits the place, season and hour stays the same (for demos and checks). |
 | `OMSI_DEBUG_AI_WIDE` | flag | Log every tenth of a second an AI car standing over 1.5 m beside its way. |
 | `OMSI_DEBUG_ANIM` | text | Log the animations of the meshes whose file name contains this text. |

@@ -370,7 +370,9 @@ impl App {
         match r {
             Request::Reload(kind) => self.devtools_reload(kind),
             Request::OpenLog => {
-                let log = omsi_launcher_lib::data_dir().join("game.log");
+                let log = std::env::var_os("OMSI_GAME_LOG")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| omsi_launcher_lib::data_dir().join("game.log"));
                 open_file(&log);
                 if let Some(d) = self.devtools.as_mut() {
                     d.say(format!("{}: {}", omsi_ui::tr("Log opened"), log.display()));

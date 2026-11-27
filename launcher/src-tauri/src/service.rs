@@ -29,15 +29,24 @@ static RELEASED: Mutex<Option<Instant>> = Mutex::new(None);
 
 fn start() -> Result<Running, String> {
     let game = omsi_launcher_lib::game_binary().ok_or("the game program was not found")?;
-    let log = std::fs::File::create(omsi_launcher_lib::data_dir().join("launcher-service.log")).map_err(|e| e.to_string())?;
     let mut child = Command::new(&game)
         .arg("--launcher-service")
         .env("RUST_LOG", "info")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(log))
+        .stderr(Stdio::piped())
+        .env("RUST_LOG_STYLE", "never")
         .spawn()
         .map_err(|e| format!("starting {}: {e}", game.display()))?;
+    let stderr = child.stderr.take().ok_or("no stderr")?;
+    let pid = child.id();
+    omsi_launcher_lib::diagnostic_log::service("INFO", "lifecycle", &format!("helper {pid} started"));
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            omsi_launcher_lib::diagnostic_log::helper_line(pid, &line);
+        }
+        omsi_launcher_lib::diagnostic_log::service("INFO", "lifecycle", &format!("helper {pid} stderr closed"));
+    });
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let pending: Pending = Arc::default();
@@ -74,6 +83,8 @@ fn start() -> Result<Running, String> {
 pub fn ask(mut req: Value, wait: Duration) -> Result<(Value, Vec<u8>), String> {
     let look = req.get("cmd").and_then(Value::as_str) == Some("look");
     let drawing = matches!(req.get("cmd").and_then(Value::as_str), Some("look" | "warm" | "frame"));
+    let command = req.get("cmd").and_then(Value::as_str).unwrap_or("unknown").to_string();
+    let started = Instant::now();
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     req["id"] = json!(id);
     let (tx, rx) = channel();
@@ -105,8 +116,15 @@ pub fn ask(mut req: Value, wait: Duration) -> Result<(Value, Vec<u8>), String> {
             return Err("the preview helper ended".into());
         }
     }
-    let (head, body) = rx.recv_timeout(wait).map_err(|_| "the preview helper did not answer".to_string())?;
+    let (head, body) = rx.recv_timeout(wait).map_err(|_| {
+        omsi_launcher_lib::diagnostic_log::service("WARN", "request", &format!("{command} #{id}: no reply after {} ms", started.elapsed().as_millis()));
+        "the preview helper did not answer".to_string()
+    })?;
+    if started.elapsed() >= Duration::from_secs(2) {
+        omsi_launcher_lib::diagnostic_log::service("INFO", "request", &format!("{command} #{id}: completed after {} ms", started.elapsed().as_millis()));
+    }
     if head.get("ok").and_then(Value::as_bool) == Some(false) {
+        omsi_launcher_lib::diagnostic_log::service("WARN", "request", &format!("{command} #{id}: helper returned an error"));
         return Err(head.get("error").and_then(Value::as_str).unwrap_or("the preview helper failed").to_string());
     }
     Ok((head, body))

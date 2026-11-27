@@ -319,6 +319,7 @@ flags! {
     OMSI_FSR1: Text, Switch, Once, "off", "Experimental FSR 1 spatial upscaling (EASU + RCAS) for scaled window views: 1, true or on enables it; off by default; requires restart.";
     OMSI_FSR_RAW_INPUT: Bool, Switch, Use, "off", "FSR 1 reads the scene through a view that is not sRGB: no square roots in EASU (not on OpenGL) - to measure.";
     OMSI_FULL_GPU: Bool, Switch, Use, "off", "Keep the requested settings on a small or shared graphics chip, and 8x MSAA with Enhanced+.";
+    OMSI_GAME_LOG: Text, Setup, Use, "-", "Path of the game session log set by the launcher; disables terminal colours and tells the Open Log action which file to open.";
     OMSI_GLASS_WIND: Num, Test, Use, "-", "Offscreen: the rain on the glass as met at this speed in m/s.";
     OMSI_GL_TEXTURE_UNITS: Bool, Switch, Use, "off", "Use the texture-unit layout of the OpenGL backend on any device.";
     OMSI_GPU_ARRAYS: Text, Switch, Use, "-", "textures, nostorage or lighttextures: take that texture array path on any device.";
