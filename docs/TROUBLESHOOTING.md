@@ -119,12 +119,11 @@ All in `~/.openomsi` (on Windows `C:\Users\<you>\.openomsi`):
 | --- | --- |
 | `game-session-<id>.log` | each desktop game launched through the launcher; latest three plus active sessions |
 | `game.log`, `game-prev.log`, `game-prev2.log` | legacy or mobile process logs |
-| `launcher.log`, `launcher.1.log`, `launcher.2.log` | launcher diagnostics, rotated at about 4 MiB per segment |
-| `launcher-service.log`, `launcher-service.1.log`, `launcher-service.2.log` | preview helper diagnostics, same retention |
+| `launcher.log`, `launcher.1.log`, `launcher.2.log` | combined launcher and preview helper diagnostics, rotated at about 4 MiB per segment |
 | `guard/guard.log` | the start watcher |
 | `diagnostics/` | a record of each game of the last 30 days: when, how long, how smoothly, how it ended |
 
-**Running games → Show the log file** opens the selected session's log. Launcher records include local time, severity, component and process ID; helper records include request IDs for slow or failed requests. Game log timestamps include milliseconds.
+**Running games → Show the log file** opens the selected session's log. Launcher records include local time, severity, process ID and a `launcher::` or `service::` component prefix; helper records include request IDs for slow or failed requests. Existing `launcher-service*.log` files from older builds are left untouched but are no longer written by the new launcher. Game log timestamps include milliseconds.
 
 ## Checking content
 
