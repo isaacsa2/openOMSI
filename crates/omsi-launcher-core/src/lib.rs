@@ -24,6 +24,7 @@ pub mod input_profiles;
 pub mod install;
 pub mod instances;
 pub mod diagnostic_log;
+pub mod classic_launcher;
 pub mod map_uses;
 pub mod mods;
 pub mod optimise;
