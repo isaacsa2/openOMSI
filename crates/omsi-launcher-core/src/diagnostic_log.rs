@@ -39,7 +39,11 @@ fn record(stream: &str, level: &str, component: &str, message: &str) {
     let pid = std::process::id();
     // Never allow a multiline error to impersonate the next record.
     let message = message.replace('\r', "\\r").replace('\n', "\\n");
-    let line = format!("[{secs}.{millis:03} {level:<5} {component} pid={pid}] {message}");
+    let timestamp = crate::local_now().map_or_else(
+        || format!("{secs}.{millis:03}"),
+        |(y, m, d, h, min)| format!("{y:04}-{m:02}-{d:02} {h:02}:{min:02}:{:02}.{millis:03} local", secs % 60),
+    );
+    let line = format!("[{timestamp} {level:<5} {component} pid={pid}] {message}");
     if let Err(error) = append_at(&crate::data_dir(), stream, &line, MAX_BYTES) {
         eprintln!("openOMSI: cannot write {stream} log: {error}");
     }
