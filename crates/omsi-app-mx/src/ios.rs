@@ -124,7 +124,10 @@ pub extern "C" fn openomsi_ios_scene_ready() {
 fn init_log() {
     let dir = omsi_launcher_lib::data_dir();
     let (now, prev) = (dir.join("game.log"), dir.join("game-prev.log"));
-    let _ = std::fs::rename(&now, &prev);
+    if now.exists() {
+        let _ = std::fs::rename(&prev, dir.join("game-prev2.log"));
+        let _ = std::fs::rename(&now, &prev);
+    }
     let file = std::fs::File::create(&now).ok();
     let logger = TeeLogger {
         file: Mutex::new(file),
