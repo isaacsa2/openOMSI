@@ -292,6 +292,9 @@ pub fn run() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--launcher-service") {
         return launcher::run_service();
     }
+    if std::env::args().nth(1).as_deref() == Some("--classic-launcher") {
+        return omsi_launcher_lib::classic_launcher::open();
+    }
     let args = Args::parse();
     // (before the content and the graphics device are looked for: it must work without them)
     if let Some(out) = &args.export_diagnostics {
