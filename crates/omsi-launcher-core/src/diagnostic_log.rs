@@ -57,6 +57,12 @@ pub fn service(level: &str, component: &str, message: &str) {
     record("launcher-service", level, component, message);
 }
 
+/// Preserve the severity of env_logger records coming from the preview process.
+pub fn helper_line(pid: u32, line: &str) {
+    let severity = line.strip_prefix('[').and_then(|s| s.split_whitespace().nth(1)).filter(|s| matches!(*s, "ERROR" | "WARN" | "INFO" | "DEBUG" | "TRACE")).unwrap_or("INFO");
+    service(severity, "helper", &format!("pid={pid} {line}"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
