@@ -68,7 +68,13 @@ pub fn open() -> anyhow::Result<()> {
         .show() != MessageDialogResult::Yes {
         return Ok(());
     }
-    let duty = Duty { map, bus, time: "09:00".into(), ..Default::default() };
+    let duty = Duty {
+        map,
+        bus,
+        time: "09:00".into(),
+        profile: Some(crate::load_config().profile),
+        ..Default::default()
+    };
     let launched = crate::launch(&duty)?;
     diagnostic_log::launcher("INFO", "classic", &format!("game pid={} started", launched.pid));
     Ok(())
