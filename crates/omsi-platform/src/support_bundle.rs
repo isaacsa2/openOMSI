@@ -265,7 +265,7 @@ pub fn export(out: &Path, value: &Value) -> anyhow::Result<()> {
     if names.is_empty() {
         names.extend(["game.log", "game-prev.log", "game-prev2.log"].map(str::to_string));
     }
-    names.extend(["launcher.log", "launcher.1.log", "launcher.2.log", "launcher-service.log", "launcher-service.1.log", "launcher-service.2.log", "crash.log"].map(str::to_string));
+    names.extend(["launcher.log", "launcher.1.log", "launcher.2.log", "crash.log"].map(str::to_string));
     let logs: Vec<_> = names
         .into_iter()
         .filter_map(|name| tail(&dir.join(&name)).ok().map(|text| (name, text)))
