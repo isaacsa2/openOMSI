@@ -239,18 +239,36 @@ pub fn export(out: &Path, value: &Value) -> anyhow::Result<()> {
             }
         }
     }
-    let game_log = recent
-        .as_ref()
-        .filter(|i| i.slot > 1 && i.slot <= 128)
-        .map(|i| format!("game-{}.log", i.slot))
-        .unwrap_or_else(|| "game.log".into());
-    let logs: Vec<_> = [game_log.as_str(), "launcher.log", "crash.log"]
-        .iter()
-        .filter_map(|name| {
-            tail(&dir.join(name))
-                .ok()
-                .map(|text| (name.to_string(), text))
-        })
+    // Only accept generated log basenames in our own data directory. Never export a
+    // path supplied by an untrusted registry entry.
+    let mut games = omsi_launcher_lib::list_instances();
+    games.sort_by(|a, b| b.started.cmp(&a.started).then(b.id.cmp(&a.id)));
+    let mut names = Vec::new();
+    for game in games.iter().take(3) {
+        let path = Path::new(&game.log);
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let generated = format!("game-session-{}.log", game.id);
+        let legacy = if game.slot <= 1 {
+            "game.log".to_string()
+        } else {
+            format!("game-{}.log", game.slot)
+        };
+        if path == dir.join(name) && (name == generated || name == legacy) {
+            let name = name.to_string();
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    if names.is_empty() {
+        names.extend(["game.log", "game-prev.log", "game-prev2.log"].map(str::to_string));
+    }
+    names.extend(["launcher.log", "launcher-service.log", "crash.log"].map(str::to_string));
+    let logs: Vec<_> = names
+        .into_iter()
+        .filter_map(|name| tail(&dir.join(&name)).ok().map(|text| (name, text)))
         .collect();
     to_the_day(&mut value);
     archive(out, &value, &logs, &history())
