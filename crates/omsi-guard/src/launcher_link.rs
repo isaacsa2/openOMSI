@@ -49,6 +49,19 @@ pub fn open_app_launcher(fatal_message: fn(&str)) -> Result<()> {
     #[cfg(not(windows))]
     let failed = failed.map(|why| said(&bin, why));
     if let Some(why) = failed {
+        omsi_launcher_lib::diagnostic_log::launcher("WARN", "startup", "Web launcher failed; opening native recovery launcher");
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        match omsi_launcher_lib::classic_launcher::open() {
+            Ok(()) => {
+                crate::healthy(crate::journal::Kind::Launcher);
+                return Ok(());
+            }
+            Err(error) => {
+                omsi_launcher_lib::diagnostic_log::launcher("ERROR", "classic", &format!("{error:#}"));
+                fatal_message(&format!("{why}\n\n{}\n\nClassic launcher: {error:#}", webview_hint()));
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         fatal_message(&format!("{why}\n\n{}", webview_hint()));
         anyhow::bail!("{}", english.unwrap_or(why));
     }
