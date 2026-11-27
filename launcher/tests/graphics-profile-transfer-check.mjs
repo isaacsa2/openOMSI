@@ -127,7 +127,7 @@ try {
   await evaluate("button('Load').click()");
   await wait("card().textContent.includes('Loaded')");
   assert.equal(await evaluate("calls.filter(([cmd, args]) => cmd === 'call' && args.cmd === 'settings_patch').at(-1)[1].args.patch.msaa"), 8);
-  await evaluate("window.profileCard = card(); window.profileStart = [...profileCard.querySelectorAll('.setting-row')].find(r => r.textContent.startsWith('Saved profile')).previousElementSibling;");
+  await evaluate("window.profileCard = card(); window.profileStart = profileCard.querySelector('#saved-graphics-profiles');");
   await evaluate("import('/ui/js/i18n.js').then(m => m.setLanguage('zh-tw')).then(() => window.renderPage())");
   // A pending render may already have translated the button when setLanguage resolves.
   await evaluate("window.importResult = null; (button('匯入圖像設定檔') ?? button('Import graphics profile')).click()");

@@ -57,3 +57,16 @@ fn streaming_starts_around_the_bus() {
     );
     assert_eq!(both, vec![DVec3::new(10.0, 20.0, 0.0), cam.position]);
 }
+
+#[test]
+fn the_export_root_uses_the_same_discovery_as_a_game_start() {
+    let missing = format!("missing-{}", std::process::id());
+    let found = PathBuf::from("found").join("OMSI 2");
+    let mut args = Args::parse_from(["omsi", "--root", missing.as_str()]);
+    assert!(discover_root(&mut args, || Some(found.clone())));
+    assert_eq!(args.root, found);
+
+    let mut args = Args::parse_from(["omsi", "--root", missing.as_str(), "--list-maps"]);
+    assert!(!discover_root(&mut args, || Some(found.clone())));
+    assert_ne!(args.root, found);
+}

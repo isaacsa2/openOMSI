@@ -112,7 +112,7 @@ pub fn restart_required(old: &ServerCfg, next: &ServerCfg) -> Vec<&'static str> 
         allow_player_teleport,
         admin_web,
         admin_web_origins,
-        admin_trusted_proxies,
+        admin_forwarding_proxies,
         admin_proxy_header,
         gateway_cf_connecting_ip,
         real_time,
