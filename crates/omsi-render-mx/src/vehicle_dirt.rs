@@ -8,9 +8,10 @@
 use crate::Renderer;
 use glam::{DVec3, Vec3};
 
-/// How many vehicles carry their dirt in a frame (the nearest the camera, as the app lists
-/// them).
-pub const DIRT_VEHICLES: usize = 6;
+/// How many bodies carry their road dirt in a frame (the nearest the camera, whole vehicles
+/// only, as `omsi_scene::road_dirt` lists them); the vehicles past them keep their own dirt
+/// overlays.
+pub const DIRT_VEHICLES: usize = 64;
 /// The uniform's vectors per vehicle (see `VehicleDirt::pack`).
 pub(crate) const DIRT_ROWS: usize = 8;
 
@@ -106,7 +107,10 @@ mod tests {
             ..Default::default()
         };
         let clean = VehicleDirt::default();
-        let list = [clean, dirty, dirty, dirty, dirty, dirty, dirty, dirty];
+        // (a clean one, left out, and more dirty ones than the uniform holds)
+        let list: Vec<VehicleDirt> = std::iter::once(clean)
+            .chain(std::iter::repeat_n(dirty, DIRT_VEHICLES + 2))
+            .collect();
         let (n, rows) = pack_all(&list, DVec3::new(100.0, 0.0, 0.0));
         assert_eq!(n[0], DIRT_VEHICLES as f32);
         assert_eq!(rows[0][..3], [0.0, 50.0, 2.0]);

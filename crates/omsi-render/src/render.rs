@@ -3,6 +3,8 @@
 
 use crate::*;
 
+mod transient;
+
 /// One single-sampled full-screen pass.
 pub(crate) fn post_pass(
     encoder: &mut wgpu::CommandEncoder,
@@ -345,6 +347,18 @@ impl Renderer {
         let Some((_, was)) = self.upscaler_retry.take() else {
             return;
         };
+        // (only while the picture is still drawn as the fallback left it: a player who turned
+        // the upscaler off, or chose other anti-aliasing, in the meantime keeps that)
+        let fallback = Self::without_upscaler(was, true);
+        let o = &self.options;
+        if o.temporal.is_some()
+            || o.msaa != fallback.msaa
+            || o.fxaa != fallback.fxaa
+            || o.msaa_fallback != fallback.msaa_fallback
+        {
+            log::info!("the upscaler is not tried again: the anti-aliasing was changed since");
+            return;
+        }
         self.upscaler_retried = true;
         log::info!("the upscaler is tried once more, now that the textures were lowered");
         self.rebuild_with(
@@ -1282,23 +1296,6 @@ impl Renderer {
         rig: &TripleScreen,
     ) -> Result<Vec<u8>> {
         self.render_image(scene, width, height, camera, lighting, Some(rig))
-    }
-
-    /// Do not draw with an invalid render target if the GPU ran out of memory.
-    /// Checked texture creation also reports OOM to the normal recovery path.
-    pub fn try_create_transient_texture(
-        &self,
-        desc: &wgpu::TextureDescriptor<'_>,
-    ) -> Option<wgpu::Texture> {
-        crate::resources::try_create_texture(&self.device, desc)
-    }
-
-    /// Readback buffers need the same error handling as scene mesh buffers.
-    pub fn try_create_transient_buffer(
-        &self,
-        desc: &wgpu::BufferDescriptor<'_>,
-    ) -> Option<wgpu::Buffer> {
-        crate::resources::try_create_buffer(&self.device, desc)
     }
 
     pub(crate) fn render_image(

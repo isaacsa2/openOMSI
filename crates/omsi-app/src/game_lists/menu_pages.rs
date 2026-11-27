@@ -47,6 +47,10 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         switch_row(app, "passenger_full_bus_reaction", "Passengers react to full buses", "Optional visual acknowledgement when an approaching compatible bus is at passenger capacity"),
         switch_row(app, "pax_short_rides_stand", "Short rides stand by a door", "Passengers with no set stop who ride only a few kilometres take a free standing place near an exit rather than a seat"),
         switch_row(app, "auto_announce", "Arrival announcements at the stop", "On depot files that keep two recordings per stop (the Chinese maps), the arrival one is played as the bus reaches the stop: the IBIS's next stop key, pressed as the driver would"),
+        switch_row(app, "announce_arrival", "…the arrival recording at the stop", "The \"… arrived\" half of each stop, pressed as the bus stands at it; off leaves the stops to their scripts").filter(|_| s.auto_announce),
+        switch_row(app, "announce_departure", "…the departure recording when pulling out", "The \"next stop is …\" half, which the bus's own scripts play; off stops the game making up for a script that does not step its counter").filter(|_| s.auto_announce),
+        switch_row(app, "announce_approach", "…the next stop on the way in", "A city that announces before the stop rather than when pulling out: the next stop's recording is played a distance before it, once a stop").filter(|_| s.auto_announce),
+        slider_row(app, "announce_approach_m", "Approach distance", "How far before the stop the approach announcement plays; two stops closer together than twice this announce halfway between them", &|v| format!("{v:.0} m")).filter(|_| s.auto_announce && s.announce_approach),
         pick("boarding", "Boarding", "How passengers get their tickets"),
         pick("standing_chance", "Standing passengers", "The chance a passenger stands although a seat is free"),
         pick("maintenance", "Maintenance", later),
@@ -146,6 +150,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         slider_row(app, "vol_ambient", "Ambience volume", "How loud the ambience is", &pct),
         slider_row(app, "vol_scenery", "Surroundings", "How loud the sounds of the scenery are", &pct),
         switch_row(app, "doppler", "Doppler effect", "Approaching sounds higher, receding ones lower"),
+        switch_row(app, "audio_surround", "5.1 sound (five speakers)", "On a 5.1 system each sound comes from the speakers where it is: a door from the side it opens on, the engine from behind the cab. Two speakers only: off"),
         pick("pax_voices", "Passenger voices", "What passengers say"),
         switch_row(app, "voice_enabled", "Voice chat in multiplayer", "Hold the nearby (V) or radio (B) key to talk. The microphone is used only while a key is held; nothing is recorded"),
         switch_row(app, "voice_all_off", "Everybody else's voice chat off", "Single players are muted in the player list"),
@@ -181,6 +186,7 @@ pub(super) fn options_pages(app: &App) -> Vec<Page> {
         switch_row(app, "zoom_hold_latch", "Zoom key stays", "One press zooms in, the next zooms out; off: only while the key is held"),
         switch_row(app, "others_detail", "Draw other players' buses in less detail when far away", "Multiplayer: beyond 120 m, and whenever the frame rate is under 20, other players' buses keep their body but lose the driver figures and destination displays nobody reads from there; they come back in full over 26 fps"),
         switch_row(app, "flashlight_cursor", "Flashlight follows the cursor", "With the cursor free (on foot, or in the cab while the mouse does not steer) the flashlight lights where it points; otherwise straight ahead"),
+        switch_row(app, "software_cursor", "Draw the mouse cursor in the game", "For a G-SYNC screen that stutters when the mouse moves: the game draws its own arrow and Windows is never asked to move the hardware cursor"),
         slider_row(app, "fov", "Field of view", "Vertical field of view; in triple screen Default uses physical measurements, an override moves the virtual eye", &|v| if v < 20.0 { "Default".to_string() } else { format!("{v:.0}°") }),
         slider_row(app, "seat 1", "Seat forward and back", "Adjust the driver's seat position forward or backward", &cm),
         slider_row(app, "seat 2", "Seat height", "Adjust the driver's seat height", &cm),
@@ -1243,10 +1249,14 @@ mod tests {
 }
 
 /// The upscaler's rows of the graphics page (after the render scale's): the upscaler, and
-/// FSR 1's quality and sharpening while it is chosen.
+/// FSR 1's quality and sharpening while it is chosen, and DLSS's sharpening while it is.
 fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
     let fsr = app.settings.upscaler == "fsr1";
     let temporal = app.settings.temporal_upscaling().is_some();
+    let dlss = app
+        .settings
+        .temporal_upscaling()
+        .is_some_and(|t| t.upscaler == omsi_render::TemporalUpscaler::Dlss);
     let offered =
         !omsi_cfg::upscaler_files::available(&omsi_cfg::upscaler_files::program_dir()).is_empty();
     let generation = app.settings.temporal_upscaling().is_some_and(|t| {
@@ -1259,6 +1269,7 @@ fn upscaler_rows(app: &App, file: &serde_json::Value) -> Vec<(String, String)> {
         select_row(file, "frame_generation", "Frame generation", omsi_cfg::upscaler_files::frame_generation_help()).filter(|_| generation),
         select_row(file, "fsr_quality", "FSR quality", &fsr_size(app)).filter(|_| fsr),
         slider_row(app, "fsr_sharpness", "FSR sharpness", "RCAS sharpening strength", &pct).filter(|_| fsr),
+        slider_row(app, "dlss_sharpness", "DLSS sharpness", "How much the picture is sharpened after DLSS; 25 % as before", &pct).filter(|_| dlss),
     ]
     .into_iter()
     .flatten()
