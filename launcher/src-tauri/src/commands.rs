@@ -67,7 +67,14 @@ impl omsi_launcher_api::Platform for Window {
 /// A command of the page (see `omsi-launcher-api`).
 #[tauri::command]
 async fn call(app: AppHandle, cmd: String, args: Value) -> Answer {
-    work(move || omsi_launcher_api::call(&cmd, &args, &Window(app))).await
+    work(move || {
+        let started = std::time::Instant::now();
+        let result = omsi_launcher_api::call(&cmd, &args, &Window(app));
+        if result.is_err() || started.elapsed() >= Duration::from_secs(2) {
+            core::diagnostic_log::launcher(if result.is_err() { "WARN" } else { "INFO" }, "command", &format!("{cmd}: {} after {} ms", if result.is_err() { "failed" } else { "completed" }, started.elapsed().as_millis()));
+        }
+        result
+    }).await
 }
 
 /// A command that answers bytes (the bus preview's pictures), as they are.
@@ -92,6 +99,7 @@ pub fn start_watch(app: AppHandle) {
                     crate::service::no_game_since(asked);
                 }
                 for ended in was.iter().filter_map(|w| all.iter().find(|a| a.id == w.id && !a.running)) {
+                    core::diagnostic_log::launcher("INFO", "game", &format!("pid={} session={} ended; exit={:?} killed={}", ended.pid, ended.id, ended.exit_code, ended.killed));
                     if let Some((event, what)) = omsi_launcher_api::game_ended(ended) {
                         core::log_to_file(&format!("game {} ended: {event}", ended.pid));
                         let _ = app.emit(event, what);
