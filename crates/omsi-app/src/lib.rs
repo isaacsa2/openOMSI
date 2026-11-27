@@ -485,7 +485,9 @@ pub(crate) fn prepare(
             // installation of it there is nothing to play on, and every player must have
             // the same base whatever copy of OMSI 2 they own
             let missing = omsi_cfg::missing_original_essentials(&args.root);
-            let text = omsi_ui::tr(MISSING_ORIGINAL).replace("{folder}", &args.root.display().to_string()).replace("{missing}", &missing.join(", "));
+            let text = omsi_ui::tr(MISSING_ORIGINAL)
+                .replace("{folder}", &args.root.display().to_string())
+                .replace("{missing}", &missing.join(", "));
             if server_cfg.is_some() || args.list_maps {
                 eprintln!("{text}");
             } else {
