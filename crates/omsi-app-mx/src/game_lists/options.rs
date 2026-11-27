@@ -18,6 +18,7 @@ pub(super) fn option_now(app: &App, verb: &str, arg: &str) -> Option<f32> {
         "pax" => s.pax_density,
         "passenger_transfer_percent" => s.passenger_transfer_percent,
         "passenger_weight_kg" => s.passenger_weight_kg,
+        "passenger_weight_spread" => s.passenger_weight_spread,
         "volume" => s.volume,
         "led_glow" => s.led_glow as f32,
         "night_brightness" => s.night_brightness,
@@ -130,6 +131,13 @@ pub(super) fn option_set(
             Some(("pax_density", v.to_string()))
         }
         "passenger_transfer_percent" => set_connection_percent(app, v),
+        "passenger_weight_spread" => {
+            app.settings.passenger_weight_spread = v.clamp(0.0, 50.0);
+            Some((
+                "passenger_weight_spread",
+                app.settings.passenger_weight_spread.to_string(),
+            ))
+        }
         "passenger_weight_kg" => {
             app.settings.passenger_weight_kg = v.clamp(20.0, 200.0);
             Some((
@@ -526,6 +534,7 @@ pub(super) fn toggle_now(app: &App, id: &str) -> Option<bool> {
         "passenger_connections" => s.passenger_connections,
         "passenger_hailing" => s.passenger_hailing,
         "passenger_mass" => s.passenger_mass,
+        "passenger_weight_fixed" => s.passenger_weight_fixed,
         "passenger_full_bus_reaction" => s.passenger_full_bus_reaction,
         "pax_short_rides_stand" => s.pax_short_rides_stand,
         "navigator" => {
@@ -681,6 +690,10 @@ pub(super) fn toggle_set(app: &mut App, id: &str, on: bool) -> Option<(&'static 
                 };
             }
             Some(("passenger_connections", bit))
+        }
+        "passenger_weight_fixed" => {
+            app.settings.passenger_weight_fixed = on;
+            Some(("passenger_weight_fixed", bit))
         }
         "passenger_mass" => {
             app.settings.passenger_mass = on;
