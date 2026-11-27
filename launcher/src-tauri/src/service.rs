@@ -43,7 +43,7 @@ fn start() -> Result<Running, String> {
     omsi_launcher_lib::diagnostic_log::service("INFO", "lifecycle", &format!("helper {pid} started"));
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            omsi_launcher_lib::diagnostic_log::service("INFO", "helper", &format!("pid={pid} {line}"));
+            omsi_launcher_lib::diagnostic_log::helper_line(pid, &line);
         }
         omsi_launcher_lib::diagnostic_log::service("INFO", "lifecycle", &format!("helper {pid} stderr closed"));
     });
