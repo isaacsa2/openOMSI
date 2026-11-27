@@ -126,9 +126,8 @@ impl PeopleSim {
         let parts = self
             .player_cabin
             .as_ref()
-            .map(|c| c.parts.clone())
-            .unwrap_or_default();
-        self.loads(BusId::Player, &parts, sections, weight)
+            .map_or(&[][..], |c| c.parts.as_slice());
+        self.loads(BusId::Player, parts, sections, weight)
     }
 }
 
