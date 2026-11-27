@@ -43,14 +43,14 @@ impl RigidBody {
         let mass = base.mass + kg;
         let cog =
             (base.cog * base.mass + loads.clone().fold(Vec3::ZERO, |a, (m, p)| a + *p * *m)) / mass;
-        let inertia = base.inertia
-            + perp(base.cog - cog) * base.mass
-            + loads.fold(Vec3::ZERO, |a, (m, p)| a + perp(*p - cog) * *m);
         // (a rider getting on or off is a step change of a few dozen kg: below a tenth of
         // that, and a millimetre of the centre of gravity, nothing is worth moving)
         if (mass - self.mass).abs() < 2.0 && (cog - self.cog).length() < 1e-3 {
             return;
         }
+        let inertia = base.inertia
+            + perp(base.cog - cog) * base.mass
+            + loads.fold(Vec3::ZERO, |a, (m, p)| a + perp(*p - cog) * *m);
         // the world position is the centre of gravity's: it moves with it in the body
         self.position += self.orientation.mul_vec3(cog - self.cog).as_dvec3();
         self.mass = mass;
