@@ -168,7 +168,10 @@ fn main() {
         .map(|app| {
             app.run(|_, e| match e {
                 tauri::RunEvent::ExitRequested { api, .. } if omsi_launcher_api::installing() => api.prevent_exit(),
-                tauri::RunEvent::Exit => service::stop(),
+                tauri::RunEvent::Exit => {
+                    service::stop();
+                    omsi_launcher_lib::diagnostic_log::launcher("INFO", "lifecycle", "launcher exited");
+                }
                 _ => {}
             })
         });
