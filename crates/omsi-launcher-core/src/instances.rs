@@ -432,6 +432,7 @@ pub fn start(game: &Path, args: &[String], d: &crate::Duty, profile: &str) -> Re
         ..Default::default()
     };
     write(&inst);
+    crate::diagnostic_log::launcher("INFO", "game", &format!("pid={pid} session={} log={}", inst.id, log.display()));
     let _ = list();
     let command = format!(
         "{} {}",
