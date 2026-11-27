@@ -1,5 +1,5 @@
 //! The games the launcher started. Any number may run at once: each gets its own log
-//! (`game.log`, `game-2.log`, ...), an id (passed to the game in `OMSI_INSTANCE`) and a
+//! (`game-session-<id>.log`), an id (passed to the game in `OMSI_INSTANCE`) and a
 //! registry file `~/.openomsi/instances/<id>.json`, so that every launcher window (and
 //! `--cli instances`) sees them. The game itself writes `~/.openomsi/lan/<id>.json`
 //! while a LAN session runs; its code and players are shown with the instance.
@@ -17,8 +17,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// A finished game stays in the list this long (seconds), so its log can still be read.
-const KEEP_ENDED: u64 = 30 * 60;
+/// Keep the three newest sessions plus any older sessions still running.
+const KEEP_SESSIONS: usize = 3;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Instance {
@@ -28,7 +28,7 @@ pub struct Instance {
     /// When the process started, as the system keeps it (`process_start`).
     #[serde(default)]
     pub process_started: Option<u64>,
-    /// 1 for `game.log`, n for `game-n.log`.
+    /// Legacy slot, retained for compatibility with older registry files.
     pub slot: u32,
     pub log: String,
     pub started: u64,
@@ -258,10 +258,6 @@ pub fn list() -> Vec<Instance> {
             write(&inst);
         }
         inst.running = alive;
-        if !alive && now_secs().saturating_sub(inst.ended.unwrap_or(0)) > KEEP_ENDED {
-            let _ = std::fs::remove_file(&p);
-            continue;
-        }
         if inst.id.is_empty() {
             inst.id = inst.pid.to_string();
         }
@@ -323,6 +319,7 @@ pub fn list() -> Vec<Instance> {
             }
         }
     }
+    prune_history(&mut out, &crate::data_dir());
     out.sort_by(|a, b| b.running.cmp(&a.running).then(b.started.cmp(&a.started)));
     out
 }
@@ -337,22 +334,26 @@ pub fn local_hosts() -> Vec<Value> {
         .collect()
 }
 
-/// The log file for a new game: `game.log` when no running game writes it, else the first
-/// free `game-n.log`.
-fn free_slot(running: &[Instance]) -> (u32, PathBuf) {
-    let data = crate::data_dir();
-    for n in 1u32.. {
-        if running.iter().any(|i| i.slot == n) {
-            continue;
+/// Keep all live sessions and the newest three sessions overall. Never unlink a legacy
+/// slot log (an old launcher may have reused it), or a path supplied by the registry.
+fn prune_history(instances: &mut Vec<Instance>, data: &Path) {
+    instances.sort_by(|a, b| b.started.cmp(&a.started).then(b.id.cmp(&a.id)));
+    let mut rank = 0;
+    instances.retain(|inst| {
+        rank += 1;
+        if rank <= KEEP_SESSIONS || inst.running {
+            return true;
         }
-        let name = if n == 1 {
-            "game.log".to_string()
-        } else {
-            format!("game-{n}.log")
-        };
-        return (n, data.join(name));
-    }
-    unreachable!()
+        if inst.id.is_empty() || !inst.id.bytes().all(|c| c.is_ascii_digit() || c == b'-') {
+            return true;
+        }
+        let log = data.join(format!("game-session-{}.log", inst.id));
+        if Path::new(&inst.log) == log && log.exists() && std::fs::remove_file(&log).is_err() {
+            return true;
+        }
+        let _ = std::fs::remove_file(data.join("instances").join(format!("{}.json", inst.id)));
+        false
+    });
 }
 
 pub struct Started {
@@ -374,27 +375,35 @@ pub fn set_screen_at(at: Option<(i32, i32)>) {
 /// Start the game with `args`; games already running keep running.
 pub fn start(game: &Path, args: &[String], d: &crate::Duty, profile: &str) -> Result<Started> {
     let running: Vec<Instance> = list().into_iter().filter(|i| i.running).collect();
-    let (slot, log) = free_slot(&running);
-    let file =
-        std::fs::File::create(&log).with_context(|| format!("creating {}", log.display()))?;
-    let err = file.try_clone()?;
     let id = format!(
         "{}-{}-{}",
         now_secs(),
         std::process::id(),
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
+    let log = crate::data_dir().join(format!("game-session-{id}.log"));
+    let file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .append(true)
+        .open(&log)
+        .with_context(|| format!("creating {}", log.display()))?;
+    let err = file.try_clone()?;
     let mut cmd = std::process::Command::new(game);
     cmd.args(args)
         .env("OMSI_INSTANCE", &id)
+        .env("OMSI_GAME_LOG", &log)
         .stdout(file)
         .stderr(err);
     if let Some((x, y)) = *SCREEN_AT.lock().unwrap_or_else(|e| e.into_inner()) {
         cmd.env("OMSI_SCREEN_AT", format!("{x},{y}"));
     }
-    let child = cmd
-        .spawn()
-        .with_context(|| trf("starting {game}", &[("game", &game.display())]))?;
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = std::fs::remove_file(&log);
+            return Err(error).with_context(|| trf("starting {game}", &[("game", &game.display())]));
+        }
+    };
     let pid = child.id();
     let process_started = process_start(pid);
     CHILDREN
@@ -405,7 +414,7 @@ pub fn start(game: &Path, args: &[String], d: &crate::Duty, profile: &str) -> Re
         id,
         pid,
         process_started,
-        slot,
+        slot: 0,
         log: log.to_string_lossy().to_string(),
         started: now_secs(),
         map: d.map.clone(),
@@ -420,6 +429,7 @@ pub fn start(game: &Path, args: &[String], d: &crate::Duty, profile: &str) -> Re
         ..Default::default()
     };
     write(&inst);
+    let _ = list();
     let command = format!(
         "{} {}",
         game.display(),
