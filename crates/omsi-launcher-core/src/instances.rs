@@ -377,7 +377,10 @@ pub fn start(game: &Path, args: &[String], d: &crate::Duty, profile: &str) -> Re
     let running: Vec<Instance> = list().into_iter().filter(|i| i.running).collect();
     let id = format!(
         "{}-{}-{}",
-        now_secs(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
         std::process::id(),
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
@@ -618,6 +621,23 @@ pub fn log_tail(pid: u32, lines: usize) -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn history_preserves_active_and_three_newest() {
+        use super::*;
+        let data = std::env::temp_dir().join(format!("omsi-history-test-{}", std::process::id()));
+        std::fs::create_dir_all(data.join("instances")).unwrap();
+        let mut games: Vec<_> = (1..=5).map(|n| {
+            let id = n.to_string();
+            let path = data.join(format!("game-session-{id}.log"));
+            std::fs::write(&path, "test").unwrap();
+            Instance { id, started: n, running: n == 1, log: path.to_string_lossy().into_owned(), ..Default::default() }
+        }).collect();
+        prune_history(&mut games, &data);
+        assert_eq!(games.iter().map(|i| i.started).collect::<Vec<_>>(), vec![5, 4, 3, 1]);
+        assert!(!data.join("game-session-2.log").exists());
+        assert!(data.join("game-session-1.log").exists());
+        let _ = std::fs::remove_dir_all(data);
+    }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     use super::*;
 
