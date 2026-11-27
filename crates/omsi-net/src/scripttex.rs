@@ -916,7 +916,10 @@ mod tests {
             rgba: Arc::new(vec![0; 128 * 64 * 4]),
         };
         let mut changed = original.clone();
-        for pixel in Arc::make_mut(&mut changed.rgba).chunks_exact_mut(4).step_by(3) {
+        for pixel in Arc::make_mut(&mut changed.rgba)
+            .chunks_exact_mut(4)
+            .step_by(3)
+        {
             pixel.copy_from_slice(&[1, 2, 3, 4]);
         }
         let blob = encode_image(&changed, Some(&original)).unwrap();
