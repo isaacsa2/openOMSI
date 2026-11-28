@@ -3474,6 +3474,7 @@ fn passenger_defaults(v: &mut Value) {
     v["passenger_connections"] = json!(false);
     v["passenger_transfer_percent"] = json!(20.0);
     v["passenger_hailing"] = json!(false);
+    v["passenger_ambient_talk"] = json!(false);
     v["passenger_full_bus_reaction"] = json!(false);
     v["pax_short_rides_stand"] = json!(false);
     // (#4014: the riders' weight on the bus's physics, off by default)
@@ -3517,6 +3518,22 @@ fn weight_value(key: &str, val: &str) -> Value {
     };
     let n = val.parse::<f64>().ok().filter(|x| x.is_finite());
     json!(n.unwrap_or(def).clamp(lo, hi))
+}
+
+fn update_and_presence_defaults(v: &mut Value) {
+    // updates from the GitHub releases: looked for when the launcher starts (and during a
+    // session, said over the navigator), installed after asking (or at once); and whether
+    // the game is counted on the website's "playing now"
+    for (k, d) in [
+        ("update_check", json!(true)),
+        ("update_auto", json!(false)),
+        ("update_notify", json!(true)),
+        ("update_channel", json!("stable")),
+        ("presence", json!(true)),
+        ("hardware_id", json!(true)),
+    ] {
+        v[k] = d;
+    }
 }
 
 // (one setting a line, as the settings file has them: rustfmt would triple it)
@@ -3635,6 +3652,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     v["pax_bad_driving"] = json!(true);
     v["pax_late_tolerance_min"] = json!(5.0);
     v["pax_free_drive"] = json!("auto");
+    v["pax_bad_driving_alight"] = json!(true);
     v["pax_board_when_stopped"] = json!(false);
     passenger_defaults(&mut v);
     // the arrival half of the stops of a depot file that keeps two recordings per stop
@@ -3772,19 +3790,7 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
     v["steer_look_response"] = json!(0.25);
     v["head_idle"] = json!(0.0);
     v["head_idle_pace"] = json!(1.0);
-    // updates from the GitHub releases: looked for when the launcher starts (and during a
-    // session, said over the navigator), installed after asking (or at once); and whether
-    // the game is counted on the website's "playing now"
-    for (k, d) in [
-        ("update_check", json!(true)),
-        ("update_auto", json!(false)),
-        ("update_notify", json!(true)),
-        ("update_channel", json!("stable")),
-        ("presence", json!(true)),
-        ("hardware_id", json!(true)),
-    ] {
-        v[k] = d;
-    }
+    update_and_presence_defaults(&mut v);
     let (dynamic_arrows, map_arrows) = route_arrows_from_text(text.unwrap_or_default());
     v["nav_dynamic_arrows"] = json!(dynamic_arrows);
     v["nav_map_arrows"] = json!(map_arrows);
@@ -3806,8 +3812,8 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             "pause_quick_actions" | "ui_theme_pack" => v[&k] = json!(val),
             "anisotropy" => v[&k] = json!(val.parse::<i64>().unwrap_or(8).clamp(1, 16)),
             "msaa" | "shadow_size" => v[&k] = json!(val.parse::<i64>().unwrap_or(0)),
-            "ui_opacity" | "volume" | "vol_ai" | "vol_scenery" | "vol_ambient" | "min_obj_size"
-            | "radio_speaker" | "radio_hiss" | "radio_dropouts" => {
+            "ui_opacity" | "volume" | "vol_ai" | "vol_scenery" | "vol_traction" | "vol_ambient"
+            | "min_obj_size" | "radio_speaker" | "radio_hiss" | "radio_dropouts" => {
                 v[&k] = json!(val.parse::<f64>().unwrap_or(0.0))
             }
             "pax_density" => {
@@ -4511,9 +4517,11 @@ pub fn settings_from_text_on(text: Option<&str>, phone: bool) -> Value {
             | "ibis_auto_stop"
             | "pax_bad_driving"
             | "pax_no_ticket"
+            | "pax_bad_driving_alight"
             | "pax_board_when_stopped"
             | "passenger_connections"
             | "passenger_hailing"
+            | "passenger_ambient_talk"
             | "passenger_full_bus_reaction"
             | "passenger_mass"
             | "passenger_weight_fixed"
@@ -4773,6 +4781,32 @@ fn weather_effects_text(v: &Value) -> String {
     )
 }
 
+fn write_passenger_behavior(
+    text: &mut String,
+    b: &impl Fn(&str, bool) -> u8,
+    f: &impl Fn(&str, f64) -> f64,
+) {
+    text.push_str(&format!(
+        "pax_bad_driving_alight={}\npax_board_when_stopped={}\n",
+        b("pax_bad_driving_alight", true),
+        b("pax_board_when_stopped", false)
+    ));
+    text.push_str(&format!(
+        "passenger_connections={}\npassenger_transfer_percent={}\n",
+        b("passenger_connections", false),
+        f("passenger_transfer_percent", 20.0).clamp(0.0, 100.0)
+    ));
+    text.push_str(&format!(
+        "passenger_hailing={}\npassenger_ambient_talk={}\n",
+        b("passenger_hailing", false),
+        b("passenger_ambient_talk", false)
+    ));
+    text.push_str(&format!(
+        "passenger_full_bus_reaction={}\n",
+        b("passenger_full_bus_reaction", false)
+    ));
+}
+
 pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     let b = |k: &str, d: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(d) as u8;
     // a number, also as the string a select gives
@@ -4797,7 +4831,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
             .unwrap_or("vanilla_plus"),
     );
     let text = format!(
-        "# openOMSI settings (written by the launcher)\nversion=4\nmsaa={}\nanisotropy={}\nssao={}\nshadows={}\nshadow_size={}\nnavigator={}\nui_opacity={}\nnavigator_corner={}\nboarding={}\ndetail_textures={}\nexact_fare={}\nenhanced={}\ngraphics={}\nfullscreen={}\nvsync={}\nvolume={}\ndrive_keys={}\nrender_scale={}\nview_distance={}\nlanguage={}\nvideo_memory={}\ntexture_compression={}\nchat={}\ntooltips={}\nname_tags={}\nshow_fps={}\nclouds={}\npax_density={}\nvol_ai={}\nvol_scenery={}\nmirror_size={}\ndoppler={}\naudio_surround={}\ndriver={}\nmax_fps={}\nmin_obj_size={}\nmax_obj_dist={}\n",
+        "# openOMSI settings (written by the launcher)\nversion=4\nmsaa={}\nanisotropy={}\nssao={}\nshadows={}\nshadow_size={}\nnavigator={}\nui_opacity={}\nnavigator_corner={}\nboarding={}\ndetail_textures={}\nexact_fare={}\nenhanced={}\ngraphics={}\nfullscreen={}\nvsync={}\nvolume={}\ndrive_keys={}\nrender_scale={}\nview_distance={}\nlanguage={}\nvideo_memory={}\ntexture_compression={}\nchat={}\ntooltips={}\nname_tags={}\nshow_fps={}\nclouds={}\npax_density={}\nvol_ai={}\nvol_scenery={}\nvol_traction={}\nmirror_size={}\ndoppler={}\naudio_surround={}\ndriver={}\nmax_fps={}\nmin_obj_size={}\nmax_obj_dist={}\n",
         n("msaa", 4),
         n("anisotropy", 8),
         b("ssao", true),
@@ -4846,6 +4880,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
         f("pax_density", 1.0),
         f("vol_ai", 1.0),
         f("vol_scenery", 1.0),
+        f("vol_traction", 1.0),
         match n("mirror_size", 256) {
             0 => 0,
             x => x.clamp(64, 2048),
@@ -5359,23 +5394,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
             _ => "auto",
         }
     ));
-    text.push_str(&format!(
-        "pax_board_when_stopped={}\n",
-        b("pax_board_when_stopped", false)
-    ));
-    text.push_str(&format!(
-        "passenger_connections={}\npassenger_transfer_percent={}\n",
-        b("passenger_connections", false),
-        f("passenger_transfer_percent", 20.0).clamp(0.0, 100.0)
-    ));
-    text.push_str(&format!(
-        "passenger_hailing={}\n",
-        b("passenger_hailing", false)
-    ));
-    text.push_str(&format!(
-        "passenger_full_bus_reaction={}\n",
-        b("passenger_full_bus_reaction", false)
-    ));
+    write_passenger_behavior(&mut text, &b, &f);
     text.push_str(&format!(
         "passenger_mass={}\npassenger_weight_kg={}\npassenger_weight_fixed={}\npassenger_weight_spread={}\n",
         b("passenger_mass", false),
